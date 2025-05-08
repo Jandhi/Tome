@@ -1,0 +1,21 @@
+[package]
+name = "Tome"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.98"
+fastnbt = "2.5.0"
+fastsnbt = "0.2.0"
+flate2 = "1.1.1"
+log = "0.4.27"
+noise = "0.9.0"
+reqwest = {version = "0.12.15", features = ["blocking"]}
+reqwest-middleware = "0.4.2"
+reqwest-retry = "0.7.0"
+schemars = "0.8.22"
+serde = "1.0.219"
+serde_derive = "1.0.219"
+serde_json = "1.0.140"
+simple_logger = "5.0.0"
+tokio = {version = "1.44.2", features = ["full"]}
