@@ -1,17 +1,23 @@
 use std::collections::{HashMap, HashSet};
-use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
+use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, minecraft::BlockID, noise::{Seed, RNG}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DistrictID(pub usize);
 
 #[derive(Debug)]
 pub struct District {
-    pub id: DistrictID,
+    id: DistrictID,
     origin: Point3D,
-    is_border : bool,
-    pub points : HashSet<Point3D>,
+    is_border: bool,
+    points: HashSet<Point3D>,
     points_2d: HashSet<Point2D>,
-    sum : Point3D,
+    sum: Point3D,
+
+    roughness: f32,
+    water_percentage: f32,
+    forested_percentage: f32,
+    surface_block_count: HashMap<BlockID, i32>,
+    biome_count: HashMap<BlockID, i32>,
 }
 
 impl District {
@@ -23,6 +29,12 @@ impl District {
             points: HashSet::new(),
             points_2d: HashSet::new(),
             sum: Default::default(),
+
+            roughness: 0.0,
+            water_percentage: 0.0,
+            forested_percentage: 0.0,
+            surface_block_count: HashMap::new(),
+            biome_count: HashMap::new(),
         };
         district.add_point(origin);
         district
@@ -36,6 +48,37 @@ impl District {
 
     pub fn set_to_border_district(&mut self) {
         self.is_border = true;
+    }
+
+    pub fn id(&self) -> DistrictID {
+        self.id
+    }
+
+    pub fn origin(&self) -> Point3D {
+        self.origin
+    }
+
+    pub fn is_border(&self) -> bool {
+        self.is_border
+    }
+
+    pub fn points(&self) -> &HashSet<Point3D> {
+        &self.points
+    }
+
+    pub fn points_2d(&self) -> &HashSet<Point2D> {
+        &self.points_2d
+    }
+
+    pub fn sum(&self) -> Point3D {
+        self.sum
+    }
+
+    pub fn average(&self) -> Point3D {
+        if self.points.len() == 0 {
+            return Point3D::default();
+        }
+        self.sum / (self.points.len() as i32)
     }
 } 
 

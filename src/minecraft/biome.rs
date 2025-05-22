@@ -1,27 +1,10 @@
-use serde::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 
-
-
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Biome {
+    Unknown, // Placeholder for unknown biomes
+    #[serde(rename = "minecraft:river")]
     River,
+    #[serde(rename = "minecraft:plains")]
     Plains,
-}
-
-
-impl<'de> Deserialize<'de> for Biome {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "minecraft:river" => Ok(Biome::River),
-            "minecraft:plains" => Ok(Biome::Plains),
-            _ => Err(serde::de::Error::custom(format!(
-                "Unknown biome: {}",
-                value
-            ))),
-        }
-    }
 }

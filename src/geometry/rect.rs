@@ -52,6 +52,65 @@ impl Rect3D {
             z: self.origin.z + self.size.z,
         }
     }
+
+    pub fn drop_y(&self) -> Rect2D {
+        Rect2D {
+            origin: Point2D::new(self.origin.x, self.origin.z),
+            size: Point2D::new(self.size.x, self.size.z),
+        }
+    }
+}
+
+// Implement an iterator over all points in the Rect3D (in x, y, z order)
+pub struct Rect3DIterator {
+    rect: Rect3D,
+    current: Option<Point3D>,
+}
+
+impl Rect3D {
+    pub fn iter(&self) -> Rect3DIterator {
+        Rect3DIterator {
+            rect: *self,
+            current: Some(self.origin),
+        }
+    }
+}
+
+impl Iterator for Rect3DIterator {
+    type Item = Point3D;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let size = &self.rect.size;
+        let origin = &self.rect.origin;
+
+        let current = match self.current {
+            Some(p) => p,
+            None => return None,
+        };
+
+        // Prepare next point
+        let mut next = current;
+
+        // Increment x
+        next.x += 1;
+        if next.x >= origin.x + size.x {
+            next.x = origin.x;
+            // Increment y
+            next.y += 1;
+            if next.y >= origin.y + size.y {
+                next.y = origin.y;
+                // Increment z
+                next.z += 1;
+                if next.z >= origin.z + size.z {
+                    self.current = None;
+                    return Some(current);
+                }
+            }
+        }
+
+        self.current = Some(next);
+        Some(current)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -100,5 +159,51 @@ impl Rect2D {
             x: self.origin.x + self.size.x,
             y: self.origin.y + self.size.y,
         }
+    }
+}
+
+impl Rect2D {
+    pub fn iter(&self) -> Rect2DIterator {
+        Rect2DIterator {
+            rect: *self,
+            current: Some(self.origin),
+        }
+    }
+}
+
+pub struct Rect2DIterator {
+    rect: Rect2D,
+    current: Option<Point2D>,
+}
+
+impl Iterator for Rect2DIterator {
+    type Item = Point2D;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let size = &self.rect.size;
+        let origin = &self.rect.origin;
+
+        let current = match self.current {
+            Some(p) => p,
+            None => return None,
+        };
+
+        // Prepare next point
+        let mut next = current;
+
+        // Increment x
+        next.x += 1;
+        if next.x >= origin.x + size.x {
+            next.x = origin.x;
+            // Increment y
+            next.y += 1;
+            if next.y >= origin.y + size.y {
+                self.current = None;
+                return Some(current);
+            }
+        }
+
+        self.current = Some(next);
+        Some(current)
     }
 }
