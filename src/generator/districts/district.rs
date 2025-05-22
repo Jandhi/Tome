@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
-
-use crate::{geometry::{Point2D, Point3D, Rect2D, Rect3D, CARDINALS}, noise::RNG};
+use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DistrictID(pub usize);
@@ -44,10 +43,10 @@ const CHUNK_SIZE: i32 = 16;
 const RETRIES: i32 = 10;
 const MIN_DISTANCE : i32 = 5;
 
-pub fn generate_districts(seed : i32, build_rect : Rect3D, height_map : &Vec<Vec<i32>>) -> Vec<District> {
-    let mut districts = spawn_districts(seed, build_rect, height_map);
+pub fn generate_districts(seed : Seed, world : &mut World) -> Vec<District> {
+    let mut districts = spawn_districts(seed, world);
 
-    let mut district_map : Vec<Vec<Option<DistrictID>>> = vec![vec![None; build_rect.size.z as usize]; build_rect.size.x as usize]; 
+    let mut district_map : Vec<Vec<Option<DistrictID>>> = vec![vec![None; world.build_area.size.z as usize]; world.build_area.size.x as usize]; 
 
     for district in districts.iter() {
         let x = district.origin.x as usize;
@@ -59,12 +58,12 @@ pub fn generate_districts(seed : i32, build_rect : Rect3D, height_map : &Vec<Vec
         .map(|d| (d.id, d))
         .collect();
 
-    bubble_out(&mut districts_dict, &mut district_map, build_rect);
+    bubble_out(&mut districts_dict, world);
 
     districts
 }
 
-fn bubble_out(districts : &mut HashMap<DistrictID, &mut District>, district_map : &mut Vec<Vec<Option<DistrictID>>>, build_rect : Rect3D) {
+fn bubble_out(districts : &mut HashMap<DistrictID, &mut District>, world : &mut World) {
     let mut queue : Vec<Point3D> = districts.iter().map(|(_, d)| d.origin).collect::<Vec<_>>();
     let mut visited : HashSet<Point3D> = queue.iter().cloned().collect();
 
@@ -76,27 +75,28 @@ fn bubble_out(districts : &mut HashMap<DistrictID, &mut District>, district_map 
                 continue;
             }
 
-            let current_district = district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
+            let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
 
-            if !build_rect.contains(neighbour) {
+            if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
             }
-
+        
             visited.insert(neighbour);
-            district_map[neighbour.x as usize][neighbour.z as usize] = Some(current_district);
+            queue.push(neighbour);
+            world.district_map[neighbour.x as usize][neighbour.z as usize] = Some(current_district);
         }   
     }
 }
 
-fn spawn_districts(seed : i32, build_rect : Rect3D, height_map : &Vec<Vec<i32>>) -> Vec<District> {
-    let mut rng = RNG::from_seed_and_string(0, "spawn_districts");
+fn spawn_districts(seed : Seed, world : &mut World) -> Vec<District> {
+    let mut rng = RNG::from_seed_and_string(seed, "spawn_districts");
 
     let mut rects : Vec<Rect2D> = vec![];
 
-    for i in 0..(build_rect.size.x / CHUNK_SIZE) * (build_rect.size.z / CHUNK_SIZE) {
-       let x = i % (build_rect.size.x / CHUNK_SIZE);
-       let z = i / (build_rect.size.x / CHUNK_SIZE);
+    for i in 0..(world.build_area.size.x / CHUNK_SIZE) * (world.build_area.size.z / CHUNK_SIZE) {
+       let x = i % (world.build_area.size.x / CHUNK_SIZE);
+       let z = i / (world.build_area.size.x / CHUNK_SIZE);
        let rect = Rect2D::new(
            Point2D::new(x * CHUNK_SIZE, z * CHUNK_SIZE),
            Point2D::new(CHUNK_SIZE, CHUNK_SIZE)
@@ -112,7 +112,7 @@ fn spawn_districts(seed : i32, build_rect : Rect3D, height_map : &Vec<Vec<i32>>)
         while trials < RETRIES {
             trials += 1;
 
-            let trial_point = (rng.rand_point2D(rect.size) + rect.origin).add_height(height_map);
+            let trial_point = world.add_height(rng.rand_point2d(rect.size) + rect.origin);
 
             if points.iter().all(|p| p.distance_squared(&trial_point) > MIN_DISTANCE * MIN_DISTANCE) {
                 points.push(trial_point);

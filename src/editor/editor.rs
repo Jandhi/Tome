@@ -21,10 +21,9 @@ impl Editor {
         }
     }
 
-    pub async fn place_block(&mut self, block : Block, point : Point3D) {
-        println!("Placing block at {:?}", point);
+    pub async fn place_block(&mut self, block : &Block, point : Point3D) {
         self.block_cache.insert(point, block.clone());
-        self.block_buffer.push(PositionedBlock::from_block(block, (point + self.build_area.origin).into()));
+        self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
         if self.block_buffer.len() >= self.buffer_size {
             self.flush_buffer().await;
         }

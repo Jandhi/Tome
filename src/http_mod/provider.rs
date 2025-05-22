@@ -1,13 +1,10 @@
-use std::{any, future::Future};
-
-
 use crate::{geometry::Rect3D, http_mod::buildarea};
 
-use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, positioned_block::{BlockPlacementResponse, PositionedBlock}};
+use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
-use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
+use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 
 
@@ -94,8 +91,8 @@ impl GDMCHTTPProvider {
         Ok(buildarea_response.to_rect())
     }
 
-    pub async fn get_heightmap(&self, x: i32, z: i32, dx: i32, dz: i32) -> anyhow::Result<Vec<Vec<i32>>> {
-        let url = self.url(&format!("heightmap?x={}&z={}&dx={}&dz={}", x, z, dx, dz));
+    pub async fn get_heightmap(&self, x: i32, z: i32, dx: i32, dz: i32, height_map_type : HeightMapType) -> anyhow::Result<Vec<Vec<i32>>> {
+        let url = self.url(&format!("heightmap?x={}&z={}&dx={}&dz={}&type={}", x, z, dx, dz, height_map_type));
         let response = self.client
             .get(&url)
             .send()

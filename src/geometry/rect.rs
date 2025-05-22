@@ -2,7 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use super::{Point2D, Point3D};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub struct Rect3D {
     pub origin : Point3D,
     pub size : Point3D,

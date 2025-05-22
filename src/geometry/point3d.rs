@@ -53,6 +53,10 @@ impl Point3D {
     pub fn drop_y(&self) -> Point2D {
         Point2D { x: self.x, y: self.z }
     }
+
+    pub fn without_y(&self) -> Point3D {
+        Point3D { x: self.x, y: 0, z: self.z }
+    }
 }
 
 impl Add for Point3D {

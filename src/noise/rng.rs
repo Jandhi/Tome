@@ -2,21 +2,24 @@ use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}};
 
 use crate::geometry::{Point2D, Point3D};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Seed(pub i64);
+
 pub struct RNG {
-    seed: i64,
+    seed: Seed,
     state: i64,
 }
 
 impl RNG {
-    pub fn new(seed: i64) -> Self {
+    pub fn new(seed: Seed) -> Self {
         RNG { seed, state: 0 }
     }
 
-    pub fn from_seed_and_string(seed: i64, string: &str) -> Self {
+    pub fn from_seed_and_string(seed: Seed, string: &str) -> Self {
         let mut hasher = DefaultHasher::new();
         hasher.write(string.as_bytes());
         return Self {
-            seed: seed ^ hasher.finish() as i64,
+            seed: Seed(seed.0 ^ hasher.finish() as i64),
             state: 0,
         }
     }
@@ -35,26 +38,26 @@ impl RNG {
         (self.next() & 0x7FFFFFFF) as i32 % range + min
     }
 
-    pub fn rand_point2D(&mut self, max : Point2D) -> Point2D {
+    pub fn rand_point2d(&mut self, max : Point2D) -> Point2D {
         let x = self.rand_i32(max.x);
         let y = self.rand_i32(max.y);
         Point2D::new(x, y)
     }
 
-    pub fn rand_point2D_range(&mut self, min : Point2D, max : Point2D) -> Point2D {
+    pub fn rand_point2d_range(&mut self, min : Point2D, max : Point2D) -> Point2D {
         let x = self.rand_i32(max.x - min.x) + min.x;
         let y = self.rand_i32(max.y - min.y) + min.y;
         Point2D::new(x, y)
     }
 
-    pub fn rand_point3D(&mut self, max : Point3D) -> Point3D {
+    pub fn rand_point3d(&mut self, max : Point3D) -> Point3D {
         let x = self.rand_i32(max.x);
         let y = self.rand_i32(max.y);
         let z = self.rand_i32(max.z);
         Point3D::new(x, y, z)
     }
 
-    pub fn rand_point3D_range(&mut self, min : Point3D, max : Point3D) -> Point3D {
+    pub fn rand_point3d_range(&mut self, min : Point3D, max : Point3D) -> Point3D {
         let x = self.rand_i32(max.x - min.x) + min.x;
         let y = self.rand_i32(max.y - min.y) + min.y;
         let z = self.rand_i32(max.z - min.z) + min.z;
@@ -136,10 +139,10 @@ const BIT_NOISE1 : i64 = 0x85297A4D;
 const BIT_NOISE2 : i64 = 0x68E31DA4;
 const BIT_NOISE3 : i64 = 0x1859C4E9;
 
-fn squirrel3(mut seed : i64, position : i64) -> i64 {
+fn squirrel3(seed : Seed, position : i64) -> i64 {
     let mut noise = position;
     noise *= BIT_NOISE1;
-    noise += seed;
+    noise += seed.0;
     noise ^= noise >> 8;
     noise += BIT_NOISE2;
     noise ^= noise << 8;

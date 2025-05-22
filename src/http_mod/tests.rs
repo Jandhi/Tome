@@ -3,7 +3,6 @@
 mod tests {
     use log::LevelFilter;
     use simple_logger::SimpleLogger;
-    use crate::http_mod::Coordinate;
 
     use crate::http_mod::{GDMCHTTPProvider, PositionedBlock};
     use crate::minecraft::BlockID;

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_derive::{Deserialize, Serialize};
 
-use crate::{minecraft::{Block, BlockID}, geometry::Point3D};
+use crate::minecraft::{Block, BlockID};
 
 use super::{coordinate::Coordinate3D, Coordinate};
 

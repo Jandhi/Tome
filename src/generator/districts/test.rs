@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{editor::Editor, generator::districts::district::generate_districts, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::{Block, BlockID}};
+    use crate::{editor::{Editor, World}, generator::districts::district::generate_districts, geometry::Point3D, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::Seed};
 
     fn init_logger() {
         simple_logger::SimpleLogger::new()
@@ -14,16 +14,18 @@ mod tests {
         init_logger();
 
         // Initialize the test data
-        let seed = 12345;
+        let seed = Seed(12345);
 
         let provider = GDMCHTTPProvider::new();
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
         
         let mut editor = Editor::new(build_area);
+        let mut world = World::new();
+        world.init(&provider).await.expect("Failed to initialize world");
 
-        let districts = generate_districts(seed, build_area, &height_map);
+        let _districts = generate_districts(seed, &mut world);
 
         let blocks = vec![
             Block {
@@ -63,11 +65,18 @@ mod tests {
             },
         ];
 
-        for district in districts.iter() {
-            let block = blocks[district.id.0 as usize % blocks.len()].clone();
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let district_id = world.district_map[x as usize][z as usize];
 
-            for point in district.points.iter() {
-                editor.place_block(block.clone(), Point3D::new(point.x, point.y, point.z)).await;
+                if district_id.is_none() {
+                    continue;
+                }
+
+                let block = &blocks[(district_id.unwrap().0 % blocks.len()) as usize];
+                let height = height_map[x as usize][z as usize];
+
+                editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
             }
         }
 
