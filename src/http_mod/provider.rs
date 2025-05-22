@@ -8,6 +8,7 @@ use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 
 
+#[derive(Debug, Clone)]
 pub struct GDMCHTTPProvider {
     base_url: String,
     client: reqwest_middleware::ClientWithMiddleware,

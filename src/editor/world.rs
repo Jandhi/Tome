@@ -5,6 +5,8 @@ use log::info;
 
 use crate::{generator::districts::DistrictID, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
 
+use super::Editor;
+
 const CHUNK_SIZE : i32 = 16;
 
 #[derive(Debug, Clone)]
@@ -28,7 +30,7 @@ impl World {
             surface_biome_map: vec![vec![Biome::Unknown; 0]; 0],
         }
     }
-
+    // TODO: World initialization should be in new
     pub async fn init(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
         self.build_area = provider.get_build_area().await.expect("Failed to get build area");
         self.district_map = vec![vec![None; self.build_area.size.z as usize]; self.build_area.size.x as usize];
@@ -68,6 +70,10 @@ impl World {
         self.init_surface_biome_map(provider).await?;
 
         Ok(())
+    }
+
+    pub fn get_editor(&self) -> Editor {
+        Editor::new(self.build_area)
     }
 
     // Initializes the surface biome map a chunk at a time
@@ -174,11 +180,19 @@ impl World {
         self.surface_height_map[point.x as usize][point.y as usize]
     }
 
+    pub fn get_motion_blocking_height_at(&self, point : Point2D) -> i32 {
+        self.motion_blocking_height_map[point.x as usize][point.y as usize]
+    }
+
     pub fn get_surface_biome_at(&self, point : Point2D) -> Biome {
         self.surface_biome_map[point.x as usize][point.y as usize]
     }
 
     pub fn add_height(&mut self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
+    }
+
+    pub fn is_in_bounds_2d(&self, point : Point2D) -> bool {
+        self.build_area.drop_y().contains(point + self.build_area.origin.drop_y())
     }
 }

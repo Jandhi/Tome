@@ -22,6 +22,15 @@ pub enum BlockID {
     #[serde(rename = "minecraft:stone")]
     Stone,
 
+    #[serde(rename = "minecraft:grass_block")]
+    GrassBlock,
+    #[serde(rename = "minecraft:dirt")]
+    Dirt,
+
+    #[serde(rename = "minecraft:water")]
+    Water,
+
+    // Wool
     #[serde(rename = "minecraft:red_wool")]
     RedWool,
     #[serde(rename = "minecraft:green_wool")]
@@ -36,4 +45,10 @@ pub enum BlockID {
     LightBlueWool,
     #[serde(rename = "minecraft:orange_wool")]
     OrangeWool,
+}
+
+impl BlockID {
+    pub fn is_water(self) -> bool {
+        matches!(self, BlockID::Water)
+    }
 }

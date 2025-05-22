@@ -5,8 +5,6 @@ mod tests {
     use simple_logger::SimpleLogger;
     use crate::editor;
     use crate::geometry::Point2D;
-    use crate::geometry::Point3D;
-    use crate::http_mod::HeightMapType;
 
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::Biome;

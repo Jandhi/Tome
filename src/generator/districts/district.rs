@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+use log::info;
+
 use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, minecraft::BlockID, noise::{Seed, RNG}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -18,6 +20,7 @@ pub struct District {
     forested_percentage: f32,
     surface_block_count: HashMap<BlockID, i32>,
     biome_count: HashMap<BlockID, i32>,
+    gradient: f32,
 }
 
 impl District {
@@ -35,6 +38,7 @@ impl District {
             forested_percentage: 0.0,
             surface_block_count: HashMap::new(),
             biome_count: HashMap::new(),
+            gradient: 0.0,
         };
         district.add_point(origin);
         district
@@ -89,12 +93,10 @@ const MIN_DISTANCE : i32 = 5;
 pub fn generate_districts(seed : Seed, world : &mut World) -> Vec<District> {
     let mut districts = spawn_districts(seed, world);
 
-    let mut district_map : Vec<Vec<Option<DistrictID>>> = vec![vec![None; world.build_area.size.z as usize]; world.build_area.size.x as usize]; 
-
     for district in districts.iter() {
         let x = district.origin.x as usize;
         let z = district.origin.z as usize;
-        district_map[x][z] = Some(district.id);
+        world.district_map[x][z] = Some(district.id);
     }
 
     let mut districts_dict : HashMap<DistrictID, &mut District> = districts.iter_mut()
@@ -112,13 +114,12 @@ fn bubble_out(districts : &mut HashMap<DistrictID, &mut District>, world : &mut 
 
     while queue.len() > 0 {
         let next = queue.remove(0);
+        let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
                 continue;
             }
-
-            let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
 
             if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();

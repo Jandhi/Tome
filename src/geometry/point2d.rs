@@ -10,6 +10,29 @@ pub struct Point2D {
     pub y: i32,
 }
 
+pub const UP_2D: Point2D = Point2D { x: 0, y: -1 };
+pub const DOWN_2D: Point2D = Point2D { x: 0, y: 1 };
+pub const LEFT_2D: Point2D = Point2D { x: -1, y: 0 };
+pub const RIGHT_2D: Point2D = Point2D { x: 1, y: 0 };
+
+pub const Y_PLUS_2D : Point2D = Point2D { x: 0, y: 1 };
+pub const Y_MINUS_2D : Point2D = Point2D { x: 0, y: -1 };
+pub const X_PLUS_2D : Point2D = Point2D { x: 1, y: 0 };
+pub const X_MINUS_2D : Point2D = Point2D { x: -1, y: 0 };
+
+pub const NORTH_2D : Point2D = Point2D { x: 0, y: -1 };
+pub const SOUTH_2D : Point2D = Point2D { x: 0, y: 1 };
+pub const EAST_2D : Point2D = Point2D { x: 1, y: 0 };
+pub const WEST_2D : Point2D = Point2D { x: -1, y: 0 };
+
+pub const CARDINALS_2D: [Point2D; 4] = [
+    NORTH_2D,
+    SOUTH_2D,
+    EAST_2D,
+    WEST_2D,
+];
+
+
 impl Default for Point2D {
     fn default() -> Self {
         Point2D { x: 0, y: 0 }

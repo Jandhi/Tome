@@ -4,6 +4,7 @@ use crate::{geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, Positioned
 
 use super::Placer;
 
+#[derive(Debug, Clone)]
 pub struct Editor {
     build_area: Rect3D,
     provider : GDMCHTTPProvider,
