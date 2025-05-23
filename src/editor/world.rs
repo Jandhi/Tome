@@ -249,4 +249,8 @@ impl World {
     pub fn is_in_bounds_2d(&self, point : Point2D) -> bool {
         self.build_area.drop_y().contains(point + self.build_area.origin.drop_y())
     }
+
+    pub fn is_water(&self, point : Point2D) -> bool {
+        self.surface_block_map[point.x as usize][point.y as usize].eq(&BlockID::Water)
+    }
 }
