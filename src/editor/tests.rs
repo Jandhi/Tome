@@ -4,6 +4,7 @@ mod tests {
     use log::LevelFilter;
     use simple_logger::SimpleLogger;
     use crate::editor;
+    use crate::editor::World;
     use crate::geometry::Point2D;
 
     use crate::http_mod::GDMCHTTPProvider;
@@ -25,8 +26,7 @@ mod tests {
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         
         let mut editor = editor::Editor::new(build_area);
-        let mut world = editor::World::new();
-        world.init(&provider).await.expect("Failed to initialize world");
+        let mut world = World::new(&provider).await.expect("Failed to create world");
 
         let block = Block {
             id: BlockID::Stone,
@@ -49,8 +49,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let mut world = editor::World::new();
-        world.init(&provider).await.expect("Failed to initialize world");
+        let world = World::new(&provider).await.expect("Failed to create world");
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {

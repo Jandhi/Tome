@@ -2,8 +2,6 @@ use std::collections::HashMap;
 
 use crate::{geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block};
 
-use super::Placer;
-
 #[derive(Debug, Clone)]
 pub struct Editor {
     build_area: Rect3D,
@@ -57,15 +55,5 @@ impl Editor {
     pub async fn flush_buffer(&mut self) {
         self.provider.put_blocks(&self.block_buffer).await.expect("Failed to send blocks");
         self.block_buffer.clear();
-    }
-}
-
-impl Placer for Editor {
-    fn place_block(&mut self, block: &Block, point: Point3D) -> impl std::future::Future<Output = ()> + Send {
-        let block = block.clone();
-        let point = point.clone();
-        async move {
-            self.place_block(&block, point).await;
-        }
     }
 }

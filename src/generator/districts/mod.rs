@@ -1,6 +1,5 @@
 mod district;
 mod test;
-mod analyze;
 
 pub use district::District;
 pub use district::DistrictID;

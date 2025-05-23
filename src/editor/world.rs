@@ -1,18 +1,20 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, future::Future, pin::Pin};
 
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::districts::DistrictID, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
+use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
 
 use super::Editor;
 
 const CHUNK_SIZE : i32 = 16;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct World {
     pub build_area : Rect3D,
+    pub districts : HashMap<DistrictID, District>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
+    pub super_district_map : Vec<Vec<Option<DistrictID>>>,
     ground_height_map : Vec<Vec<i32>>,
     surface_height_map : Vec<Vec<i32>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
@@ -20,18 +22,23 @@ pub struct World {
 }
 
 impl World {
-    pub fn new() -> Self {
-        World {
+    pub async fn new(provider : &GDMCHTTPProvider) -> anyhow::Result<Self> {
+        let mut world = World {
             build_area: Rect3D::default(),
+            districts: HashMap::new(),
             district_map: vec![vec![None; 0]; 0],
+            super_district_map: vec![vec![None; 0]; 0],
             ground_height_map: vec![vec![0; 0]; 0],
             surface_height_map: vec![vec![0; 0]; 0],
             motion_blocking_height_map: vec![vec![0; 0]; 0],
             surface_biome_map: vec![vec![Biome::Unknown; 0]; 0],
-        }
+        };
+
+        world.init(provider).await?;
+        Ok(world)
     }
     // TODO: World initialization should be in new
-    pub async fn init(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
+    async fn init(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
         self.build_area = provider.get_build_area().await.expect("Failed to get build area");
         self.district_map = vec![vec![None; self.build_area.size.z as usize]; self.build_area.size.x as usize];
         
@@ -76,6 +83,20 @@ impl World {
         Editor::new(self.build_area)
     }
 
+    pub fn world_rect_2d(&self) -> Rect2D {
+        Rect2D {
+            origin: Point2D::new(0, 0),
+            size: Point2D::new(self.build_area.size.x, self.build_area.size.z),
+        }
+    }
+
+    pub fn iter_points_2d(&self) -> impl Iterator<Item = Point2D> {
+        Rect2D{
+            origin: Point2D::new(0, 0),
+            size: Point2D::new(self.build_area.size.x, self.build_area.size.z),
+        }.iter()
+    }
+
     // Initializes the surface biome map a chunk at a time
     async fn init_surface_biome_map(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
         info!("Initializing surface biome map");
@@ -99,7 +120,7 @@ impl World {
         &'a mut self,
         provider: &'a GDMCHTTPProvider,
         chunk: Rect2D,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = anyhow::Result<()>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
         Box::pin(async move {
             let x = chunk.origin.x;
             let z = chunk.origin.y;
@@ -186,6 +207,10 @@ impl World {
 
     pub fn get_surface_biome_at(&self, point : Point2D) -> Biome {
         self.surface_biome_map[point.x as usize][point.y as usize]
+    }
+
+    pub fn get_district_at(&self, point : Point2D) -> Option<DistrictID> {
+        self.district_map[point.x as usize][point.y as usize]
     }
 
     pub fn add_height(&mut self, point : Point2D) -> Point3D {

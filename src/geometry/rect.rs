@@ -149,6 +149,13 @@ impl Rect2D {
         self.size.y
     }
 
+    pub fn on_edge(&self, point : Point2D) -> bool {
+        (point.x == self.origin.x || point.x == self.origin.x + self.size.x - 1) &&
+        (point.y >= self.origin.y && point.y < self.origin.y + self.size.y) ||
+        (point.y == self.origin.y || point.y == self.origin.y + self.size.y - 1) &&
+        (point.x >= self.origin.x && point.x < self.origin.x + self.size.x)
+    }
+
     pub fn contains(&self, point : Point2D) -> bool {
         point.x >= self.origin.x && point.x < self.origin.x + self.size.x &&
         point.y >= self.origin.y && point.y < self.origin.y + self.size.y

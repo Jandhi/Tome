@@ -10,6 +10,7 @@ dependencies = [
  "fastnbt",
  "fastsnbt",
  "flate2",
+ "futures",
  "log",
  "noise",
  "reqwest",

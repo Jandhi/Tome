@@ -22,10 +22,9 @@ mod tests {
         let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
         
         let mut editor = Editor::new(build_area);
-        let mut world = World::new();
-        world.init(&provider).await.expect("Failed to initialize world");
+        let mut world = World::new(&provider).await.expect("Failed to create world");
 
-        let _districts = generate_districts(seed, &mut world);
+        let _districts = generate_districts(seed, &mut world).await;
 
         let blocks = vec![
             Block {
