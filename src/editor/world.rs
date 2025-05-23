@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 use super::Editor;
 
@@ -17,6 +17,7 @@ pub struct World {
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
 
     ground_height_map : Vec<Vec<i32>>,
+    ground_block_map : Vec<Vec<Block>>,
     ocean_floor_height_map : Vec<Vec<i32>>,
     ground_biome_map: Vec<Vec<Biome>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
@@ -74,35 +75,38 @@ impl World {
 
         let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
 
-        let mut ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut ground_no_water_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut surface_block_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
-        let mut ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
+        let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let ground_block_map = vec![vec![Block::new(BlockID::Unknown, None, None); size_z_usize]; size_x_usize];
+        let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
+        let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
 
-        let y_offset = build_area.origin.y;
-        for x in 0..size_x_usize {
-            for z in 0..size_z_usize {
-                ground_height_map[x][z] = ground_map[x][z] - y_offset;
-                ground_no_water_height_map[x][z] = ocean_map[x][z] - y_offset;
-                motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
-                
-            }
-        }
-
-        Ok(World {
+        let mut world = World {
             build_area,
             districts: HashMap::new(),
             district_map,
             super_district_map,
             ground_height_map,
-            ocean_floor_height_map: ground_no_water_height_map,
+            ocean_floor_height_map,
             motion_blocking_height_map,
             build_claim_map,
             chunks,
             ground_biome_map,
-        })
+            ground_block_map,
+        };
+
+        let y_offset = build_area.origin.y;
+        for x in 0..size_x_usize {
+            for z in 0..size_z_usize {
+                world.ground_height_map[x][z] = ground_map[x][z] - y_offset;
+                world.ocean_floor_height_map[x][z] = ocean_map[x][z] - y_offset;
+                world.motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
+                world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z], z as i32)).expect("Failed to get block at point");
+            }
+        }
+
+        Ok(world)
     }
 
     pub fn get_editor(&self) -> Editor {
@@ -221,5 +225,9 @@ impl World {
         let biome_list = &biomes.biomes;
 
         biome_list.get(biome_index as usize).cloned()
+
+    }
+    pub fn is_water(&self, point : Point2D) -> bool {
+        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
     }
 }
