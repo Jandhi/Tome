@@ -17,6 +17,7 @@ impl Block {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockID {
+    Unknown, // Placeholder for unknown block ids
     #[serde(rename = "minecraft:air")]
     Air,
     #[serde(rename = "minecraft:stone")]

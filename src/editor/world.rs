@@ -3,7 +3,7 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
+use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, BlockID}};
 
 use super::Editor;
 
@@ -19,6 +19,8 @@ pub struct World {
     surface_height_map : Vec<Vec<i32>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
     surface_biome_map : Vec<Vec<Biome>>,
+    surface_block_map : Vec<Vec<i32>>,
+    build_map : Vec<Vec<i32>>,
 }
 
 impl World {
@@ -32,6 +34,8 @@ impl World {
             surface_height_map: vec![vec![0; 0]; 0],
             motion_blocking_height_map: vec![vec![0; 0]; 0],
             surface_biome_map: vec![vec![Biome::Unknown; 0]; 0],
+            water_map: vec![vec![0; 0]; 0],
+            build_map: vec![vec![0; 0]; 0],
         };
 
         world.init(provider).await?;
@@ -64,6 +68,8 @@ impl World {
         self.ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         self.surface_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         self.motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        self.surface_block_map = vec![vec![0; size_z_usize]; size_x_usize];
+        self.build_map = vec![vec![0; size_z_usize]; size_x_usize];
 
         for x in 0..size_x_usize {
             for z in 0..size_z_usize {
@@ -74,7 +80,7 @@ impl World {
             }
         }
 
-        self.init_surface_biome_map(provider).await?;
+        self.init_surface_maps(provider).await?;
 
         Ok(())
     }
@@ -98,9 +104,10 @@ impl World {
     }
 
     // Initializes the surface biome map a chunk at a time
-    async fn init_surface_biome_map(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
-        info!("Initializing surface biome map");
+    async fn init_surface_maps(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
+        info!("Initializing surface biome and block maps");
         self.surface_biome_map = vec![vec![Biome::Unknown; self.build_area.size.z as usize]; self.build_area.size.x as usize];
+        self.surface_block_map = vec![vec![BlockID::Unknown; self.build_area.size.z as usize]; self.build_area.size.x as usize];
 
         for x in 0..((self.build_area.size.x + CHUNK_SIZE - 1) / CHUNK_SIZE) {
             for z in 0..((self.build_area.size.z + CHUNK_SIZE - 1) / CHUNK_SIZE) {
@@ -181,8 +188,30 @@ impl World {
                 })
                 .collect();
 
+            let blocks: HashMap<Point3D, BlockID> = provider
+                .get_blocks(
+                    x,
+                    min_height,
+                    z,
+                    chunk.size.x,
+                    max_height - min_height + 1,
+                    chunk.size.y,
+                )
+                .await?
+                .iter()
+                .map(|positioned_block| {
+                    let block = positioned_block.id;
+                    let point = Point3D::new(positioned_block.x, positioned_block.y, positioned_block.z);
+                    (point, block)
+                })
+                .collect();
+
             for point in chunk.iter() {
                 self.surface_biome_map[point.x as usize][point.y as usize] = biomes
+                    .get(&Point3D::new(point.x, min_height, point.y))
+                    .expect("This should have been here")
+                    .clone();
+                self.surface_block_map[point.x as usize][point.y as usize] = blocks
                     .get(&Point3D::new(point.x, min_height, point.y))
                     .expect("This should have been here")
                     .clone();
