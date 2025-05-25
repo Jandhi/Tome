@@ -3,7 +3,11 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::info;
 
+<<<<<<< HEAD
 use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+=======
+use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID}};
+>>>>>>> 2d84133 (testing)
 
 use super::Editor;
 
@@ -21,6 +25,7 @@ pub struct World {
     ocean_floor_height_map : Vec<Vec<i32>>,
     ground_biome_map: Vec<Vec<Biome>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
+<<<<<<< HEAD
     build_claim_map : Vec<Vec<BuildClaim>>,
     pub chunks: HashMap<Point2D, Chunk>,
 }
@@ -42,6 +47,26 @@ impl World {
         let chunk_rect = Rect3D {
             origin: build_area.origin / CHUNK_SIZE,
             size: build_area.last() / CHUNK_SIZE - build_area.origin / CHUNK_SIZE + Point3D::new(1, 1, 1),
+=======
+    surface_biome_map : Vec<Vec<Biome>>,
+    surface_block_map : Vec<Vec<Block>>,
+    build_map : Vec<Vec<bool>>,
+}
+
+impl World {
+    pub async fn new(provider : &GDMCHTTPProvider) -> anyhow::Result<Self> {
+        let mut world = World {
+            build_area: Rect3D::default(),
+            districts: HashMap::new(),
+            district_map: vec![vec![None; 0]; 0],
+            super_district_map: vec![vec![None; 0]; 0],
+            ground_height_map: vec![vec![0; 0]; 0],
+            surface_height_map: vec![vec![0; 0]; 0],
+            motion_blocking_height_map: vec![vec![0; 0]; 0],
+            surface_biome_map: vec![vec![Biome::Unknown; 0]; 0],
+            surface_block_map: vec![vec![Block { id: BlockID::Unknown, states: None, data: None }; 0]; 0],
+            build_map: vec![vec![false; 0]; 0],
+>>>>>>> 2d84133 (testing)
         };
 
         info!("Loading chunks...");
@@ -75,12 +100,19 @@ impl World {
 
         let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
 
+<<<<<<< HEAD
         let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ground_block_map = vec![vec![Block::new(BlockID::Unknown, None, None); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
         let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
+=======
+        self.ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        self.surface_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        self.motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        self.build_map = vec![vec![false; size_z_usize]; size_x_usize];
+>>>>>>> 2d84133 (testing)
 
         let mut world = World {
             build_area,
