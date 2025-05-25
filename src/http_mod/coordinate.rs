@@ -82,13 +82,24 @@ impl<'de> Deserialize<'de> for Coordinate {
     where
         D: serde::Deserializer<'de>,
     {
-        let value = String::deserialize(deserializer)?;
-        if value.starts_with('~') {
-            let relative_value = value[1..].parse::<i32>().map_err(serde::de::Error::custom)?;
-            Ok(Coordinate::Relative(relative_value))
-        } else {
-            let absolute_value = value.parse::<i32>().map_err(serde::de::Error::custom)?;
-            Ok(Coordinate::Absolute(absolute_value))
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum CoordHelper {
+            Str(String),
+            Int(i32),
+        }
+
+        match CoordHelper::deserialize(deserializer)? {
+            CoordHelper::Str(value) => {
+                if value.starts_with('~') {
+                    let relative_value = value[1..].parse::<i32>().map_err(serde::de::Error::custom)?;
+                    Ok(Coordinate::Relative(relative_value))
+                } else {
+                    let absolute_value = value.parse::<i32>().map_err(serde::de::Error::custom)?;
+                    Ok(Coordinate::Absolute(absolute_value))
+                }
+            }
+            CoordHelper::Int(value) => Ok(Coordinate::Absolute(value)),
         }
     }
 }

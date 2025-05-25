@@ -3,7 +3,7 @@ use std::{collections::HashMap, future::Future, pin::Pin};
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
+use crate::{generator::districts::{District, DistrictID, SuperDistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Biome};
 
 use super::Editor;
 
@@ -14,7 +14,7 @@ pub struct World {
     pub build_area : Rect3D,
     pub districts : HashMap<DistrictID, District>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
-    pub super_district_map : Vec<Vec<Option<DistrictID>>>,
+    pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
     ground_height_map : Vec<Vec<i32>>,
     surface_height_map : Vec<Vec<i32>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
@@ -194,6 +194,10 @@ impl World {
 
     pub fn get_height_at(&self, point : Point2D) -> i32 {
         self.ground_height_map[point.x as usize][point.y as usize]
+    }
+
+    pub fn get_height_map(&self) -> &Vec<Vec<i32>> {
+        &self.ground_height_map
     }   
 
     // Get height without counting water

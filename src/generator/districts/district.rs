@@ -4,6 +4,8 @@ use log::{error, warn};
 
 use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS, CARDINALS_2D, X_PLUS_2D, Y_PLUS_2D}, minecraft::{Biome, BlockID}, noise::{Seed, RNG}};
 
+use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, SuperDistrict, SuperDistrictID};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DistrictID(pub usize);
 
@@ -34,6 +36,7 @@ pub struct District {
     biome_count: HashMap<Biome, u32>,
     gradient: f32,
 }
+
 
 impl District {
     pub fn id(&self) -> DistrictID {
@@ -104,7 +107,34 @@ impl District {
         }
         self.sum / (self.points.len() as i32)
     }
+
+    pub fn size(&self) -> usize {
+        self.points.len()
+    }
+
+    fn biome_percent(&self, biome: &Biome) -> f32 {
+        let count = self.biome_count.get(biome).unwrap_or(&0);
+        (*count as f32) / (self.points.len() as f32)
+    }
 } 
+
+impl AdjacencyAnalyzeable<DistrictID> for District {
+    fn increment_adjacency(&mut self, id: Option<DistrictID>) {
+        self.adjacencies_count += 1;
+        if let Some(id) = id {
+            *self.district_adjacency.entry(id).or_insert(0) += 1;
+        }
+    }
+
+    fn add_edge(&mut self, point: Point3D) {
+        self.edges.insert(point);
+    }
+}
+
+// Setter that won't be exposed outside of this module
+pub fn set_district_type(district : &mut District, district_type: DistrictType) {
+    district.district_type = district_type;
+}
 
 const CHUNK_SIZE: i32 = 16;
 const RETRIES: i32 = 10;
@@ -122,7 +152,7 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
     }
 
     let mut districts : HashMap<DistrictID, District> = districts.into_iter()
-        .map(|d| (d.id, d))
+        .map(|district| (district.id, district))
         .collect();
 
     bubble_out(&mut districts, world);
@@ -131,25 +161,26 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
         recenter_districts(world, &mut districts);
     }
 
-    establish_adjacency(&mut districts, world);
+    analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d());
     
     // TODO: super districts
-    let mut super_district_id_counter = districts.len();
-    let mut super_districts : HashMap<DistrictID, District> = HashMap::new();
+    let mut super_district_id_counter = 0;
+    let mut super_districts : HashMap<SuperDistrictID, SuperDistrict> = HashMap::new();
     for district in districts.values_mut() {
         analyze_district(district, world).await;
-        let mut super_district = district.clone();
-        super_district.id = DistrictID(super_district_id_counter);
+        let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
+        let mut super_district = SuperDistrict::new(id);
+        super_district.add_district(&district);
         
-        for point in super_district.points_2d.iter() {
-            world.super_district_map[point.x as usize][point.y as usize] = Some(super_district.id);
+        for point in super_district.points_2d() {
+            world.super_district_map[point.x as usize][point.y as usize] = Some(super_district.id());
         }
 
-        super_districts.insert(super_district.id, super_district);
+        super_districts.insert(super_district.id(), super_district);
     }
 
-    // establish super adjacency
+    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
     // merge down
     // remeasure adjacency
 
@@ -321,70 +352,100 @@ fn spawn_districts(seed : Seed, world : &mut World) -> Vec<District> {
     }).collect()
 }
 
-fn establish_adjacency(districts : &mut HashMap<DistrictID, District>, world : &mut World) {
-    for point in world.iter_points_2d() {
-        if world.get_district_at(point).is_none() {
-            warn!("No district at point {:?}. This should not be possible.", point);
+
+
+fn merge_down(districts : &mut HashMap<DistrictID, District>, world : &mut World) {
+    let mut district_count = districts.len();
+    let mut ignore : HashSet<DistrictID>= HashSet::new();
+
+    while district_count > TARGET_DISTRICT_AMOUNT as usize {
+        let child = districts.iter()
+            .filter(|(id, _)| ignore.contains(&id))
+            .min_by_key(|(_, district)| district.size())
+            .map(|(id, _)| *id);
+
+        if child.is_none() {
+            break;
+        }
+
+        let child = child.unwrap();
+
+        let neighbours : Vec<DistrictID> = districts.get(&child).unwrap().district_adjacency.keys().cloned().collect();
+
+        let parent = get_best_merge_candidate(districts, child, neighbours);
+
+        if parent.is_none() {
+            ignore.insert(child);
+
+            // Remove garbage districts
+            if districts.get(&child).unwrap().size() < 10 {
+                remove_district(districts, child, world);
+                district_count -= 1;
+            }
+
             continue;
         }
 
-        let district_id = world.get_district_at(point).expect("This should be here");
-        let mut is_edge = false;
-        let height = world.get_height_at(point);
+        let parent = parent.unwrap();
 
-        // Check near edges
-        if point.x == 0 || point.y == 0 {
-            let district = districts.get_mut(&district_id).expect("Could not find district with id");
-            district.district_type = DistrictType::OffLimits;
-        }
-
-        for neighbour_point in [point + X_PLUS_2D, point + Y_PLUS_2D] {
-            // Hit the far edge
-            if !world.is_in_bounds_2d(neighbour_point) {
-                is_edge = true;
-                let district = districts.get_mut(&district_id).expect("Could not find district with id");
-                district.district_type = DistrictType::OffLimits;
-                continue;
-            }
-            
-            // If the neighbour is empty, only increment the adjacency count
-            if world.get_district_at(neighbour_point).is_none() {
-                districts.get_mut(&district_id).expect("Could not find district with id").adjacencies_count += 1;
-                is_edge = true;
-                continue;
-            }
-
-            let neighbour_district_id = world.get_district_at(neighbour_point).expect("This should be here");
-
-            if neighbour_district_id == district_id {
-                continue;
-            }
-
-            is_edge = true;
-
-            let neighbour_height = world.get_height_at(neighbour_point);
-
-            // If the neighbour is not walkable from this point
-            // TODO: Consider whether this is useful
-            if (neighbour_height - height).abs() > 1 {
-                continue;
-            }
-
-            districts.get_mut(&district_id).expect("Could not find district with id").district_adjacency
-                .entry(neighbour_district_id)
-                .and_modify(|e| *e += 1)
-                .or_insert(1);
-
-            districts.get_mut(&neighbour_district_id).expect("Could not find district with id").district_adjacency
-                .entry(district_id)
-                .and_modify(|e| *e += 1)
-                .or_insert(1);
-
-        }
-
-        if is_edge {
-            let district = districts.get_mut(&district_id).expect("Could not find district with id");
-            district.edges.insert(Point3D::new(point.x, height, point.y));
-        }
+        merge(districts, parent, child, world);
     }
+}
+
+fn remove_district(districts : &mut HashMap<DistrictID, District>, district_id : DistrictID, world : &mut World) {
+    for point in districts.get(&district_id).unwrap().points_2d.iter() {
+        world.super_district_map[point.x as usize][point.y as usize] = None;
+    }
+    
+    districts.remove(&district_id);
+}
+
+fn merge(districts : &mut HashMap<DistrictID, District>, parent : DistrictID, child : DistrictID, world : &mut World) {
+
+}
+
+fn get_best_merge_candidate(districts : &HashMap<DistrictID, District>, target : DistrictID, options : Vec<DistrictID>) -> Option<DistrictID> {
+    options.iter()
+        // Only merge border districts with other border districts
+        .filter(|other| {
+            districts.get(other).expect("Could not find district with id").is_border
+                == districts.get(&target).expect("Could not find district with id").is_border
+        })
+        .map(|other| {
+            let score = get_candidate_score(districts, target, *other, true);
+            (*other, score)
+        })
+        // Our best candidate has to be 0.33 at minimum
+        .filter(|(_, score)| {
+            *score > 0.33
+        })
+        .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
+        .map(|(other, _score)| other)
+}
+
+const ADJACENCY_WEIGHT : f32 = 3.0;
+fn get_candidate_score(districts : &HashMap<DistrictID, District>, target : DistrictID, candidate : DistrictID, use_adjacency : bool) -> f32 {
+    let target = districts.get(&target).expect("Could not find district with id");
+    let candidate = districts.get(&candidate).expect("Could not find district with id");
+    
+    let adjacency_ratio = (*target.district_adjacency.get(&target.id).unwrap_or(&0) as f32) / (target.adjacencies_count as f32);
+    let adjacency_score : f32 = 1000.0 * adjacency_ratio / (candidate.size() as f32);
+
+    let biome_score : f32 = 1.0 - target.biome_count.iter()
+        .map(|(biome, _)| {
+            (target.biome_percent(biome) - candidate.biome_percent(biome)).abs()
+        })
+        .sum::<f32>() / target.biome_count.len() as f32;
+    
+    let water_score = 1.0 - (target.water_percentage - candidate.water_percentage).abs();
+    let forest_score = 1.0 - (target.forested_percentage - candidate.forested_percentage).abs();
+    let gradient_score = 1.0 - (target.gradient - candidate.gradient).abs();
+    let roughness_score = 1.0 - (target.roughness - candidate.roughness).abs();
+
+    return (adjacency_score * ADJACENCY_WEIGHT
+        + biome_score
+        + water_score
+        + forest_score
+        + gradient_score
+        + roughness_score) / (5.0 + if use_adjacency { ADJACENCY_WEIGHT } else { 0.0 })
 }
