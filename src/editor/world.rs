@@ -103,6 +103,7 @@ impl World {
                 world.ocean_floor_height_map[x][z] = ocean_map[x][z] - y_offset;
                 world.motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
                 world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z], z as i32)).expect("Failed to get block at point");
+                world.ground_biome_map[x][z] = world.get_biome(Point3D::new(x as i32, world.ocean_floor_height_map[x][z], z as i32)).expect("Failed to get biome at point");
             }
         }
 

@@ -10,16 +10,10 @@ pub fn replace_ground(
     rng: &mut RNG,
     world: &World,
     height_offset: Option<i32>,
-    permit_blocks: Option<&HashSet<BlockID>>,
-    ignore_water: Option<bool>) {
+    permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
+    ignore_water: Option<bool>) { //thereotically could be part of permit blockts
         for point in points {
             let mut height = world.get_height(point.x, point.y);
-            if let Some(offset) = height_offset {
-                height += offset;
-            }
-            if height < 0 {
-                continue;
-            }
             let block = world.get_block(point.x, height, point.y);
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block) {
@@ -27,9 +21,12 @@ pub fn replace_ground(
                 }
             }
             if let Some(ignore_water) = ignore_water {
-                if ignore_water && block == BlockID::Water {
+                if ignore_water && block == BlockID::Water { // can use is_water(), unsure if it is better
                     continue;
                 }
+            }
+            if let Some(offset) = height_offset {
+                height += offset;
             }
             let biome = world.get_biome(point.x, point.y);
             if let Some(block_id) = block_dict.get(&biome) {
