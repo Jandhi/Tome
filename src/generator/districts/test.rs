@@ -149,17 +149,6 @@ mod tests {
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
                 road_points.insert(Point2D::new(x, z));
-                log::info!("Adding road point: ({}, {})", x, z);
-                let district_id = world.district_map[x as usize][z as usize];
-
-                if district_id.is_none() {
-                    continue;
-                }
-
-                let block = &block_vec[(district_id.unwrap().0 % block_vec.len()) as usize];
-                let height = height_map[x as usize][z as usize];
-
-                editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
             }
         }
 
@@ -173,7 +162,7 @@ mod tests {
             Some(0),
             None, // No permit blocks
             Some(false), // Ignore water
-        );
+        ).await;
 
         editor.flush_buffer().await;
     }

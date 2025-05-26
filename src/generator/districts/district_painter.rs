@@ -14,7 +14,6 @@ pub async fn replace_ground(
     height_offset: Option<i32>,
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
-        println!("Road points: {:?}", points);
         for point in points {
             let mut height = world.get_height_at(*point);
             let block = editor.get_block(Point3D::new(point.x, height, point.y)).await;
