@@ -77,7 +77,7 @@ impl RNG {
         Some(options.remove(index))
     }
 
-    pub fn choose_weighted<'map, 'items, T>(&mut self, options: &'map HashMap<&'items T, f32>) -> &'items T {
+    pub fn choose_weighted<'map, T>(&mut self, options: &'map HashMap<T, f32>) -> &'map T {
         let total_weight: f32 = options.values().sum();
         let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
         for (item, weight) in options.iter() {
@@ -89,9 +89,9 @@ impl RNG {
         unreachable!()
     }
 
-    pub fn pop_weighted<'a, T>(&mut self, options: &'a mut HashMap<&'a T, f32>) -> Option<(&'a T, f32)>
+    pub fn pop_weighted<'map, 'items, T>(&mut self, options: &'map mut HashMap<T, f32>) -> Option<(T, f32)>
     where
-        T: Eq + std::hash::Hash,
+        T: Eq + std::hash::Hash + Clone,
     {
         if options.is_empty() {
             return None;
@@ -100,7 +100,7 @@ impl RNG {
         let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
         for (item, weight) in options.iter() {
             if rand_value < *weight {
-                let item_key = *item;
+                let item_key = (*item).clone();
                 let weight_value = *weight;
                 options.remove(&item_key);
                 return Some((item_key, weight_value));
