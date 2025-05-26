@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Block {
     pub id : BlockID,
     pub states : Option<HashMap<String, String>>,
@@ -33,6 +33,15 @@ pub enum BlockID {
     Air,
     #[serde(rename = "minecraft:stone")]
     Stone,
+
+    #[serde(rename = "minecraft:cobblestone")]
+    Cobblestone,
+    #[serde(rename = "minecraft:stone_bricks")]
+    Stone_Bricks,
+    #[serde(rename = "minecraft:andesite")]
+    Andesite,
+    #[serde(rename = "minecraft:gravel")]
+    Gravel,
 
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,

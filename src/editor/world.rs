@@ -3,11 +3,8 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::info;
 
-<<<<<<< HEAD
 use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
-=======
-use crate::{generator::districts::{District, DistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID}};
->>>>>>> 2d84133 (testing)
+
 
 use super::Editor;
 
@@ -234,5 +231,9 @@ impl World {
     }
     pub fn is_water(&self, point : Point2D) -> bool {
         self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
+    }
+
+    pub fn is_built(&self, point : Point2D) -> bool {
+        self.build_map[point.x as usize][point.y as usize]
     }
 }
