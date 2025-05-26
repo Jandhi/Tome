@@ -77,7 +77,7 @@ impl RNG {
         Some(options.remove(index))
     }
 
-    pub fn choose_weighted<'a, T>(&mut self, options: HashMap<&'a T, f32>) -> &'a T {
+    pub fn choose_weighted<'map, 'items, T>(&mut self, options: &'map HashMap<&'items T, f32>) -> &'items T {
         let total_weight: f32 = options.values().sum();
         let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
         for (item, weight) in options.iter() {
