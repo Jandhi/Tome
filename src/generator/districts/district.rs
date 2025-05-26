@@ -122,7 +122,9 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
     while queue.len() > 0 {
         let next = queue.remove(0);
 
+        println!("Bubbling out from {:?}", next);
         let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
+        println!("Current district: {:?}", current_district);
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
@@ -130,10 +132,11 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
             }
 
             if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
-                districts.get_mut(&current_district).expect(&format!("No district found with id {}", current_district.0)).set_to_border_district();
+                println!("Skipping {:?} because it is out of bounds", neighbour);
+                districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
             }
-        
+
             visited.insert(neighbour);
             queue.push(neighbour);
             world.district_map[neighbour.x as usize][neighbour.z as usize] = Some(current_district);
