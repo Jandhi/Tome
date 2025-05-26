@@ -40,7 +40,7 @@ impl GDMCHTTPProvider {
             .await?;
         
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let command_response: Vec<CommandResponse> = serde_json::from_str(&text)?;
         Ok(command_response)
     }
@@ -56,7 +56,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let blocks: Vec<PositionedBlock> = serde_json::from_str(&text)?;
         Ok(blocks)
     }
@@ -74,7 +74,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let block_response: Vec<BlockPlacementResponse> = serde_json::from_str(&text)?;
         Ok(block_response)
     }
@@ -87,7 +87,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let buildarea_response : buildarea::BuildAreaResponse = serde_json::from_str(&text)?;
         Ok(buildarea_response.to_rect())
     }
@@ -100,7 +100,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let heightmap: Vec<Vec<i32>> = serde_json::from_str(&text)?;
         Ok(heightmap)
     }
@@ -113,7 +113,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let biomes: Vec<PositionedBiome> = serde_json::from_str(&text)?;
         Ok(biomes)
     }
@@ -144,7 +144,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         let entities: Vec<EntityResponse> = serde_json::from_str(&text)?;
         Ok(entities)
     }
@@ -161,8 +161,16 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        info!("Response: {}", text);
+        Self::log_response(&text);
         Ok(())
+    }
+
+    fn log_response(text : &str) {
+        if text.len() > 1000 {
+            info!("Response: {}...", &text[..1000]);
+        } else {
+            info!("Response: {}", text);
+        }
     }
 
     

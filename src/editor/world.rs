@@ -41,6 +41,7 @@ impl World {
     async fn init(&mut self, provider : &GDMCHTTPProvider) -> anyhow::Result<()> {
         self.build_area = provider.get_build_area().await.expect("Failed to get build area");
         self.district_map = vec![vec![None; self.build_area.size.z as usize]; self.build_area.size.x as usize];
+        self.super_district_map = vec![vec![None; self.build_area.size.z as usize]; self.build_area.size.x as usize];
         
         let (origin_x, origin_z, size_x, size_z) = (
             self.build_area.origin.x,

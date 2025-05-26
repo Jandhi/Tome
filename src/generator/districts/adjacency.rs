@@ -4,8 +4,7 @@ use log::warn;
 
 use crate::geometry::{Point3D, Rect2D, X_PLUS_2D, Y_PLUS_2D};
 
-use super::{district::{set_district_type, DistrictType}, District, DistrictID};
-
+// We use this trait to allow various regions to be analyzed for adjacency
 pub trait AdjacencyAnalyzeable<TID> {
     fn increment_adjacency(&mut self, id : Option<TID>);
     fn add_edge(&mut self, point : Point3D);
@@ -28,6 +27,10 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
         let height = height_map[point.x as usize][point.y as usize];
 
         for neighbour_point in [point + X_PLUS_2D, point + Y_PLUS_2D] {
+            if !world_rect.contains(neighbour_point) {
+                continue;
+            }
+
             // If the neighbour is empty, only increment the adjacency count
             if map[neighbour_point.x as usize][neighbour_point.y as usize].is_none() {
                 objects.get_mut(&id).expect("Could not find region with id").increment_adjacency(None);
@@ -54,8 +57,6 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
             // Add ajacency to both regions
             objects.get_mut(&id).expect("Could not find region with id").increment_adjacency(Some(neighbour_district_id));
             objects.get_mut(&neighbour_district_id).expect("Could not find region with id").increment_adjacency(Some(id));
-            
-
         }
 
         if is_edge {

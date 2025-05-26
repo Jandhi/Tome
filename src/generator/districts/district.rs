@@ -195,6 +195,7 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
 
     while queue.len() > 0 {
         let next = queue.remove(0);
+
         let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
@@ -203,7 +204,7 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
             }
 
             if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
-                districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
+                districts.get_mut(&current_district).expect(&format!("No district found with id {}", current_district.0)).set_to_border_district();
                 continue;
             }
         
@@ -224,6 +225,8 @@ fn recenter_districts(world : &mut World, districts : &mut HashMap<DistrictID, D
         district.sum = Point3D::default();
         district.is_border = false;
         district.add_point(district.origin);
+
+        world.district_map[district.origin.x as usize][district.origin.z as usize] = Some(district.id);
     }
 
     bubble_out(districts, world);
