@@ -5,13 +5,13 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Block {
     pub id : BlockID,
-    pub states : Option<HashMap<String, String>>,
+    pub state : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
 impl Block {
-    pub fn new(id: BlockID, states: Option<HashMap<String, String>>, data: Option<String>) -> Self {
-        Block { id, states, data }
+    pub fn new(id: BlockID, state: Option<HashMap<String, String>>, data: Option<String>) -> Self {
+        Block { id, state, data }
     }
 }
 
@@ -37,11 +37,32 @@ pub enum BlockID {
     #[serde(rename = "minecraft:cobblestone")]
     Cobblestone,
     #[serde(rename = "minecraft:stone_bricks")]
-    Stone_Bricks,
+    StoneBricks,
     #[serde(rename = "minecraft:andesite")]
     Andesite,
     #[serde(rename = "minecraft:gravel")]
     Gravel,
+
+    // Slabs
+    #[serde(rename = "minecraft:stone_slab")]
+    StoneSlab,
+    #[serde(rename = "minecraft:cobblestone_slab")]
+    CobblestoneSlab,
+    #[serde(rename = "minecraft:stone_brick_slab")]
+    StoneBrickSlab,
+    #[serde(rename = "minecraft:andesite_slab")]
+    AndesiteSlab,
+
+    // Stairs
+    #[serde(rename = "minecraft:stone_stairs")]
+    StoneStairs,
+    #[serde(rename = "minecraft:cobblestone_stairs")]
+    CobblestoneStairs,
+    #[serde(rename = "minecraft:stone_brick_stairs")]
+    StoneBrickStairs,
+    #[serde(rename = "minecraft:andesite_stairs")]
+    AndesiteStairs,
+    
 
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,
@@ -60,6 +81,7 @@ pub enum BlockID {
     MagentaWool,
     #[serde(rename = "minecraft:light_blue_wool")]
     LightBlueWool,
+<<<<<<< HEAD
     #[serde(rename = "minecraft:yellow_wool")]
     YellowWool,
     #[serde(rename = "minecraft:lime_wool")]
@@ -87,6 +109,13 @@ pub enum BlockID {
 
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
+=======
+    #[serde(rename = "minecraft:orange_wool")]
+    OrangeWool,
+
+    #[serde(other)]
+    Unknown, // Placeholder for unknown block ids
+>>>>>>> b999855 (smooth district painter working)
 }
 
 impl BlockID {

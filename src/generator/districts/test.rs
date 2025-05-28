@@ -1,6 +1,10 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+<<<<<<< HEAD
+=======
+    use crate::{editor::{Editor, World}, generator::districts::{district::generate_districts, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point3D, Point2D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}};
+>>>>>>> b999855 (smooth district painter working)
 
     use crate::{editor::{Editor, World}, generator::districts::{district::generate_districts, replace_ground}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
 
@@ -102,8 +106,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
-        
+
         let mut editor = Editor::new(build_area);
         let mut world = World::new(&provider).await.expect("Failed to create world");
 
@@ -113,27 +116,27 @@ mod tests {
             Block {
                 id: BlockID::Stone,
                 data: None,
-                states: None,
+                state: None,
             },
             Block {
                 id: BlockID::Cobblestone,
                 data: None,
-                states: None,
+                state: None,
             },
             Block {
-                id: BlockID::Stone_Bricks,
+                id: BlockID::StoneBricks,
                 data: None,
-                states: None,
+                state: None,
             },
             Block {
                 id: BlockID::Andesite,
                 data: None,
-                states: None,
+                state: None,
             },
             Block {
                 id: BlockID::Gravel,
                 data: None,
-                states: None,
+                state: None,
             },
         ];
 
@@ -155,6 +158,136 @@ mod tests {
         replace_ground(
             &road_points,
             &block_dict,
+            &block_vec,
+            &mut rng,
+            &mut world,
+            &mut editor,
+            Some(0),
+            None, // No permit blocks
+            Some(false), // Ignore water
+        ).await;
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn district_replace_ground_smooth() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let mut editor = Editor::new(build_area);
+        let mut world = World::new(&provider).await.expect("Failed to create world");
+
+        let _districts = generate_districts(seed, &mut world).await;
+
+        let block_vec = vec![
+            Block {
+                id: BlockID::Stone,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::Cobblestone,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::StoneBricks,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::Andesite,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::Gravel,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::StoneStairs,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::CobblestoneStairs,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::StoneBrickStairs,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::AndesiteStairs,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::StoneSlab,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::CobblestoneSlab,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::StoneBrickSlab,
+                data: None,
+                state: None,
+            },
+            Block {
+                id: BlockID::AndesiteSlab,
+                data: None,
+                state: None,
+            },
+        ];
+
+        let mut blocks_dict: HashMap<u32 ,HashMap<u32, f32>> = HashMap::new();
+        let mut block_dict: HashMap<u32, f32> = HashMap::new();
+        block_dict.insert(0, 3.0); // Stone
+        block_dict.insert(1, 2.0); // Cobblestone
+        block_dict.insert(2, 8.0); // Stone Bricks
+        block_dict.insert(3, 3.0); // Andesite
+        block_dict.insert(4, 1.0); // Gravel
+        blocks_dict.insert(0, block_dict);
+        let mut stair_dict: HashMap<u32, f32> = HashMap::new();
+        stair_dict.insert(5, 3.0); // Stone stairs
+        stair_dict.insert(6, 2.0); // Cobblestone stairs
+        stair_dict.insert(7, 8.0); // Stone Bricks stairs
+        stair_dict.insert(8, 4.0); // Andesite stairs
+        blocks_dict.insert(1, stair_dict);
+        let mut slab_dict: HashMap<u32, f32> = HashMap::new();
+        slab_dict.insert(9, 3.0); // Stone slab
+        slab_dict.insert(10, 2.0); // Cobblestone slab
+        slab_dict.insert(11, 8.0); // Stone Bricks slab
+        slab_dict.insert(12, 4.0); // Andesite slab
+        blocks_dict.insert(2, slab_dict);
+
+
+        let mut road_points = HashSet::new();
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                road_points.insert(Point2D::new(x, z));
+            }
+        }
+
+        replace_ground_smooth(
+            &road_points,
+            &blocks_dict,
             &block_vec,
             &mut rng,
             &mut world,
