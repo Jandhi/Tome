@@ -255,25 +255,31 @@ mod tests {
             },
         ];
 
-        let mut blocks_dict: HashMap<u32 ,HashMap<u32, f32>> = HashMap::new();
-        let mut block_dict: HashMap<u32, f32> = HashMap::new();
-        block_dict.insert(0, 3.0); // Stone
-        block_dict.insert(1, 2.0); // Cobblestone
-        block_dict.insert(2, 8.0); // Stone Bricks
-        block_dict.insert(3, 3.0); // Andesite
-        block_dict.insert(4, 1.0); // Gravel
+        let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
+
+        let block_dict = [
+            (0, 3.0),  // Stone
+            (1, 2.0),  // Cobblestone
+            (2, 8.0),  // Stone Bricks
+            (3, 3.0),  // Andesite
+            (4, 1.0),  // Gravel
+        ].iter().cloned().collect();
         blocks_dict.insert(0, block_dict);
-        let mut stair_dict: HashMap<u32, f32> = HashMap::new();
-        stair_dict.insert(5, 3.0); // Stone stairs
-        stair_dict.insert(6, 2.0); // Cobblestone stairs
-        stair_dict.insert(7, 8.0); // Stone Bricks stairs
-        stair_dict.insert(8, 4.0); // Andesite stairs
+
+        let stair_dict = [
+            (5, 3.0),  // Stone stairs
+            (6, 2.0),  // Cobblestone stairs
+            (7, 8.0),  // Stone Bricks stairs
+            (8, 4.0),  // Andesite stairs
+        ].iter().cloned().collect();
         blocks_dict.insert(1, stair_dict);
-        let mut slab_dict: HashMap<u32, f32> = HashMap::new();
-        slab_dict.insert(9, 3.0); // Stone slab
-        slab_dict.insert(10, 2.0); // Cobblestone slab
-        slab_dict.insert(11, 8.0); // Stone Bricks slab
-        slab_dict.insert(12, 4.0); // Andesite slab
+
+        let slab_dict = [
+            (9, 3.0),   // Stone slab
+            (10, 2.0),  // Cobblestone slab
+            (11, 8.0),  // Stone Bricks slab
+            (12, 4.0),  // Andesite slab
+        ].iter().cloned().collect();
         blocks_dict.insert(2, slab_dict);
 
 
