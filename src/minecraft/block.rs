@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use log::info;
 use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,8 +16,20 @@ impl Block {
     }
 }
 
+impl From<BlockID> for Block {
+    fn from(id: BlockID) -> Self {
+        Block {
+            id,
+            states: None,
+            data: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockID {
+    Unknown,
+
     #[serde(rename = "minecraft:air")]
     Air,
     #[serde(rename = "minecraft:stone")]
@@ -45,10 +58,24 @@ pub enum BlockID {
     LightBlueWool,
     #[serde(rename = "minecraft:orange_wool")]
     OrangeWool,
+
+    #[serde(rename = "minecraft:bedrock")]
+    Bedrock,
 }
 
 impl BlockID {
     pub fn is_water(self) -> bool {
         matches!(self, BlockID::Water)
+    }
+}
+
+impl From<&str> for BlockID {
+    fn from(value: &str) -> Self {
+        
+        
+        info!("Converting string to BlockID: {}", value);
+
+
+        serde_json::from_str::<BlockID>(&format!("\"{}\"", value)).unwrap_or(BlockID::Unknown)
     }
 }

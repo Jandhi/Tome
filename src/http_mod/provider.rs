@@ -1,11 +1,15 @@
-use crate::{geometry::Rect3D, http_mod::buildarea};
+use std::io::Read;
+
+use crate::{geometry::Rect3D, http_mod::buildarea, minecraft::{Chunk, Chunks}};
 
 use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
 use flate2::read::GzDecoder;
-use log::info;
+use log::{debug, info};
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+
+const PROVIDER_LOG_LIMIT : usize = 300;
 
 
 #[derive(Debug, Clone)]
@@ -118,7 +122,7 @@ impl GDMCHTTPProvider {
         Ok(biomes)
     }
 
-    pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<PositionedBlock>> {
+    pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<Chunk>> {
         let url = self.url(&format!("chunks?x={}&y={}&z={}&dx={}&dy={}&dz={}", x, y, z, dx, dy, dz));
         let response = self.client
             .get(&url)
@@ -127,13 +131,20 @@ impl GDMCHTTPProvider {
             .await?;
 
         let raw_bytes = response.bytes().await?;
-        let mut decompressed = GzDecoder::new(&raw_bytes[..]);
-        let mut decompressed_bytes = Vec::new();
-        std::io::copy(&mut decompressed, &mut decompressed_bytes)?;
+        let mut decoder = GzDecoder::new(&raw_bytes[..]);
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf).unwrap();
+        debug!("Decompressed {} bytes from chunk data", buf.len());
 
-        
+        let mut decoder = GzDecoder::new(buf.as_slice());
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf).unwrap();
+        debug!("Decompressed {} bytes from NBT data", buf.len());
 
-        todo!("Handle gzip response and then deserialize nbt")
+        let chunks : Chunks = fastnbt::from_bytes(&buf)?;
+        debug!("Decompressed NBT value: {:?}", chunks);
+
+        Ok(chunks.chunks)
     }
 
     pub async fn get_entities(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<EntityResponse>> {
@@ -166,8 +177,8 @@ impl GDMCHTTPProvider {
     }
 
     fn log_response(text : &str) {
-        if text.len() > 1000 {
-            info!("Response: {}...", &text[..1000]);
+        if text.len() > PROVIDER_LOG_LIMIT {
+            info!("Response: {}...", &text[..PROVIDER_LOG_LIMIT]);
         } else {
             info!("Response: {}", text);
         }

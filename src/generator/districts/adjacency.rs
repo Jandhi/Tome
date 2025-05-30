@@ -1,7 +1,5 @@
 use std::collections::HashMap;
 
-use log::warn;
-
 use crate::geometry::{Point3D, Rect2D, X_PLUS_2D, Y_PLUS_2D};
 
 // We use this trait to allow various regions to be analyzed for adjacency
@@ -18,7 +16,6 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
 {
     for point in world_rect.iter() {
         if map[point.x as usize][point.y as usize].is_none() {
-            warn!("No district at point {:?}. This should not be possible.", point);
             continue;
         }
 

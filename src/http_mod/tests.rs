@@ -79,4 +79,19 @@ mod tests {
         log::info!("Biomes: {:?}", biomes);
         assert!(!biomes.is_empty(), "No biomes returned from server");
     }
+
+    #[tokio::test]
+    async fn get_chunks() {
+        init_logger();
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area()
+            .await
+            .expect("Failed to get build area");
+        let chunks = provider.get_chunks(build_area.origin.x, build_area.origin.y, build_area.origin.z, build_area.size.x, build_area.size.y, build_area.size.z)
+            .await
+            .expect("Failed to get chunks");
+
+        log::info!("a section: {:?}", chunks[0].sections[0]);
+    }
 }

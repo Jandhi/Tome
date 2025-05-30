@@ -1,0 +1,5 @@
+pub const CHUNK_SIZE: i32 = 16;
+pub const SPAWN_DISTRICTS_RETRIES: i32 = 10;
+pub const SPAWN_DISTRICTS_MIN_DISTANCE : i32 = 5;
+pub const NUM_RECENTER : i32 = 2;
+pub const TARGET_DISTRICT_AMOUNT : u32 = 16; 
