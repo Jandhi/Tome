@@ -7,9 +7,9 @@ mod tests {
 
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
-    use crate::init_logger;
     use crate::minecraft::Biome;
     use crate::minecraft::{Block, BlockID};
+    use crate::util::init_logger;
 
     #[tokio::test]
     async fn place_blocks() {
