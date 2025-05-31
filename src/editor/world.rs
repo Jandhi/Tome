@@ -233,7 +233,7 @@ impl World {
         self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
     }
 
-    pub fn is_built(&self, point : Point2D) -> bool {
-        self.build_map[point.x as usize][point.y as usize]
+    pub fn is_claimed(&self, point : Point2D) -> bool {
+        self.build_claim_map[point.x as usize][point.y as usize] != BuildClaim::None
     }
 }

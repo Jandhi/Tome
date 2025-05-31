@@ -1,12 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-<<<<<<< HEAD
-=======
-    use crate::{editor::{Editor, World}, generator::districts::{district::generate_districts, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point3D, Point2D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}};
->>>>>>> b999855 (smooth district painter working)
-
-    use crate::{editor::{Editor, World}, generator::districts::{district::generate_districts, replace_ground}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{editor::{Editor, World}, generator::districts::{district::generate_districts, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
 
     fn get_block_for_id(id : usize) -> Block {
         use BlockID::*;
@@ -116,27 +111,27 @@ mod tests {
             Block {
                 id: BlockID::Stone,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Cobblestone,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneBricks,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Andesite,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Gravel,
                 data: None,
-                state: None,
+                states: None,
             },
         ];
 
@@ -191,67 +186,67 @@ mod tests {
             Block {
                 id: BlockID::Stone,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Cobblestone,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneBricks,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Andesite,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::Gravel,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneStairs,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::CobblestoneStairs,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneBrickStairs,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::AndesiteStairs,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneSlab,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::CobblestoneSlab,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::StoneBrickSlab,
                 data: None,
-                state: None,
+                states: None,
             },
             Block {
                 id: BlockID::AndesiteSlab,
                 data: None,
-                state: None,
+                states: None,
             },
         ];
 

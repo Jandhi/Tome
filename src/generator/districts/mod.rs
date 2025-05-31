@@ -16,5 +16,4 @@ pub use district::generate_districts;
 pub use super_district::SuperDistrict;
 pub use super_district::SuperDistrictID;
 pub use data::{DistrictData, HasDistrictData};
-pub use district::generate_districts;
 pub use district_painter::*;

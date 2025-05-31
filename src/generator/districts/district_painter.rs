@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use log::{error, warn};
 
-use crate::{editor::{World, Editor}, geometry::{Point2D, Point3D, Rect2D, CARDINALS, CARDINALS_2D, X_PLUS_2D, Y_PLUS_2D, cardinal_to_str}, minecraft::{Biome, Block, BlockID}, noise::{Seed, RNG}};
+use crate::{editor::{World, Editor}, geometry::{Point2D, Point3D, CARDINALS_2D, cardinal_to_str}, minecraft::{Block, BlockID}, noise::RNG};
 
 pub async fn replace_ground(
     points: &HashSet<Point2D>,
@@ -15,17 +14,17 @@ pub async fn replace_ground(
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
         for point in points {
-            if world.is_built(*point) { // already built on point
+            if world.is_claimed(*point) { // already built on point
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if !ignore_water && world.is_built(*point) { // can use is_water(), unsure if it is better
+                if !ignore_water && world.is_claimed(*point) { // can use is_water(), unsure if it is better
                     continue;
                 }
             }
 
             let mut height = world.get_height_at(*point) - 1; // -1 to ensure we are placing on the ground
-            let block = editor.get_block(Point3D::new(point.x, height, point.y)).await;
+            let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
             
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block.id) {
@@ -53,17 +52,17 @@ pub async fn replace_ground_smooth(
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
         for point in points {
             print!("Replacing ground at {:?}\n", point);
-            if world.is_built(*point) { // already built on point
+            if world.is_claimed(*point) { // already built on point
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if !ignore_water && world.is_built(*point) { // can use is_water(), unsure if it is better
+                if !ignore_water && world.is_claimed(*point) { // can use is_water(), unsure if it is better
                     continue;
                 }
             }
 
             let mut height = world.get_height_at(*point); 
-            let block = editor.get_block(Point3D::new(point.x, height, point.y)).await;
+            let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
             
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block.id) {
@@ -92,7 +91,7 @@ pub async fn replace_ground_smooth(
                 if world.get_height_at(neighbor) == height + 1 && world.get_height_at(opposite_neighbour) == height - 1 {
                     //place stair
                     block = block_list[*rng.choose_weighted(block_dict.get(&1).unwrap()) as usize].clone();
-                    block.state = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
+                    block.states = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
                     print!("Placing {:?} stair at {:?} facing {:?}\n",block, point, direction);
                     break;
                 }

@@ -5,13 +5,13 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Block {
     pub id : BlockID,
-    pub state : Option<HashMap<String, String>>,
+    pub states : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
 impl Block {
     pub fn new(id: BlockID, state: Option<HashMap<String, String>>, data: Option<String>) -> Self {
-        Block { id, state, data }
+        Block { id, states: state, data }
     }
 }
 
@@ -81,7 +81,6 @@ pub enum BlockID {
     MagentaWool,
     #[serde(rename = "minecraft:light_blue_wool")]
     LightBlueWool,
-<<<<<<< HEAD
     #[serde(rename = "minecraft:yellow_wool")]
     YellowWool,
     #[serde(rename = "minecraft:lime_wool")]
@@ -109,13 +108,6 @@ pub enum BlockID {
 
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
-=======
-    #[serde(rename = "minecraft:orange_wool")]
-    OrangeWool,
-
-    #[serde(other)]
-    Unknown, // Placeholder for unknown block ids
->>>>>>> b999855 (smooth district painter working)
 }
 
 impl BlockID {
