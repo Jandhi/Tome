@@ -32,7 +32,15 @@ pub const CARDINALS_2D: [Point2D; 4] = [
     WEST_2D,
 ];
 
-
+pub fn cardinal_to_str(dir: &Point2D) -> Option<String> {
+    match *dir {
+        NORTH_2D => Some("north".to_string()),
+        SOUTH_2D => Some("south".to_string()),
+        EAST_2D => Some("east".to_string()),
+        WEST_2D => Some("west".to_string()),
+        _ => None,
+    }
+}
 impl Default for Point2D {
     fn default() -> Self {
         Point2D { x: 0, y: 0 }

@@ -76,7 +76,7 @@ impl GDMCHTTPProvider {
         let url = self.url("blocks");
 
         let body = serde_json::to_string(&blocks)?;
-
+        info!("Sending PUT request to {} with body: {}", url, body);
         let response = self.client
             .put(&url)
             .body(body)

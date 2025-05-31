@@ -35,7 +35,7 @@ mod tests {
                 z: build_area.origin.z.into(),
                 id: BlockID::Stone,
                 data: None,
-                states: None,
+                state: None,
             },
             PositionedBlock {
                 x: (build_area.origin.x + 1).into(),
@@ -43,7 +43,7 @@ mod tests {
                 z: build_area.origin.z.into(),
                 id: BlockID::Stone,
                 data: None,
-                states: None,
+                state: None,
             },
         ];
 
