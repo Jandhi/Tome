@@ -1,17 +1,22 @@
-use crate::{geometry::Rect3D, http_mod::buildarea};
+use std::io::Read;
+
+use crate::{geometry::Rect3D, http_mod::buildarea, minecraft::{Chunk, Chunks}};
 
 use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
 use flate2::read::GzDecoder;
-use log::info;
+use log::{debug, info};
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+
+const PROVIDER_LOG_LIMIT : usize = 300;
 
 
 #[derive(Debug, Clone)]
 pub struct GDMCHTTPProvider {
     base_url: String,
     client: reqwest_middleware::ClientWithMiddleware,
+    log_responses: bool,
 }
 
 impl GDMCHTTPProvider {
@@ -23,8 +28,14 @@ impl GDMCHTTPProvider {
 
         GDMCHTTPProvider {
             base_url: "http://localhost:9000".to_string(),
-            client: client,
+            client,
+            log_responses: false,
         }
+    }
+
+    pub fn with_response_logging(mut self, log_responses: bool) -> Self {
+        self.log_responses = log_responses;
+        self
     }
 
     fn url(&self, path: &str) -> String {
@@ -40,7 +51,7 @@ impl GDMCHTTPProvider {
             .await?;
         
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let command_response: Vec<CommandResponse> = serde_json::from_str(&text)?;
         Ok(command_response)
     }
@@ -56,13 +67,12 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let blocks: Vec<PositionedBlock> = serde_json::from_str(&text)?;
         Ok(blocks)
     }
 
     pub async fn put_blocks(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
-        info!("Placing blocks: {:?}", blocks);
         let url = self.url("blocks");
 
         let body = serde_json::to_string(&blocks)?;
@@ -74,7 +84,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let block_response: Vec<BlockPlacementResponse> = serde_json::from_str(&text)?;
         Ok(block_response)
     }
@@ -87,7 +97,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let buildarea_response : buildarea::BuildAreaResponse = serde_json::from_str(&text)?;
         Ok(buildarea_response.to_rect())
     }
@@ -100,7 +110,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let heightmap: Vec<Vec<i32>> = serde_json::from_str(&text)?;
         Ok(heightmap)
     }
@@ -113,12 +123,12 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let biomes: Vec<PositionedBiome> = serde_json::from_str(&text)?;
         Ok(biomes)
     }
 
-    pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<PositionedBlock>> {
+    pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<Chunk>> {
         let url = self.url(&format!("chunks?x={}&y={}&z={}&dx={}&dy={}&dz={}", x, y, z, dx, dy, dz));
         let response = self.client
             .get(&url)
@@ -127,13 +137,20 @@ impl GDMCHTTPProvider {
             .await?;
 
         let raw_bytes = response.bytes().await?;
-        let mut decompressed = GzDecoder::new(&raw_bytes[..]);
-        let mut decompressed_bytes = Vec::new();
-        std::io::copy(&mut decompressed, &mut decompressed_bytes)?;
+        let mut decoder = GzDecoder::new(&raw_bytes[..]);
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        debug!("Decompressed {} bytes from chunk data", buf.len());
 
-        
+        let mut decoder = GzDecoder::new(buf.as_slice());
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        debug!("Decompressed {} bytes from NBT data", buf.len());
 
-        todo!("Handle gzip response and then deserialize nbt")
+        let chunks : Chunks = fastnbt::from_bytes(&buf)?;
+        debug!("Decompressed NBT value: {:?}", chunks);
+
+        Ok(chunks.chunks)
     }
 
     pub async fn get_entities(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<EntityResponse>> {
@@ -144,7 +161,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let entities: Vec<EntityResponse> = serde_json::from_str(&text)?;
         Ok(entities)
     }
@@ -161,13 +178,17 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         Ok(())
     }
 
-    fn log_response(text : &str) {
-        if text.len() > 1000 {
-            info!("Response: {}...", &text[..1000]);
+    fn log_response(&self, text : &str) {
+        if !self.log_responses {
+            return;
+        }
+
+        if text.len() > PROVIDER_LOG_LIMIT {
+            info!("Response: {}...", &text[..PROVIDER_LOG_LIMIT]);
         } else {
             info!("Response: {}", text);
         }

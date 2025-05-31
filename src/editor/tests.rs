@@ -1,22 +1,15 @@
 #[cfg(test)]
 mod tests {
     use log::info;
-    use log::LevelFilter;
-    use simple_logger::SimpleLogger;
     use crate::editor;
     use crate::editor::World;
     use crate::geometry::Point2D;
 
+    use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::Biome;
     use crate::minecraft::{Block, BlockID};
-
-    fn init_logger() {
-        SimpleLogger::new()
-            .with_level(LevelFilter::Info)
-            .init()
-            .unwrap();
-    }
+    use crate::util::init_logger;
 
     #[tokio::test]
     async fn place_blocks() {
@@ -57,5 +50,16 @@ mod tests {
                 assert_ne!(biome, Biome::Unknown, "Biome should not be unknown");
             }
         }
+    }
+
+    #[tokio::test]
+    async fn world_get_block() {
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+
+        let block = world.get_block(Point3D::new(0, 0, 0));
+
+        println!("Block at (0, 0, 0): {:?}", block);
     }
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block};
+use crate::{editor::World, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -30,26 +30,12 @@ impl Editor {
         }
     }
 
-    pub async fn get_block(&mut self, point : Point3D) -> Block {
-        if let Some(block) = self.block_cache.get(&point) {
+    pub fn get_block(&mut self, point : Point3D, world : &World) -> Block {
+        if let Some(block) = self.block_cache.get(&(point - self.build_area.origin)) {
             return block.clone();
         }
 
-        let x = (point.x >> 3) << 3;
-        let y = (point.y >> 3) << 3;
-        let z = (point.z >> 3) << 3;
-
-        let dx = x + 8;
-        let dy = y + 8;
-        let dz = z + 8;
-
-        let blocks = self.provider.get_blocks(x, y, z, dx, dy, dz).await.expect("Failed to get block");
-        
-        for block in blocks.iter() {
-            self.block_cache.insert(block.get_coordinate().into(), block.get_block());
-        }
-
-        self.block_cache.get(&point).expect("Block not found").clone()
+        world.get_block(point).expect("Failed to get block from world")
     }
 
     pub async fn flush_buffer(&mut self) {

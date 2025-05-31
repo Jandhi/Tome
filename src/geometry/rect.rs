@@ -59,6 +59,14 @@ impl Rect3D {
             size: Point2D::new(self.size.x, self.size.z),
         }
     }
+
+    pub fn last(&self) -> Point3D {
+        Point3D {
+            x: self.origin.x + self.size.x - 1,
+            y: self.origin.y + self.size.y - 1,
+            z: self.origin.z + self.size.z - 1,
+        }
+    }
 }
 
 // Implement an iterator over all points in the Rect3D (in x, y, z order)
@@ -147,6 +155,13 @@ impl Rect2D {
 
     pub fn width(&self) -> i32 {
         self.size.y
+    }
+
+    pub fn last(&self) -> Point2D {
+        Point2D {
+            x: self.origin.x + self.size.x - 1,
+            y: self.origin.y + self.size.y - 1,
+        }
     }
 
     pub fn on_edge(&self, point : Point2D) -> bool {

@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
+use crate::{editor::World, geometry::Point3D};
 
-use crate::{geometry::{Point2D, Point3D}, minecraft::{Biome, BlockID}};
-
-use super::{adjacency::AdjacencyAnalyzeable, District, DistrictID};
+use super::{adjacency::AdjacencyAnalyzeable, data::{DistrictData, HasDistrictData}, District, DistrictID};
 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -11,73 +10,73 @@ pub struct SuperDistrictID(pub usize);
 #[derive(Debug, Clone)]
 pub struct SuperDistrict {
     id : SuperDistrictID,
-    districts: HashSet<DistrictID>,
-    is_border: bool,
-    points: HashSet<Point3D>,
-    points_2d: HashSet<Point2D>,
-    edges : HashSet<Point3D>,
-    sum: Point3D,
-    district_adjacency : HashMap<SuperDistrictID, u32>,
-    adjacencies_count : u32,
+    districts : HashSet<DistrictID>,
+    data : DistrictData<SuperDistrictID>,
+}
 
-    roughness: f32,
-    water_percentage: f32,
-    forested_percentage: f32,
-    surface_block_count: HashMap<BlockID, u32>,
-    biome_count: HashMap<Biome, u32>,
-    gradient: f32,
+impl HasDistrictData<'_, SuperDistrictID> for SuperDistrict {
+    fn data(&self) -> &DistrictData<SuperDistrictID> {
+        &self.data
+    }
 }
 
 impl SuperDistrict {
-    pub fn new(id : SuperDistrictID) -> Self {
-        SuperDistrict {
-            id,
-            districts: HashSet::new(),
-            is_border: false,
-            points: HashSet::new(),
-            points_2d: HashSet::new(),
-            edges: HashSet::new(),
-            sum: Point3D::default(),
-            district_adjacency: HashMap::new(),
-            adjacencies_count: 0, 
-            roughness: 0.0,
-            water_percentage: 0.0,
-            forested_percentage: 0.0,
-            surface_block_count: HashMap::new(),
-            biome_count: HashMap::new(),
-            gradient: 0.0,
-        }
-    }
-
-    pub fn add_district(&mut self, district: &District) {
-        self.districts.insert(district.id());
-
-        for point in district.points() {
-            self.points.insert(*point);
-            self.points_2d.insert(point.drop_y());
-        }
-
-        self.sum += district.sum();
-    }
-
     pub fn id(&self) -> SuperDistrictID {
         self.id
     }
 
-    pub fn points_2d(&self) -> &HashSet<Point2D> {
-        &self.points_2d
+    pub fn new(id : SuperDistrictID) -> Self {
+        SuperDistrict {
+            id,
+            districts: HashSet::new(),
+            data: DistrictData::empty(),
+        }
+    }
+
+    pub fn add_district(&mut self, district: &District, world: &mut World) {
+        self.districts.insert(district.id());
+
+        for point in district.points() {
+            self.data.points.insert(*point);
+            self.data.points_2d.insert(point.drop_y());
+            world.super_district_map[point.x as usize][point.z as usize] = Some(self.id);
+        }
+
+        self.data.sum += district.sum();
+    }
+
+    pub fn add_superdistrict(&mut self, other : &SuperDistrict, districts : &HashMap<DistrictID, District>, world: &mut World) {
+        for district in other.districts() {
+            let district = districts.get(&district).expect(&format!("District with id {} not found", district.0));
+            self.add_district(district, world);
+        }
+
+        let my_id = self.id();
+        let other_id = other.id();
+
+        for (neighbour, amt) in other.district_adjacency().iter().filter(|(id, _)| **id != my_id) {
+            // Add the adjacency to the parent
+            *self.data.district_adjacency.entry(*neighbour).or_insert(0) += amt;
+        }
+
+        self.data.adjacencies_count = (self.data.adjacencies_count + other.data.adjacencies_count) - self.data.district_adjacency.get(&other_id).unwrap_or(&0) - other.data.district_adjacency.get(&my_id).unwrap_or(&0);
+        self.data.district_adjacency.remove(&other_id);
+    }
+    
+    pub fn districts(&self) -> &HashSet<DistrictID> {
+        &self.districts
     }
 }
 
 impl AdjacencyAnalyzeable<SuperDistrictID> for SuperDistrict {
     fn increment_adjacency(&mut self, id: Option<SuperDistrictID>) {
-        self.adjacencies_count += 1;
+        self.data.adjacencies_count += 1;
         if let Some(id) = id {
-            *self.district_adjacency.entry(id).or_insert(0) += 1;
+            *self.data.district_adjacency.entry(id).or_insert(0) += 1;
         }
     }
 
     fn add_edge(&mut self, point: Point3D) {
-        self.edges.insert(point);
+        self.data.edges.insert(point);
     }
 }
