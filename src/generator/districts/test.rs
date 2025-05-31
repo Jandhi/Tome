@@ -3,42 +3,18 @@ mod tests {
     use crate::{editor::{Editor, World}, generator::districts::district::generate_districts, geometry::Point3D, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::Seed, util::init_logger};
 
     fn get_block_for_id(id : usize) -> Block {
-        match id % 7 {
-            0 => Block {
-                id: BlockID::RedWool,
-                data: None,
-                states: None,
-            }, 
-            1 => Block {
-                id: BlockID::GreenWool,
-                data: None,
-                states: None,
-            },
-            2 => Block {
-                id: BlockID::BlueWool,
-                data: None,
-                states: None,
-            },
-            3 => Block {
-                id: BlockID::YellowWool,
-                data: None,
-                states: None,
-            },
-            4 => Block {
-                id: BlockID::MagentaWool,
-                data: None,
-                states: None,
-            },
-            5 => Block {
-                id: BlockID::LightBlueWool,
-                data: None,
-                states: None,
-            },
-            _ => Block {
-                id: BlockID::OrangeWool,
-                data: None,
-                states: None,
-            },
+        use BlockID::*;
+        // List of all 16 wool colors in order
+        let wool_colors = [
+            WhiteWool, OrangeWool, MagentaWool, LightBlueWool,
+            YellowWool, LimeWool, PinkWool, GrayWool,
+            LightGrayWool, CyanWool, PurpleWool, BlueWool,
+            BrownWool, GreenWool, RedWool, BlackWool,
+        ];
+        Block {
+            id: wool_colors[id % wool_colors.len()],
+            data: None,
+            states: None,
         }
     }
 
