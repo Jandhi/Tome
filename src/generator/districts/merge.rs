@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use log::info;
+
 use crate::editor::World;
 
 use super::analysis::analyze_district;
@@ -13,11 +15,12 @@ pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDist
 
     while district_count > TARGET_DISTRICT_AMOUNT as usize {
         let child = superdistricts.iter()
-            .filter(|(id, _)| ignore.contains(&id))
+            .filter(|(id, _)| !ignore.contains(&id))
             .min_by_key(|(_, district)| district.size())
             .map(|(id, _)| *id);
 
         let Some(child) = child else {
+            info!("Out of districts to merge, stopping.");
             break;
         };
 
@@ -59,15 +62,15 @@ async fn merge(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, di
     district_analysis_data.insert(parent.id(), new_analysis);
 }
 
-fn get_best_merge_candidate(districts : &HashMap<SuperDistrictID, SuperDistrict>, district_analysis_data : &HashMap<SuperDistrictID, DistrictAnalysis>, target : SuperDistrictID, options : Vec<SuperDistrictID>) -> Option<SuperDistrictID> {
+fn get_best_merge_candidate(superdistricts : &HashMap<SuperDistrictID, SuperDistrict>, district_analysis_data : &HashMap<SuperDistrictID, DistrictAnalysis>, target : SuperDistrictID, options : Vec<SuperDistrictID>) -> Option<SuperDistrictID> {
     options.iter()
         // Only merge border districts with other border districts
         .filter(|other| {
-            districts.get(other).expect("Could not find district with id").is_border()
-                == districts.get(&target).expect("Could not find district with id").is_border()
+            superdistricts.contains_key(other) && superdistricts.get(other).expect("Could not find district with id").is_border()
+                == superdistricts.get(&target).expect("Could not find district with id").is_border()
         })
         .map(|other| {
-            let score = get_candidate_score(districts,  district_analysis_data, target, *other, true);
+            let score = get_candidate_score(superdistricts,  district_analysis_data, target, *other, true);
             (*other, score)
         })
         // Our best candidate has to be 0.33 at minimum

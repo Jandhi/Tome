@@ -59,7 +59,7 @@ impl SuperDistrict {
             *self.data.district_adjacency.entry(*neighbour).or_insert(0) += amt;
         }
 
-        self.data.adjacencies_count += other.data.adjacencies_count - self.data.district_adjacency.get(&other_id).unwrap_or(&0) - other.data.district_adjacency.get(&my_id).unwrap_or(&0);
+        self.data.adjacencies_count = (self.data.adjacencies_count + other.data.adjacencies_count) - self.data.district_adjacency.get(&other_id).unwrap_or(&0) - other.data.district_adjacency.get(&my_id).unwrap_or(&0);
         self.data.district_adjacency.remove(&other_id);
     }
     
