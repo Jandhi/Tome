@@ -1,13 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::{editor::{Editor, World}, generator::districts::district::generate_districts, geometry::Point3D, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::Seed};
-
-    fn init_logger() {
-        simple_logger::SimpleLogger::new()
-            .with_level(log::LevelFilter::Info)
-            .init()
-            .unwrap();
-    }
+    use crate::{editor::{Editor, World}, generator::districts::district::generate_districts, geometry::Point3D, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::Seed, util::init_logger};
 
     fn get_block_for_id(id : usize) -> Block {
         match id % 7 {
@@ -15,7 +8,7 @@ mod tests {
                 id: BlockID::RedWool,
                 data: None,
                 states: None,
-            },
+            }, 
             1 => Block {
                 id: BlockID::GreenWool,
                 data: None,
@@ -100,7 +93,6 @@ mod tests {
         let mut editor = Editor::new(build_area);
         let mut world = World::new(&provider).await.expect("Failed to create world");
 
-        println!("a");
         let _districts = generate_districts(seed, &mut world).await;
 
         for x in 0..build_area.size.x {

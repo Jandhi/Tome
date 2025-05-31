@@ -1,8 +1,8 @@
 use std::{collections::{HashMap, HashSet}, hash::Hash};
 
-use log::{error, info, warn};
+use log::info;
 
-use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS, CARDINALS_2D, X_PLUS_2D, Y_PLUS_2D}, minecraft::{Biome, BlockID}, noise::{Seed, RNG}};
+use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
 
 use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
@@ -46,9 +46,7 @@ impl District {
     fn set_to_border_district(&mut self) {
         self.data.is_border = true;
     }
-} 
-
-
+}
 
 impl AdjacencyAnalyzeable<DistrictID> for District {
     fn increment_adjacency(&mut self, id: Option<DistrictID>) {
@@ -63,15 +61,8 @@ impl AdjacencyAnalyzeable<DistrictID> for District {
     }
 }
 
-// Setter that won't be exposed outside of this module
-pub fn set_district_type(district : &mut District, district_type: DistrictType) {
-    district.data.district_type = district_type;
-}
-
-
 pub async fn generate_districts(seed : Seed, world : &mut World) {
     info!("Generating districts with seed: {:?}", seed);
-    println!("a");
 
     let districts = spawn_districts(seed, world);
 
@@ -85,11 +76,9 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
         .map(|district| (district.id, district))
         .collect();
 
-    println!("a");
     info!("Bubbling out districts...");
     bubble_out(&mut districts, world);
     
-    println!("a");
     info!("Re-centering districts...");
     for _ in 0..NUM_RECENTER {
         recenter_districts(world, &mut districts);

@@ -16,6 +16,7 @@ const PROVIDER_LOG_LIMIT : usize = 300;
 pub struct GDMCHTTPProvider {
     base_url: String,
     client: reqwest_middleware::ClientWithMiddleware,
+    log_responses: bool,
 }
 
 impl GDMCHTTPProvider {
@@ -27,8 +28,14 @@ impl GDMCHTTPProvider {
 
         GDMCHTTPProvider {
             base_url: "http://localhost:9000".to_string(),
-            client: client,
+            client,
+            log_responses: false,
         }
+    }
+
+    pub fn with_response_logging(mut self, log_responses: bool) -> Self {
+        self.log_responses = log_responses;
+        self
     }
 
     fn url(&self, path: &str) -> String {
@@ -44,7 +51,7 @@ impl GDMCHTTPProvider {
             .await?;
         
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let command_response: Vec<CommandResponse> = serde_json::from_str(&text)?;
         Ok(command_response)
     }
@@ -60,13 +67,12 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let blocks: Vec<PositionedBlock> = serde_json::from_str(&text)?;
         Ok(blocks)
     }
 
     pub async fn put_blocks(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
-        info!("Placing blocks: {:?}", blocks);
         let url = self.url("blocks");
 
         let body = serde_json::to_string(&blocks)?;
@@ -78,7 +84,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let block_response: Vec<BlockPlacementResponse> = serde_json::from_str(&text)?;
         Ok(block_response)
     }
@@ -91,7 +97,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let buildarea_response : buildarea::BuildAreaResponse = serde_json::from_str(&text)?;
         Ok(buildarea_response.to_rect())
     }
@@ -104,7 +110,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let heightmap: Vec<Vec<i32>> = serde_json::from_str(&text)?;
         Ok(heightmap)
     }
@@ -117,7 +123,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let biomes: Vec<PositionedBiome> = serde_json::from_str(&text)?;
         Ok(biomes)
     }
@@ -155,7 +161,7 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         let entities: Vec<EntityResponse> = serde_json::from_str(&text)?;
         Ok(entities)
     }
@@ -172,11 +178,15 @@ impl GDMCHTTPProvider {
             .await?;
 
         let text = response.text().await?;
-        Self::log_response(&text);
+        self.log_response(&text);
         Ok(())
     }
 
-    fn log_response(text : &str) {
+    fn log_response(&self, text : &str) {
+        if !self.log_responses {
+            return;
+        }
+
         if text.len() > PROVIDER_LOG_LIMIT {
             info!("Response: {}...", &text[..PROVIDER_LOG_LIMIT]);
         } else {

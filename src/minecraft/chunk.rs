@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use fastnbt::{ByteArray, LongArray, Value};
+use fastnbt::{LongArray, Value};
 use serde_derive::{Serialize, Deserialize};
 
 use crate::minecraft::Biome;

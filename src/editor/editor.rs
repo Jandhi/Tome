@@ -30,10 +30,8 @@ impl Editor {
         }
     }
 
-    pub fn get_block(&mut self, mut point : Point3D, world : &World) -> Block {
-        point -= self.build_area.origin;
-
-        if let Some(block) = self.block_cache.get(&point) {
+    pub fn get_block(&mut self, point : Point3D, world : &World) -> Block {
+        if let Some(block) = self.block_cache.get(&(point - self.build_area.origin)) {
             return block.clone();
         }
 

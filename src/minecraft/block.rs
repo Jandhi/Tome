@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use log::info;
 use serde_derive::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,11 +70,6 @@ impl BlockID {
 
 impl From<&str> for BlockID {
     fn from(value: &str) -> Self {
-        
-        
-        info!("Converting string to BlockID: {}", value);
-
-
         serde_json::from_str::<BlockID>(&format!("\"{}\"", value)).unwrap_or(BlockID::Unknown)
     }
 }

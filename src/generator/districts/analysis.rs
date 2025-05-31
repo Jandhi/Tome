@@ -1,16 +1,11 @@
 
-use lerp::Lerp;
-use log::info;
 
 use crate::editor::World;
-use crate::geometry::Point2D;
-use crate::geometry::Point3D;
 use crate::geometry::CARDINALS_2D;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
 use std::collections::HashMap;
 
-use super::constants::CHUNK_SIZE;
 use super::data::HasDistrictData;
 use super::DistrictData;
 
@@ -74,25 +69,8 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, world: &mu
     let mut surface_block_count: HashMap<BlockID, u32> = HashMap::new();
 
     let mut editor = world.get_editor();
-
-    let chunks : HashMap<Point2D, Vec<Point3D>> = area.points()
-        .iter()
-        .map(|point| (point.drop_y() / CHUNK_SIZE, *point))
-        .fold(HashMap::new(), |mut acc, (key, point)| {
-            acc.entry(key).or_insert_with(Vec::new).push(point);
-            acc
-        });
-
-    let analysis_by_chunk = chunks.into_iter()
-        .map(|(_, points)| {
-            tokio::spawn(async move {
-                
-            })
-        })
-        .collect::<Vec<_>>();
     
     for point in area.points() {
-        info!("Analyzing point: {:?}", point);
         let biome = world.get_surface_biome_at(point.drop_y());
         let block = editor.get_block(*point, &world);
         let is_water = block.id.is_water();

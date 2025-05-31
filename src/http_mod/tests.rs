@@ -1,18 +1,9 @@
 
 #[cfg(test)]
 mod tests {
-    use log::LevelFilter;
-    use simple_logger::SimpleLogger;
-
     use crate::http_mod::{GDMCHTTPProvider, PositionedBlock};
     use crate::minecraft::BlockID;
-
-    fn init_logger() {
-        SimpleLogger::new()
-            .with_level(LevelFilter::Info)
-            .init()
-            .unwrap();
-    }
+    use crate::util::init_logger;
 
     #[tokio::test]
     async fn get_blocks() {
