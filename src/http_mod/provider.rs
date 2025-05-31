@@ -139,12 +139,12 @@ impl GDMCHTTPProvider {
         let raw_bytes = response.bytes().await?;
         let mut decoder = GzDecoder::new(&raw_bytes[..]);
         let mut buf = vec![];
-        decoder.read_to_end(&mut buf).unwrap();
+        decoder.read_to_end(&mut buf)?;
         debug!("Decompressed {} bytes from chunk data", buf.len());
 
         let mut decoder = GzDecoder::new(buf.as_slice());
         let mut buf = vec![];
-        decoder.read_to_end(&mut buf).unwrap();
+        decoder.read_to_end(&mut buf)?;
         debug!("Decompressed {} bytes from NBT data", buf.len());
 
         let chunks : Chunks = fastnbt::from_bytes(&buf)?;
