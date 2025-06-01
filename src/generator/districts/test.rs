@@ -107,40 +107,18 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut world).await;
 
-        let block_vec = vec![
-            Block {
-                id: BlockID::Stone,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Cobblestone,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneBricks,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Andesite,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Gravel,
-                data: None,
-                states: None,
-            },
-        ];
+        use BlockID::*;
+        let block_vec : Vec<Block> = vec![
+            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
+        ].into_iter().map(|id| Block { id, data: None, states: None }).collect();
 
-        let mut block_dict: HashMap<u32, f32> = HashMap::new();
-        block_dict.insert(0, 3.0); // Stone
-        block_dict.insert(1, 2.0); // Cobblestone
-        block_dict.insert(2, 8.0); // Stone Bricks
-        block_dict.insert(3, 3.0); // Andesite
-        block_dict.insert(4, 1.0); // Gravel
+        let block_dict: HashMap<u32, f32> = [
+            (0, 3.0),  // Stone
+            (1, 2.0),  // Cobblestone
+            (2, 8.0),  // Stone Bricks
+            (3, 3.0),  // Andesite
+            (4, 1.0),  // Gravel
+        ].into_iter().collect();
 
         let mut road_points = HashSet::new();
 
@@ -182,73 +160,12 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut world).await;
 
-        let block_vec = vec![
-            Block {
-                id: BlockID::Stone,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Cobblestone,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneBricks,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Andesite,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::Gravel,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneStairs,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::CobblestoneStairs,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneBrickStairs,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::AndesiteStairs,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneSlab,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::CobblestoneSlab,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::StoneBrickSlab,
-                data: None,
-                states: None,
-            },
-            Block {
-                id: BlockID::AndesiteSlab,
-                data: None,
-                states: None,
-            },
-        ];
+        use BlockID::*;
+        let block_vec : Vec<Block> = vec![
+            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
+            StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
+            StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
+        ].into_iter().map(|id| Block { id, data: None, states: None }).collect();
 
         let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
 
@@ -258,7 +175,7 @@ mod tests {
             (2, 8.0),  // Stone Bricks
             (3, 3.0),  // Andesite
             (4, 1.0),  // Gravel
-        ].iter().cloned().collect();
+        ].into_iter().collect();
         blocks_dict.insert(0, block_dict);
 
         let stair_dict = [
@@ -266,7 +183,7 @@ mod tests {
             (6, 2.0),  // Cobblestone stairs
             (7, 8.0),  // Stone Bricks stairs
             (8, 4.0),  // Andesite stairs
-        ].iter().cloned().collect();
+        ].into_iter().collect();
         blocks_dict.insert(1, stair_dict);
 
         let slab_dict = [
@@ -274,7 +191,7 @@ mod tests {
             (10, 2.0),  // Cobblestone slab
             (11, 8.0),  // Stone Bricks slab
             (12, 4.0),  // Andesite slab
-        ].iter().cloned().collect();
+        ].into_iter().collect();
         blocks_dict.insert(2, slab_dict);
 
 
