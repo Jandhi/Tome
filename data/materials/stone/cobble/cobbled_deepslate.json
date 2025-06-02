@@ -1,0 +1,15 @@
+{
+    "id": "cobbled_deepslate",
+    "connections": {
+        "lighter": "deepslate",
+        "darker": "basalt"
+    },
+    "blocks": {
+        "block": "minecraft:cobbled_deepslate",
+        "stairs": "minecraft:cobbled_deepslate_stairs",
+        "slab": "minecraft:cobbled_deepslate_slab",
+        "wall": "minecraft:cobbled_deepslate_wall",
+        "pressure_plate" : "minecraft:stone_pressure_plate",
+        "button" : "minecraft:stone_button"
+    }
+}

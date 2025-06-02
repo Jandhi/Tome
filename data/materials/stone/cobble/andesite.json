@@ -1,0 +1,14 @@
+{
+    "id" : "andesite",
+    "connections" : {
+        "darker" : "cobblestone"
+    },
+    "blocks" : {
+        "block" : "minecraft:andesite",
+        "stairs" : "minecraft:andesite_stairs",
+        "slab" : "minecraft:andesite_slab",
+        "wall" : "minecraft:andesite_wall",
+        "pressure_plate" : "minecraft:stone_pressure_plate",
+        "button" : "minecraft:stone_button"
+    }
+}
