@@ -5,6 +5,12 @@ use crate::geometry::{Point2D, Point3D};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Seed(pub i64);
 
+impl From<i64> for Seed {
+    fn from(value: i64) -> Self {
+        Seed(value)
+    }
+}
+
 pub struct RNG {
     seed: Seed,
     state: i64,
@@ -132,6 +138,12 @@ impl RNG {
             let j = self.rand_i32(i as i32) as usize;
             items.swap(i, j);
         }
+    }
+}
+
+impl From<Seed> for RNG {
+    fn from(seed: Seed) -> Self {
+        RNG::new(seed)
     }
 }
 

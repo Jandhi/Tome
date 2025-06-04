@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-
+use serde_derive::{Serialize, Deserialize};
 use log::info;
 
 use crate::generator::materials::{Material, MaterialId};
@@ -22,6 +22,14 @@ pub const MATERIAL_FEATURE_TRAVERSAL_ORDER : [MaterialFeature; 4] = [
 pub enum MaterialFeatureMapping {
     Linear,
     Fitted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaterialParameters {
+    pub shade : f32,
+    pub wear : f32,
+    pub moisture : f32,
+    pub decoration : f32,
 }
 
 fn more(
@@ -62,6 +70,31 @@ fn less(
     }
 
     result
+}
+
+pub fn map_features(
+    parameters : &MaterialParameters,
+    material : &MaterialId,
+    materials : &HashMap<MaterialId, Material>,
+) -> MaterialId {
+    let mut material = material.clone();
+
+    for feature in MATERIAL_FEATURE_TRAVERSAL_ORDER.iter() {
+        material = map_feature(
+            match feature {
+                MaterialFeature::Shade => parameters.shade,
+                MaterialFeature::Wear => parameters.wear,
+                MaterialFeature::Moisture => parameters.moisture,
+                MaterialFeature::Decoration => parameters.decoration,
+            },
+            &material,
+            *feature,
+            materials,
+            MaterialFeatureMapping::Fitted, // or Linear based on your needs
+        ); 
+    }
+
+    material
 }
 
 pub fn map_feature(
