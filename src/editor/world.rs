@@ -215,7 +215,11 @@ impl World {
         }
 
         let data = biomes.data.as_ref()?;
-        let index = (point.x % CHUNK_SIZE + point.y % CHUNK_SIZE * CHUNK_SIZE + point.z % CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+        let index = (
+            point.x.rem_euclid(CHUNK_SIZE)
+            + point.y.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE
+            + point.z.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE * CHUNK_SIZE
+        ) as usize;
 
         let indices_per_long = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize / data.len();
         let bits = 64 / indices_per_long;
