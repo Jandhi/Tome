@@ -142,11 +142,15 @@ impl GDMCHTTPProvider {
         decoder.read_to_end(&mut buf)?;
         debug!("Decompressed {} bytes from chunk data", buf.len());
 
-        // Maybe need to uncomment if decoder isnt working
-        // let mut decoder = GzDecoder::new(buf.as_slice());
-        // let mut buf = vec![];
-        // decoder.read_to_end(&mut buf)?;
-        // debug!("Decompressed {} bytes from NBT data", buf.len());
+        if let std::result::Result::Ok(chunks) = fastnbt::from_bytes::<Chunks>(&buf) {
+            debug!("Decompressed NBT value: {:?}", chunks);
+            return Ok(chunks.chunks);
+        }
+
+        let mut decoder = GzDecoder::new(buf.as_slice());
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        debug!("Decompressed {} bytes from NBT data", buf.len());
 
         let chunks : Chunks = fastnbt::from_bytes(&buf)?;
         debug!("Decompressed NBT value: {:?}", chunks);
