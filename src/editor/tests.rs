@@ -24,7 +24,7 @@ mod tests {
         let block = Block {
             id: BlockID::Stone,
             data: None,
-            states: None,
+            state: None,
         };
 
         for x in 0..build_area.length() {

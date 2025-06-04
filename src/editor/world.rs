@@ -172,7 +172,7 @@ impl World {
             let block = block_states.palette.get(0)?;
             return Some(Block {
                 id: block.name.as_str().into(),
-                states: block.properties.clone(),
+                state: block.properties.clone(),
                 data: None,
             });
         }
@@ -191,7 +191,7 @@ impl World {
 
         palette.get(block_index as usize).map(|block| Block {
             id: block.name.as_str().into(),
-            states: block.properties.clone(),
+            state: block.properties.clone(),
             data: None,
         })
     }

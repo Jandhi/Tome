@@ -14,7 +14,7 @@ mod tests {
         Block {
             id: wool_colors[id % wool_colors.len()],
             data: None,
-            states: None,
+            state: None,
         }
     }
 

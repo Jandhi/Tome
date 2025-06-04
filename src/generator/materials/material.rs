@@ -57,7 +57,7 @@ impl Material {
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form) {
             editor.place_block(&Block{
                 id: block_id.clone(),
-                states,
+                state: states,
                 data,
             }, point).await;
         } else {

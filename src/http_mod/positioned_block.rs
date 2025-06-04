@@ -24,7 +24,7 @@ impl PositionedBlock {
             x: position.x,
             y: position.y,
             z: position.z,
-            states: block.states,
+            states: block.state,
             data: block.data,
         }
     }
@@ -36,7 +36,7 @@ impl PositionedBlock {
     pub fn get_block(&self) -> Block {
         Block {
             id: self.id,
-            states: self.states.clone(),
+            state: self.states.clone(),
             data: self.data.clone(),
         }
     }

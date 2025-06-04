@@ -7,13 +7,13 @@ use crate::minecraft::BlockID;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Block {
     pub id : BlockID,
-    pub states : Option<HashMap<String, String>>,
+    pub state : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
 impl Block {
     pub fn new(id: BlockID, states: Option<HashMap<String, String>>, data: Option<String>) -> Self {
-        Block { id, states, data }
+        Block { id, state: states, data }
     }
 }
 
@@ -21,7 +21,7 @@ impl From<BlockID> for Block {
     fn from(id: BlockID) -> Self {
         Block {
             id,
-            states: None,
+            state: None,
             data: None,
         }
     }
@@ -31,7 +31,7 @@ impl From<&BlockID> for Block {
     fn from(id: &BlockID) -> Self {
         Block {
             id: id.clone(),
-            states: None,
+            state: None,
             data: None,
         }
     }
