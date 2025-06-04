@@ -40,5 +40,9 @@ pub trait Loadable<'de, TItem, TKey>
     }
 
     fn get_key(item: &TItem) -> TKey;
+
+    // In case we need to do something after loading all items
+    fn post_load(items : &mut HashMap<TKey, TItem>) -> anyhow::Result<()>;
+    
     fn path() -> &'static str;
 }
