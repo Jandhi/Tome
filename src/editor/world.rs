@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 
 use super::Editor;
@@ -14,6 +14,7 @@ const CHUNK_SIZE : i32 = 16;
 pub struct World {
     pub build_area : Rect3D,
     pub districts : HashMap<DistrictID, District>,
+    pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
 
@@ -86,6 +87,7 @@ impl World {
         let mut world = World {
             build_area,
             districts: HashMap::new(),
+            super_districts: HashMap::new(),
             district_map,
             super_district_map,
             ground_height_map,
@@ -155,6 +157,10 @@ impl World {
     pub fn get_district_at(&self, point : Point2D) -> Option<DistrictID> {
         self.district_map[point.x as usize][point.y as usize]
     }
+
+    pub fn get_super_district_at(&self, point : Point2D) -> Option<SuperDistrictID> {
+        self.super_district_map[point.x as usize][point.y as usize]
+    }   
 
     pub fn add_height(&mut self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)

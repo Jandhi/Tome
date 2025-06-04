@@ -9,9 +9,9 @@ pub struct SuperDistrictID(pub usize);
 
 #[derive(Debug, Clone)]
 pub struct SuperDistrict {
-    id : SuperDistrictID,
-    districts : HashSet<DistrictID>,
-    data : DistrictData<SuperDistrictID>,
+    pub id : SuperDistrictID,
+    pub districts : HashSet<DistrictID>,
+    pub data : DistrictData<SuperDistrictID>,
 }
 
 impl HasDistrictData<'_, SuperDistrictID> for SuperDistrict {

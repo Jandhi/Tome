@@ -109,6 +109,9 @@ pub enum BlockID {
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
 
+    #[serde(rename = "minecraft:glass")]
+    Glass,
+
     #[serde(other)]
     Unknown, // Placeholder for unknown block ids
 }

@@ -23,7 +23,7 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
         let mut is_edge = false;
         let height = height_map[point.x as usize][point.y as usize];
 
-        for neighbour_point in [point + X_PLUS_2D, point + Y_PLUS_2D] {
+        for neighbour_point in [point + X_PLUS_2D, point + Y_PLUS_2D, point - X_PLUS_2D, point - Y_PLUS_2D] {
             if !world_rect.contains(neighbour_point) {
                 continue;
             }
