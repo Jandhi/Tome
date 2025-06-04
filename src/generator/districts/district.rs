@@ -19,8 +19,8 @@ pub enum DistrictType {
 
 #[derive(Debug, Clone)]
 pub struct District {
-    id: DistrictID,
-    data : DistrictData<DistrictID>,
+    pub id: DistrictID,
+    pub data : DistrictData<DistrictID>,
 }
 
 impl HasDistrictData<'_, DistrictID> for District {
@@ -121,6 +121,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     }
 
     editor.world().districts = districts;
+    editor.world().super_districts = super_districts;
     info!("Districts generated successfully");
 }
 
@@ -131,9 +132,9 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
     while queue.len() > 0 {
         let next = queue.remove(0);
 
-        println!("Bubbling out from {:?}", next);
+        info!("Bubbling out from {:?}", next);
         let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
-        println!("Current district: {:?}", current_district);
+        info!("Current district: {:?}", current_district);
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
@@ -141,7 +142,7 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
             }
 
             if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
-                println!("Skipping {:?} because it is out of bounds", neighbour);
+                info!("Skipping {:?} because it is out of bounds", neighbour);
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
             }
