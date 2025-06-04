@@ -2,16 +2,16 @@ use std::collections::HashMap;
 
 use serde_derive::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Block {
     pub id : BlockID,
-    pub states : Option<HashMap<String, String>>,
+    pub state : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
 impl Block {
-    pub fn new(id: BlockID, states: Option<HashMap<String, String>>, data: Option<String>) -> Self {
-        Block { id, states, data }
+    pub fn new(id: BlockID, state: Option<HashMap<String, String>>, data: Option<String>) -> Self {
+        Block { id, state, data }
     }
 }
 
@@ -19,7 +19,7 @@ impl From<BlockID> for Block {
     fn from(id: BlockID) -> Self {
         Block {
             id,
-            states: None,
+            state: None,
             data: None,
         }
     }
@@ -27,12 +27,42 @@ impl From<BlockID> for Block {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockID {
-    Unknown,
-
+   
+    
     #[serde(rename = "minecraft:air")]
     Air,
     #[serde(rename = "minecraft:stone")]
     Stone,
+
+    #[serde(rename = "minecraft:cobblestone")]
+    Cobblestone,
+    #[serde(rename = "minecraft:stone_bricks")]
+    StoneBricks,
+    #[serde(rename = "minecraft:andesite")]
+    Andesite,
+    #[serde(rename = "minecraft:gravel")]
+    Gravel,
+
+    // Slabs
+    #[serde(rename = "minecraft:stone_slab")]
+    StoneSlab,
+    #[serde(rename = "minecraft:cobblestone_slab")]
+    CobblestoneSlab,
+    #[serde(rename = "minecraft:stone_brick_slab")]
+    StoneBrickSlab,
+    #[serde(rename = "minecraft:andesite_slab")]
+    AndesiteSlab,
+
+    // Stairs
+    #[serde(rename = "minecraft:stone_stairs")]
+    StoneStairs,
+    #[serde(rename = "minecraft:cobblestone_stairs")]
+    CobblestoneStairs,
+    #[serde(rename = "minecraft:stone_brick_stairs")]
+    StoneBrickStairs,
+    #[serde(rename = "minecraft:andesite_stairs")]
+    AndesiteStairs,
+    
 
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,
@@ -78,6 +108,9 @@ pub enum BlockID {
 
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
+
+    #[serde(other)]
+    Unknown, // Placeholder for unknown block ids
 }
 
 impl BlockID {

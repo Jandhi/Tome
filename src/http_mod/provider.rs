@@ -76,7 +76,7 @@ impl GDMCHTTPProvider {
         let url = self.url("blocks");
 
         let body = serde_json::to_string(&blocks)?;
-
+        info!("Sending PUT request to {} with body: {}", url, body);
         let response = self.client
             .put(&url)
             .body(body)
@@ -141,6 +141,11 @@ impl GDMCHTTPProvider {
         let mut buf = vec![];
         decoder.read_to_end(&mut buf)?;
         debug!("Decompressed {} bytes from chunk data", buf.len());
+
+        if let std::result::Result::Ok(chunks) = fastnbt::from_bytes::<Chunks>(&buf) {
+            debug!("Decompressed NBT value: {:?}", chunks);
+            return Ok(chunks.chunks);
+        }
 
         let mut decoder = GzDecoder::new(buf.as_slice());
         let mut buf = vec![];

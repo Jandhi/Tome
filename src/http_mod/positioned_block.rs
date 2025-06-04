@@ -12,7 +12,7 @@ pub struct PositionedBlock {
     pub x : Coordinate,
     pub y : Coordinate,
     pub z : Coordinate,
-    pub states : Option<HashMap<String, String>>,
+    pub state : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
@@ -24,7 +24,7 @@ impl PositionedBlock {
             x: position.x,
             y: position.y,
             z: position.z,
-            states: block.states,
+            state: block.state,
             data: block.data,
         }
     }
@@ -36,7 +36,7 @@ impl PositionedBlock {
     pub fn get_block(&self) -> Block {
         Block {
             id: self.id,
-            states: self.states.clone(),
+            state: self.state.clone(),
             data: self.data.clone(),
         }
     }

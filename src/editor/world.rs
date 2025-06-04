@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::info;
 
-use crate::{generator::districts::{District, DistrictID, SuperDistrictID}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+
 
 use super::Editor;
 
@@ -17,9 +18,11 @@ pub struct World {
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
 
     ground_height_map : Vec<Vec<i32>>,
-    surface_height_map : Vec<Vec<i32>>,
+    ground_block_map : Vec<Vec<Block>>,
+    ocean_floor_height_map : Vec<Vec<i32>>,
+    ground_biome_map: Vec<Vec<Biome>>,
     motion_blocking_height_map : Vec<Vec<i32>>,
-
+    build_claim_map : Vec<Vec<BuildClaim>>,
     pub chunks: HashMap<Point2D, Chunk>,
 }
 
@@ -71,29 +74,41 @@ impl World {
             .get_heightmap(origin_x, origin_z, size_x, size_z, HeightMapType::MotionBlocking)
             .await?;
 
-        let mut ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut surface_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let mut motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
 
-        let y_offset = build_area.origin.y;
-        for x in 0..size_x_usize {
-            for z in 0..size_z_usize {
-                ground_height_map[x][z] = ground_map[x][z] - y_offset;
-                surface_height_map[x][z] = ocean_map[x][z] - y_offset;
-                motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
-            }
-        }
+        let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
+        let ground_block_map = vec![vec![Block::new(BlockID::Unknown, None, None); size_z_usize]; size_x_usize];
+        let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
+        let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
 
-        Ok(World {
+        let mut world = World {
             build_area,
             districts: HashMap::new(),
             district_map,
             super_district_map,
             ground_height_map,
-            surface_height_map,
+            ocean_floor_height_map,
             motion_blocking_height_map,
+            build_claim_map,
             chunks,
-        })
+            ground_biome_map,
+            ground_block_map,
+        };
+
+        let y_offset = build_area.origin.y;
+        for x in 0..size_x_usize {
+            for z in 0..size_z_usize {
+                world.ground_height_map[x][z] = ground_map[x][z] - y_offset;
+                world.ocean_floor_height_map[x][z] = ocean_map[x][z] - y_offset;
+                world.motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
+                world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z], z as i32)).expect("Failed to get block at point");
+                world.ground_biome_map[x][z] = world.get_biome(Point3D::new(x as i32, world.ocean_floor_height_map[x][z], z as i32)).expect("Failed to get biome at point");
+            }
+        }
+
+        Ok(world)
     }
 
     pub fn get_editor(&self) -> Editor {
@@ -123,8 +138,8 @@ impl World {
     }   
 
     // Get height without counting water
-    pub fn get_surface_height_at(&self, point : Point2D) -> i32 {
-        self.surface_height_map[point.x as usize][point.y as usize]
+    pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
+        self.ocean_floor_height_map[point.x as usize][point.y as usize]
     }
 
     pub fn get_motion_blocking_height_at(&self, point : Point2D) -> i32 {
@@ -132,7 +147,7 @@ impl World {
     }
 
     pub fn get_surface_biome_at(&self, point : Point2D) -> Biome {
-        let height = self.get_surface_height_at(point);
+        let height = self.get_ocean_floor_height_at(point);
         let point_3d = Point3D::new(point.x, height, point.y);
         self.get_biome(point_3d).expect("Failed to get biome at point")
     }
@@ -164,13 +179,13 @@ impl World {
             let block = block_states.palette.get(0)?;
             return Some(Block {
                 id: block.name.as_str().into(),
-                states: block.properties.clone(),
+                state: block.properties.clone(),
                 data: None,
             });
         }
 
         let data = block_states.data.as_ref()?;
-        let index = (point.x % CHUNK_SIZE + point.y % CHUNK_SIZE * CHUNK_SIZE + point.z % CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
         let indices_per_long = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize / data.len();
         let bits = 64 / indices_per_long;
@@ -183,7 +198,7 @@ impl World {
 
         palette.get(block_index as usize).map(|block| Block {
             id: block.name.as_str().into(),
-            states: block.properties.clone(),
+            state: block.properties.clone(),
             data: None,
         })
     }
@@ -200,7 +215,11 @@ impl World {
         }
 
         let data = biomes.data.as_ref()?;
-        let index = (point.x % CHUNK_SIZE + point.y % CHUNK_SIZE * CHUNK_SIZE + point.z % CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+        let index = (
+            point.x.rem_euclid(CHUNK_SIZE)
+            + point.y.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE
+            + point.z.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE * CHUNK_SIZE
+        ) as usize;
 
         let indices_per_long = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize / data.len();
         let bits = 64 / indices_per_long;
@@ -212,5 +231,13 @@ impl World {
         let biome_list = &biomes.biomes;
 
         biome_list.get(biome_index as usize).cloned()
+
+    }
+    pub fn is_water(&self, point : Point2D) -> bool {
+        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
+    }
+
+    pub fn is_claimed(&self, point : Point2D) -> bool {
+        self.build_claim_map[point.x as usize][point.y as usize] != BuildClaim::None
     }
 }
