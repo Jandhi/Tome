@@ -5,13 +5,13 @@ use serde_derive::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Block {
     pub id : BlockID,
-    pub states : Option<HashMap<String, String>>,
+    pub state : Option<HashMap<String, String>>,
     pub data: Option<String>,
 }
 
 impl Block {
     pub fn new(id: BlockID, state: Option<HashMap<String, String>>, data: Option<String>) -> Self {
-        Block { id, states: state, data }
+        Block { id, state, data }
     }
 }
 
@@ -19,7 +19,7 @@ impl From<BlockID> for Block {
     fn from(id: BlockID) -> Self {
         Block {
             id,
-            states: None,
+            state: None,
             data: None,
         }
     }
@@ -27,7 +27,7 @@ impl From<BlockID> for Block {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BlockID {
-    Unknown, // Placeholder for unknown block ids
+   
     
     #[serde(rename = "minecraft:air")]
     Air,
@@ -108,6 +108,9 @@ pub enum BlockID {
 
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
+
+    #[serde(other)]
+    Unknown, // Placeholder for unknown block ids
 }
 
 impl BlockID {

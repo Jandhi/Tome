@@ -15,7 +15,7 @@ mod tests {
         Block {
             id: wool_colors[id % wool_colors.len()],
             data: None,
-            states: None,
+            state: None,
         }
     }
 
@@ -110,7 +110,7 @@ mod tests {
         use BlockID::*;
         let block_vec : Vec<Block> = vec![
             Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-        ].into_iter().map(|id| Block { id, data: None, states: None }).collect();
+        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
         let block_dict: HashMap<u32, f32> = [
             (0, 3.0),  // Stone
@@ -165,7 +165,7 @@ mod tests {
             Stone, Cobblestone, StoneBricks, Andesite, Gravel,
             StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
             StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
-        ].into_iter().map(|id| Block { id, data: None, states: None }).collect();
+        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
         let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
 

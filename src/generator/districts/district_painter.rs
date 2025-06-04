@@ -91,7 +91,7 @@ pub async fn replace_ground_smooth(
                 if world.get_height_at(neighbor) == height + 1 && world.get_height_at(opposite_neighbour) == height - 1 {
                     //place stair
                     block = block_list[*rng.choose_weighted(block_dict.get(&1).unwrap()) as usize].clone();
-                    block.states = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
+                    block.state = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
                     print!("Placing {:?} stair at {:?} facing {:?}\n",block, point, direction);
                     break;
                 }
