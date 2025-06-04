@@ -26,3 +26,13 @@ impl From<BlockID> for Block {
         }
     }
 }
+
+impl From<&BlockID> for Block {
+    fn from(id: &BlockID) -> Self {
+        Block {
+            id: id.clone(),
+            state: None,
+            data: None,
+        }
+    }
+}
