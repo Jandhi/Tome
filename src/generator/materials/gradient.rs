@@ -32,12 +32,16 @@ impl PerlinSettings {
         let y = point.y as f32 * self.base_frequency as f32;
         let z = point.z as f32 * self.base_frequency as f32;
 
-        let mut value = 0.0;
+        let mut value : f32 = 0.0;
         let mut frequency = self.base_frequency;
-        let mut weight = 1.0;
+        let mut weight : f32 = 1.0;
 
         for _ in 0..self.octaves {
-            value += weight * self.perlin.get([x * frequency, y * frequency, z * frequency]);
+            value += weight * self.perlin.get([
+                (x * frequency) as f64,
+                (y * frequency) as f64,
+                (z * frequency) as f64,
+            ]) as f32;
             frequency *= self.frequency_multiplier;
             weight *= self.weight_multiplier;
         }

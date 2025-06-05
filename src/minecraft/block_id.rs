@@ -6,8 +6,6 @@ pub enum BlockID {
 
     #[serde(rename = "minecraft:air")]
     Air,
-    #[serde(rename = "minecraft:stone")]
-    Stone,
 
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,
@@ -412,6 +410,22 @@ pub enum BlockID {
     StrippedWarpedHyphae,
 
     // STONE
+
+    // Stone
+    #[serde(rename = "minecraft:stone")]
+    Stone,
+    #[serde(rename = "minecraft:smooth_stone")]
+    SmoothStone,
+    #[serde(rename = "minecraft:stone_slab")]
+    StoneSlab,
+    #[serde(rename = "minecraft:smooth_stone_slab")]
+    SmoothStoneSlab,
+    #[serde(rename = "minecraft:stone_stairs")]
+    StoneStairs,
+
+    // Misc
+    #[serde(rename = "minecraft:gravel")]
+    Gravel,
 
     // Cobblestone
     #[serde(rename = "minecraft:cobblestone")]
