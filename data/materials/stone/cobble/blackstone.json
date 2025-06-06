@@ -1,0 +1,14 @@
+{
+    "id" : "blackstone",
+    "connections" : {
+        "lighter" : "basalt"
+    },
+    "blocks" : {
+        "block" : "minecraft:blackstone",
+        "stairs": "minecraft:blackstone_stairs",
+        "slab": "minecraft:blackstone_slab",
+        "wall": "minecraft:blackstone_wall",
+        "pressure_plate" : "minecraft:polished_blackstone_pressure_plate",
+        "button" : "minecraft:polished_blackstone_button"
+    }
+}

@@ -1,0 +1,15 @@
+{
+    "id" : "cobblestone",
+    "connections" : {
+        "lighter" : "andesite",
+        "darker" : "deepslate"
+    },
+    "blocks" : {
+        "block" : "minecraft:cobblestone",
+        "stairs" : "minecraft:cobblestone_stairs",
+        "slab" : "minecraft:cobblestone_slab",
+        "wall" : "minecraft:cobblestone_wall",
+        "pressure_plate" : "minecraft:stone_pressure_plate",
+        "button" : "minecraft:stone_button"
+    }
+}

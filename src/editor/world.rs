@@ -115,6 +115,14 @@ impl World {
         Editor::new(self.build_area)
     }
 
+    pub fn origin(&self) -> Point3D {
+        self.build_area.origin
+    }
+
+    pub fn size(&self) -> Point3D {
+        self.build_area.size
+    }
+
     pub fn world_rect_2d(&self) -> Rect2D {
         Rect2D {
             origin: Point2D::new(0, 0),
