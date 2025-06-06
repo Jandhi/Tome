@@ -30,9 +30,9 @@ impl PerlinSettings {
     }
 
     pub fn get(&self, point: Point3D) -> f32 {
-        let x = point.x as f32 * self.base_frequency as f32;
-        let y = point.y as f32 * self.base_frequency as f32;
-        let z = point.z as f32 * self.base_frequency as f32;
+        let x = point.x as f32 * self.base_frequency;
+        let y = point.y as f32 * self.base_frequency;
+        let z = point.z as f32 * self.base_frequency;
 
         let mut value : f32 = 0.0;
         let mut frequency = self.base_frequency;

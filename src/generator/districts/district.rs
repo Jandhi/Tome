@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use log::info;
 
-use crate::{editor::World, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
+use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
 
 use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
@@ -61,15 +61,15 @@ impl AdjacencyAnalyzeable<DistrictID> for District {
     }
 }
 
-pub async fn generate_districts(seed : Seed, world : &mut World) {
+pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Generating districts with seed: {:?}", seed);
 
-    let districts = spawn_districts(seed, world);
+    let districts = spawn_districts(seed, editor.world());
 
     for district in districts.iter() {
         let x = district.data.origin.x as usize;
         let z = district.data.origin.z as usize;
-        world.district_map[x][z] = Some(district.id);
+        editor.world().district_map[x][z] = Some(district.id);
     }
 
     let mut districts : HashMap<DistrictID, District> = districts.into_iter()
@@ -77,15 +77,18 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
         .collect();
 
     info!("Bubbling out districts...");
-    bubble_out(&mut districts, world);
+    bubble_out(&mut districts, editor.world());
     
     info!("Re-centering districts...");
     for _ in 0..NUM_RECENTER {
-        recenter_districts(world, &mut districts);
+        recenter_districts(editor.world(), &mut districts);
     }
 
     info!("Analyzing adjacency of districts...");
-    analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d());
+    {
+        let world = editor.world();
+        analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d());
+    }
     
     info!("Creating superdistricts...");
     // TODO: super districts
@@ -95,7 +98,7 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
         let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
         let mut super_district = SuperDistrict::new(id);
-        super_district.add_district(&district, world);
+        super_district.add_district(&district, editor.world());
         super_districts.insert(super_district.id(), super_district);
     }
 
@@ -103,15 +106,21 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
     let mut district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis> = HashMap::new();
     for district in super_districts.values() {
         info!("Analyzing district {}", district.id().0);
-        district_analysis_data.insert(district.id(), analyze_district(district.data(), world).await);
+        district_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
     }
 
+    {
+        let world = editor.world();
+        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+    }
     info!("Merging down superdistricts...");
-    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
-    merge_down(&mut super_districts, &districts, &mut district_analysis_data, world).await;
-    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+    merge_down(&mut super_districts, &districts, &mut district_analysis_data, editor).await;
+    {
+        let world = editor.world();
+        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+    }
 
-    world.districts = districts;
+    editor.world().districts = districts;
     info!("Districts generated successfully");
 }
 

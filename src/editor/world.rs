@@ -111,8 +111,8 @@ impl World {
         Ok(world)
     }
 
-    pub fn get_editor(&self) -> Editor {
-        Editor::new(self.build_area)
+    pub fn get_editor(self) -> Editor {
+        Editor::new(self.build_area, self)
     }
 
     pub fn origin(&self) -> Point3D {
@@ -164,7 +164,7 @@ impl World {
         self.district_map[point.x as usize][point.y as usize]
     }
 
-    pub fn add_height(&mut self, point : Point2D) -> Point3D {
+    pub fn add_height(&self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
     }
 

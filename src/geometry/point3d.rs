@@ -31,6 +31,12 @@ impl Default for Point3D {
     }
 }
 
+impl From<[i32; 3]> for Point3D {
+    fn from(arr: [i32; 3]) -> Self {
+        Point3D { x: arr[0], y: arr[1], z: arr[2] }
+    }
+}
+
 impl Point3D {
     pub fn new(x: i32, y: i32, z: i32) -> Self {
         Point3D { x, y, z }

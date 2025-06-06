@@ -4,7 +4,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use crate::minecraft::BlockID;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Block {
     pub id : BlockID,
     pub state : Option<HashMap<String, String>>,

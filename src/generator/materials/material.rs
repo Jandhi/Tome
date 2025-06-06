@@ -56,7 +56,7 @@ impl Material {
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form) {
             editor.place_block(&Block{
-                id: block_id.clone(),
+                id: *block_id,
                 state: states,
                 data,
             }, point).await;
@@ -72,7 +72,7 @@ impl Loadable<'_, Material, MaterialId> for Material {
     }
 
     fn path() -> &'static str {
-        &"materials"
+        "materials"
     }
     
     fn post_load(_items : &mut HashMap<MaterialId, Material>) -> anyhow::Result<()> {

@@ -2,14 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use log::info;
 
-use crate::editor::World;
+use crate::editor::{self, Editor, World};
 
 use super::analysis::analyze_district;
 use super::{constants::TARGET_DISTRICT_AMOUNT, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 use super::{District, DistrictID, HasDistrictData};
 
 
-pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, districts : &HashMap<DistrictID, District>, district_analysis_data : &mut HashMap<SuperDistrictID, DistrictAnalysis>, world : &mut World) {
+pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, districts : &HashMap<DistrictID, District>, district_analysis_data : &mut HashMap<SuperDistrictID, DistrictAnalysis>, editor : &mut Editor) {
     let mut district_count = superdistricts.len();
     let mut ignore : HashSet<SuperDistrictID>= HashSet::new();
 
@@ -33,14 +33,14 @@ pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDist
 
             // Remove garbage districts
             if superdistricts.get(&child).expect(&format!("Superdistrict with id {} not found", child.0)).size() < 10 {
-                remove_district(superdistricts, child, world);
+                remove_district(superdistricts, child, editor.world());
                 district_count -= 1;
             }
 
             continue;
         };
 
-        merge(superdistricts, districts, district_analysis_data, parent, child, world).await;
+        merge(superdistricts, districts, district_analysis_data, parent, child, editor).await;
     }
 }
 
@@ -54,11 +54,11 @@ fn remove_district(districts : &mut HashMap<SuperDistrictID, SuperDistrict>, dis
 }
 
 
-async fn merge(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, districts : &HashMap<DistrictID, District>, district_analysis_data : &mut HashMap<SuperDistrictID, DistrictAnalysis>, parent : SuperDistrictID, child : SuperDistrictID, world : &mut World) {
+async fn merge(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, districts : &HashMap<DistrictID, District>, district_analysis_data : &mut HashMap<SuperDistrictID, DistrictAnalysis>, parent : SuperDistrictID, child : SuperDistrictID, editor : &mut Editor) {
     let child = superdistricts.remove(&child).expect(&format!("Superdistrict with id {} not found", child.0));
     let parent = superdistricts.get_mut(&parent).expect(&format!("Superdistrict with id {} not found", parent.0));
-    parent.add_superdistrict(&child, districts, world);
-    let new_analysis = analyze_district(parent.data(), world).await;
+    parent.add_superdistrict(&child, districts, editor.world());
+    let new_analysis = analyze_district(parent.data(), editor).await;
     district_analysis_data.insert(parent.id(), new_analysis);
 }
 

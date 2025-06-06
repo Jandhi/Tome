@@ -18,8 +18,8 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         
-        let mut editor = editor::Editor::new(build_area);
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
 
         let block = Block {
             id: BlockID::Stone,
@@ -29,7 +29,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let point = world.add_height(Point2D { x, y: z });
+                let point = editor.world().add_height(Point2D { x, y: z });
                 info!("Placing block at: {:?}", point);
                 editor.place_block( &block, point).await;
             }

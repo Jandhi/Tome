@@ -3,7 +3,7 @@
 mod tests {
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::MaterialPlacer, Material, MaterialId}, http_mod::GDMCHTTPProvider, minecraft::BlockForm, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::MaterialPlacer, Material, MaterialId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockForm, util::init_logger};
 
     #[test]
     fn deserialize_material() {
@@ -46,11 +46,11 @@ mod tests {
         init_logger();
 
         let provider = GDMCHTTPProvider::new();
-        let mut world = World::new(&provider).await.unwrap();
+        let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
-        let world_rect = world.world_rect_2d();
+        let world_rect = editor.world().world_rect_2d();
         let placer : MaterialPlacer = MaterialPlacer::new(
             material.clone(),
             &materials,
@@ -58,8 +58,9 @@ mod tests {
             point.x as f32 / world_rect.size.x as f32
         });
 
-        for point in world.world_rect_2d().iter() {
-            placer.place_block(&mut editor, world.add_height(point), BlockForm::Block).await;
+        for point in editor.world().world_rect_2d().clone().iter() {
+            let point = editor.world().add_height(point);
+            placer.place_block(&mut editor, point, BlockForm::Block).await;
         }
     }
 
@@ -68,7 +69,7 @@ mod tests {
         init_logger();
 
         let provider = GDMCHTTPProvider::new();
-        let mut world = World::new(&provider).await.unwrap();
+        let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
@@ -81,12 +82,16 @@ mod tests {
             perlin.get(point) as f32 + 0.5
         });
 
+
+        let points : Vec<Point3D> = editor.world()
+            .world_rect_2d()
+            .clone()
+            .iter()
+            .map(|point| editor.world().add_height(point))
+            .collect();
         placer.place_blocks(
             &mut editor, 
-            world.world_rect_2d()
-                .iter()
-                .map(|point| world.add_height(point))
-                .into_iter(), 
+            points.into_iter(),
             BlockForm::Block).await;
     }
 
@@ -95,13 +100,13 @@ mod tests {
         init_logger();
 
         let provider = GDMCHTTPProvider::new();
-        let mut world = World::new(&provider).await.unwrap();
+        let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
 
         let gradient = Gradient::new(PerlinSettings::small(25.into()), 1.0, 0.05)
-            .with_x(0, world.build_area.width());
+            .with_x(0, editor.world().build_area.width());
 
         let placer: MaterialPlacer = MaterialPlacer::new(
             material.clone(),
@@ -111,12 +116,15 @@ mod tests {
             gradient.get_value(point)
         });
 
+        let points : Vec<Point3D> = editor.world()
+            .world_rect_2d()
+            .clone()
+            .iter()
+            .map(|point| editor.world().add_height(point))
+            .collect();
         placer.place_blocks(
             &mut editor, 
-            world.world_rect_2d()
-                .iter()
-                .map(|point| world.add_height(point))
-                .into_iter(), 
+            points.into_iter(),
             BlockForm::Block).await;
     }
     
