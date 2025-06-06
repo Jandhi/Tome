@@ -181,4 +181,36 @@ pub enum Biome {
     DeepDark,
     #[serde(rename = "minecraft:mangrove_swamp")]
     MangroveSwamp,
+
+    // 1.18+ and 1.19+ biomes (Caves & Cliffs, Wild Update, Trails & Tales)
+    #[serde(rename = "minecraft:old_growth_birch_forest")]
+    OldGrowthBirchForest,
+    #[serde(rename = "minecraft:old_growth_pine_taiga")]
+    OldGrowthPineTaiga,
+    #[serde(rename = "minecraft:old_growth_spruce_taiga")]
+    OldGrowthSpruceTaiga,
+    #[serde(rename = "minecraft:sparse_jungle")]
+    SparseJungle,
+    #[serde(rename = "minecraft:stony_shore")]
+    StonyShore,
+    #[serde(rename = "minecraft:windswept_hills")]
+    WindsweptHills,
+    #[serde(rename = "minecraft:windswept_gravelly_hills")]
+    WindsweptGravellyHills,
+    #[serde(rename = "minecraft:windswept_forest")]
+    WindsweptForest,
+    #[serde(rename = "minecraft:windswept_savanna")]
+    WindsweptSavanna,
+    #[serde(rename = "minecraft:snowy_plains")]
+    SnowyPlains,
+    #[serde(rename = "minecraft:snowy_forest")]
+    SnowyForest,
+    #[serde(rename = "minecraft:wooded_badlands")]
+    WoodedBadlands,
+
+    // 1.20 (Trails & Tales)
+    #[serde(rename = "minecraft:cherry_grove")]
+    CherryGroveNew, // To avoid duplicate with old name
+
+    // Add more as new biomes are introduced
 }

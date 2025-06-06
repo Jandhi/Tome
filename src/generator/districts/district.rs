@@ -85,7 +85,7 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
     }
 
     info!("Analyzing adjacency of districts...");
-    analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d());
+    analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d(), false);
     
     info!("Creating superdistricts...");
     // TODO: super districts
@@ -107,13 +107,15 @@ pub async fn generate_districts(seed : Seed, world : &mut World) {
     }
 
     info!("Merging down superdistricts...");
-    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), true);
     merge_down(&mut super_districts, &districts, &mut district_analysis_data, world).await;
-    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+    analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), false);
 
     world.districts = districts;
     world.super_districts = super_districts;
     info!("Districts generated successfully");
+
+    //prune urban chokepoints??
 }
 
 fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) {

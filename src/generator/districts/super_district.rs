@@ -42,6 +42,7 @@ impl SuperDistrict {
             world.super_district_map[point.x as usize][point.z as usize] = Some(self.id);
         }
 
+        self.data.is_border = district.data.is_border();
         self.data.sum += district.sum();
     }
 
