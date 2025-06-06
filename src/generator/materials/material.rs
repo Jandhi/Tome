@@ -32,7 +32,7 @@ impl Material {
     pub fn more(&self, feature: MaterialFeature) -> Option<&MaterialId> {
         self.connections.as_ref().and_then(|connections| match feature {
             MaterialFeature::Shade => connections.lighter.as_ref(),
-            MaterialFeature::Wear => connections.less_worn.as_ref(),
+            MaterialFeature::Wear => connections.more_worn.as_ref(),
             MaterialFeature::Moisture => connections.wetter.as_ref(),
             MaterialFeature::Decoration => connections.more_decorated.as_ref(),
         })
@@ -41,7 +41,7 @@ impl Material {
     pub fn less(&self, feature: MaterialFeature) -> Option<&MaterialId> {
         self.connections.as_ref().and_then(|connections| match feature {
             MaterialFeature::Shade => connections.darker.as_ref(),
-            MaterialFeature::Wear => connections.more_worn.as_ref(),
+            MaterialFeature::Wear => connections.less_worn.as_ref(),
             MaterialFeature::Moisture => connections.drier.as_ref(),
             MaterialFeature::Decoration => connections.less_decorated.as_ref(),
         })
@@ -83,11 +83,11 @@ impl Loadable<'_, Material, MaterialId> for Material {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct MaterialConnections {
     // Shade
-    lighter: Option<MaterialId>,
+    lighter: Option<MaterialId>, // more
     darker: Option<MaterialId>,
     // Wear
-    less_worn: Option<MaterialId>,
     more_worn: Option<MaterialId>,
+    less_worn: Option<MaterialId>,
     // Moisture
     wetter: Option<MaterialId>,
     drier: Option<MaterialId>,

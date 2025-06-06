@@ -1,3 +1,5 @@
+use lerp::Lerp;
+use log::info;
 use noise::{NoiseFn, Perlin};
 
 use crate::{generator::materials::feature::MaterialParameters, geometry::{Point3D, Rect3D}, noise::Seed};
@@ -101,17 +103,19 @@ impl GradientAxis {
 
 pub struct Gradient {
     perlin : PerlinSettings,
-    gradient_strength : f32,
+    gradient_strength : f32, // How much the gradient effects the material, from 0.0 to 1.0
+    noise_strength : f32, // From 0.0 to 1.0, the proportion of noise in the gradient
     x : Option<GradientAxis>,
     y : Option<GradientAxis>,
     z : Option<GradientAxis>,
 }
 
 impl Gradient {
-    pub fn new(perlin_settings : PerlinSettings, gradient_strength : f32) -> Self {
+    pub fn new(perlin_settings: PerlinSettings, gradient_strength: f32, noise_strength: f32) -> Self {
         Gradient {
             perlin: perlin_settings,
             gradient_strength,
+            noise_strength,
             x: None,
             y: None,
             z: None,
@@ -132,17 +136,28 @@ impl Gradient {
         self.z = Some(GradientAxis::new(min, max));
         self
     }
-}
 
-impl Into<Box<dyn Fn (Point3D) -> MaterialParameters>> for Gradient {
-    fn into(self) -> Box<dyn Fn (Point3D) -> MaterialParameters> {
-        Box::new(move |point: Point3D| {
-            MaterialParameters {
-                shade: 0.0,
-                wear: 0.0,
-                moisture: 0.0,
-                decoration: 0.0, // Decoration can be set to a constant or calculated differently
-            }
-        })
+    pub fn get_value(&self, point : Point3D) -> f32 {
+        let mut value = 0.0;
+
+        if let Some(axis) = &self.x {
+            value += axis.get_value(point.x as f32);
+        }
+        if let Some(axis) = &self.y {
+            value += axis.get_value(point.y as f32);
+        }
+        if let Some(axis) = &self.z {
+            value += axis.get_value(point.z as f32);
+        }
+
+        // Normalize the value to be between 0.0 and 1.0
+        value /= (match self.x { Some(_) => 1, None => 0 } + match self.y { Some(_) => 1, None => 0 } + match self.z { Some(_) => 1, None => 0 }) as f32;
+
+        // Apply the gradient strength
+        value = value.lerp(self.perlin.get(point), self.noise_strength);
+
+        info!("Gradient value for point {:?}: {}", point, value);
+
+        value.clamp(0.0, 1.0) * self.gradient_strength + 0.5 * (1.0 - self.gradient_strength)
     }
 }

@@ -3,7 +3,7 @@
 mod tests {
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::materials::{feature::MaterialParameters, gradient::{Gradient, PerlinSettings}, placer::MaterialPlacer, Material, MaterialId}, http_mod::GDMCHTTPProvider, minecraft::BlockForm, noise::Seed, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::MaterialPlacer, Material, MaterialId}, http_mod::GDMCHTTPProvider, minecraft::BlockForm, util::init_logger};
 
     #[test]
     fn deserialize_material() {
@@ -53,14 +53,10 @@ mod tests {
         let world_rect = world.world_rect_2d();
         let placer : MaterialPlacer = MaterialPlacer::new(
             material.clone(),
-            Box::new(move |point| MaterialParameters {
-                shade: point.x as f32 / world_rect.size.x as f32,
-                wear: 0.0,
-                moisture: 0.0,
-                decoration: 0.0,
-            }),
             &materials,
-        );
+        ).with_shade_function(move |point| {
+            point.x as f32 / world_rect.size.x as f32
+        });
 
         for point in world.world_rect_2d().iter() {
             placer.place_block(&mut editor, world.add_height(point), BlockForm::Block).await;
@@ -80,17 +76,10 @@ mod tests {
         let perlin = PerlinSettings::large(42.into());
         let placer: MaterialPlacer = MaterialPlacer::new(
             material.clone(),
-            Box::new(move |point| {
-                let shade = perlin.get(point) as f32 + 0.5;
-                MaterialParameters {
-                    shade,
-                    wear: 0.0,
-                    moisture: 0.0,
-                    decoration: 0.0,
-                }
-            }),
             &materials,
-        );
+        ).with_shade_function(move |point| {
+            perlin.get(point) as f32 + 0.5
+        });
 
         placer.place_blocks(
             &mut editor, 
@@ -101,5 +90,34 @@ mod tests {
             BlockForm::Block).await;
     }
 
+    #[tokio::test]
+    async fn gradient() {
+        init_logger();
+
+        let provider = GDMCHTTPProvider::new();
+        let mut world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+        let materials = Material::load().expect("Failed to load materials");
+        let material = MaterialId::new("cobblestone".to_string());
+
+        let gradient = Gradient::new(PerlinSettings::small(25.into()), 1.0, 0.05)
+            .with_x(0, world.build_area.width());
+
+        let placer: MaterialPlacer = MaterialPlacer::new(
+            material.clone(),
+            &materials,
+        ).with_shade_function(move |point| {
+            info!("Point: {:?}", gradient.get_value(point));
+            gradient.get_value(point)
+        });
+
+        placer.place_blocks(
+            &mut editor, 
+            world.world_rect_2d()
+                .iter()
+                .map(|point| world.add_height(point))
+                .into_iter(), 
+            BlockForm::Block).await;
+    }
     
 }
