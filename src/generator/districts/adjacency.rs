@@ -9,7 +9,7 @@ pub trait AdjacencyAnalyzeable<TID> {
 }
 
 // We do a sweep of the world in the x+ and z+ directions, checking for district adjacency
-pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyzeable>, height_map : &Vec<Vec<i32>>, map : &Vec<Vec<Option<TID>>>, world_rect : &Rect2D) 
+pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyzeable>, height_map : &Vec<Vec<i32>>, map : &Vec<Vec<Option<TID>>>, world_rect : &Rect2D, ignore_edge_addition : bool) 
     where 
         TID: Copy + std::hash::Hash + Eq,
         TAnalyzeable: AdjacencyAnalyzeable<TID>,
@@ -56,7 +56,7 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
             objects.get_mut(&neighbour_district_id).expect("Could not find region with id").increment_adjacency(Some(id));
         }
 
-        if is_edge {
+        if is_edge && !ignore_edge_addition {
             let item = objects.get_mut(&id).expect("Could not find region with id");
             item.add_edge(Point3D::new(point.x, height, point.y));
         }
