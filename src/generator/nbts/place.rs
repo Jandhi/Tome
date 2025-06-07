@@ -4,9 +4,9 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{data::to_snbt, editor::Editor, generator::{materials::{Material, MaterialId}, nbts::structure::Structure}, geometry::Point3D, minecraft::Block};
+use crate::{data::to_snbt, editor::Editor, generator::{materials::{Material, MaterialId}, nbts::{structure::Structure, transform::{self, Transform}}}, geometry::Point3D, minecraft::Block};
 
-pub async fn place_nbt(path : &Path, point : Point3D, editor : &mut Editor,  materials : &HashMap<MaterialId, Material>) -> anyhow::Result<()> {
+pub async fn place_nbt(path : &Path, transform : Transform, editor : &mut Editor,  materials : &HashMap<MaterialId, Material>) -> anyhow::Result<()> {
     let nbt_data = std::fs::read(path)?;
     
     let structure : Result<Structure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
@@ -30,7 +30,7 @@ pub async fn place_nbt(path : &Path, point : Point3D, editor : &mut Editor,  mat
             id: palette_data.name,
             state: palette_data.properties.clone(),
             data, // Now contains the SNBT string if data exists
-        }, Point3D::from(block.pos) + point).await;
+        }, transform.apply(Point3D::from(block.pos))).await;
     }
 
     Ok(())

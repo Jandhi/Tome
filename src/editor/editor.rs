@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
-use log::{error, warn};
+use anyhow::Ok;
+use log::{error, info, warn};
 
-use crate::{editor::World, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}};
 
 #[derive(Debug)]
 pub struct Editor {
@@ -12,19 +13,29 @@ pub struct Editor {
     buffer_size : usize,
     block_cache : HashMap<Point3D, Block>,
     world : World,
+    materials : HashMap<MaterialId, Material>
 }
 
 impl Editor {
     // Note: You will need to update the new() function to accept a &'a mut World parameter
     pub fn new(build_area: Rect3D, world: World) -> Self {
-        Self {
+        let mut editor = Self {
             build_area,
             provider: GDMCHTTPProvider::new(),
             block_buffer: Vec::new(),
             buffer_size: 32,
             block_cache: HashMap::new(),
             world,
-        }
+            materials: HashMap::new(),
+        };
+        editor.load_data().expect("Failed to load materials");
+        editor
+    }
+
+    fn load_data(&mut self) -> anyhow::Result<()> {
+        info!("Loading editor data");
+        self.materials = Material::load()?;
+        Ok(())
     }
 
     pub async fn place_block(&mut self,  block : &Block, point : Point3D) {

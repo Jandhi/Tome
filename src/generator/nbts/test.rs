@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{materials::Material, nbts::place::place_nbt}, geometry::Point2D, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{materials::Material, nbts::place::place_nbt}, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]
@@ -25,7 +25,7 @@ mod tests {
         let point = editor.world().add_height(midpoint);
 
         // Place the NBT structure in the world
-        place_nbt(Path::new(&path), point, &mut editor, &materials)
+        place_nbt(Path::new(&path), point.into(), &mut editor, &materials)
             .await
             .expect("Failed to place NBT structure");
 
