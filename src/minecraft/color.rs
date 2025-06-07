@@ -1,6 +1,10 @@
 use serde_derive::{Serialize, Deserialize};
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+use crate::minecraft::BlockID;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
 pub enum Color {
     #[serde(rename = "black")]
     Black,
@@ -57,4 +61,34 @@ impl Into<String> for Color {
             Color::White => "white".to_string(),
         }
     }
+}
+
+fn color_block(block_id : BlockID, color : Color) -> BlockID {
+    let block_id_str: String = serde_json::to_string(&block_id).unwrap();
+
+    let swappable_strings = vec![
+        "wool",
+        "carpet",
+        "stained_glass",
+        "terracotta",
+        "concrete",
+        "shulker_box",
+        "bed",
+        "candle",
+        "banner",
+    ];
+
+    if !swappable_strings.iter().any(|s| block_id_str.contains(s)) {
+        return block_id; // No swappable strings found, return original block ID
+    }
+
+    for color in Color::iter() {
+        let color_in: String = serde_json::to_string(&color).unwrap();
+        let color_out : String = color.into();
+        if block_id_str.contains(&color_in) {
+            return serde_json::from_str(&block_id_str.replace(&color_in, &color_out)).unwrap();
+        }
+    }
+
+    block_id // If no color match found, return original block ID
 }

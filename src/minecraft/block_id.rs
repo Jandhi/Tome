@@ -771,6 +771,132 @@ pub enum BlockID {
     // === (Add more sections and blocks as needed for full coverage) ===
     #[serde(rename = "minecraft:player_head")]
     PlayerHead,
+
+    // NETHER BRICKS
+    #[serde(rename = "minecraft:nether_bricks")]
+    NetherBricks,
+    #[serde(rename = "minecraft:nether_brick_slab")]
+    NetherBrickSlab,
+    #[serde(rename = "minecraft:nether_brick_stairs")]
+    NetherBrickStairs,
+    #[serde(rename = "minecraft:nether_brick_wall")]
+    NetherBrickWall,
+    #[serde(rename = "minecraft:chiseled_nether_bricks")]
+    ChiseledNetherBricks,
+    #[serde(rename = "minecraft:cracked_nether_bricks")]
+    CrackedNetherBricks,
+
+    #[serde(rename = "minecraft:red_nether_bricks")]
+    RedNetherBricks,
+    #[serde(rename = "minecraft:red_nether_brick_slab")]
+    RedNetherBrickSlab,
+    #[serde(rename = "minecraft:red_nether_brick_stairs")]
+    RedNetherBrickStairs,
+    #[serde(rename = "minecraft:red_nether_brick_wall")]
+    RedNetherBrickWall,
+
+    // CONCRETE
+    #[serde(rename = "minecraft:white_concrete")]
+    WhiteConcrete,
+    #[serde(rename = "minecraft:orange_concrete")]
+    OrangeConcrete,
+    #[serde(rename = "minecraft:magenta_concrete")]
+    MagentaConcrete,
+    #[serde(rename = "minecraft:light_blue_concrete")]
+    LightBlueConcrete,
+    #[serde(rename = "minecraft:yellow_concrete")]
+    YellowConcrete,
+    #[serde(rename = "minecraft:lime_concrete")]
+    LimeConcrete,
+    #[serde(rename = "minecraft:pink_concrete")]
+    PinkConcrete,
+    #[serde(rename = "minecraft:gray_concrete")]
+    GrayConcrete,
+    #[serde(rename = "minecraft:light_gray_concrete")]
+    LightGrayConcrete,
+    #[serde(rename = "minecraft:cyan_concrete")]
+    CyanConcrete,
+    #[serde(rename = "minecraft:purple_concrete")]
+    PurpleConcrete,
+    #[serde(rename = "minecraft:blue_concrete")]
+    BlueConcrete,
+    #[serde(rename = "minecraft:brown_concrete")]
+    BrownConcrete,
+    #[serde(rename = "minecraft:green_concrete")]
+    GreenConcrete,
+    #[serde(rename = "minecraft:red_concrete")]
+    RedConcrete,
+    #[serde(rename = "minecraft:black_concrete")]
+    BlackConcrete,
+
+    #[serde(rename = "minecraft:white_concrete_powder")]
+    WhiteConcretePowder,
+    #[serde(rename = "minecraft:orange_concrete_powder")]
+    OrangeConcretePowder,
+    #[serde(rename = "minecraft:magenta_concrete_powder")]
+    MagentaConcretePowder,
+    #[serde(rename = "minecraft:light_blue_concrete_powder")]
+    LightBlueConcretePowder,
+    #[serde(rename = "minecraft:yellow_concrete_powder")]
+    YellowConcretePowder,
+    #[serde(rename = "minecraft:lime_concrete_powder")]
+    LimeConcretePowder,
+    #[serde(rename = "minecraft:pink_concrete_powder")]
+    PinkConcretePowder,
+    #[serde(rename = "minecraft:gray_concrete_powder")]
+    GrayConcretePowder,
+    #[serde(rename = "minecraft:light_gray_concrete_powder")]
+    LightGrayConcretePowder,
+    #[serde(rename = "minecraft:cyan_concrete_powder")]
+    CyanConcretePowder,
+    #[serde(rename = "minecraft:purple_concrete_powder")]
+    PurpleConcretePowder,
+    #[serde(rename = "minecraft:blue_concrete_powder")]
+    BlueConcretePowder,
+    #[serde(rename = "minecraft:brown_concrete_powder")]
+    BrownConcretePowder,
+    #[serde(rename = "minecraft:green_concrete_powder")]
+    GreenConcretePowder,
+    #[serde(rename = "minecraft:red_concrete_powder")]
+    RedConcretePowder,
+    #[serde(rename = "minecraft:black_concrete_powder")]
+    BlackConcretePowder,
+
+    // TERRACOTTA
+    #[serde(rename = "minecraft:terracotta")]
+    Terracotta,
+    #[serde(rename = "minecraft:white_terracotta")]
+    WhiteTerracotta,
+    #[serde(rename = "minecraft:orange_terracotta")]
+    OrangeTerracotta,
+    #[serde(rename = "minecraft:magenta_terracotta")]
+    MagentaTerracotta,
+    #[serde(rename = "minecraft:light_blue_terracotta")]
+    LightBlueTerracotta,
+    #[serde(rename = "minecraft:yellow_terracotta")]
+    YellowTerracotta,
+    #[serde(rename = "minecraft:lime_terracotta")]
+    LimeTerracotta,
+    #[serde(rename = "minecraft:pink_terracotta")]
+    PinkTerracotta,
+    #[serde(rename = "minecraft:gray_terracotta")]
+    GrayTerracotta,
+    #[serde(rename = "minecraft:light_gray_terracotta")]
+    LightGrayTerracotta,
+    #[serde(rename = "minecraft:cyan_terracotta")]
+    CyanTerracotta,
+    #[serde(rename = "minecraft:purple_terracotta")]
+    PurpleTerracotta,
+    #[serde(rename = "minecraft:blue_terracotta")]
+    BlueTerracotta,
+    #[serde(rename = "minecraft:brown_terracotta")]
+    BrownTerracotta,
+    #[serde(rename = "minecraft:green_terracotta")]
+    GreenTerracotta,
+    #[serde(rename = "minecraft:red_terracotta")]
+    RedTerracotta,
+    #[serde(rename = "minecraft:black_terracotta")]
+    BlackTerracotta,
 }
 
 impl BlockID {
