@@ -25,6 +25,8 @@ pub enum BlockID {
     RootedDirt,
     #[serde(rename = "minecraft:mud")]
     Mud,
+    #[serde(rename = "minecraft:muddy_mangrove_roots")]
+    MuddyMangroveRoots,
     #[serde(rename = "minecraft:mycelium")]
     Mycelium,
     #[serde(rename = "minecraft:grass")]
@@ -97,6 +99,8 @@ pub enum BlockID {
     PolishedTuffStairs,
     #[serde(rename = "minecraft:polished_tuff_wall")]
     PolishedTuffWall,
+    #[serde(rename = "minecraft:netherrack")]
+    Netherrack,
 
     // === STONE & VARIANTS ===
     #[serde(rename = "minecraft:stone")]
@@ -897,6 +901,42 @@ pub enum BlockID {
     RedTerracotta,
     #[serde(rename = "minecraft:black_terracotta")]
     BlackTerracotta,
+
+    // MUD BRICKs
+    #[serde(rename = "minecraft:packed_mud")]
+    PackedMud,
+    #[serde(rename = "minecraft:mud_bricks")]
+    MudBricks,
+    #[serde(rename = "minecraft:mud_brick_slab")]
+    MudBrickSlab,
+    #[serde(rename = "minecraft:mud_brick_stairs")]
+    MudBrickStairs,
+    #[serde(rename = "minecraft:mud_brick_wall")]
+    MudBrickWall,
+
+    // PRISMARINE
+    #[serde(rename = "minecraft:prismarine")]
+    Prismarine,
+    #[serde(rename = "minecraft:prismarine_bricks")]
+    PrismarineBricks,
+    #[serde(rename = "minecraft:dark_prismarine")]
+    DarkPrismarine,
+    #[serde(rename = "minecraft:prismarine_slab")]
+    PrismarineSlab,
+    #[serde(rename = "minecraft:prismarine_brick_slab")]
+    PrismarineBrickSlab,
+    #[serde(rename = "minecraft:dark_prismarine_slab")]
+    DarkPrismarineSlab,
+    #[serde(rename = "minecraft:prismarine_stairs")]
+    PrismarineStairs,
+    #[serde(rename = "minecraft:prismarine_brick_stairs")]
+    PrismarineBrickStairs,
+    #[serde(rename = "minecraft:dark_prismarine_stairs")]
+    DarkPrismarineStairs,
+    #[serde(rename = "minecraft:prismarine_wall")]
+    PrismarineWall,
+
+    
 }
 
 impl BlockID {
