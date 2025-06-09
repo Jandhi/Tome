@@ -27,7 +27,7 @@ impl<TID> DistrictData<TID> {
             points_2d: HashSet::new(),
             edges: HashSet::new(),
             sum: Point3D::default(),
-            district_type: DistrictType::Rural,
+            district_type: DistrictType::Unknown,
             district_adjacency: HashMap::new(),
             adjacencies_count: 0,
         }
@@ -41,7 +41,7 @@ impl<TID> DistrictData<TID> {
             points_2d: HashSet::new(),
             edges: HashSet::new(),
             sum: origin,
-            district_type: DistrictType::Rural,
+            district_type: DistrictType::Unknown,
             district_adjacency: HashMap::new(),
             adjacencies_count: 0,
         }

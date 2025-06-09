@@ -19,6 +19,16 @@ mod tests {
         }
     }
 
+    fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
+        use BlockID::*;
+        match district_type {
+            district::DistrictType::Urban => Block { id: BlueWool, data: None, state: None },
+            district::DistrictType::Rural => Block { id: GreenWool, data: None, state: None },
+            district::DistrictType::OffLimits => Block { id: RedWool, data: None, state: None },
+            _ => Block { id: Bedrock, data: None, state: None }, // Default case for unknown types
+        }
+    }
+
     #[tokio::test]
     async fn district_test() {
         init_logger();
@@ -128,6 +138,120 @@ mod tests {
                     editor.place_block(&block, Point3D::new(x, height, z)).await;
                 }
 
+            }
+        }
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn superdistrict_classification() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        println!("Build area: {:?}", build_area);
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        
+        let mut editor = Editor::new(build_area);
+        let mut world = World::new(&provider).await.expect("Failed to create world");
+
+        let _districts = generate_districts(seed, &mut world).await;
+        let glass = Block {
+            id: BlockID::Glass,
+            data: None,
+            state: None,
+        };
+        let bedrock  = Block {
+            id: BlockID::Bedrock,
+            data: None,
+            state: None,
+        };
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let super_district_id = world.super_district_map[x as usize][z as usize];
+                let district_id = world.district_map[x as usize][z as usize];
+
+                let Some(district_id) = district_id else {
+                    continue;
+                };
+                let Some(super_district_id) = super_district_id else {
+                    continue;
+                };
+
+                let block = get_block_for_district_type(world.super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let height = height_map[x as usize][z as usize] - build_area.origin.y;
+                let point = Point3D::new(x, height, z);
+
+                let super_district = world.super_districts.get(&super_district_id).expect("Failed to get super district");
+                let district = world.districts.get(&district_id).expect("Failed to get district");
+                if super_district.data.edges.contains(&point) {
+                    editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
+                }
+                else if district.data.edges.contains(&point) {
+                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                    editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
+                }
+                else {
+                    editor.place_block(&block, Point3D::new(x, height, z)).await;
+                }
+
+            }
+        }
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn district_classification() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        println!("Build area: {:?}", build_area);
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        
+        let mut editor = Editor::new(build_area);
+        let mut world = World::new(&provider).await.expect("Failed to create world");
+
+        let _districts = generate_districts(seed, &mut world).await;
+        let glass = Block {
+            id: BlockID::Glass,
+            data: None,
+            state: None,
+        };
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let district_id = world.district_map[x as usize][z as usize];
+
+                let Some(district_id) = district_id else {
+                    continue;
+                };
+                
+
+                let block = get_block_for_district_type(world.districts.get(&district_id).expect("Failed to get district").data.district_type);
+                let height = height_map[x as usize][z as usize] - build_area.origin.y;
+                let point = Point3D::new(x, height, z);
+                //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
+                if let Some(district) = world.districts.get(&district_id) {
+                    
+                    if district.data.edges.contains(&point) {
+                        editor.place_block(&glass, Point3D::new(x, height , z)).await;
+                        editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
+                    } else {
+                        editor.place_block(&block, Point3D::new(x, height, z)).await;
+                    }
+                }
             }
         }
 

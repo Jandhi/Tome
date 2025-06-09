@@ -6,12 +6,14 @@ mod analysis;
 mod merge;
 mod constants;
 mod data;
+mod classification;
 
 mod district_painter;
 
 pub use district::District;
 pub use district::DistrictID;
 pub use analysis::DistrictAnalysis;
+pub use district::DistrictType;
 pub use district::generate_districts;
 pub use super_district::SuperDistrict;
 pub use super_district::SuperDistrictID;

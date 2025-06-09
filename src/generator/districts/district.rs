@@ -4,13 +4,14 @@ use log::info;
 
 use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
 
-use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, DistrictAnalysis, SuperDistrict, SuperDistrictID};
+use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, classification::{classify_districts, classify_superdistricts}, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DistrictID(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DistrictType {
+    Unknown, // placeholder for unclassified districts
     Urban,
     Rural,
     OffLimits,
@@ -45,6 +46,11 @@ impl District {
 
     fn set_to_border_district(&mut self) {
         self.data.is_border = true;
+    }
+
+    pub fn get_adjacency_ratio(&mut self, id: DistrictID) -> f32 {
+        let count = self.data.district_adjacency.get(&id).cloned().unwrap_or(0);
+        count as f32 / self.data.adjacencies_count as f32   
     }
 }
 
@@ -94,6 +100,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     // TODO: super districts
     let mut super_district_id_counter = 0;
     let mut super_districts : HashMap<SuperDistrictID, SuperDistrict> = HashMap::new();
+    let mut district_analysis_data : HashMap<DistrictID, DistrictAnalysis> = HashMap::new();
     for district in districts.values_mut() {
         let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
@@ -109,6 +116,9 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
         district_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
     }
 
+    //district classification
+    classify_districts(&mut districts, &district_analysis_data).await;
+
     {
         let world = editor.world();
         analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), true);
@@ -122,6 +132,8 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
 
     editor.world().districts = districts;
     editor.world().super_districts = super_districts;
+
+    classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data).await;
     info!("Districts generated successfully");
 
     //prune urban chokepoints??

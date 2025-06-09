@@ -5,7 +5,7 @@ use log::{info, warn};
 use crate::editor::{self, Editor, World};
 
 use super::analysis::analyze_district;
-use super::{constants::TARGET_DISTRICT_AMOUNT, DistrictAnalysis, SuperDistrict, SuperDistrictID};
+use super::{constants::{TARGET_DISTRICT_AMOUNT, ADJACENCY_WEIGHT}, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 use super::{District, DistrictID, HasDistrictData};
 
 
@@ -25,12 +25,12 @@ pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDist
         };
 
         let neighbours : Vec<SuperDistrictID> = superdistricts.get(&child).expect(&format!("Superdistrict with id {} not found", child.0)).district_adjacency().keys().cloned().collect();
-        println!("options for child {} are {:?}", child.0, neighbours);
+        info!("options for child {} are {:?}", child.0, neighbours);
         let parent = get_best_merge_candidate(superdistricts, district_analysis_data, child, neighbours);
         
         let Some(parent) = parent else {
             ignore.insert(child);
-            println!("No suitable parent found for child {}, ignoring it.", child.0);
+            info!("No suitable parent found for child {}, ignoring it.", child.0);
 
             // Remove garbage districts
             if superdistricts.get(&child).expect(&format!("Superdistrict with id {} not found", child.0)).size() < 10 {
@@ -78,14 +78,14 @@ fn get_best_merge_candidate(superdistricts : &HashMap<SuperDistrictID, SuperDist
     options.iter()
         // Only merge border districts with other border districts
         .filter(|other| {
-            println!("Target district is {} and border is {}", target.0, superdistricts.get(&target).expect("Could not find district with id").is_border());
-            println!("other district in superdistrict {}", superdistricts.contains_key(other));
+            info!("Target district is {} and border is {}", target.0, superdistricts.get(&target).expect("Could not find district with id").is_border());
+            info!("other district in superdistrict {}", superdistricts.contains_key(other));
             superdistricts.contains_key(other) && superdistricts.get(other).expect("Could not find district with id").is_border()
                 == superdistricts.get(&target).expect("Could not find district with id").is_border()
         })
         .map(|other| {
             let score = get_candidate_score(superdistricts,  district_analysis_data, target, *other, true);
-            println!("Candidate {} has score {}", other.0, score);
+            info!("Candidate {} has score {}", other.0, score);
             (*other, score)
         })
         // Our best candidate has to be 0.33 at minimum
@@ -94,12 +94,11 @@ fn get_best_merge_candidate(superdistricts : &HashMap<SuperDistrictID, SuperDist
         })
         .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
         .map(|(other, _score)| 
-        {println!("Best candidate is {}", other.0); 
+        {info!("Best candidate is {}", other.0); 
         other})
 }
 
-const ADJACENCY_WEIGHT : f32 = 3.0;
-fn get_candidate_score(districts : &HashMap<SuperDistrictID, SuperDistrict>, district_analysis_data : &HashMap<SuperDistrictID, DistrictAnalysis>, target : SuperDistrictID, candidate : SuperDistrictID, use_adjacency : bool) -> f32 {
+pub fn get_candidate_score(districts : &HashMap<SuperDistrictID, SuperDistrict>, district_analysis_data : &HashMap<SuperDistrictID, DistrictAnalysis>, target : SuperDistrictID, candidate : SuperDistrictID, use_adjacency : bool) -> f32 {
     let target_analysis = district_analysis_data.get(&target).expect("Could not find district analysis data for target");
     let candidate_analysis = district_analysis_data.get(&candidate).expect("Could not find district analysis data for candidate");
     let target = districts.get(&target).expect("Could not find district with id");
@@ -130,4 +129,27 @@ fn get_candidate_score(districts : &HashMap<SuperDistrictID, SuperDistrict>, dis
         + forest_score
         + gradient_score
         + roughness_score) / (5.0 + if use_adjacency { ADJACENCY_WEIGHT } else { 0.0 })
+}
+
+/// Calculates the similarity score between two districts based on their analysis data, same as above but for districts instead of super district and adjacency removed
+pub fn district_similarity_score(district_analysis_data : &HashMap<DistrictID, DistrictAnalysis>, target : DistrictID, candidate : DistrictID) -> f32 {
+    let target_analysis = district_analysis_data.get(&target).expect("Could not find district analysis data for target");
+    let candidate_analysis = district_analysis_data.get(&candidate).expect("Could not find district analysis data for candidate");
+
+    let biome_score : f32 = 1.0 - target_analysis.biome_count().iter()
+        .map(|(biome, _)| {
+            (target_analysis.biome_percentage(biome) - candidate_analysis.biome_percentage(biome)).abs()
+        })
+        .sum::<f32>() / target_analysis.biome_count().len() as f32;
+    
+    let water_score = 1.0 - (target_analysis.water_percentage() - candidate_analysis.water_percentage()).abs();
+    let forest_score = 1.0 - (target_analysis.forested_percentage() - candidate_analysis.forested_percentage()).abs();
+    let gradient_score = 1.0 - (target_analysis.gradient() - candidate_analysis.gradient()).abs();
+    let roughness_score = 1.0 - (target_analysis.roughness() - candidate_analysis.roughness()).abs();
+
+    return ( biome_score
+        + water_score
+        + forest_score
+        + gradient_score
+        + roughness_score) / 5.0
 }
