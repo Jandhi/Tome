@@ -1,0 +1,15 @@
+{
+    "id" : "basalt",
+    "connections" : {
+        "lighter" : "cobbled_deepslate",
+        "darker" : "blackstone"
+    },
+    "blocks" : {
+        "block" : "minecraft:basalt",
+        "stairs": "minecraft:cobbled_deepslate_stairs",
+        "slab": "minecraft:cobbled_deepslate_slab",
+        "wall": "minecraft:cobbled_deepslate_wall",
+        "pressure_plate" : "minecraft:stone_pressure_plate",
+        "button" : "minecraft:stone_button"
+    }
+}
