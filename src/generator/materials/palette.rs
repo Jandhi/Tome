@@ -36,11 +36,13 @@ impl Palette {
     }
 
     pub fn find_role_and_form(&self, block : BlockID, materials : &HashMap<MaterialId, Material>) -> Option<(MaterialRole, BlockForm)> {
+        // Iterate through all material roles to find the matching block
         for role in MaterialRole::iter() {
-            if let Some(material) = materials.get(self.get_material(role)) {
-                if let Some(form) = material.get_form(block) {
-                    return Some((role, form));
-                }
+            let id = self.get_material(role);
+            let material = materials.get(id).expect(&format!("Material {:?} not found", id)); 
+            
+            if let Some(form) = material.get_form(block) {
+                return Some((role, form));
             }
         }
         
@@ -54,7 +56,7 @@ impl Palette {
             }
         }
 
-        block
+        self.recolor_block(block, output_palette)
     }
 
     pub fn recolor_block(&self, block : BlockID, output_palette : &Palette) -> BlockID {

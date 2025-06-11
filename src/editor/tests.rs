@@ -1,7 +1,6 @@
 #[cfg(test)]
 mod tests {
     use log::info;
-    use crate::editor;
     use crate::editor::World;
     use crate::geometry::Point2D;
 

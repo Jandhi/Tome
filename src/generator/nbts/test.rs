@@ -23,7 +23,7 @@ mod tests {
 
         // Assuming you have a valid NBT file path
         let path = env::current_dir().expect("Should get current dir")
-            .join("data").join("structures").join("well.nbt");
+            .join("data").join("structures").join("bedroom1.nbt");
         
         let midpoint = editor.world().world_rect_2d().size / 2;
         let point = editor.world().add_height(midpoint);

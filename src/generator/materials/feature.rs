@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
-use log::info;
 
 use crate::generator::materials::{Material, MaterialId};
 
@@ -121,10 +120,6 @@ pub fn map_feature(
             for i in 0..length {
                 materials.push(more[i].clone());
             }
-
-            info!("materials: {:?}", materials);
-
-            info!("value * length: {}", (value *(length * 2 + 1) as f32) as usize);
 
             materials
                 .get((value * (length * 2 + 1) as f32) as usize)

@@ -1,5 +1,6 @@
 use std::{collections::HashMap};
 use anyhow::Ok;
+use log::info;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}};
@@ -66,7 +67,13 @@ impl Material {
     }
 
     pub fn get_form(&self, id : BlockID) -> Option<BlockForm> {
-        self.blocks.iter().find_map(|(form, block_id)| if *block_id == id { Some(*form) } else { None })
+        for (form, block_id) in &self.blocks {
+            if *block_id == id {
+                return Some(form.clone());
+            }
+        }
+
+        None
     }
 }
 

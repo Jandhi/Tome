@@ -658,6 +658,30 @@ pub enum BlockID {
     #[serde(rename = "minecraft:warped_sign")]
     WarpedSign,
 
+    // === WALL SIGNS ===
+    #[serde(rename = "minecraft:oak_wall_sign")]
+    OakWallSign,
+    #[serde(rename = "minecraft:spruce_wall_sign")]
+    SpruceWallSign,
+    #[serde(rename = "minecraft:birch_wall_sign")]
+    BirchWallSign,
+    #[serde(rename = "minecraft:jungle_wall_sign")]
+    JungleWallSign,
+    #[serde(rename = "minecraft:acacia_wall_sign")]
+    AcaciaWallSign,
+    #[serde(rename = "minecraft:dark_oak_wall_sign")]
+    DarkOakWallSign,
+    #[serde(rename = "minecraft:mangrove_wall_sign")]
+    MangroveWallSign,
+    #[serde(rename = "minecraft:bamboo_wall_sign")]
+    BambooWallSign,
+    #[serde(rename = "minecraft:cherry_wall_sign")]
+    CherryWallSign,
+    #[serde(rename = "minecraft:crimson_wall_sign")]
+    CrimsonWallSign,
+    #[serde(rename = "minecraft:warped_wall_sign")]
+    WarpedWallSign,
+
     // === HANGING SIGNS ===
     #[serde(rename = "minecraft:oak_hanging_sign")]
     OakHangingSign,
@@ -681,6 +705,30 @@ pub enum BlockID {
     CrimsonHangingSign,
     #[serde(rename = "minecraft:warped_hanging_sign")]
     WarpedHangingSign,
+
+    // === HANGING WALL SIGNS ===
+    #[serde(rename = "minecraft:oak_hanging_wall_sign")]
+    OakHangingWallSign,
+    #[serde(rename = "minecraft:spruce_hanging_wall_sign")]
+    SpruceHangingWallSign,
+    #[serde(rename = "minecraft:birch_hanging_wall_sign")]
+    BirchHangingWallSign,
+    #[serde(rename = "minecraft:jungle_hanging_wall_sign")]
+    JungleHangingWallSign,
+    #[serde(rename = "minecraft:acacia_hanging_wall_sign")]
+    AcaciaHangingWallSign,
+    #[serde(rename = "minecraft:dark_oak_hanging_wall_sign")]
+    DarkOakHangingWallSign,
+    #[serde(rename = "minecraft:mangrove_hanging_wall_sign")]
+    MangroveHangingWallSign,
+    #[serde(rename = "minecraft:bamboo_hanging_wall_sign")]
+    BambooHangingWallSign,
+    #[serde(rename = "minecraft:cherry_hanging_wall_sign")]
+    CherryHangingWallSign,
+    #[serde(rename = "minecraft:crimson_hanging_wall_sign")]
+    CrimsonHangingWallSign,
+    #[serde(rename = "minecraft:warped_hanging_wall_sign")]
+    WarpedHangingWallSign,
 
     // === BUTTONS ===
     #[serde(rename = "minecraft:oak_button")]
@@ -707,7 +755,7 @@ pub enum BlockID {
     WarpedButton,
     #[serde(rename = "minecraft:stone_button")]
     StoneButton,
-    #[serde(rename = "minecraft:polished_blackstone_button")]
+    #[serde(rename = "minecraft:polished_blackstone_button", alias = "minecraft:blackstone_button")]
     PolishedBlackstoneButton,
 
     // === PRESSURE PLATES ===
@@ -735,7 +783,7 @@ pub enum BlockID {
     WarpedPressurePlate,
     #[serde(rename = "minecraft:stone_pressure_plate")]
     StonePressurePlate,
-    #[serde(rename = "minecraft:polished_blackstone_pressure_plate")]
+    #[serde(rename = "minecraft:polished_blackstone_pressure_plate", alias = "minecraft:blackstone_pressure_plate")]
     PolishedBlackstonePressurePlate,
 
     // === WATER & FLUIDS ===
@@ -936,7 +984,337 @@ pub enum BlockID {
     #[serde(rename = "minecraft:prismarine_wall")]
     PrismarineWall,
 
-    
+    // GLASS BLOCKS
+    #[serde(rename = "minecraft:glass")]
+    Glass,
+    #[serde(rename = "minecraft:white_stained_glass")]
+    WhiteStainedGlass,
+    #[serde(rename = "minecraft:orange_stained_glass")]
+    OrangeStainedGlass,
+    #[serde(rename = "minecraft:magenta_stained_glass")]
+    MagentaStainedGlass,
+    #[serde(rename = "minecraft:light_blue_stained_glass")]
+    LightBlueStainedGlass,
+    #[serde(rename = "minecraft:yellow_stained_glass")]
+    YellowStainedGlass,
+    #[serde(rename = "minecraft:lime_stained_glass")]
+    LimeStainedGlass,
+    #[serde(rename = "minecraft:pink_stained_glass")]
+    PinkStainedGlass,
+    #[serde(rename = "minecraft:gray_stained_glass")]
+    GrayStainedGlass,
+    #[serde(rename = "minecraft:light_gray_stained_glass")]
+    LightGrayStainedGlass,
+    #[serde(rename = "minecraft:cyan_stained_glass")]
+    CyanStainedGlass,
+    #[serde(rename = "minecraft:purple_stained_glass")]
+    PurpleStainedGlass,
+    #[serde(rename = "minecraft:blue_stained_glass")]
+    BlueStainedGlass,
+    #[serde(rename = "minecraft:brown_stained_glass")]
+    BrownStainedGlass,
+    #[serde(rename = "minecraft:green_stained_glass")]
+    GreenStainedGlass,
+    #[serde(rename = "minecraft:red_stained_glass")]
+    RedStainedGlass,
+    #[serde(rename = "minecraft:black_stained_glass")]
+    BlackStainedGlass,
+
+    // GLASS PANES
+    #[serde(rename = "minecraft:glass_pane")]
+    GlassPane,
+    #[serde(rename = "minecraft:white_stained_glass_pane")]
+    WhiteStainedGlassPane,
+    #[serde(rename = "minecraft:orange_stained_glass_pane")]
+    OrangeStainedGlassPane,
+    #[serde(rename = "minecraft:magenta_stained_glass_pane")]
+    MagentaStainedGlassPane,
+    #[serde(rename = "minecraft:light_blue_stained_glass_pane")]
+    LightBlueStainedGlassPane,
+    #[serde(rename = "minecraft:yellow_stained_glass_pane")]
+    YellowStainedGlassPane,
+    #[serde(rename = "minecraft:lime_stained_glass_pane")]
+    LimeStainedGlassPane,
+    #[serde(rename = "minecraft:pink_stained_glass_pane")]
+    PinkStainedGlassPane,
+    #[serde(rename = "minecraft:gray_stained_glass_pane")]
+    GrayStainedGlassPane,
+    #[serde(rename = "minecraft:light_gray_stained_glass_pane")]
+    LightGrayStainedGlassPane,
+    #[serde(rename = "minecraft:cyan_stained_glass_pane")]
+    CyanStainedGlassPane,
+    #[serde(rename = "minecraft:purple_stained_glass_pane")]
+    PurpleStainedGlassPane,
+    #[serde(rename = "minecraft:blue_stained_glass_pane")]
+    BlueStainedGlassPane,
+    #[serde(rename = "minecraft:brown_stained_glass_pane")]
+    BrownStainedGlassPane,
+    #[serde(rename = "minecraft:green_stained_glass_pane")]
+    GreenStainedGlassPane,
+    #[serde(rename = "minecraft:red_stained_glass_pane")]
+    RedStainedGlassPane,
+    #[serde(rename = "minecraft:black_stained_glass_pane")]
+    BlackStainedGlassPane,
+
+    // FURNITURE
+    #[serde(rename = "minecraft:crafting_table")]
+    CraftingTable,
+    #[serde(rename = "minecraft:furnace")]
+    Furnace,
+    #[serde(rename = "minecraft:blast_furnace")]
+    BlastFurnace,
+    #[serde(rename = "minecraft:smoker")]
+    Smoker,
+    #[serde(rename = "minecraft:cartography_table")]
+    CartographyTable,
+    #[serde(rename = "minecraft:loom")]
+    Loom,
+    #[serde(rename = "minecraft:barrel")]
+    Barrel,
+    #[serde(rename = "minecraft:chest")]
+    Chest,
+    #[serde(rename = "minecraft:trapped_chest")]
+    TrappedChest,
+    #[serde(rename = "minecraft:ender_chest")]
+    EnderChest,
+    #[serde(rename = "minecraft:shulker_box")]
+    ShulkerBox,
+    #[serde(rename = "minecraft:white_shulker_box")]
+    WhiteShulkerBox,
+    #[serde(rename = "minecraft:orange_shulker_box")]
+    OrangeShulkerBox,
+    #[serde(rename = "minecraft:magenta_shulker_box")]
+    MagentaShulkerBox,
+    #[serde(rename = "minecraft:light_blue_shulker_box")]
+    LightBlueShulkerBox,
+    #[serde(rename = "minecraft:yellow_shulker_box")]
+    YellowShulkerBox,
+    #[serde(rename = "minecraft:lime_shulker_box")]
+    LimeShulkerBox,
+    #[serde(rename = "minecraft:pink_shulker_box")]
+    PinkShulkerBox,
+    #[serde(rename = "minecraft:gray_shulker_box")]
+    GrayShulkerBox,
+    #[serde(rename = "minecraft:light_gray_shulker_box")]
+    LightGrayShulkerBox,
+    #[serde(rename = "minecraft:cyan_shulker_box")]
+    CyanShulkerBox,
+    #[serde(rename = "minecraft:purple_shulker_box")]
+    PurpleShulkerBox,
+    #[serde(rename = "minecraft:blue_shulker_box")]
+    BlueShulkerBox,
+    #[serde(rename = "minecraft:brown_shulker_box")]
+    BrownShulkerBox,
+    #[serde(rename = "minecraft:green_shulker_box")]
+    GreenShulkerBox,
+    #[serde(rename = "minecraft:red_shulker_box")]
+    RedShulkerBox,
+    #[serde(rename = "minecraft:black_shulker_box")]
+    BlackShulkerBox,
+    #[serde(rename = "minecraft:anvil")]
+    Anvil,
+    #[serde(rename = "minecraft:chipped_anvil")]
+    ChippedAnvil,
+    #[serde(rename = "minecraft:damaged_anvil")]
+    DamagedAnvil,
+    #[serde(rename = "minecraft:enchanting_table")]
+    EnchantingTable,
+    #[serde(rename = "minecraft:lectern")]
+    Lectern,
+    #[serde(rename = "minecraft:grindstone")]
+    Grindstone,
+    #[serde(rename = "minecraft:smithing_table")]
+    SmithingTable,
+    #[serde(rename = "minecraft:stonecutter")]
+    Stonecutter,
+    #[serde(rename = "minecraft:composter")]
+    Composter,
+    #[serde(rename = "minecraft:bell")]
+    Bell,
+    #[serde(rename = "minecraft:bed")]
+    Bed,
+    #[serde(rename = "minecraft:white_bed")]
+    WhiteBed,
+    #[serde(rename = "minecraft:orange_bed")]
+    OrangeBed,
+    #[serde(rename = "minecraft:magenta_bed")]
+    MagentaBed,
+    #[serde(rename = "minecraft:light_blue_bed")]
+    LightBlueBed,
+    #[serde(rename = "minecraft:yellow_bed")]
+    YellowBed,
+    #[serde(rename = "minecraft:lime_bed")]
+    LimeBed,
+    #[serde(rename = "minecraft:pink_bed")]
+    PinkBed,
+    #[serde(rename = "minecraft:gray_bed")]
+    GrayBed,
+    #[serde(rename = "minecraft:light_gray_bed")]
+    LightGrayBed,
+    #[serde(rename = "minecraft:cyan_bed")]
+    CyanBed,
+    #[serde(rename = "minecraft:purple_bed")]
+    PurpleBed,
+    #[serde(rename = "minecraft:blue_bed")]
+    BlueBed,
+    #[serde(rename = "minecraft:brown_bed")]
+    BrownBed,
+    #[serde(rename = "minecraft:green_bed")]
+    GreenBed,
+    #[serde(rename = "minecraft:red_bed")]
+    RedBed,
+    #[serde(rename = "minecraft:black_bed")]
+    BlackBed,
+    #[serde(rename = "minecraft:jukebox")]
+    Jukebox,
+    #[serde(rename = "minecraft:note_block")]
+    NoteBlock,
+    #[serde(rename = "minecraft:bookshelf")]
+    Bookshelf,
+    #[serde(rename = "minecraft:chiseled_bookshelf")]
+    ChiseledBookshelf,
+    #[serde(rename = "minecraft:flower_pot")]
+    FlowerPot,
+    #[serde(rename = "minecraft:painting")]
+    Painting,
+    #[serde(rename = "minecraft:item_frame")]
+    ItemFrame,
+    #[serde(rename = "minecraft:glow_item_frame")]
+    GlowItemFrame,
+    #[serde(rename = "minecraft:armor_stand")]
+    ArmorStand,
+    #[serde(rename = "minecraft:lantern")]
+    Lantern,
+    #[serde(rename = "minecraft:soul_lantern")]
+    SoulLantern,
+
+    // === PLANTS ===
+    #[serde(rename = "minecraft:dandelion")]
+    Dandelion,
+    #[serde(rename = "minecraft:poppy")]
+    Poppy,
+    #[serde(rename = "minecraft:blue_orchid")]
+    BlueOrchid,
+    #[serde(rename = "minecraft:allium")]
+    Allium,
+    #[serde(rename = "minecraft:azure_bluet")]
+    AzureBluet,
+    #[serde(rename = "minecraft:red_tulip")]
+    RedTulip,
+    #[serde(rename = "minecraft:orange_tulip")]
+    OrangeTulip,
+    #[serde(rename = "minecraft:white_tulip")]
+    WhiteTulip,
+    #[serde(rename = "minecraft:pink_tulip")]
+    PinkTulip,
+    #[serde(rename = "minecraft:oxeye_daisy")]
+    OxeyeDaisy,
+    #[serde(rename = "minecraft:cornflower")]
+    Cornflower,
+    #[serde(rename = "minecraft:lily_of_the_valley")]
+    LilyOfTheValley,
+    #[serde(rename = "minecraft:wither_rose")]
+    WitherRose,
+    #[serde(rename = "minecraft:sunflower")]
+    Sunflower,
+    #[serde(rename = "minecraft:lilac")]
+    Lilac,
+    #[serde(rename = "minecraft:rose_bush")]
+    RoseBush,
+    #[serde(rename = "minecraft:peony")]
+    Peony,
+    #[serde(rename = "minecraft:bamboo")]
+    Bamboo,
+    #[serde(rename = "minecraft:sugar_cane")]
+    SugarCane,
+    #[serde(rename = "minecraft:cactus")]
+    Cactus,
+    #[serde(rename = "minecraft:dead_bush")]
+    DeadBush,
+    #[serde(rename = "minecraft:moss_block")]
+    MossBlock,
+    #[serde(rename = "minecraft:moss_carpet")]
+    MossCarpet,
+    #[serde(rename = "minecraft:azalea")]
+    Azalea,
+    #[serde(rename = "minecraft:flowering_azalea")]
+    FloweringAzalea,
+    #[serde(rename = "minecraft:spore_blossom")]
+    SporeBlossom,
+    #[serde(rename = "minecraft:small_dripleaf")]
+    SmallDripleaf,
+    #[serde(rename = "minecraft:big_dripleaf")]
+    BigDripleaf,
+    #[serde(rename = "minecraft:big_dripleaf_stem")]
+    BigDripleafStem,
+    #[serde(rename = "minecraft:lily_pad")]
+    LilyPad,
+    #[serde(rename = "minecraft:vine")]
+    Vine,
+    #[serde(rename = "minecraft:glow_lichen")]
+    GlowLichen,
+    #[serde(rename = "minecraft:torchflower")]
+    Torchflower,
+    #[serde(rename = "minecraft:pitcher_plant")]
+    PitcherPlant,
+    #[serde(rename = "minecraft:pitcher_crop")]
+    PitcherCrop,
+
+    // === POTTED PLANTS ===
+    #[serde(rename = "minecraft:potted_dandelion")]
+    PottedDandelion,
+    #[serde(rename = "minecraft:potted_poppy")]
+    PottedPoppy,
+    #[serde(rename = "minecraft:potted_blue_orchid")]
+    PottedBlueOrchid,
+    #[serde(rename = "minecraft:potted_allium")]
+    PottedAllium,
+    #[serde(rename = "minecraft:potted_azure_bluet")]
+    PottedAzureBluet,
+    #[serde(rename = "minecraft:potted_red_tulip")]
+    PottedRedTulip,
+    #[serde(rename = "minecraft:potted_orange_tulip")]
+    PottedOrangeTulip,
+    #[serde(rename = "minecraft:potted_white_tulip")]
+    PottedWhiteTulip,
+    #[serde(rename = "minecraft:potted_pink_tulip")]
+    PottedPinkTulip,
+    #[serde(rename = "minecraft:potted_oxeye_daisy")]
+    PottedOxeyeDaisy,
+    #[serde(rename = "minecraft:potted_cornflower")]
+    PottedCornflower,
+    #[serde(rename = "minecraft:potted_lily_of_the_valley")]
+    PottedLilyOfTheValley,
+    #[serde(rename = "minecraft:potted_wither_rose")]
+    PottedWitherRose,
+    #[serde(rename = "minecraft:potted_sunflower")]
+    PottedSunflower,
+    #[serde(rename = "minecraft:potted_lilac")]
+    PottedLilac,
+    #[serde(rename = "minecraft:potted_rose_bush")]
+    PottedRoseBush,
+    #[serde(rename = "minecraft:potted_peony")]
+    PottedPeony,
+    #[serde(rename = "minecraft:potted_fern")]
+    PottedFern,
+    #[serde(rename = "minecraft:potted_cactus")]
+    PottedCactus,
+    #[serde(rename = "minecraft:potted_bamboo")]
+    PottedBamboo,
+    #[serde(rename = "minecraft:potted_azalea_bush")]
+    PottedAzaleaBush,
+    #[serde(rename = "minecraft:potted_flowering_azalea_bush")]
+    PottedFloweringAzaleaBush,
+    #[serde(rename = "minecraft:potted_torchflower")]
+    PottedTorchflower,
+    #[serde(rename = "minecraft:potted_pitcher_plant")]
+    PottedPitcherPlant,
+
+    // === BEEHIVE ===
+    #[serde(rename = "minecraft:beehive")]
+    Beehive,
+    #[serde(rename = "minecraft:bee_nest")]
+    BeeNest,
 }
 
 impl BlockID {

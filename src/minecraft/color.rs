@@ -1,3 +1,4 @@
+use log::info;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
@@ -6,7 +7,6 @@ use crate::minecraft::BlockID;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
 pub enum Color {
-    #[serde(rename = "black")]
     Black,
     #[serde(rename = "dark_blue")]
     DarkBlue,
@@ -38,6 +38,18 @@ pub enum Color {
     Yellow,
     #[serde(rename = "white")]
     White,
+    #[serde(rename = "orange")]
+    Orange,
+    #[serde(rename = "magenta")]
+    Magenta,
+    #[serde(rename = "light_blue")]
+    LightBlue,
+    #[serde(rename = "lime")]
+    Lime,
+    #[serde(rename = "pink")]
+    Pink,
+    #[serde(rename = "brown")]
+    Brown,
 }
 
 impl Into<String> for Color {
@@ -59,9 +71,16 @@ impl Into<String> for Color {
             Color::LightPurple => "light_purple".to_string(),
             Color::Yellow => "yellow".to_string(),
             Color::White => "white".to_string(),
+            Color::Orange => "orange".to_string(),
+            Color::Magenta => "magenta".to_string(),
+            Color::LightBlue => "light_blue".to_string(),
+            Color::Lime => "lime".to_string(),
+            Color::Pink => "pink".to_string(),
+            Color::Brown => "brown".to_string(),
         }
     }
 }
+
 const SWAPPABLE_STRINGS: &[&str] = &[
     "wool",
     "carpet",
@@ -77,12 +96,13 @@ const SWAPPABLE_STRINGS: &[&str] = &[
 // Only colors a block if it was the old color
 pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> BlockID {
     let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
-
+    
     if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
         return block_id; // No swappable strings found, return original block ID
     }
 
-    let old_color_str: String = serde_json::to_string(&old_color).expect("Failed to serialize old color");
+    
+    let old_color_str: String = old_color.into();
     let new_color_str: String = new_color.into();
 
     if block_id_str.contains(&old_color_str) {

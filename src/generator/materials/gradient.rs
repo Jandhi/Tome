@@ -156,8 +156,6 @@ impl Gradient {
         // Apply the gradient strength
         value = value.lerp(self.perlin.get(point), self.noise_strength);
 
-        info!("Gradient value for point {:?}: {}", point, value);
-
         value.clamp(0.0, 1.0) * self.gradient_strength + 0.5 * (1.0 - self.gradient_strength)
     }
 }
