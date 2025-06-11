@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{materials::Material, nbts::place::place_nbt}, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::place::place_nbt}, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]
@@ -17,6 +17,10 @@ mod tests {
         let mut editor = world.get_editor();
         let materials = Material::load().expect("Failed to load materials");
 
+        let palettes = Palette::load().expect("Failed to load palettes");
+        let input_palette = palettes.get("test1").expect("Default palette not found");
+        let output_palette = palettes.get("test2").expect("Default palette not found");
+
         // Assuming you have a valid NBT file path
         let path = env::current_dir().expect("Should get current dir")
             .join("data").join("structures").join("well.nbt");
@@ -25,7 +29,7 @@ mod tests {
         let point = editor.world().add_height(midpoint);
 
         // Place the NBT structure in the world
-        place_nbt(Path::new(&path), point.into(), &mut editor, &materials)
+        place_nbt(Path::new(&path), point.into(), &mut editor, &materials, input_palette, output_palette)
             .await
             .expect("Failed to place NBT structure");
 

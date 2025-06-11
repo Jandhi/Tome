@@ -13,4 +13,4 @@ pub use biome::Biome;
 pub use chunk::{Chunks, Chunk};
 pub use block_entity::BlockEntity;
 pub use form::BlockForm;
-pub use color::Color;
+pub use color::{Color, recolor_block, color_block};

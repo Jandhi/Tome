@@ -1,6 +1,9 @@
 {
     "id" : "oak_plank",
-    "connections" : {},
+    "connections" : {
+        "darker" : "spruce_plank",
+        "lighter" : "birch_plank"
+    },
     "blocks" : {
         "block"          : "minecraft:oak_planks",
         "stairs"         : "minecraft:oak_stairs",

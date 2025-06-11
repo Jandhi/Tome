@@ -62,31 +62,50 @@ impl Into<String> for Color {
         }
     }
 }
+const SWAPPABLE_STRINGS: &[&str] = &[
+    "wool",
+    "carpet",
+    "stained_glass",
+    "terracotta",
+    "concrete",
+    "shulker_box",
+    "bed",
+    "candle",
+    "banner",
+];
 
-fn color_block(block_id : BlockID, color : Color) -> BlockID {
-    let block_id_str: String = serde_json::to_string(&block_id).unwrap();
+// Only colors a block if it was the old color
+pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> BlockID {
+    let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
 
-    let swappable_strings = vec![
-        "wool",
-        "carpet",
-        "stained_glass",
-        "terracotta",
-        "concrete",
-        "shulker_box",
-        "bed",
-        "candle",
-        "banner",
-    ];
+    if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
+        return block_id; // No swappable strings found, return original block ID
+    }
 
-    if !swappable_strings.iter().any(|s| block_id_str.contains(s)) {
+    let old_color_str: String = serde_json::to_string(&old_color).expect("Failed to serialize old color");
+    let new_color_str: String = new_color.into();
+
+    if block_id_str.contains(&old_color_str) {
+        return serde_json::from_str(&block_id_str.replace(&old_color_str, &new_color_str))
+            .expect("Failed to replace color in block ID");
+    }
+
+    block_id // If no color match found, return original block ID
+}
+
+pub fn color_block(block_id: BlockID, color: Color) -> BlockID {
+    let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
+
+    if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
         return block_id; // No swappable strings found, return original block ID
     }
 
     for color in Color::iter() {
-        let color_in: String = serde_json::to_string(&color).unwrap();
-        let color_out : String = color.into();
+        let color_in: String = serde_json::to_string(&color).expect("Failed to serialize color");
+        let color_out: String = color.into();
         if block_id_str.contains(&color_in) {
-            return serde_json::from_str(&block_id_str.replace(&color_in, &color_out)).unwrap();
+            return serde_json::from_str(&block_id_str.replace(&color_in, &color_out))
+                .expect("Failed to replace color in block ID");
         }
     }
 

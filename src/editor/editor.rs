@@ -39,7 +39,7 @@ impl Editor {
     }
 
     pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
-        if !self.world.build_area.contains(point) {
+        if !self.world.build_area.contains(point + self.build_area.origin) {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point, self.world.build_area);
             return;
         }

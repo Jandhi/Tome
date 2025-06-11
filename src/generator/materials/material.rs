@@ -64,6 +64,10 @@ impl Material {
             log::warn!("No block found for material {} with form {:?}", self.id().0, form);
         }
     }
+
+    pub fn get_form(&self, id : BlockID) -> Option<BlockForm> {
+        self.blocks.iter().find_map(|(form, block_id)| if *block_id == id { Some(*form) } else { None })
+    }
 }
 
 impl Loadable<'_, Material, MaterialId> for Material {

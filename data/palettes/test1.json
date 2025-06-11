@@ -1,0 +1,10 @@
+{
+    "name" : "test1",
+    "primary_stone" : "sandstone",
+    "secondary_stone" : "smooth_sandstone",
+    "primary_wood" : "oak_planks",
+    "secondary_wood" : "oak_planks",
+    "accent" : "oak_planks",
+    "primary_color" : "blue",
+    "secondary_color" : "green"
+}

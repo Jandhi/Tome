@@ -4,9 +4,9 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{data::to_snbt, editor::Editor, generator::{materials::{Material, MaterialId}, nbts::{structure::Structure, transform::{self, Transform}}}, geometry::Point3D, minecraft::Block};
+use crate::{data::to_snbt, editor::Editor, generator::{materials::{Material, MaterialId, Palette}, nbts::{structure::Structure, transform::{self, Transform}}}, geometry::Point3D, minecraft::Block};
 
-pub async fn place_nbt(path : &Path, transform : Transform, editor : &mut Editor,  materials : &HashMap<MaterialId, Material>) -> anyhow::Result<()> {
+pub async fn place_nbt(path : &Path, transform : Transform, editor : &mut Editor,  materials : &HashMap<MaterialId, Material>, input_palette : &Palette, output_palette : &Palette) -> anyhow::Result<()> {
     let nbt_data = std::fs::read(path)?;
     
     let structure : Result<Structure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
@@ -26,8 +26,10 @@ pub async fn place_nbt(path : &Path, transform : Transform, editor : &mut Editor
         let palette_data = structure.palette.get(block.state).expect("The block state index is out of bounds");
         let data = block.nbt.map(|nbt| to_snbt(&nbt));
 
+        let id = input_palette.swap_with(palette_data.name, &output_palette, materials);
+
         editor.place_block(&Block{
-            id: palette_data.name,
+            id,
             state: palette_data.properties.clone(),
             data, // Now contains the SNBT string if data exists
         }, transform.apply(Point3D::from(block.pos))).await;

@@ -941,7 +941,20 @@ pub enum BlockID {
 
 impl BlockID {
     pub fn is_water(self) -> bool {
-        matches!(self, BlockID::Water)
+        matches!(
+            self,
+            BlockID::Water
+            | BlockID::Ice
+            | BlockID::PackedIce
+            | BlockID::BlueIce
+            | BlockID::FrostedIce
+            | BlockID::BubbleColumn
+            | BlockID::Kelp
+            | BlockID::KelpPlant
+            | BlockID::Seagrass
+            | BlockID::TallSeagrass
+            | BlockID::WaterCauldron
+        )
     }
 }
 

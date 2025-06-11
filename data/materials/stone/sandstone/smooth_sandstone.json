@@ -1,0 +1,14 @@
+{
+    "id" : "smooth_sandstone",
+    "connections" : {
+        "darker" : "smooth_red_sandstone"
+    },
+    "blocks" : {
+        "block" : "minecraft:smooth_sandstone",
+        "stairs" : "minecraft:smooth_sandstone_stairs",
+        "slab" : "minecraft:smooth_sandstone_slab",
+        "wall" : "minecraft:sandstone_wall",
+        "pressure_plate" : "minecraft:birch_pressure_plate",
+        "button" : "minecraft:birch_button"
+    }
+}
