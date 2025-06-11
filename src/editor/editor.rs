@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{editor::World, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block};
+use crate::{editor::World, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block, noise::RNG};
 
 #[derive(Debug, Clone)]
 pub struct Editor {
@@ -27,6 +27,16 @@ impl Editor {
         self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
         if self.block_buffer.len() >= self.buffer_size {
             self.flush_buffer().await;
+        }
+    }
+
+    pub async fn place_block_chance(&mut self, block : &Block, point : Point3D, rng : &mut RNG, chance : i32) {
+        if rng.rand_i32_range(1, 100) <= chance {
+            self.block_cache.insert(point, block.clone());
+            self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
+            if self.block_buffer.len() >= self.buffer_size {
+                self.flush_buffer().await;
+            }
         }
     }
 

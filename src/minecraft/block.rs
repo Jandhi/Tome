@@ -36,3 +36,30 @@ impl From<&BlockID> for Block {
         }
     }
 }
+
+// Converts a string representation of a block into a Block struct.
+pub fn string_to_block(block: &str) -> Option<Block> {
+    if block.contains('[') {
+        let mut iter = block.split('[');
+        let id = iter.next()?.into();
+        let state_list = iter.next()?.trim_end_matches(']');
+        let state: Option<HashMap<String, String>> = state_list.split(',').map(|s| {
+            let mut kv = s.split('=');
+            let key = kv.next()?.trim().to_string();
+            let value = kv.next()?.trim().to_string();
+            Some((key, value))
+        }).collect();
+        println!("Parsed block: {:?} with state: {:?} iter {:?} statelist {:?}", id, state, iter, state_list);
+        Some(Block {
+                    id: id,
+                    state: state,
+                    data: None,
+                })
+    } else {
+        Some(Block {
+            id: block.into(),
+            state: None,
+            data: None,
+        })
+    }
+}

@@ -109,3 +109,40 @@ pub async fn replace_ground_smooth(
 
         }
     }
+
+pub async fn plant_forest(
+    points: &HashSet<Point2D>,
+    block_dict: &HashMap<u32, HashMap<u32, f32>>,
+    block_list: &Vec<Block>,
+    rng: &mut RNG,
+    world: &World,
+    editor: &mut Editor,
+    height_offset: Option<i32>,
+    permit_blocks: Option<&HashSet<BlockID>>,
+    ignore_water: Option<bool>,
+) {
+    for point in points {
+        if world.is_claimed(*point) {
+            continue;
+        }
+        if let Some(ignore_water) = ignore_water {
+            if !ignore_water && world.is_claimed(*point) {
+                continue;
+            }
+        }
+
+        let mut height = world.get_height_at(*point) - 1;
+        let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
+
+        if let Some(permit_blocks) = permit_blocks {
+            if permit_blocks.contains(&block.id) {
+                continue;
+            }
+        }
+        if let Some(offset) = height_offset {
+            height += offset;
+        }
+
+        editor.place_block(&block, Point3D::new(point.x, height, point.y)).await;
+    }
+}

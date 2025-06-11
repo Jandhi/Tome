@@ -605,6 +605,24 @@ pub enum BlockID {
     #[serde(rename = "minecraft:polished_blackstone_pressure_plate")]
     PolishedBlackstonePressurePlate,
 
+    // LEAVES
+    #[serde(rename = "minecraft:oak_leaves")]
+    OakLeaves,
+    #[serde(rename = "minecraft:spruce_leaves")]
+    SpruceLeaves,
+    #[serde(rename = "minecraft:birch_leaves")]
+    BirchLeaves,
+    #[serde(rename = "minecraft:jungle_leaves")]
+    JungleLeaves,
+    #[serde(rename = "minecraft:acacia_leaves")]
+    AcaciaLeaves,
+    #[serde(rename = "minecraft:dark_oak_leaves")]
+    DarkOakLeaves,
+    #[serde(rename = "minecraft:mangrove_leaves")]
+    MangroveLeaves,
+    #[serde(rename = "minecraft:cherry_leaves")]
+    CherryLeaves,
+
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
 }

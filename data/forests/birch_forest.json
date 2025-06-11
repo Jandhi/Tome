@@ -1,0 +1,47 @@
+{
+    "id" : "birch_forest",
+    "trees" : {
+        "mega_birch": 1,
+        "large_birch": 3,
+        "medium_birch": 4
+    },
+    "tree_palette" : {
+        "mega_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        },
+        "large_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        },
+        "medium_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        }
+    },
+    "tree_density" : 5
+}

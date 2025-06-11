@@ -12,3 +12,4 @@ pub use biome::Biome;
 pub use chunk::{Chunks, Chunk};
 pub use block_entity::BlockEntity;
 pub use form::BlockForm;
+pub use block::string_to_block;
