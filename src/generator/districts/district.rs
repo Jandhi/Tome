@@ -101,6 +101,13 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     let mut super_district_id_counter = 0;
     let mut super_districts : HashMap<SuperDistrictID, SuperDistrict> = HashMap::new();
     let mut district_analysis_data : HashMap<DistrictID, DistrictAnalysis> = HashMap::new();
+
+    for district in districts.values() {
+        info!("Analyzing district {}", district.id.0);
+        let analysis = analyze_district(district.data(), editor).await;
+        district_analysis_data.insert(district.id, analysis);
+    }
+
     for district in districts.values_mut() {
         let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
@@ -110,10 +117,10 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     }
 
     // Get District Analysis Data
-    let mut district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis> = HashMap::new();
+    let mut superdistrict_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis> = HashMap::new();
     for district in super_districts.values() {
         info!("Analyzing district {}", district.id().0);
-        district_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
+        superdistrict_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
     }
 
     //district classification
@@ -124,7 +131,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
         analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), true);
     }
     info!("Merging down superdistricts...");
-    merge_down(&mut super_districts, &districts, &mut district_analysis_data, editor).await;
+    merge_down(&mut super_districts, &districts, &mut superdistrict_analysis_data, editor).await;
     {
         let world = editor.world();
         analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(),false);
@@ -134,6 +141,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     editor.world().super_districts = super_districts;
 
     // superdistrict classification
+    let world = editor.world();
     classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data);
     info!("Districts generated successfully");
 

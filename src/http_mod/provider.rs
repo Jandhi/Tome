@@ -128,7 +128,7 @@ impl GDMCHTTPProvider {
         Ok(biomes)
     }
 
-    pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<Chunk>> {
+     pub async fn get_chunks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<Chunk>> {
         let url = self.url(&format!("chunks?x={}&y={}&z={}&dx={}&dy={}&dz={}", x, y, z, dx, dy, dz));
         let response = self.client
             .get(&url)
@@ -146,17 +146,18 @@ impl GDMCHTTPProvider {
             debug!("Decompressed NBT value: {:?}", chunks);
             return Ok(chunks.chunks);
         }
-        // if not decoding might need to uncomment for it to work
-        // let mut decoder = GzDecoder::new(buf.as_slice());
-        // let mut buf = vec![];
-        // decoder.read_to_end(&mut buf)?;
-        // debug!("Decompressed {} bytes from NBT data", buf.len());
+
+        let mut decoder = GzDecoder::new(buf.as_slice());
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        debug!("Decompressed {} bytes from NBT data", buf.len());
 
         let chunks : Chunks = fastnbt::from_bytes(&buf)?;
         debug!("Decompressed NBT value: {:?}", chunks);
 
         Ok(chunks.chunks)
     }
+
 
     pub async fn get_entities(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<EntityResponse>> {
         let url = self.url(&format!("entities?x={}&y={}&z={}&dx={}&dy={}&dz={}", x, y, z, dx, dy, dz));

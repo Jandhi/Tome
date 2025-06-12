@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{editor::World, generator::districts::{district::{generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{editor::World, generator::districts::{district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
 
     fn get_block_for_id(id : usize) -> Block {
         use BlockID::*;
@@ -125,8 +125,10 @@ mod tests {
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let super_district = world.super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = editor.world().districts.get(&district_id).expect("Failed to get district");
+                let World {districts,super_districts, .. } = editor.world();
+
+                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
+                let district = districts.get(&district_id).expect("Failed to get district");
                 if super_district.data.edges.contains(&point) {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
                 }
@@ -157,10 +159,10 @@ mod tests {
         println!("Build area: {:?}", build_area);
         let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
         
-        let mut editor = Editor::new(build_area);
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut world).await;
+        let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
             id: BlockID::Glass,
             data: None,
@@ -174,8 +176,8 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = world.super_district_map[x as usize][z as usize];
-                let district_id = world.district_map[x as usize][z as usize];
+                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
+                let district_id = editor.world().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
@@ -184,12 +186,14 @@ mod tests {
                     continue;
                 };
 
-                let block = get_block_for_district_type(world.super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let super_district = world.super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = world.districts.get(&district_id).expect("Failed to get district");
+                let World {districts,super_districts, .. } = editor.world();
+                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
+                let district = districts.get(&district_id).expect("Failed to get district");
+
                 if super_district.data.edges.contains(&point) {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
                 }
@@ -220,10 +224,10 @@ mod tests {
         println!("Build area: {:?}", build_area);
         let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
         
-        let mut editor = Editor::new(build_area);
         let mut world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut world).await;
+        let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
             id: BlockID::Glass,
             data: None,
@@ -232,18 +236,18 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let district_id = world.district_map[x as usize][z as usize];
+                let district_id = editor.world().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
                 };
                 
 
-                let block = get_block_for_district_type(world.districts.get(&district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_district_type(editor.world().districts.get(&district_id).expect("Failed to get district").data.district_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
                 //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
-                if let Some(district) = world.districts.get(&district_id) {
+                if let Some(district) = editor.world().districts.get(&district_id) {
                     
                     if district.data.edges.contains(&point) {
                         editor.place_block(&glass, Point3D::new(x, height , z)).await;
