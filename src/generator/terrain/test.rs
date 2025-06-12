@@ -52,16 +52,16 @@ mod tests {
         let mut rng = RNG::new(seed);
         let provider = GDMCHTTPProvider::new(); 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let mut editor = Editor::new(build_area);
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = Editor::new(build_area, world);
 
         let forests = Forest::load().expect("Failed to load forests");
         let forest_id = ForestId::new("birch_forest".to_string());
         let forest = forests.get(&forest_id).expect("Failed to get birch forest").clone();
-        let points = HashSet::from_iter(world.world_rect_2d().iter());
+        let points = HashSet::from_iter(editor.world().world_rect_2d().iter());
 
 
-        plant_forest(&points, forest, &mut rng, &mut world, &mut editor, None, true).await
+        plant_forest(&points, forest, &mut rng, &mut editor, None, true).await
     }
 
     
@@ -77,7 +77,8 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
 
-        let mut editor = Editor::new(build_area);
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = Editor::new(build_area, world);
 
         let mut palette: HashMap<String, HashMap<String, f32>> = HashMap::new();
 

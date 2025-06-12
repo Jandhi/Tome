@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::Ok;
+use fastnbt::LongArray;
 use log::info;
 
 use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
@@ -111,8 +112,8 @@ impl World {
         Ok(world)
     }
 
-    pub fn get_editor(&self) -> Editor {
-        Editor::new(self.build_area)
+    pub fn get_editor(self) -> Editor {
+        Editor::new(self.build_area, self)
     }
 
     pub fn origin(&self) -> Point3D {
@@ -164,7 +165,7 @@ impl World {
         self.district_map[point.x as usize][point.y as usize]
     }
 
-    pub fn add_height(&mut self, point : Point2D) -> Point3D {
+    pub fn add_height(&self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
     }
 
@@ -193,18 +194,12 @@ impl World {
         }
 
         let data = block_states.data.as_ref()?;
-        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
-        let indices_per_long = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize / data.len();
-        let bits = 64 / indices_per_long;
-        let long_index = index / indices_per_long;
-        let bit_index = index % indices_per_long;
-
-        let long = data.get(long_index)?;
-        let block_index = (long >> (bit_index * bits)) & ((1 << bits) - 1);
+        let block_index = self.get_data_index(data, point)?;
+        
         let palette = &block_states.palette;
 
-        palette.get(block_index as usize).map(|block| Block {
+        palette.get(block_index).map(|block| Block {
             id: block.name.as_str().into(),
             state: block.properties.clone(),
             data: None,
@@ -223,24 +218,28 @@ impl World {
         }
 
         let data = biomes.data.as_ref()?;
-        let index = (
-            point.x.rem_euclid(CHUNK_SIZE)
-            + point.y.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE
-            + point.z.rem_euclid(CHUNK_SIZE) * CHUNK_SIZE * CHUNK_SIZE
-        ) as usize;
+        let biome_index = self.get_data_index(data, point)?;
+        let biome_list = &biomes.biomes;
 
-        let indices_per_long = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize / data.len();
+        biome_list.get(biome_index).cloned()
+
+    }
+
+    pub fn get_data_index(&self, data : &LongArray, point : Point3D) -> Option<usize> {
+        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
+
+        let indices_per_long = ((CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as f32 / data.len() as f32).ceil() as usize;
+
         let bits = 64 / indices_per_long;
         let long_index = index / indices_per_long;
         let bit_index = index % indices_per_long;
 
         let long = data.get(long_index)?;
-        let biome_index = (long >> (bit_index * bits)) & ((1 << bits) - 1);
-        let biome_list = &biomes.biomes;
+        let block_index = (long >> (bit_index * bits)) & ((1 << bits) - 1);
 
-        biome_list.get(biome_index as usize).cloned()
-
+        Some(block_index as usize)
     }
+
     pub fn is_water(&self, point : Point2D) -> bool {
         self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
     }

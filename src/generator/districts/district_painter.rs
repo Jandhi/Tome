@@ -8,23 +8,22 @@ pub async fn replace_ground(
     block_dict: &HashMap<u32, f32>,
     block_list: &Vec<Block>,
     rng: &mut RNG,
-    world: &World,
     editor: &mut Editor,
     height_offset: Option<i32>,
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
         for point in points {
-            if world.is_claimed(*point) { // already built on point
+            if editor.world().is_claimed(*point) { // already built on point
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if world.is_water(*point) && ignore_water {
+                if editor.world().is_water(*point) && ignore_water {
                     continue; // skip water points if ignore_water is true
                 }
             }
 
-            let mut height = world.get_height_at(*point) - 1; // -1 to ensure we are placing on the ground
-            let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
+            let mut height = editor.world().get_height_at(*point) - 1; // -1 to ensure we are placing on the ground
+            let block = editor.get_block(Point3D::new(point.x, height, point.y));
             
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block.id) {
@@ -45,24 +44,23 @@ pub async fn replace_ground_smooth(
     block_dict: &HashMap<u32, HashMap<u32, f32>>,
     block_list: &Vec<Block>,
     rng: &mut RNG,
-    world: &World,
     editor: &mut Editor,
     height_offset: Option<i32>,
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
         for point in points {
             print!("Replacing ground at {:?}\n", point);
-            if world.is_claimed(*point) { // already built on point
+            if editor.world().is_claimed(*point) { // already built on point
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if world.is_water(*point) && ignore_water {
+                if editor.world().is_water(*point) && ignore_water {
                     continue; // skip water points if ignore_water is true
                 }
             }
 
-            let mut height = world.get_height_at(*point); 
-            let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
+            let mut height = editor.world().get_height_at(*point); 
+            let block = editor.get_block(Point3D::new(point.x, height, point.y));
             
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block.id) {
@@ -83,12 +81,12 @@ pub async fn replace_ground_smooth(
                     continue; // skip if neighbor is not in points
                 }
                 if points.contains(&neighbor) {
-                    y_in_dir.insert(direction, world.get_height_at(neighbor));
+                    y_in_dir.insert(direction, editor.world().get_height_at(neighbor));
                 }
                 if !points.contains(&opposite_neighbour) {
                     continue; // skip if opposite neighbor is not in points
                 }
-                if world.get_height_at(neighbor) == height + 1 && world.get_height_at(opposite_neighbour) == height - 1 {
+                if editor.world().get_height_at(neighbor) == height + 1 && editor.world().get_height_at(opposite_neighbour) == height - 1 {
                     //place stair
                     block = block_list[*rng.choose_weighted(block_dict.get(&1).unwrap()) as usize].clone();
                     block.state = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
@@ -114,7 +112,6 @@ pub async fn plant_forest(
     points: &HashSet<Point2D>,
     forest: Forest,
     rng: &mut RNG,
-    world: &mut World,
     editor: &mut Editor,
     permit_blocks: Option<&HashSet<BlockID>>,
     ignore_water: bool,
@@ -123,15 +120,15 @@ pub async fn plant_forest(
     for point in points {
         let point = rng.pop(&mut shuffled_points).unwrap_or(*point); // get randomness in
 
-        if world.is_claimed(point) { // already built on point
+        if editor.world().is_claimed(point) { // already built on point
             continue;
         }
-        if world.is_water(point) && ignore_water {
+        if editor.world().is_water(point) && ignore_water {
             continue; // skip water points if ignore_water is true
         }
-        
-        let mut height = world.get_height_at(point);
-        let block = editor.get_block(Point3D::new(point.x, height, point.y), world);
+
+        let mut height = editor.world().get_height_at(point);
+        let block = editor.get_block(Point3D::new(point.x, height, point.y));
 
         if let Some(permit_blocks) = permit_blocks {
             if permit_blocks.contains(&block.id) {
@@ -146,7 +143,7 @@ pub async fn plant_forest(
 
         for x in (point.x - forest.tree_density() as i32 + 1)..(point.x + forest.tree_density() as i32) {
             for y in (point.y - forest.tree_density() as i32 + 1)..(point.y + forest.tree_density() as i32) {
-                world.claim(Point2D::new(x, y), BuildClaim::Nature);
+                editor.world().claim(Point2D::new(x, y), BuildClaim::Nature);
             }
         }
     }

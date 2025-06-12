@@ -47,6 +47,12 @@ impl Default for Point2D {
     }
 }
 
+impl From<[i32; 2]> for Point2D {
+    fn from(arr: [i32; 2]) -> Self {
+        Point2D { x: arr[0], y: arr[1] }
+    }
+}
+
 impl Point2D {
     pub fn new(x: i32, y: i32) -> Self {
         Point2D { x, y }

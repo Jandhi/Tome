@@ -1,10 +1,10 @@
 use std::collections::HashMap;
-
+use log::info;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::minecraft::BlockID;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Block {
     pub id : BlockID,
     pub state : Option<HashMap<String, String>>,
@@ -49,7 +49,7 @@ pub fn string_to_block(block: &str) -> Option<Block> {
             let value = kv.next()?.trim().to_string();
             Some((key, value))
         }).collect();
-        println!("Parsed block: {:?} with state: {:?} iter {:?} statelist {:?}", id, state, iter, state_list);
+        info!("Parsed block: {:?} with state: {:?} iter {:?} statelist {:?}", id, state, iter, state_list);
         Some(Block {
                     id: id,
                     state: state,

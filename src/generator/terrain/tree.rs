@@ -1,3 +1,4 @@
+use log::info;
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap};
 
@@ -62,13 +63,13 @@ pub async fn generate_tree(
     rng: &mut RNG,
     palette: &HashMap<String, HashMap<String, f32>>,
 ) {
-    let new_seed = Seed(rng.next());
+    let new_seed = Seed(rng.next_i64());
     let mut new_rng: RNG = RNG::new(new_seed);
     let wood = new_rng.choose_weighted(palette.get("wood").expect("Wood palette not found"));
     let leaves = new_rng.choose_weighted(palette.get("leaves").expect("Leaves palette not found"));
     let wood_block = string_to_block(wood.as_str()).expect("Failed to convert wood to block");
     let leaf_block = string_to_block(leaves.as_str()).expect("Failed to convert leaves to block");
-    println!("Leaf block: {:?}, Wood: {:?}", leaf_block, wood_block);
+    info!("Leaf block: {:?}, Wood: {:?}", leaf_block, wood_block);
 
     match tree {
         Tree::MegaBirch => {

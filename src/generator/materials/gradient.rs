@@ -30,9 +30,9 @@ impl PerlinSettings {
     }
 
     pub fn get(&self, point: Point3D) -> f32 {
-        let x = point.x as f32 * self.base_frequency as f32;
-        let y = point.y as f32 * self.base_frequency as f32;
-        let z = point.z as f32 * self.base_frequency as f32;
+        let x = point.x as f32 * self.base_frequency;
+        let y = point.y as f32 * self.base_frequency;
+        let z = point.z as f32 * self.base_frequency;
 
         let mut value : f32 = 0.0;
         let mut frequency = self.base_frequency;
@@ -155,8 +155,6 @@ impl Gradient {
 
         // Apply the gradient strength
         value = value.lerp(self.perlin.get(point), self.noise_strength);
-
-        info!("Gradient value for point {:?}: {}", point, value);
 
         value.clamp(0.0, 1.0) * self.gradient_strength + 0.5 * (1.0 - self.gradient_strength)
     }

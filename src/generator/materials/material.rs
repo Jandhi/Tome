@@ -1,5 +1,6 @@
 use std::{collections::HashMap};
 use anyhow::Ok;
+use log::info;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}};
@@ -56,13 +57,23 @@ impl Material {
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form) {
             editor.place_block(&Block{
-                id: block_id.clone(),
+                id: *block_id,
                 state: states,
                 data,
             }, point).await;
         } else {
             log::warn!("No block found for material {} with form {:?}", self.id().0, form);
         }
+    }
+
+    pub fn get_form(&self, id : BlockID) -> Option<BlockForm> {
+        for (form, block_id) in &self.blocks {
+            if *block_id == id {
+                return Some(form.clone());
+            }
+        }
+
+        None
     }
 }
 
@@ -72,7 +83,7 @@ impl Loadable<'_, Material, MaterialId> for Material {
     }
 
     fn path() -> &'static str {
-        &"materials"
+        "materials"
     }
     
     fn post_load(_items : &mut HashMap<MaterialId, Material>) -> anyhow::Result<()> {

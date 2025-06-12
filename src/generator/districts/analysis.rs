@@ -1,5 +1,6 @@
 
 
+use crate::editor::Editor;
 use crate::editor::World;
 use crate::geometry::CARDINALS_2D;
 use crate::minecraft::Biome;
@@ -55,7 +56,7 @@ impl DistrictAnalysis {
     }
 }
 
-pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, world: &mut World) -> DistrictAnalysis {
+pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &mut Editor) -> DistrictAnalysis {
     let average = area.average();
     let average_height = average.y;
     let number_of_points = area.points().len() as f32;
@@ -68,22 +69,21 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, world: &mu
     let mut biome_count: HashMap<Biome, u32> = HashMap::new();
     let mut surface_block_count: HashMap<BlockID, u32> = HashMap::new();
 
-    let mut editor = world.get_editor();
     
     for point in area.points() {
-        let biome = world.get_surface_biome_at(point.drop_y());
-        let block = editor.get_block(*point, &world);
+        let biome = editor.world().get_surface_biome_at(point.drop_y());
+        let block = editor.get_block(*point);
         let is_water = block.id.is_water();
-        let leaf_height = world.get_motion_blocking_height_at(point.drop_y());
+        let leaf_height = editor.world().get_motion_blocking_height_at(point.drop_y());
 
         root_mean_square_height += ((point.y - average_height) as f32).powi(2);
 
-        let height = world.get_height_at(point.drop_y());
+        let height = editor.world().get_height_at(point.drop_y());
         let average_neighbour_height = CARDINALS_2D.iter()
             .map(|cardinal| {
                 let neighbour = point.drop_y() + *cardinal;
-                if world.is_in_bounds_2d(neighbour) {
-                    world.get_height_at(neighbour)
+                if editor.world().is_in_bounds_2d(neighbour) {
+                    editor.world().get_height_at(neighbour)
                 } else {
                     height
                 }

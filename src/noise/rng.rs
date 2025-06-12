@@ -24,24 +24,24 @@ impl RNG {
     pub fn from_seed_and_string(seed: Seed, string: &str) -> Self {
         let mut hasher = DefaultHasher::new();
         hasher.write(string.as_bytes());
-        return Self {
+        Self {
             seed: Seed(seed.0 ^ hasher.finish() as i64),
             state: 0,
         }
     }
 
-    pub fn next(&mut self) -> i64 {
+    pub fn next_i64(&mut self) -> i64 {
         self.state += 1;
         squirrel3(self.seed, self.state)
     }
 
     pub fn rand_i32(&mut self, max : i32) -> i32 {
-        (self.next() & 0x7FFFFFFF) as i32 % max
+        (self.next_i64() & 0x7FFFFFFF) as i32 % max
     }
 
     pub fn rand_i32_range(&mut self, min : i32, max : i32) -> i32 {
         let range = max - min;
-        (self.next() & 0x7FFFFFFF) as i32 % range + min
+        (self.next_i64() & 0x7FFFFFFF) as i32 % range + min
     }
 
     pub fn rand_point2d(&mut self, max : Point2D) -> Point2D {
@@ -75,7 +75,7 @@ impl RNG {
         &options[index]
     }
 
-    pub fn pop<'a, T>(&mut self, options: &'a mut Vec<T>) -> Option<T> {
+    pub fn pop<T>(&mut self, options: &mut Vec<T>) -> Option<T> {
         if options.is_empty() {
             return None;
         }
@@ -95,7 +95,7 @@ impl RNG {
         unreachable!()
     }
 
-    pub fn pop_weighted<'map, 'items, T>(&mut self, options: &'map mut HashMap<T, f32>) -> Option<(T, f32)>
+    pub fn pop_weighted<T>(&mut self, options: &mut HashMap<T, f32>) -> Option<(T, f32)>
     where
         T: Eq + std::hash::Hash + Clone,
     {
@@ -132,7 +132,7 @@ impl RNG {
         rand_value < percent
     }
 
-    pub fn shuffle(&mut self, items : &mut Vec<i32>) {
+    pub fn shuffle(&mut self, items : &mut [i32]) {
         let len = items.len();
         for i in (1..len).rev() {
             let j = self.rand_i32(i as i32) as usize;
