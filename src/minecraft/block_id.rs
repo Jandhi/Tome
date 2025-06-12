@@ -1326,12 +1326,24 @@ pub enum BlockID {
     MangroveLeaves,
     #[serde(rename = "minecraft:cherry_leaves")]
     CherryLeaves,
+    #[serde(rename = "minecraft:azalea_leaves")]
+    AzaleaLeaves,
+    #[serde(rename = "minecraft:flowering_azalea_leaves")]
+    FloweringAzaleaLeaves,
 
     // === BEEHIVE ===
     #[serde(rename = "minecraft:beehive")]
     Beehive,
     #[serde(rename = "minecraft:bee_nest")]
     BeeNest,
+
+    // === MUSHROOMS ===
+    #[serde(rename = "minecraft:mushroom_stem")]
+    MushroomStem,
+    #[serde(rename = "minecraft:red_mushroom_block")]
+    RedMushroomBlock,
+    #[serde(rename = "minecraft:brown_mushroom_block")]
+    BrownMushroomBlock,
 
     #[serde(other)]
     Unknown,
@@ -1353,6 +1365,48 @@ impl BlockID {
             | BlockID::TallSeagrass
             | BlockID::WaterCauldron
         )
+    }
+    pub fn is_log(self) -> bool {
+        matches!(
+            self,
+            BlockID::OakLog
+            | BlockID::SpruceLog
+            | BlockID::BirchLog
+            | BlockID::JungleLog
+            | BlockID::AcaciaLog
+            | BlockID::DarkOakLog
+            | BlockID::MangroveLog
+            | BlockID::CherryLog
+        )
+    }
+    pub fn is_mushroom(self) -> bool {
+        matches!(
+            self,
+            BlockID::MushroomStem
+            | BlockID::RedMushroomBlock
+            | BlockID::BrownMushroomBlock
+        )
+    }
+    pub fn is_leaf(self) -> bool {
+        matches!(
+            self,
+            BlockID::OakLeaves
+            | BlockID::SpruceLeaves
+            | BlockID::BirchLeaves
+            | BlockID::JungleLeaves
+            | BlockID::AcaciaLeaves
+            | BlockID::DarkOakLeaves
+            | BlockID::MangroveLeaves
+            | BlockID::CherryLeaves
+            | BlockID::AzaleaLeaves
+            | BlockID::FloweringAzaleaLeaves
+        )
+    }
+    pub fn is_tree(self) -> bool {
+        self.is_log() || self.is_mushroom()
+    }
+    pub fn is_tree_or_leaf(self) -> bool {
+        self.is_leaf() || self.is_log() || self.is_mushroom()
     }
 }
 
