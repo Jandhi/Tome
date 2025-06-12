@@ -1,28 +1,49 @@
 use std::collections::HashMap;
 
-use crate::{editor::World, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::Block};
+use anyhow::Ok;
+use log::{error, info, warn};
 
-#[derive(Debug, Clone)]
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}};
+
+#[derive(Debug)]
 pub struct Editor {
     build_area: Rect3D,
     provider : GDMCHTTPProvider,
     block_buffer : Vec<PositionedBlock>,
     buffer_size : usize,
     block_cache : HashMap<Point3D, Block>,
+    world : World,
+    materials : HashMap<MaterialId, Material>
 }
 
 impl Editor {
-    pub fn new(build_area: Rect3D) -> Self {
-        Self {
+    // Note: You will need to update the new() function to accept a &'a mut World parameter
+    pub fn new(build_area: Rect3D, world: World) -> Self {
+        let mut editor = Self {
             build_area,
             provider: GDMCHTTPProvider::new(),
             block_buffer: Vec::new(),
             buffer_size: 32,
             block_cache: HashMap::new(),
-        }
+            world,
+            materials: HashMap::new(),
+        };
+        editor.load_data().expect("Failed to load materials");
+        editor
     }
 
-    pub async fn place_block(&mut self, block : &Block, point : Point3D) {
+    fn load_data(&mut self) -> anyhow::Result<()> {
+        info!("Loading editor data");
+        self.materials = Material::load()?;
+        Ok(())
+    }
+
+    pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
+        if !self.world.build_area.contains(point + self.build_area.origin) {
+            warn!("Point {:?} is outside the build area {:?} and will be ignored", point, self.world.build_area);
+            return;
+        }
+
         self.block_cache.insert(point, block.clone());
         self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
         if self.block_buffer.len() >= self.buffer_size {
@@ -30,16 +51,33 @@ impl Editor {
         }
     }
 
-    pub fn get_block(&mut self, point : Point3D, world : &World) -> Block {
+    pub fn get_block(&mut self, point : Point3D) -> Block {
         if let Some(block) = self.block_cache.get(&(point - self.build_area.origin)) {
             return block.clone();
         }
 
-        world.get_block(point).expect("Failed to get block from world")
+        self.world.get_block(point).expect("Failed to get block from world")
     }
 
     pub async fn flush_buffer(&mut self) {
-        self.provider.put_blocks(&self.block_buffer).await.expect("Failed to send blocks");
+        let result = self.provider.put_blocks(&self.block_buffer).await.expect("Failed to send blocks");
+        
+        for (index, response) in result.iter().enumerate() {
+            let point : Point3D = self.block_buffer[index].get_coordinate().into();
+            let block = self.block_buffer[index].get_block();
+            if response.status == 0 && self.world.get_block(point).is_none_or(|b| b != block) {
+                if block.id == BlockID::Air && self.world.get_block(point).is_none() {
+                    continue;
+                }
+                
+                error!("Failed to place block {:?} at {:?}, world block is {:?}", block, point, self.world.get_block(point));
+            }
+        }
+        
         self.block_buffer.clear();
+    }
+
+    pub fn world(&mut self) -> &mut World {
+        &mut self.world
     }
 }

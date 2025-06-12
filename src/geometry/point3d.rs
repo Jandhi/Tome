@@ -17,6 +17,10 @@ pub const LEFT : Point3D = Point3D { x: -1, y: 0, z: 0 };
 pub const RIGHT : Point3D = Point3D { x: 1, y: 0, z: 0 };
 pub const FORWARD : Point3D = Point3D { x: 0, y: 0, z: 1 };
 pub const BACK : Point3D = Point3D { x: 0, y: 0, z: -1 };
+pub const NORTH : Point3D = Point3D { x: 0, y: 0, z: -1 };
+pub const EAST  : Point3D = Point3D { x: 1, y: 0, z: 0 };
+pub const SOUTH : Point3D = Point3D { x: 0, y: 0, z: 1 };
+pub const WEST  : Point3D = Point3D { x: -1, y: 0, z: 0 };
 
 pub const CARDINALS : [Point3D; 4] = [
     LEFT,
@@ -28,6 +32,12 @@ pub const CARDINALS : [Point3D; 4] = [
 impl Default for Point3D {
     fn default() -> Self {
         Point3D { x: 0, y: 0, z: 0 }
+    }
+}
+
+impl From<[i32; 3]> for Point3D {
+    fn from(arr: [i32; 3]) -> Self {
+        Point3D { x: arr[0], y: arr[1], z: arr[2] }
     }
 }
 

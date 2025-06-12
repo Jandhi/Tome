@@ -182,6 +182,13 @@ impl Rect2D {
             y: self.origin.y + self.size.y,
         }
     }
+
+    pub fn midpoint(&self) -> Point2D {
+        Point2D {
+            x: self.origin.x + self.size.x / 2,
+            y: self.origin.y + self.size.y / 2,
+        }
+    }
 }
 
 impl Rect2D {

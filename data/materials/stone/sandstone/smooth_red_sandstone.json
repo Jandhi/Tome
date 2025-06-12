@@ -1,0 +1,14 @@
+{
+    "id" : "smooth_red_sandstone",
+    "connections" : {
+        "lighter" : "smooth_sandstone"
+    },
+    "blocks" : {
+        "block" : "minecraft:smooth_red_sandstone",
+        "stairs" : "minecraft:smooth_red_sandstone_stairs",
+        "slab" : "minecraft:smooth_red_sandstone_slab",
+        "wall" : "minecraft:red_sandstone_wall",
+        "pressure_plate" : "minecraft:acacia_pressure_plate",
+        "button" : "minecraft:acacia_button"
+    }
+}

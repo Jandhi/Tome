@@ -1,0 +1,22 @@
+{
+    "id" : "spruce_planks",
+    "connections" : {
+        "darker" : "dark_oak_plank",
+        "lighter" : "oak_plank"
+    },
+    "blocks" : {
+        "block"              : "minecraft:spruce_planks",
+        "stairs"             : "minecraft:spruce_stairs",
+        "slab"               : "minecraft:spruce_slab",
+        "fence"              : "minecraft:spruce_fence",
+        "fence_gate"         : "minecraft:spruce_fence_gate",
+        "door"               : "minecraft:spruce_door",
+        "trapdoor"           : "minecraft:spruce_trapdoor",
+        "button"             : "minecraft:spruce_button",
+        "pressure_plate"     : "minecraft:spruce_pressure_plate",
+        "sign"               : "minecraft:spruce_sign",
+        "wall_sign"          : "minecraft:spruce_wall_sign",
+        "hanging_sign"       : "minecraft:spruce_hanging_sign",
+        "hanging_wall_sign"  : "minecraft:spruce_hanging_wall_sign"
+    }
+}

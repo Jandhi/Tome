@@ -23,7 +23,7 @@ pub trait Loadable<'de, TItem, TKey>
             let entry_path = entry.path();
             if entry_path.is_dir() {
                 Self::load_all_in(&entry_path, items)?;
-            } else if entry_path.extension().map_or(false, |ext| ext == "json") {
+            } else if entry_path.extension().is_some_and(|ext| ext == "json") {
                 let file = File::open(&entry_path)?;
                 let item: TItem = match serde_json::from_reader(file) {
                     Ok(val) => val,

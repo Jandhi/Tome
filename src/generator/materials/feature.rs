@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
-use log::info;
 
 use crate::generator::materials::{Material, MaterialId};
 
@@ -104,8 +103,8 @@ pub fn map_feature(
     materials : &HashMap<MaterialId, Material>,
     mapping : MaterialFeatureMapping,
 ) -> MaterialId {
-    let mut more = more(&material, feature, materials);
-    let mut less = less(&material, feature, materials);
+    let mut more = more(material, feature, materials);
+    let mut less = less(material, feature, materials);
 
     match mapping {
         MaterialFeatureMapping::Linear => {
@@ -122,14 +121,10 @@ pub fn map_feature(
                 materials.push(more[i].clone());
             }
 
-            info!("materials: {:?}", materials);
-
-            info!("value * length: {}", (value *(length * 2 + 1) as f32) as usize);
-
-            return materials
+            materials
                 .get((value * (length * 2 + 1) as f32) as usize)
                 .cloned()
-                .unwrap_or(material.clone());
+                .unwrap_or(material.clone())
         },
         MaterialFeatureMapping::Fitted => {
             more.push(material.clone());
@@ -138,11 +133,11 @@ pub fn map_feature(
             if value < 0.5 {
                 let value = 2.0 * (0.5 - value); // Rescale
                 let index = (value * less.len() as f32) as usize;
-                return less.get(index.min(less.len() - 1)).expect("Index out of range").clone();
+                less.get(index.min(less.len() - 1)).expect("Index out of range").clone()
             } else {
                 let value = 1.0 - 2.0 * (value - 0.5);  // Rescale
                 let index = (value * more.len() as f32) as usize;
-                return more.get(index.min(more.len() - 1)).expect("Index out of range").clone();
+                more.get(index.min(more.len() - 1)).expect("Index out of range").clone()
             }
         }
     }
