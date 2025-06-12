@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use log::{info, warn};
+use log::info;
 
 use crate::editor::{self, Editor, World};
 

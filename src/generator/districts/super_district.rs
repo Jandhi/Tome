@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use crate::{editor::World, generator::districts::district, geometry::Point3D};
+use crate::{editor::World, geometry::Point3D};
 
 use super::{adjacency::AdjacencyAnalyzeable, data::{DistrictData, HasDistrictData}, District, DistrictID, DistrictType};
 

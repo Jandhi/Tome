@@ -117,7 +117,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     }
 
     //district classification
-    classify_districts(&mut districts, &district_analysis_data).await;
+    classify_districts(&mut districts, &district_analysis_data);
 
     {
         let world = editor.world();
@@ -133,7 +133,8 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     editor.world().districts = districts;
     editor.world().super_districts = super_districts;
 
-    classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data).await;
+    // superdistrict classification
+    classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data);
     info!("Districts generated successfully");
 
     //prune urban chokepoints??

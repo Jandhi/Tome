@@ -1,4 +1,3 @@
-use crate::generator::districts::{adjacency, district};
 
 use super::{
     District,
@@ -7,16 +6,16 @@ use super::{
     SuperDistrict,
     SuperDistrictID,
     district::DistrictType,
-    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_SIZE, ADJACENCY_WEIGHT, URBAN_RELATIVE_TO_PRIME},
+    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_SIZE, URBAN_RELATIVE_TO_PRIME},
     merge::{get_candidate_score, district_similarity_score},
-    data::{DistrictData, HasDistrictData}
+    data::HasDistrictData
 };
 
 
-use std::{collections::HashMap, option};
+use std::collections::HashMap;
 use log::info;
 
-pub async fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>){
+pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>){
     
     let mut options: Vec<DistrictID> = Vec::new(); // Placeholder for options to choose from
 
@@ -56,7 +55,7 @@ pub async fn classify_districts<'a>(districts: & mut HashMap<DistrictID, Distric
     }
 }
 
-pub async fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
+pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
     // This function will classify superdistricts based on their districts
 
     let mut options: Vec<SuperDistrictID> = Vec::new(); // Placeholder for options to choose from
@@ -84,7 +83,7 @@ pub async fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistr
     info!("Options for prime urban district: {:?}", options);
     let prime_urban_district: SuperDistrictID = select_prime_urban_superdistrict(options, district_analysis_data).expect("No prime urban candidate found"); // Placeholder for prime urban district ID
     superdistricts.get_mut(&prime_urban_district).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
-    classify_urban_districts(prime_urban_district, superdistricts, districts, district_analysis_data).await;
+    classify_urban_districts(prime_urban_district, superdistricts, districts, district_analysis_data);
 
     // classify remaining superdistricts as rural if they are unknown
     for district in superdistricts.values_mut() {
@@ -96,7 +95,7 @@ pub async fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistr
 
 }
 
-async fn classify_urban_districts(prime_urban_district: SuperDistrictID, superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
+fn classify_urban_districts(prime_urban_district: SuperDistrictID, superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, _districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
     let mut urban_districts: Vec<SuperDistrictID> = vec![prime_urban_district];
     let mut urban_count : u32 = 1;
     while urban_count < URBAN_SIZE {
@@ -165,7 +164,7 @@ fn urban_district_score(analysis_data: &DistrictAnalysis) -> f32 {
     // Calculate a score based on the analysis data for urban districts
     let water_score = analysis_data.water_percentage();
     let forest_score = analysis_data.forested_percentage();
-    let gradient_score = analysis_data.gradient()/3.0;
+    let gradient_score = analysis_data.gradient() / 3.0;
     let roughness_score = analysis_data.roughness();
 
     water_score + forest_score + gradient_score + roughness_score
