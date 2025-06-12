@@ -20,7 +20,7 @@ impl ForestId {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Forest {
     id : ForestId,
-    trees: HashMap<String, f32>,
+    trees: HashMap<Tree, f32>,
     tree_palette: HashMap<Tree, HashMap<String, HashMap<String, f32>>>,
     tree_density: u32,
 }
@@ -29,6 +29,18 @@ impl Forest {
     pub fn id(&self) -> &ForestId {
         &self.id
     }
+
+    pub fn trees(&self) -> &HashMap<Tree, f32> {
+        &self.trees
+    }
+
+    pub fn tree_palette(&self) -> &HashMap<Tree, HashMap<String, HashMap<String, f32>>> {
+        &self.tree_palette
+    }
+
+    pub fn tree_density(&self) -> u32 {
+        self.tree_density
+    }   
 }
 
 impl Loadable<'_, Forest, ForestId> for Forest {

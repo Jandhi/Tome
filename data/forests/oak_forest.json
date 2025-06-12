@@ -1,0 +1,38 @@
+{
+    "id" : "oak_forest",
+    "trees" : {
+        "mega_oak": 1,
+        "large_oak": 3,
+        "medium_oak": 4
+    },
+    "tree_palette" : {
+        "mega_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1
+            }
+        },
+        "large_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1
+            }
+        },
+        "medium_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1
+            }
+        }
+    },
+    "tree_density" : 8
+}
