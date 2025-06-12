@@ -1,0 +1,14 @@
+{
+    "id" : "polished_blackstone_bricks",
+    "connections" : {
+        "lighter" : "deepslate_bricks"
+    },
+    "blocks" : {
+        "block" : "minecraft:polished_blackstone_bricks",
+        "stairs" : "minecraft:polished_blackstone_brick_stairs",
+        "slab" : "minecraft:polished_blackstone_brick_slab",
+        "wall" : "minecraft:polished_blackstone_brick_wall",
+        "pressure_plate" : "minecraft:blackstone_pressure_plate",
+        "button" : "minecraft:blackstone_button"
+    }
+}
