@@ -108,21 +108,21 @@ fn classify_urban_districts(prime_urban_district: SuperDistrictID, superdistrict
                 .collect::<Vec<SuperDistrictID>>();
             options.extend(neighbours);
         }
-        println!("Options for urban district classification: {:?}", options);
+        info!("Options for urban district classification: {:?}", options);
         let best_candidate = options.iter()
             .map(|&id| {
                 let score = get_candidate_score(&superdistricts, district_analysis_data, prime_urban_district, id, true);
-                println!("Candidate {:?} has score {}", id, score);
+                info!("Candidate {:?} has score {}", id, score);
                 (id, score)
             })
             .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
             .map(|(other, _score)| {
-                println!("Best candidate is {:?}", other);
+                info!("Best candidate is {:?}", other);
                 other
             });
         
         if best_candidate.is_none() {
-            println!("No more candidates found, stopping urban district classification.");
+            info!("No more candidates found, stopping urban district classification.");
             break;
         } else {
             superdistricts.get_mut(&best_candidate.expect("No best candidate found")).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
