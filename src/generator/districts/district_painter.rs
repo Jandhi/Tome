@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 
-use crate::{editor::{World, Editor}, geometry::{Point2D, Point3D, CARDINALS_2D, cardinal_to_str}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{editor::{World, Editor}, generator::BuildClaim, geometry::{Point2D, Point3D, CARDINALS_2D, cardinal_to_str}, minecraft::{Block, BlockID}, noise::RNG, generator::terrain::{Forest, generate_tree}};
 
 pub async fn replace_ground(
     points: &HashSet<Point2D>,
@@ -17,8 +17,8 @@ pub async fn replace_ground(
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if !ignore_water && editor.world().is_claimed(*point) { // can use is_water(), unsure if it is better
-                    continue;
+                if editor.world().is_water(*point) && ignore_water {
+                    continue; // skip water points if ignore_water is true
                 }
             }
 
@@ -54,8 +54,8 @@ pub async fn replace_ground_smooth(
                 continue;
             }
             if let Some(ignore_water) = ignore_water {
-                if !ignore_water && editor.world().is_claimed(*point) { // can use is_water(), unsure if it is better
-                    continue;
+                if editor.world().is_water(*point) && ignore_water {
+                    continue; // skip water points if ignore_water is true
                 }
             }
 
@@ -107,3 +107,44 @@ pub async fn replace_ground_smooth(
 
         }
     }
+
+pub async fn plant_forest(
+    points: &HashSet<Point2D>,
+    forest: Forest,
+    rng: &mut RNG,
+    editor: &mut Editor,
+    permit_blocks: Option<&HashSet<BlockID>>,
+    ignore_water: bool,
+) {
+    let mut shuffled_points: Vec<Point2D> = points.iter().cloned().collect();
+    for point in points {
+        let point = rng.pop(&mut shuffled_points).unwrap_or(*point); // get randomness in
+
+        if editor.world().is_claimed(point) { // already built on point
+            continue;
+        }
+        if editor.world().is_water(point) && ignore_water {
+            continue; // skip water points if ignore_water is true
+        }
+
+        let mut height = editor.world().get_height_at(point);
+        let block = editor.get_block(Point3D::new(point.x, height, point.y));
+
+        if let Some(permit_blocks) = permit_blocks {
+            if permit_blocks.contains(&block.id) {
+                continue;
+            }
+        }
+
+        let tree_type = *rng.choose_weighted(forest.trees());
+        let palette = forest.tree_palette().get(&tree_type).expect("Tree type not found in forest palette");
+
+        generate_tree(tree_type, editor, point.add_y(height), rng, palette).await;
+
+        for x in (point.x - forest.tree_density() as i32 + 1)..(point.x + forest.tree_density() as i32) {
+            for y in (point.y - forest.tree_density() as i32 + 1)..(point.y + forest.tree_density() as i32) {
+                editor.world().claim(Point2D::new(x, y), BuildClaim::Nature);
+            }
+        }
+    }
+}

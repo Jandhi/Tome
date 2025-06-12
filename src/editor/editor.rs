@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}, noise::RNG};
 
 #[derive(Debug)]
 pub struct Editor {
@@ -43,11 +43,22 @@ impl Editor {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point, self.world.build_area);
             return;
         }
+        if block.id == BlockID::Unknown {
+            warn!("Attempted to place an unknown block at {:?}, skipping", point);
+            return;
+        }
 
         self.block_cache.insert(point, block.clone());
         self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
         if self.block_buffer.len() >= self.buffer_size {
             self.flush_buffer().await;
+        }
+    }
+
+    pub async fn place_block_chance(&mut self, block : &Block, point : Point3D, rng : &mut RNG, chance : i32) {
+
+        if rng.rand_i32_range(1, 100) <= chance {
+            self.place_block(block, point).await;
         }
     }
 

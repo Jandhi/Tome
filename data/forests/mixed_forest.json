@@ -1,0 +1,122 @@
+{
+    "id" : "mixed_forest",
+    "trees" : {
+        "mega_birch": 2,
+        "large_birch": 3,
+        "medium_birch": 5,
+        "mega_pine": 1,
+        "large_pine": 3,
+        "medium_pine": 1,
+        "mega_oak": 2,
+        "large_oak": 7,
+        "medium_oak": 10
+    },
+    "tree_palette" : {
+        "mega_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        },
+        "large_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        },
+        "medium_birch" : {
+            "wood" : {
+                "minecraft:birch_wood" : 5,
+                "minecraft:stripped_birch_wood" : 2,
+                "minecraft:stripped_oak_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:oak_leaves[persistent=true]" : 1,
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 5
+            }
+        },
+        "mega_pine" : {
+            "wood" : {
+                "minecraft:oak_wood" : 1,
+                "minecraft:stripped_spruce_wood" : 1,
+                "minecraft:spruce_wood" : 2
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 1,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:spruce_leaves[persistent=true]" : 1
+            }
+        },
+        "large_pine" : {
+            "wood" : {
+                "minecraft:oak_wood" : 1,
+                "minecraft:stripped_spruce_wood" : 1,
+                "minecraft:spruce_wood" : 2
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 1,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:spruce_leaves[persistent=true]" : 1
+            }
+        },
+        "medium_pine" : {
+            "wood" : {
+                "minecraft:oak_wood" : 1,
+                "minecraft:stripped_spruce_wood" : 1,
+                "minecraft:spruce_wood" : 2
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 1,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:spruce_leaves[persistent=true]" : 1
+            }
+        },
+        "mega_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:oak_leaves[persistent=true]" : 5
+            }
+        },
+        "large_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:oak_leaves[persistent=true]" : 5
+            }
+        },
+        "medium_oak" : {
+            "wood" : {
+                "minecraft:oak_wood" : 3,
+                "minecraft:stripped_spruce_wood" : 1
+            },
+            "leaves" : {
+                "minecraft:acacia_leaves[persistent=true]" : 2,
+                "minecraft:birch_leaves[persistent=true]" : 1,
+                "minecraft:oak_leaves[persistent=true]" : 5
+            }
+        }
+    },
+    "tree_density" : 7
+}

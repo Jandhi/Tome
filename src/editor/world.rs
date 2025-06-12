@@ -253,4 +253,12 @@ impl World {
     pub fn is_claimed(&self, point : Point2D) -> bool {
         self.build_claim_map[point.x as usize][point.y as usize] != BuildClaim::None
     }
+
+    pub fn claim(&mut self, point: Point2D, claim: BuildClaim) {
+        if self.is_in_bounds_2d(point) {
+            self.build_claim_map[point.x as usize][point.y as usize] = claim;
+        } else {
+            log::warn!("Tried to claim point {:?} out of bounds", point);
+        }
+    }
 }

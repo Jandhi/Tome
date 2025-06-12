@@ -14,3 +14,4 @@ pub use chunk::{Chunks, Chunk};
 pub use block_entity::BlockEntity;
 pub use form::BlockForm;
 pub use color::{Color, recolor_block, color_block};
+pub use block::string_to_block;
