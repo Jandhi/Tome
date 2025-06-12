@@ -4,13 +4,14 @@ use log::info;
 
 use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
 
-use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, DistrictAnalysis, SuperDistrict, SuperDistrictID};
+use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, classification::{classify_districts, classify_superdistricts}, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DistrictID(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DistrictType {
+    Unknown, // placeholder for unclassified districts
     Urban,
     Rural,
     OffLimits,
@@ -19,8 +20,8 @@ pub enum DistrictType {
 
 #[derive(Debug, Clone)]
 pub struct District {
-    id: DistrictID,
-    data : DistrictData<DistrictID>,
+    pub id: DistrictID,
+    pub data : DistrictData<DistrictID>,
 }
 
 impl HasDistrictData<'_, DistrictID> for District {
@@ -45,6 +46,11 @@ impl District {
 
     fn set_to_border_district(&mut self) {
         self.data.is_border = true;
+    }
+
+    pub fn get_adjacency_ratio(&mut self, id: DistrictID) -> f32 {
+        let count = self.data.district_adjacency.get(&id).cloned().unwrap_or(0);
+        count as f32 / self.data.adjacencies_count as f32   
     }
 }
 
@@ -87,13 +93,21 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Analyzing adjacency of districts...");
     {
         let world = editor.world();
-        analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d());
+        analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d(), false);
     }
     
     info!("Creating superdistricts...");
     // TODO: super districts
     let mut super_district_id_counter = 0;
     let mut super_districts : HashMap<SuperDistrictID, SuperDistrict> = HashMap::new();
+    let mut district_analysis_data : HashMap<DistrictID, DistrictAnalysis> = HashMap::new();
+
+    for district in districts.values() {
+        info!("Analyzing district {}", district.id.0);
+        let analysis = analyze_district(district.data(), editor).await;
+        district_analysis_data.insert(district.id, analysis);
+    }
+
     for district in districts.values_mut() {
         let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
@@ -103,25 +117,35 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     }
 
     // Get District Analysis Data
-    let mut district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis> = HashMap::new();
+    let mut superdistrict_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis> = HashMap::new();
     for district in super_districts.values() {
         info!("Analyzing district {}", district.id().0);
-        district_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
+        superdistrict_analysis_data.insert(district.id(), analyze_district(district.data(), editor).await);
     }
+
+    //district classification
+    classify_districts(&mut districts, &district_analysis_data);
 
     {
         let world = editor.world();
-        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), true);
     }
     info!("Merging down superdistricts...");
-    merge_down(&mut super_districts, &districts, &mut district_analysis_data, editor).await;
+    merge_down(&mut super_districts, &districts, &mut superdistrict_analysis_data, editor).await;
     {
         let world = editor.world();
-        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d());
+        analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(),false);
     }
 
     editor.world().districts = districts;
+    editor.world().super_districts = super_districts;
+
+    // superdistrict classification
+    let world = editor.world();
+    classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data);
     info!("Districts generated successfully");
+
+    //prune urban chokepoints??
 }
 
 fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) {
@@ -131,9 +155,9 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
     while queue.len() > 0 {
         let next = queue.remove(0);
 
-        println!("Bubbling out from {:?}", next);
+        info!("Bubbling out from {:?}", next);
         let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
-        println!("Current district: {:?}", current_district);
+        info!("Current district: {:?}", current_district);
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
@@ -141,7 +165,7 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
             }
 
             if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
-                println!("Skipping {:?} because it is out of bounds", neighbour);
+                info!("Skipping {:?} because it is out of bounds", neighbour);
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
             }

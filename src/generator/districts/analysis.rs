@@ -83,9 +83,9 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
             .map(|cardinal| {
                 let neighbour = point.drop_y() + *cardinal;
                 if editor.world().is_in_bounds_2d(neighbour) {
-                    editor.world().get_height_at(neighbour)
+                    (height - editor.world().get_height_at(neighbour)).abs()
                 } else {
-                    height
+                    0
                 }
             })
             .sum::<i32>() as f32 / 4.0;
