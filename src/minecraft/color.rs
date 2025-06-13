@@ -3,37 +3,26 @@ use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::minecraft::BlockID;
+use crate::minecraft::{block, BlockID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
 pub enum Color {
+    #[serde(rename = "black")]
     Black,
-    #[serde(rename = "dark_blue")]
-    DarkBlue,
-    #[serde(rename = "dark_green")]
-    DarkGreen,
-    #[serde(rename = "dark_aqua")]
-    DarkAqua,
-    #[serde(rename = "dark_red")]
-    DarkRed,
-    #[serde(rename = "dark_purple")]
-    DarkPurple,
-    #[serde(rename = "gold")]
-    Gold,
     #[serde(rename = "gray")]
     Gray,
-    #[serde(rename = "dark_gray")]
-    DarkGray,
+    #[serde(rename = "light_gray")]
+    LightGray,
     #[serde(rename = "blue")]
     Blue,
+    #[serde(rename = "cyan")]
+    Cyan,
     #[serde(rename = "green")]
     Green,
-    #[serde(rename = "aqua")]
-    Aqua,
     #[serde(rename = "red")]
     Red,
-    #[serde(rename = "light_purple")]
-    LightPurple,
+    #[serde(rename = "purple")]
+    Purple,
     #[serde(rename = "yellow")]
     Yellow,
     #[serde(rename = "white")]
@@ -56,19 +45,13 @@ impl Into<String> for Color {
     fn into(self) -> String {
         match self {
             Color::Black => "black".to_string(),
-            Color::DarkBlue => "dark_blue".to_string(),
-            Color::DarkGreen => "dark_green".to_string(),
-            Color::DarkAqua => "dark_aqua".to_string(),
-            Color::DarkRed => "dark_red".to_string(),
-            Color::DarkPurple => "dark_purple".to_string(),
-            Color::Gold => "gold".to_string(),
             Color::Gray => "gray".to_string(),
-            Color::DarkGray => "dark_gray".to_string(),
+            Color::LightGray => "light_gray".to_string(),
             Color::Blue => "blue".to_string(),
+            Color::Cyan => "cyan".to_string(),
             Color::Green => "green".to_string(),
-            Color::Aqua => "aqua".to_string(),
             Color::Red => "red".to_string(),
-            Color::LightPurple => "light_purple".to_string(),
+            Color::Purple => "purple".to_string(),
             Color::Yellow => "yellow".to_string(),
             Color::White => "white".to_string(),
             Color::Orange => "orange".to_string(),
@@ -104,6 +87,14 @@ pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> B
     
     let old_color_str: String = old_color.into();
     let new_color_str: String = new_color.into();
+
+    // Don't replace light colors with dark colors
+    if old_color_str == "blue" && block_id_str.contains("light_blue") {
+        return block_id;
+    }
+    if old_color_str == "gray" && block_id_str.contains("light_gray") {
+        return block_id;
+    }
 
     if block_id_str.contains(&old_color_str) {
         return serde_json::from_str(&block_id_str.replace(&old_color_str, &new_color_str))
