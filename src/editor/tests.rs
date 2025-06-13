@@ -74,7 +74,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let height = world.get_height_at(Point2D::new(x, z));
+                let height = world.get_height_at(Point2D::new(x, z)) - 1;
                 let block = world.get_block(Point3D::new(x, height, z));
                 let point = Point3D::new(x, height, z) + world.build_area.origin;
                 println!("Block at ({:?}) height:{} {:?}", point, height, block);
