@@ -1,4 +1,4 @@
-use std::ops::{Add, AddAssign, DivAssign, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, DivAssign, MulAssign, Neg, Sub, SubAssign};
 use serde_derive::{Deserialize, Serialize};
 use std::ops::{Mul, Div};
 
@@ -6,8 +6,11 @@ use super::Point2D;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Point3D {
+    #[serde(default)]
     pub x: i32,
+    #[serde(default)]
     pub y: i32,
+    #[serde(default)]
     pub z: i32,
 }
 
@@ -42,7 +45,7 @@ impl From<[i32; 3]> for Point3D {
 }
 
 impl Point3D {
-    pub fn new(x: i32, y: i32, z: i32) -> Self {
+    pub const fn new(x: i32, y: i32, z: i32) -> Self {
         Point3D { x, y, z }
     }
 
@@ -147,3 +150,14 @@ impl Div<i32> for Point3D {
     }
 }
 
+impl Neg for Point3D {
+    type Output = Point3D;
+
+    fn neg(self) -> Point3D {
+        Point3D {
+            x: -self.x,
+            y: -self.y,
+            z: -self.z,
+        }
+    }
+}

@@ -1,7 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 
 use super::Point3D;
-use std::ops::{Add, Sub, Mul, Div};
+use std::ops::{Add, Div, Mul, Neg, Sub};
 use std::ops::{AddAssign, SubAssign, MulAssign, DivAssign};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -149,5 +149,16 @@ impl DivAssign<i32> for Point2D {
     fn div_assign(&mut self, scalar: i32) {
         self.x /= scalar;
         self.y /= scalar;
+    }
+}
+
+impl Neg for Point2D {
+    type Output = Point2D;
+
+    fn neg(self) -> Point2D {
+        Point2D {
+            x: -self.x,
+            y: -self.y,
+        }
     }
 }
