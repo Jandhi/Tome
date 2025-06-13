@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::place::place_nbt}, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::{meta::NBTMeta, place::place_nbt}}, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]
@@ -29,7 +29,7 @@ mod tests {
         let point = editor.world().add_height(midpoint);
 
         // Place the NBT structure in the world
-        place_nbt(Path::new(&path), point.into(), &mut editor, &materials, input_palette, output_palette)
+        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &materials, input_palette, output_palette)
             .await
             .expect("Failed to place NBT structure");
 

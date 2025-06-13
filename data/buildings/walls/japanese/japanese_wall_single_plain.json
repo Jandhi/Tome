@@ -1,0 +1,13 @@
+{
+    "id" : "japanese_wall_single_plain",
+    "path" : "data/buildings/walls/japanese/japanese_wall_single_plain.nbt",
+    "origin" : {
+        "x" : 1,
+        "y" : -1,
+        "z" : 0
+    },
+    "facing" : "x_minus",
+    "palette" : "japanese_dark_blackstone",
+    "positions" : ["lower"],
+    "tags" : ["only_roof", "japanese"]
+}
