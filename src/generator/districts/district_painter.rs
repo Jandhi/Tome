@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 
+use log::info;
+
 use crate::{editor::{World, Editor}, generator::BuildClaim, geometry::{Point2D, Point3D, CARDINALS_2D, cardinal_to_str}, minecraft::{Block, BlockID}, noise::RNG, generator::terrain::{Forest, generate_tree}};
 
 pub async fn replace_ground(
@@ -49,7 +51,6 @@ pub async fn replace_ground_smooth(
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
     ignore_water: Option<bool>) { //thereotically could be part of permit blocks
         for point in points {
-            print!("Replacing ground at {:?}\n", point);
             if editor.world().is_claimed(*point) { // already built on point
                 continue;
             }
@@ -90,7 +91,7 @@ pub async fn replace_ground_smooth(
                     //place stair
                     block = block_list[*rng.choose_weighted(block_dict.get(&1).unwrap()) as usize].clone();
                     block.state = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
-                    print!("Placing {:?} stair at {:?} facing {:?}\n",block, point, direction);
+                    info!("Placing {:?} stair at {:?} facing {:?}\n",block, point, direction);
                     break;
                 }
             }

@@ -233,7 +233,7 @@ impl World {
     }
 
     pub fn get_data_index(&self, data : &LongArray, point : Point3D) -> Option<usize> {
-        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
+        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
         let indices_per_long = ((CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as f32 / data.len() as f32).ceil() as usize;
 
