@@ -181,6 +181,7 @@ impl World {
 
     pub fn get_block(&self, mut point: Point3D) -> Option<Block> {
         point = point + self.build_area.origin;
+        info!("Getting block at point: {:?}", point);
 
         let chunk_coordinates = point_to_chunk_coordinates(point);
 
