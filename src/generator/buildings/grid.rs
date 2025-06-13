@@ -1,8 +1,13 @@
 use std::collections::HashMap;
 
+<<<<<<< HEAD
 use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D, Rect2D, Rect3D}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+=======
+use crate::{editor::{self, Editor}, generator::{materials::{Material, MaterialId, Palette}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::Point3D};
+
+>>>>>>> 8f1c711 (walls)
 pub struct Grid {
     pub origin : Point3D,
     pub cell_size : Point3D,
@@ -63,9 +68,6 @@ impl Grid {
 
         let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
 
-
-        println!("Facing: {:?}, Direction: {:?}, Rotation: {:?}", structure.facing, direction, rotation);
-        println!("Building structure: {:?} at grid coordinate: {:?} with rotation: {:?}", structure.id, grid_coordinate, rotation);
         
         let mut transform = match rotation {
             Rotation::None => origin.into(),
