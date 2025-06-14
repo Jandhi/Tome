@@ -51,10 +51,13 @@ impl Editor {
             return;
         }
 
-        let current_block = self.get_block(point).id;
-        if self.block_cache.contains_key(&(point - self.build_area.origin)) && self.get_block_form(block.id).density() < self.get_block_form(current_block).density() {
-            info!("Block at {:?} is already placed, skipping", point);
-            return;
+        if self.block_cache.contains_key(&(point)) {
+            let current_block = self.block_cache.get(&(point)).expect("Block should be in cache").id;
+
+            if self.get_block_form(block.id).density() <= self.get_block_form(current_block).density() {
+                info!("Block at {:?} is already placed with a denser block, skipping", point);
+                return;
+            }
         }
 
         self.block_cache.insert(point, block.clone());
