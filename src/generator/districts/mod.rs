@@ -7,7 +7,7 @@ mod merge;
 mod constants;
 mod data;
 mod classification;
-
+mod wall;
 mod district_painter;
 
 pub use district::District;
