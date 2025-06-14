@@ -89,7 +89,19 @@ impl Palette {
 
     pub fn find_role_and_form(&self, block : BlockID, materials : &HashMap<MaterialId, Material>) -> Option<(MaterialRole, BlockForm)> {
         // Iterate through all material roles to find the matching block
-        for role in MaterialRole::iter() {
+        for role in [
+            MaterialRole::Accent,
+            MaterialRole::PrimaryWall,
+            MaterialRole::SecondaryWall,
+            MaterialRole::PrimaryRoof,
+            MaterialRole::SecondaryRoof,
+            MaterialRole::WoodPillar,
+            MaterialRole::StonePillar,
+            MaterialRole::SecondaryStone,
+            MaterialRole::SecondaryWood,
+            MaterialRole::PrimaryStone,
+            MaterialRole::PrimaryWood,
+        ] {
             let id = self.get_material(role);
             let material = materials.get(id).expect(&format!("Material {:?} not found", id)); 
             

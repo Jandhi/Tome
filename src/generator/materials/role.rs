@@ -1,16 +1,8 @@
 use strum_macros::EnumIter;
 use serde_derive::{Serialize, Deserialize};
 
-#[derive(Clone, Copy, PartialEq, Eq, EnumIter, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 pub enum MaterialRole {
-    #[serde(rename = "primary_stone")]
-    PrimaryStone,
-    #[serde(rename = "secondary_stone")]
-    SecondaryStone,
-    #[serde(rename = "primary_wood")]
-    PrimaryWood,
-    #[serde(rename = "secondary_wood")]
-    SecondaryWood,
     #[serde(rename = "accent")]
     Accent,
 
@@ -28,6 +20,15 @@ pub enum MaterialRole {
     WoodPillar,
     #[serde(rename = "stone_pillar")]
     StonePillar,
+
+    #[serde(rename = "primary_stone")]
+    PrimaryStone,
+    #[serde(rename = "secondary_stone")]
+    SecondaryStone,
+    #[serde(rename = "primary_wood")]
+    PrimaryWood,
+    #[serde(rename = "secondary_wood")]
+    SecondaryWood,
 }
 
 impl MaterialRole {

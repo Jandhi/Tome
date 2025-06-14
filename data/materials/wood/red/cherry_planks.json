@@ -1,0 +1,21 @@
+{
+    "id" : "cherry_planks",
+    "connections" : {
+        "darker" : "jungle_planks"
+    },
+    "blocks" : {
+        "block"              : "minecraft:cherry_planks",
+        "stairs"             : "minecraft:cherry_stairs",
+        "slab"               : "minecraft:cherry_slab",
+        "fence"              : "minecraft:cherry_fence",
+        "fence_gate"         : "minecraft:cherry_fence_gate",
+        "door"               : "minecraft:cherry_door",
+        "trapdoor"           : "minecraft:cherry_trapdoor",
+        "button"             : "minecraft:cherry_button",
+        "pressure_plate"     : "minecraft:cherry_pressure_plate",
+        "sign"               : "minecraft:cherry_sign",
+        "wall_sign"          : "minecraft:cherry_wall_sign",
+        "hanging_sign"       : "minecraft:cherry_hanging_sign",
+        "hanging_wall_sign"  : "minecraft:cherry_hanging_wall_sign"
+    }
+}

@@ -14,7 +14,7 @@ mod tests {
         let mut editor = world.get_editor();
 
         let data = LoadedData::load().expect("Failed to load generator data");
-        let palette : PaletteId = "test2".into();
+        let palette : PaletteId = "japanese_light_cherry".into();
 
         let shape = BuildingShape::new(
             vec![
