@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{editor::{self, Editor}, generator::{materials::{Material, MaterialId, Palette}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::Point3D};
+use crate::{editor::{Editor}, generator::{materials::{Material, MaterialId, Palette}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D}};
 
 pub struct Grid {
     pub origin : Point3D,
@@ -57,10 +57,10 @@ impl Grid {
         point - self.origin
     }
 
-    pub async fn build_structure(&self, editor: &mut Editor, structure: &Structure, grid_coordinate: Point3D, rotation: Rotation, materials: &HashMap<MaterialId, Material>, input_palette: &Palette, output_palette: &Palette) -> anyhow::Result<()> {
+    pub async fn build_structure(&self, editor: &mut Editor, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, materials: &HashMap<MaterialId, Material>, input_palette: &Palette, output_palette: &Palette) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
 
-        let rotation = rotation - structure.facing.into();
+        let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
         
         let mut transform = match rotation {
             Rotation::None => origin.into(),
@@ -86,5 +86,15 @@ impl Grid {
         };
 
         place_nbt(nbt, transform, editor, materials, input_palette, output_palette).await
+    }
+
+    pub fn get_door_position(&self, grid_coordinate: Point3D, direction : Cardinal) -> Point3D {
+        let local = self.grid_to_local(grid_coordinate);
+        match direction {
+            Cardinal::North => local + Point3D { x: self.cell_size.x / 2, y: 0, z: 0 },
+            Cardinal::East => local + Point3D { x: 0, y: 0, z: self.cell_size.z / 2 },
+            Cardinal::South => local + Point3D { x: self.cell_size.x / 2, y: 0, z: self.cell_size.z - 1 },
+            Cardinal::West => local + Point3D { x: self.cell_size.x - 1, y: 0, z: self.cell_size.z / 2 },
+        }
     }
 }

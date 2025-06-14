@@ -1,7 +1,6 @@
 
 
 use crate::editor::Editor;
-use crate::editor::World;
 use crate::geometry::CARDINALS_2D;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
