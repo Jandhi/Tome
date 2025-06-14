@@ -25,7 +25,7 @@ mod tests {
         let point = editor.world().add_height(midpoint);
 
         // Place the NBT structure in the world
-        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &Placer::new(&data.materials), &data, &"test1".into(), &"test2".into())
+        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &Placer::new(&data.materials), &data, &"test1".into(), &"test2".into(), None, None)
             .await
             .expect("Failed to place NBT structure");
 

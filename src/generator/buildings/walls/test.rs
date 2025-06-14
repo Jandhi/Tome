@@ -3,7 +3,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{editor::World, generator::{buildings::{shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId}, geometry::Point3D, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{editor::World, generator::{buildings::{roofs::build_roof, shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -28,12 +28,22 @@ mod tests {
         let grid = Grid::new(point.into());
 
         let walls = &data.walls;
-
-        build_walls(&mut editor, &walls.values().collect::<Vec<_>>(), &BuildingData{
+        let building = BuildingData{
             id: 0.into(),
             shape,
             grid,
             palette: palette.clone()
-        }, &data).await.expect("Failed to build walls");
+        };
+
+        for cell in building.shape.cells().iter() {
+            let midpoint = building.grid.grid_to_world(*cell) + building.grid.cell_size / 2;
+            editor.place_block(&BlockID::RedMushroomBlock.into(), midpoint).await;
+        }
+
+        build_walls(&mut editor, &walls.values().collect::<Vec<_>>(), &building, &data).await.expect("Failed to build walls");
+
+        build_roof(&mut editor, &data, &building).await.expect("Failed to build roof");        
+
+        build_compass(&mut editor).await;
     }
 }

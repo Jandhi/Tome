@@ -36,10 +36,16 @@ impl MaterialRole {
             MaterialRole::SecondaryStone => MaterialRole::PrimaryStone,
             MaterialRole::SecondaryWood => MaterialRole::PrimaryWood,
             MaterialRole::Accent => MaterialRole::PrimaryStone,
+            
             MaterialRole::PrimaryWall => MaterialRole::PrimaryStone,
             MaterialRole::SecondaryWall => MaterialRole::SecondaryStone,
+            
             MaterialRole::WoodPillar => MaterialRole::PrimaryWood,
             MaterialRole::StonePillar => MaterialRole::PrimaryStone,
+            
+            MaterialRole::PrimaryRoof => MaterialRole::PrimaryStone,
+            MaterialRole::SecondaryRoof => MaterialRole::SecondaryStone,
+            
             _ => *self, // PrimaryStone remains unchanged
         }
     }

@@ -3,27 +3,32 @@ use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, nbts::{place_nbt, place_structure, Structure, StructureId}}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, nbts::{place_nbt, place_structure, Structure, StructureId}}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}, minecraft::BlockID};
 
 #[derive(Serialize, Deserialize)]
 pub struct Roof {
     #[serde(flatten)]
     structure : Structure,
 
-    #[serde(rename = "type")]
     roof_type : RoofType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", content = "shape")]
 pub enum RoofType {
+    #[serde(rename = "gable")]
     Gable,
+    #[serde(rename = "hip")]
     Hip(HipRoofPart)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HipRoofPart {
+    #[serde(rename = "side")]
     Side,
+    #[serde(rename = "corner")]
     Corner,
+    #[serde(rename = "inner")]
     Inner,
 }
 
@@ -53,8 +58,6 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
             continue; // skip cells that have a roof above them
         }
 
-        let coords = building.grid.grid_to_world(*cell + UP);
-
         let neighbours : HashMap<Cardinal, bool> = Cardinal::iter()
             .map(|direction| {
                 let neighbour_cell = *cell + direction.into();
@@ -64,18 +67,37 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
             .collect();
 
         for direction in Cardinal::iter() {
-            let offset = match direction {
-                Cardinal::North => Point3D::new(0, 0, 0),
-                Cardinal::East => Point3D::new(building.grid.cell_size.x / 2, 0, 0),
-                Cardinal::South => Point3D::new(building.grid.cell_size.x / 2, 0, building.grid.cell_size.z / 2),
-                Cardinal::West => Point3D::new(0, 0, building.grid.cell_size.z / 2),
-            };
+            let mut offset = building.grid.get_door_world_position(*cell + UP, direction.turn_left());
 
-            // if neighbours[&direction] && neighbours[&direction.turn_left()] {
-            //     place_structure(editor, &placer, &inner.structure, offset, editor, placer, generator_data, input_palette, output_palette).await;
-            // }
-
-            
+            if !neighbours[&direction] && !neighbours[&direction.turn_left()] {
+                offset += Point3D::from(direction) * (match direction {
+                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
+                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
+                });
+                place_structure(editor, &placer, &corner.structure, offset, direction, data, &building.palette, false ,false).await?;
+            }
+            else if !neighbours[&direction] {
+                offset += Point3D::from(direction) * (match direction {
+                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
+                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
+                });
+                place_structure(editor, &placer, &side.structure, offset, direction.turn_right(), data, &building.palette, false, true).await?;
+            }
+            else if !neighbours[&direction.turn_left()] {
+                offset += Point3D::from(direction) * (match direction {
+                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
+                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
+                });
+                place_structure(editor, &placer, &side.structure, offset, direction, data, &building.palette, false, false).await?;
+            }
+            else {
+                // place the corner roof
+                offset += Point3D::from(direction) * (match direction {
+                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
+                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
+                });
+                place_structure(editor, &placer, &corner.structure, offset, direction, data, &building.palette, false, false).await?;
+            }
         }
     }
 

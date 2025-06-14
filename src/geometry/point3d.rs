@@ -2,6 +2,8 @@ use std::ops::{Add, AddAssign, DivAssign, MulAssign, Neg, Sub, SubAssign};
 use serde_derive::{Deserialize, Serialize};
 use std::ops::{Mul, Div};
 
+use crate::geometry::Cardinal;
+
 use super::Point2D;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -50,6 +52,17 @@ impl Default for Point3D {
 impl From<[i32; 3]> for Point3D {
     fn from(arr: [i32; 3]) -> Self {
         Point3D { x: arr[0], y: arr[1], z: arr[2] }
+    }
+}
+
+impl From<Cardinal> for Point3D {
+    fn from(cardinal: Cardinal) -> Self {
+        match cardinal {
+            Cardinal::North => NORTH,
+            Cardinal::East  => EAST,
+            Cardinal::South => SOUTH,
+            Cardinal::West  => WEST,
+        }
     }
 }
 

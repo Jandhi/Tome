@@ -52,6 +52,8 @@ pub enum PaletteSwapResult<'a> {
 
 impl Palette {
     pub fn get_material<'a>(&'a self, mut role : MaterialRole) -> &'a MaterialId {
+        let mut iterations = 0;
+
         match role {
             MaterialRole::PrimaryStone => &self.primary_stone,
             MaterialRole::PrimaryWood => &self.primary_wood,
@@ -68,6 +70,12 @@ impl Palette {
                     if role == MaterialRole::PrimaryWood {
                         return &self.primary_wood;
                     }
+
+                    if iterations > 10 {
+                        panic!("Infinite loop detected while trying to find material role {:?} in palette {:?}", role, self.id);
+                    }
+
+                    iterations += 1;
                 }
 
                 self.materials.get(&role).expect(&format!("Material role {:?} not found in palette {:?}", role, self.id))
