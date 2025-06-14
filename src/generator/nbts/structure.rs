@@ -1,5 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
-use crate::{data::Loadable, generator::nbts::NBTMeta, geometry::{Cardinal, Point3D}};
+use crate::{data::Loadable, generator::{materials::PaletteId, nbts::NBTMeta}, geometry::{Cardinal, Point3D}};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StructureId(String);
@@ -24,7 +24,8 @@ pub struct Structure {
     #[serde(default)]
     pub facing : Cardinal,
     #[serde(default)]
-    pub origin : Point3D
+    pub origin : Point3D,
+    pub palette : PaletteId
 }
 
 impl Loadable<'_, Structure, StructureId> for Structure {

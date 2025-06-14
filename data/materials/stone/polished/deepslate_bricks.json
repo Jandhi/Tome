@@ -1,0 +1,16 @@
+{
+    "id": "polished_deepslate",
+    "connections": {
+        "lighter": "polished_andesite",
+        "darker": "polished_blackstone"
+    },
+    "blocks": {
+        "block": "minecraft:polished_deepslate",
+        "stairs": "minecraft:polished_deepslate_stairs",
+        "slab": "minecraft:polished_deepslate_slab",
+        "wall": "minecraft:polished_deepslate_wall",
+        "pressure_plate": "minecraft:stone_pressure_plate",
+        "button": "minecraft:stone_button",
+        "chiseled" : "minecraft:chiseled_deepslate"
+    }
+}

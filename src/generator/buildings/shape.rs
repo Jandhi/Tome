@@ -9,9 +9,17 @@ pub struct BuildingShape {
 }
 
 impl BuildingShape {
+    pub fn new(cells: Vec<Point3D>) -> Self {
+        Self { cells }
+    }
+
     pub fn get_footprint(&self, grid : &Grid) -> HashSet<Point2D> {
         self.cells.iter().flat_map(|cell| {
             grid.get_cell_rect2d(*cell).iter()
         }).collect()
+    }
+
+    pub fn cells(&self) -> &[Point3D] {
+        &self.cells
     }
 }
