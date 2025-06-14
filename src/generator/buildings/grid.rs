@@ -73,7 +73,7 @@ impl Grid {
         // Shift the transform to account for the structure's origin
         transform.shift(rotation.apply_to_point(-structure.origin));
 
-        place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette).await
+        place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette, None, None).await
     }
 
     pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
@@ -86,16 +86,16 @@ impl Grid {
             Rotation::Thrice => Transform::new(origin + Point3D { x: self.cell_size.x - 1, y: 0, z: 0 }, Rotation::Thrice),
         };
 
-        place_nbt(nbt, transform, editor, placer, data, input_palette, output_palette).await
+        place_nbt(nbt, transform, editor, placer, data, input_palette, output_palette, None, None).await
     }
 
-    pub fn get_door_position(&self, grid_coordinate: Point3D, direction : Cardinal) -> Point3D {
-        let local = self.grid_to_local(grid_coordinate);
+    pub fn get_door_world_position(&self, grid_coordinate: Point3D, direction : Cardinal) -> Point3D {
+        let offset = self.grid_to_world(grid_coordinate);
         match direction {
-            Cardinal::North => local + Point3D { x: self.cell_size.x / 2, y: 0, z: 0 },
-            Cardinal::East => local + Point3D { x: 0, y: 0, z: self.cell_size.z / 2 },
-            Cardinal::South => local + Point3D { x: self.cell_size.x / 2, y: 0, z: self.cell_size.z - 1 },
-            Cardinal::West => local + Point3D { x: self.cell_size.x - 1, y: 0, z: self.cell_size.z / 2 },
+            Cardinal::North => offset + Point3D { x: self.cell_size.x / 2, y: 0, z: 0 },
+            Cardinal::West => offset + Point3D { x: 0, y: 0, z: self.cell_size.z / 2 },
+            Cardinal::South => offset + Point3D { x: self.cell_size.x / 2, y: 0, z: self.cell_size.z - 1 },
+            Cardinal::East => offset + Point3D { x: self.cell_size.x - 1, y: 0, z: self.cell_size.z / 2 },
         }
     }
 

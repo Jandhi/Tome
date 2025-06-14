@@ -25,7 +25,12 @@ pub struct Structure {
     pub facing : Cardinal,
     #[serde(default)]
     pub origin : Point3D,
-    pub palette : PaletteId
+    pub palette : PaletteId,
+    pub tags : Option<Vec<String>>,
+    #[serde(default)]
+    pub mirror_x : bool,
+    #[serde(default)]
+    pub mirror_z : bool,
 }
 
 impl Loadable<'_, Structure, StructureId> for Structure {

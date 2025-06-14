@@ -7,7 +7,7 @@ use log::info;
 use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform, Rotation, Structure}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockID}};
 
 
-pub async fn place_structure<'materials>(editor: &mut Editor, placer : &Placer<'materials>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
+pub async fn place_structure<'materials>(editor: &mut Editor, placer : &Placer<'materials>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
     let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
     
     let mut transform = match rotation {
@@ -20,10 +20,13 @@ pub async fn place_structure<'materials>(editor: &mut Editor, placer : &Placer<'
     // Shift the transform to account for the structure's origin
     transform.shift(rotation.apply_to_point(-structure.origin));
 
-    place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette).await
+    place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette, 
+        if mirror_x { Some(structure.origin.x) } else { None }, 
+        if mirror_z { Some(structure.origin.z) } else { None }
+    ).await
 }
 
-pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId) -> anyhow::Result<()> {
+pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
     let LoadedData { materials, palettes, .. } = generator_data;
     info!("Placing NBT structure: {}", data.path);
 
@@ -48,6 +51,14 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
 
         let palette = palettes.get(&input_palette).expect(&format!("Palette {:?} not found", input_palette)).clone();
 
+        let mut pos = Point3D::from(blockdata.pos);
+
+        if let Some(mx) = mirror_x {
+            pos.x = mx * 2 - pos.x;
+        }
+        if let Some(mz) = mirror_z {
+            pos.z = mz * 2 - pos.z;
+        }
 
         let swap = palette.swap_with(palette_data.name, palettes.get(&output_palette).expect(&format!("Palette {:?} not found", output_palette)), materials);
         
@@ -70,7 +81,7 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
 
                 placer.place_block(
                     editor,
-                    transform.apply(Point3D::from(blockdata.pos)),
+                    transform.apply(pos),
                     material_id,
                     form,
                     block.state.as_ref(),

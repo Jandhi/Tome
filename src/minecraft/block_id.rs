@@ -11,6 +11,18 @@ pub enum BlockID {
     #[serde(rename = "minecraft:void_air")]
     VoidAir,
 
+    // === GLOWSTONE & CO. ===
+    #[serde(rename = "minecraft:glowstone")]
+    Glowstone,
+    #[serde(rename = "minecraft:shroomlight")]
+    Shroomlight,
+    #[serde(rename = "minecraft:sea_lantern")]
+    SeaLantern,
+    #[serde(rename = "minecraft:jack_o_lantern")]
+    JackOLantern,
+    #[serde(rename = "minecraft:redstone_lamp")]
+    RedstoneLamp,
+
     // === NATURAL BLOCKS ===
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,
