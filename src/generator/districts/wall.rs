@@ -88,7 +88,7 @@ pub fn order_wall_points(
                 // Reverse the order of the ordered_vec
                 ordered_vec.reverse();
                 current_point = &ordered_vec.first().cloned().unwrap();
-                continue;
+                continue; 
             }
         
         } else {
