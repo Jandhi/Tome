@@ -5,11 +5,7 @@ mod tests {
 
     use log::info;
 
-<<<<<<< HEAD
     use crate::{editor::World, generator::{buildings::{build_stairs, floor::build_floor, roofs::build_roof, shape::BuildingShape, stairs::StairPlacement, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId, style::Style}, geometry::{Cardinal, Point3D}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
-=======
-    use crate::{editor::World, generator::{buildings::{shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId}, geometry::Point3D, http_mod::GDMCHTTPProvider, util::init_logger};
->>>>>>> 518977f (roofs in progress)
 
 
     #[tokio::test]
@@ -40,15 +36,8 @@ mod tests {
             ]),
         );
 
-<<<<<<< HEAD
         let midpoint = editor.world_mut().world_rect_2d().size / 2;
         let point = editor.world_mut().add_height(midpoint);
-=======
-        let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
-
-        info!("Placing structure at: {:?}", point);
->>>>>>> 518977f (roofs in progress)
 
         let grid = Grid::new(point.into());
 
@@ -57,7 +46,6 @@ mod tests {
             id: 0.into(),
             shape,
             grid,
-<<<<<<< HEAD
             palette: palette.clone(),
             style: Style::Desert,
         };
@@ -78,9 +66,5 @@ mod tests {
 
 
         editor.flush_buffer().await;
-=======
-            palette: palette.clone()
-        }, &data).await.expect("Failed to build walls");
->>>>>>> 518977f (roofs in progress)
     }
 }
