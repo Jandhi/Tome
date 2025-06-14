@@ -98,6 +98,23 @@ pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &Bui
     Ok(())
 }
 
+pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &BuildingData, data : &LoadedData, palette : &PaletteId) -> anyhow::Result<()> {
+    for cell in building.shape.cells().iter() {
+        for direction in Cardinal::iter() {
+            if building.shape.cells().iter().any(|other_cell| *other_cell == *cell + direction.into()) {
+                continue;
+            }
+
+            let wall = &walls[0]; // todo: handle multiple walls
+
+            let placer = Placer::new(&data.materials);
+            building.grid.build_structure(editor, &placer, &wall.structure, *cell, direction, data, palette).await?;
+        }
+    }
+
+    Ok(())
+}
+
 impl Loadable<'_, Wall, StructureId> for Wall {
     fn get_key(item: &Wall) -> StructureId {
         item.structure.id.clone()

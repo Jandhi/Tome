@@ -125,14 +125,36 @@ pub async fn place_nbt_without_palette(path : &Path, transform : Transform, edit
 
         let id = palette_data.name;
 
-        editor.place_block(&Block{
 
-            id,
-            state: palette_data.properties.clone(),
-            data, // Now contains the SNBT string if data exists
-        };
+        let swap = palette.swap_with(palette_data.name, palettes.get(&output_palette).expect(&format!("Palette {:?} not found", output_palette)), materials);
+        
+        match swap {
+            PaletteSwapResult::Block(id) => {
+                let block = (-transform.rotation).apply_to_block(Block{
+                    id,
+                    state: palette_data.properties.clone(),
+                    data, // Now contains the SNBT string if data exists
+                });
 
-        editor.place_block(&(-transform.rotation).apply_to_block(block), transform.apply(Point3D::from(blockdata.pos))).await;
+                editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
+            },
+            PaletteSwapResult::Material(material_id, form) => {
+                let block = (-transform.rotation).apply_to_block(Block{
+                    id: BlockID::Unknown,
+                    state: palette_data.properties.clone(),
+                    data, // Now contains the SNBT string if data exists
+                });
+
+                placer.place_block(
+                    editor,
+                    transform.apply(Point3D::from(blockdata.pos)),
+                    material_id,
+                    form,
+                    block.state.as_ref(),
+                    block.data.as_ref()
+                ).await
+            }
+        }
     }
 
     Ok(())
