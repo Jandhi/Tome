@@ -2,7 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 use crate::geometry::{Point2D, Point3D, EAST, EAST_2D, NORTH, NORTH_2D, SOUTH, SOUTH_2D, WEST, WEST_2D};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter, Hash)]
 pub enum Cardinal {
     #[serde(rename = "north", alias = "z_minus")]
     North,
@@ -79,6 +79,24 @@ impl Cardinal {
             Cardinal::East  => "east".to_string(),
             Cardinal::South => "south".to_string(),
             Cardinal::West  => "west".to_string(),
+        }
+    }
+
+    pub fn turn_right(&self) -> Self {
+        match self {
+            Cardinal::North => Cardinal::East,
+            Cardinal::East  => Cardinal::South,
+            Cardinal::South => Cardinal::West,
+            Cardinal::West  => Cardinal::North,
+        }
+    }
+
+    pub fn turn_left(&self) -> Self {
+        match self {
+            Cardinal::North => Cardinal::West,
+            Cardinal::East  => Cardinal::North,
+            Cardinal::South => Cardinal::East,
+            Cardinal::West  => Cardinal::South,
         }
     }
 }

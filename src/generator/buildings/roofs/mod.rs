@@ -1,1 +1,3 @@
 mod roof;
+
+pub use roof::{Roof, RoofType, HipRoofPart};

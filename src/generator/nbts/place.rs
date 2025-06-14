@@ -4,7 +4,24 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::Point3D, minecraft::{Block, BlockID}};
+use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform, Rotation, Structure}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockID}};
+
+
+pub async fn place_structure<'materials>(editor: &mut Editor, placer : &Placer<'materials>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
+    let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
+    
+    let mut transform = match rotation {
+        Rotation::None => offset.into(),
+        Rotation::Once => Transform::new(offset, Rotation::Once),
+        Rotation::Twice => Transform::new(offset, Rotation::Twice),
+        Rotation::Thrice => Transform::new(offset, Rotation::Thrice),
+    };
+
+    // Shift the transform to account for the structure's origin
+    transform.shift(rotation.apply_to_point(-structure.origin));
+
+    place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette).await
+}
 
 pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId) -> anyhow::Result<()> {
     let LoadedData { materials, palettes, .. } = generator_data;

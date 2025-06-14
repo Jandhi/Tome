@@ -3,7 +3,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{shape::BuildingShape, walls::{wall::build_walls, Wall}, BuildingData, Grid}, data::LoadedData, materials::{Material, Palette, PaletteId, Placer}, nbts::Structure}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::init_logger};
+    use crate::{editor::World, generator::{buildings::{shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId}, geometry::Point3D, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]
@@ -23,7 +23,7 @@ mod tests {
         let midpoint = editor.world().world_rect_2d().size / 2;
         let point = editor.world().add_height(midpoint);
 
-        println!("Placing structure at: {:?}", point);
+        info!("Placing structure at: {:?}", point);
 
         let grid = Grid::new(point.into());
 
@@ -33,6 +33,7 @@ mod tests {
             id: 0.into(),
             shape,
             grid,
-        }, &data, &palette).await.expect("Failed to build walls");
+            palette: palette.clone()
+        }, &data).await.expect("Failed to build walls");
     }
 }
