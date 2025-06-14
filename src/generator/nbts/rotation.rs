@@ -26,22 +26,22 @@ impl Rotation {
         match self {
             Rotation::None => cardinal,
             Rotation::Once => match cardinal {
-                Cardinal::NORTH => Cardinal::EAST,
-                Cardinal::EAST => Cardinal::SOUTH,
-                Cardinal::SOUTH => Cardinal::WEST,
-                Cardinal::WEST => Cardinal::NORTH,
+                Cardinal::North => Cardinal::East,
+                Cardinal::East => Cardinal::South,
+                Cardinal::South => Cardinal::West,
+                Cardinal::West => Cardinal::North,
             },
             Rotation::Twice => match cardinal {
-                Cardinal::NORTH => Cardinal::SOUTH,
-                Cardinal::EAST => Cardinal::WEST,
-                Cardinal::SOUTH => Cardinal::NORTH,
-                Cardinal::WEST => Cardinal::EAST,
+                Cardinal::North => Cardinal::South,
+                Cardinal::East => Cardinal::West,
+                Cardinal::South => Cardinal::North,
+                Cardinal::West => Cardinal::East,
             },
             Rotation::Thrice => match cardinal {
-                Cardinal::NORTH => Cardinal::WEST,
-                Cardinal::EAST => Cardinal::NORTH,
-                Cardinal::SOUTH => Cardinal::EAST,
-                Cardinal::WEST => Cardinal::SOUTH,
+                Cardinal::North => Cardinal::West,
+                Cardinal::East => Cardinal::North,
+                Cardinal::South => Cardinal::East,
+                Cardinal::West => Cardinal::South,
             },
         }
     }
@@ -129,10 +129,10 @@ impl Into<i32> for Rotation {
 impl From<Cardinal> for Rotation {
     fn from(cardinal: Cardinal) -> Self {
         match cardinal {
-            Cardinal::NORTH => Rotation::None,
-            Cardinal::EAST => Rotation::Once,
-            Cardinal::SOUTH => Rotation::Twice,
-            Cardinal::WEST => Rotation::Thrice,
+            Cardinal::North => Rotation::None,
+            Cardinal::East => Rotation::Once,
+            Cardinal::South => Rotation::Twice,
+            Cardinal::West => Rotation::Thrice,
         }
     }
 }
