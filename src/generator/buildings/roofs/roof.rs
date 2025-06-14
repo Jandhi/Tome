@@ -68,6 +68,8 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
 
         for direction in Cardinal::iter() {
             let mut offset = building.grid.get_door_world_position(*cell + UP, direction.turn_left());
+            
+
 
             if !neighbours[&direction] && !neighbours[&direction.turn_left()] {
                 offset += Point3D::from(direction) * (match direction {
@@ -77,26 +79,25 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
                 place_structure(editor, &placer, &corner.structure, offset, direction, data, &building.palette, false ,false).await?;
             }
             else if !neighbours[&direction] {
-                offset += Point3D::from(direction) * (match direction {
+                offset += Point3D::from(direction.turn_right()) * (match direction {
+                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
+                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
+                }) + Point3D::from(direction) * (match direction {
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &placer, &side.structure, offset, direction.turn_right(), data, &building.palette, false, true).await?;
+
+                place_structure(editor, &placer, &side.structure, offset, direction.turn_right(), data, &building.palette, false, false).await?;
             }
             else if !neighbours[&direction.turn_left()] {
-                offset += Point3D::from(direction) * (match direction {
-                    Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
-                    Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
-                });
-                place_structure(editor, &placer, &side.structure, offset, direction, data, &building.palette, false, false).await?;
+                place_structure(editor, &placer, &side.structure, offset, direction, data, &building.palette, false, true).await?;
             }
             else {
-                // place the corner roof
                 offset += Point3D::from(direction) * (match direction {
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &placer, &corner.structure, offset, direction, data, &building.palette, false, false).await?;
+                place_structure(editor, &placer, &inner.structure, offset, direction, data, &building.palette, false, false).await?;
             }
         }
     }

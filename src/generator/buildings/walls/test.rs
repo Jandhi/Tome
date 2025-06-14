@@ -17,7 +17,24 @@ mod tests {
         let palette : PaletteId = "test2".into();
 
         let shape = BuildingShape::new(
-            vec![Point3D::new(0, 0, 0), Point3D::new(1, 0, 0), Point3D::new(2, 0, 0), Point3D::new(0, 0, 1)]
+            vec![
+            // Base layer
+            Point3D::new(0, 0, 0),
+            Point3D::new(1, 0, 0),
+            Point3D::new(2, 0, 0),
+            Point3D::new(2, 0, 1),
+            Point3D::new(2, 0, 2),
+            Point3D::new(1, 0, 2),
+            Point3D::new(0, 0, 2),
+            Point3D::new(0, 0, 1),
+            // Second layer (for height)
+            Point3D::new(0, 1, 0),
+            Point3D::new(2, 1, 0),
+            Point3D::new(2, 1, 2),
+            Point3D::new(0, 1, 2),
+            // Third layer (roof base)
+            Point3D::new(1, 2, 1),
+            ]
         );
 
         let midpoint = editor.world().world_rect_2d().size / 2;
@@ -45,5 +62,8 @@ mod tests {
         build_roof(&mut editor, &data, &building).await.expect("Failed to build roof");        
 
         build_compass(&mut editor).await;
+
+
+        editor.flush_buffer().await;
     }
 }
