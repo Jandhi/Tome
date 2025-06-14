@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{editor::{Editor}, generator::{materials::{Material, MaterialId, Palette}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D}};
+use crate::{editor::Editor, generator::{buildings::grid, materials::{Material, MaterialId, Palette}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D, Rect2D, Rect3D}};
 
 pub struct Grid {
     pub origin : Point3D,
@@ -96,5 +96,17 @@ impl Grid {
             Cardinal::South => local + Point3D { x: self.cell_size.x / 2, y: 0, z: self.cell_size.z - 1 },
             Cardinal::West => local + Point3D { x: self.cell_size.x - 1, y: 0, z: self.cell_size.z / 2 },
         }
+    }
+
+    pub fn get_cell_rect(&self, grid_coordinate : Point3D) -> Rect3D {
+        let local = self.grid_to_local(grid_coordinate);
+        Rect3D {
+            origin: local,
+            size: self.cell_size
+        }
+    }
+
+    pub fn get_cell_rect2d(&self, grid_coordinate : Point3D) -> Rect2D {
+        self.get_cell_rect(grid_coordinate).drop_y()
     }
 }
