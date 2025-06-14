@@ -11,7 +11,7 @@ pub struct Wall {
     pub structure : Structure
 }
 
-pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &BuildingData, data : &LoadedData, palette : &PaletteId) -> anyhow::Result<()> {
+pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &BuildingData, data : &LoadedData) -> anyhow::Result<()> {
     for cell in building.shape.cells().iter() {
         for direction in Cardinal::iter() {
             if building.shape.cells().iter().any(|other_cell| *other_cell == *cell + direction.into()) {
@@ -21,7 +21,7 @@ pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &Bui
             let wall = &walls[0]; // todo: handle multiple walls
 
             let placer = Placer::new(&data.materials);
-            building.grid.build_structure(editor, &placer, &wall.structure, *cell, direction, data, palette).await?;
+            building.grid.build_structure(editor, &placer, &wall.structure, *cell, direction, data, &building.palette).await?;
         }
     }
 

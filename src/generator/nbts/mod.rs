@@ -6,7 +6,7 @@ mod rotation;
 mod meta;
 mod structure;
 
-pub use place::place_nbt;
+pub use place::{place_nbt, place_structure};
 pub use meta::NBTMeta;
 pub use transform::Transform;
 pub use rotation::Rotation;
