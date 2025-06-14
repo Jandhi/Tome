@@ -32,6 +32,15 @@ pub const CARDINALS : [Point3D; 4] = [
     BACK,
 ];
 
+pub const ORTHOGONALS : [Point3D; 6] = [
+    UP,
+    DOWN,
+    LEFT,
+    RIGHT,
+    FORWARD,
+    BACK,
+];
+
 impl Default for Point3D {
     fn default() -> Self {
         Point3D { x: 0, y: 0, z: 0 }
@@ -69,6 +78,14 @@ impl Point3D {
 
     pub fn without_y(&self) -> Point3D {
         Point3D { x: self.x, y: 0, z: self.z }
+    }
+
+    pub fn neighbours_3d(&self) -> Vec<Point3D> {
+        ORTHOGONALS.iter().map(|&d| *self + d).collect()
+    }
+
+    pub fn neighbours_2d(&self) -> Vec<Point3D> {
+        CARDINALS.iter().map(|&d| *self + d).collect()
     }
 }
 

@@ -1,40 +1,31 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::HashSet, hash::Hash};
 
-use crate::{geometry::{Point2D, Point3D, CARDINALS_2D}};
+use crate::geometry::{Point2D, ALL_8, CARDINALS_2D};
 
-pub fn get_neighbours_in_set(point: &Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
-    let mut neighbours = Vec::new();
-    for cardinal in CARDINALS_2D {
-        let neighbour = *point + cardinal;
-        if points.contains(&neighbour) {
-            neighbours.push(neighbour);
-        }
-    }
-    neighbours
+pub fn get_neighbours_in_set(point: Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
+    point.neighbours()
+        .into_iter()
+        .filter(|neighbour| points.contains(neighbour))
+        .collect()
 }
 
-pub fn get_neighbours_not_in_set(point: &Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
-    let mut neighbours = Vec::new();
-    for cardinal in CARDINALS_2D {
-        let neighbour = *point + cardinal;
-        if !points.contains(&neighbour) {
-            neighbours.push(neighbour);
-        }
-    }
-    neighbours
+pub fn get_neighbours_not_in_set(point: Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
+    point.neighbours()
+        .into_iter()
+        .filter(|neighbour| !points.contains(neighbour))
+        .collect()
 }
 
 
 pub fn get_outer_points(points: &HashSet<Point2D>) -> (HashSet<Point2D>) {
-    let mut outer_points = HashSet::new();
-
-    for point in points {
-        let neighbours = get_neighbours_in_set(point, points);
-        if neighbours.len() < 4 {
-            outer_points.insert(point.clone());
-        }
-    }
-    outer_points
+    points.iter()
+        .filter(|point| {
+            point.neighbours()
+                .iter()
+                .any(|neighbour| !points.contains(neighbour))
+        })
+        .cloned()
+        .collect()
 }
 
 
@@ -85,44 +76,28 @@ pub fn is_straight_not_diagonal_point2d(first: &Point2D, second: &Point2D, lengt
 pub fn is_point_surrounded_by_points(
     point: &Point2D, points: &HashSet<Point2D>
 ) -> bool {
-    // Define all 8 directions (cardinals + diagonals)
-    let directions = [
-        Point2D { x: 1, y: 0 },
-        Point2D { x: -1, y: 0 },
-        Point2D { x: 0, y: 1 },
-        Point2D { x: 0, y: -1 },
-        Point2D { x: 1, y: 1 },
-        Point2D { x: 1, y: -1 },
-        Point2D { x: -1, y: 1 },
-        Point2D { x: -1, y: -1 },
-    ];
-
-    for direction in directions.iter() {
+    ALL_8.iter().all(|direction| {
         let neighbour = *point + *direction;
-        if !points.contains(&neighbour) {
-            return false;
-        }
-    }
-    true
+        points.contains(&neighbour)
+    })
 }
 
 pub fn get_surrounding_set(points: &HashSet<Point2D>, distance: u32) -> HashSet<Point2D> {
-    let mut surrounding = HashSet::new();
     if distance == 0 {
-        return surrounding;
+        return HashSet::new();
     }
 
-    for point in points {
-        for direction in CARDINALS_2D {
-            let neighbour = *point + direction;
-            if !points.contains(&neighbour) {
-                surrounding.insert(neighbour);
-            }
-        }
-    }
+    let surrounding = points.iter()
+        .flat_map(|point| point.neighbours())
+        .filter(|neighbour| !points.contains(neighbour))
+        .collect();
+
     if distance == 1 {
         return surrounding;
     } else {
-        return surrounding.union(&get_surrounding_set(&surrounding, distance - 1)).cloned().collect();
+        return surrounding
+            .union(&get_surrounding_set(&surrounding, distance - 1))
+            .copied()
+            .collect();
     }
 }
