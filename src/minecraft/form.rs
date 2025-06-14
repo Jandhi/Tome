@@ -44,6 +44,10 @@ pub enum BlockForm {
     #[serde(rename = "hanging_wall_sign")]
     HangingWallSign,
 
+    // SPARSE
+    #[serde(rename = "sparse")]
+    Sparse,
+
 }
 
 impl BlockForm {
@@ -80,8 +84,29 @@ impl BlockForm {
             BlockForm::HangingSign
         } else if id_string.contains("hanging_wall_sign") {
             BlockForm::HangingWallSign
+        } else if id_string.contains("air") || id_string.contains("water") || id_string.contains("lava") || id_string.contains("snow") {
+            BlockForm::Sparse
         } else {
             BlockForm::Block // Default to block form for unrecognized types
+        }
+    }
+
+    pub fn density(self) -> f32 {
+        match self {
+            BlockForm::Block => 1.0,
+            BlockForm::Stairs => 0.5,
+            BlockForm::Slab => 0.4,
+            BlockForm::Wall => 0.5,
+            BlockForm::Fence => 0.4,
+            BlockForm::FenceGate => 0.4,
+            BlockForm::Pillar => 1.0,
+            BlockForm::Trapdoor => 0.2,
+            BlockForm::Door => 0.2,
+            BlockForm::Button => 0.1,
+            BlockForm::PressurePlate => 0.1,
+            BlockForm::Chiseled => 1.0,
+            BlockForm::Sign | BlockForm::WallSign | BlockForm::HangingSign | BlockForm::HangingWallSign => 0.1,
+            BlockForm::Sparse => 0.0,
         }
     }
 }

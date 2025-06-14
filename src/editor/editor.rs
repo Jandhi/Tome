@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 #[derive(Debug)]
 pub struct Editor {
@@ -13,7 +13,8 @@ pub struct Editor {
     buffer_size : usize,
     block_cache : HashMap<Point3D, Block>,
     world : World,
-    materials : HashMap<MaterialId, Material>
+    materials : HashMap<MaterialId, Material>,
+    block_form_cache : HashMap<BlockID, BlockForm>,
 }
 
 impl Editor {
@@ -27,6 +28,7 @@ impl Editor {
             block_cache: HashMap::new(),
             world,
             materials: HashMap::new(),
+            block_form_cache: HashMap::new(),
         };
         editor.load_data().expect("Failed to load materials");
         editor
@@ -49,8 +51,9 @@ impl Editor {
             return;
         }
 
-        if self.block_cache.contains_key(&(point - self.build_area.origin)) {
-            warn!("Block at {:?} is already cached, skipping placement", point);
+        let current_block = self.get_block(point).id;
+        if self.block_cache.contains_key(&(point - self.build_area.origin)) && self.get_block_form(block.id).density() < self.get_block_form(current_block).density() {
+            info!("Block at {:?} is already placed, skipping", point);
             return;
         }
 
@@ -59,6 +62,15 @@ impl Editor {
         if self.block_buffer.len() >= self.buffer_size {
             self.flush_buffer().await;
         }
+    }
+
+    fn get_block_form(&mut self, id : BlockID) -> BlockForm {
+        if !self.block_form_cache.contains_key(&id) {
+            let form = BlockForm::infer_from_block(id);
+            self.block_form_cache.insert(id, form.clone());
+        }
+
+        *self.block_form_cache.get(&id).expect("Block form not found")
     }
 
     pub async fn place_block_chance(&mut self, block : &Block, point : Point3D, rng : &mut RNG, chance : i32) {

@@ -51,6 +51,10 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
 
         let palette = palettes.get(&input_palette).expect(&format!("Palette {:?} not found", input_palette)).clone();
 
+        if palette_data.name == BlockID::Air {
+            continue; // Skip air blocks
+        }
+
         let mut pos = Point3D::from(blockdata.pos);
 
         if let Some(mx) = mirror_x {
