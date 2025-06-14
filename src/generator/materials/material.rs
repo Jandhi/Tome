@@ -52,14 +52,14 @@ impl Material {
         self.blocks.get(form)
     }
 
-    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, states : Option<HashMap<String, String>>, data : Option<String>, parameters : MaterialParameters) {
+    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, state : Option<&HashMap<String, String>>, data : Option<&String>, parameters : MaterialParameters) {
         let material = map_features(&parameters, self.id(), materials);
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form) {
             editor.place_block(&Block{
                 id: *block_id,
-                state: states,
-                data,
+                state: state.cloned(),
+                data: data.cloned(),
             }, point).await;
         } else {
             log::warn!("No block found for material {} with form {:?}", self.id().0, form);

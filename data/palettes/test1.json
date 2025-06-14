@@ -1,5 +1,5 @@
 {
-    "name" : "test1",
+    "id" : "test1",
     "primary_stone" : "sandstone",
     "secondary_stone" : "smooth_sandstone",
     "primary_wood" : "oak_planks",

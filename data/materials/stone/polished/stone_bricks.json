@@ -1,0 +1,15 @@
+{
+    "id": "polished_andesite",
+    "connections": {
+        "darker": "polished_deepslate"
+    },
+    "blocks": {
+        "block": "minecraft:polished_andesite",
+        "stairs": "minecraft:polished_andesite_stairs",
+        "slab": "minecraft:polished_andesite_slab",
+        "wall": "minecraft:andesite_wall",
+        "pressure_plate": "minecraft:stone_pressure_plate",
+        "button": "minecraft:stone_button",
+        "chiseled": "minecraft:chiseled_stone_bricks"
+    }
+}

@@ -4,9 +4,10 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{data::to_snbt, editor::Editor, generator::{materials::{Material, MaterialId, Palette}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform, Structure}}, geometry::Point3D, minecraft::Block};
+use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::Point3D, minecraft::{Block, BlockID}};
 
-pub async fn place_nbt(data : &NBTMeta, transform : Transform, editor : &mut Editor,  materials : &HashMap<MaterialId, Material>, input_palette : &Palette, output_palette : &Palette) -> anyhow::Result<()> {
+pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId) -> anyhow::Result<()> {
+    let LoadedData { materials, palettes, .. } = generator_data;
     info!("Placing NBT structure: {}", data.path);
 
     let nbt_data = std::fs::read(data.path.clone())?;
@@ -28,14 +29,38 @@ pub async fn place_nbt(data : &NBTMeta, transform : Transform, editor : &mut Edi
         let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
         let data = blockdata.nbt.map(|nbt| to_snbt(&nbt));
 
-        let id = input_palette.swap_with(palette_data.name, &output_palette, materials);
-        let block = Block{
-            id,
-            state: palette_data.properties.clone(),
-            data, // Now contains the SNBT string if data exists
-        };
+        let palette = palettes.get(&input_palette).expect(&format!("Palette {:?} not found", input_palette)).clone();
 
-        editor.place_block(&(-transform.rotation).apply_to_block(block), transform.apply(Point3D::from(blockdata.pos))).await;
+
+        let swap = palette.swap_with(palette_data.name, palettes.get(&output_palette).expect(&format!("Palette {:?} not found", output_palette)), materials);
+        
+        match swap {
+            PaletteSwapResult::Block(id) => {
+                let block = (-transform.rotation).apply_to_block(Block{
+                    id,
+                    state: palette_data.properties.clone(),
+                    data, // Now contains the SNBT string if data exists
+                });
+
+                editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
+            },
+            PaletteSwapResult::Material(material_id, form) => {
+                let block = (-transform.rotation).apply_to_block(Block{
+                    id: BlockID::Unknown,
+                    state: palette_data.properties.clone(),
+                    data, // Now contains the SNBT string if data exists
+                });
+
+                placer.place_block(
+                    editor,
+                    transform.apply(Point3D::from(blockdata.pos)),
+                    material_id,
+                    form,
+                    block.state.as_ref(),
+                    block.data.as_ref()
+                ).await
+            }
+        }
     }
 
     Ok(())

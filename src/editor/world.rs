@@ -4,7 +4,11 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
+<<<<<<< HEAD
 use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrict, SuperDistrictID, DistrictType}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+=======
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+>>>>>>> decb88a (progress)
 
 
 use super::Editor;
@@ -18,6 +22,7 @@ pub struct World {
     pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
+    pub buildings : Vec<BuildingData>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -91,6 +96,7 @@ impl World {
             super_districts: HashMap::new(),
             district_map,
             super_district_map,
+            buildings: Vec::new(),
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,

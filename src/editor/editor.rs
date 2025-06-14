@@ -43,8 +43,14 @@ impl Editor {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point, self.world.build_area);
             return;
         }
+
         if block.id == BlockID::Unknown {
             warn!("Attempted to place an unknown block at {:?}, skipping", point);
+            return;
+        }
+
+        if self.block_cache.contains_key(&(point - self.build_area.origin)) {
+            warn!("Block at {:?} is already cached, skipping placement", point);
             return;
         }
 
@@ -78,6 +84,10 @@ impl Editor {
             let block = self.block_buffer[index].get_block();
             if response.status == 0 && self.world.get_block(point).is_none_or(|b| b != block) {
                 if block.id == BlockID::Air && self.world.get_block(point).is_none() {
+                    continue;
+                }
+
+                if self.block_cache.contains_key(&(point - self.build_area.origin)) && self.get_block(point) == block {
                     continue;
                 }
                 
