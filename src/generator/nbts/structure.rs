@@ -1,55 +1,45 @@
-use std::collections::HashMap;
+use serde_derive::{Deserialize, Serialize};
+use crate::{data::Loadable, generator::nbts::NBTMeta, geometry::{Cardinal, Point3D}};
 
-use serde_derive::{Serialize, Deserialize};
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct StructureId(String);
 
-use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Structure {
-    pub size : [i32; 3],
-    pub palette : Vec<PaletteBlock>,
-    pub blocks : Vec<BlockData>,
-    pub entities : Vec<Entity>,
-}
-
-impl Structure {
-    pub fn add_block(&mut self, block : Block, pos : Point3D) {
-        let state = self.palette.iter().position(|b| b.name == block.id && b.properties == block.state).unwrap_or_else(|| {
-            self.palette.push(PaletteBlock {
-                name: block.id,
-                properties: block.state,
-            });
-            self.palette.len() - 1
-        });
-
-        self.blocks.push(BlockData {
-            state,
-            pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-            nbt: block.data.map(|s| fastnbt::Value::from(s)),
-        });
+impl From<String> for StructureId {
+    fn from(id: String) -> Self {
+        StructureId(id)
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct PaletteBlock {
-    #[serde(rename = "Name")]
-    pub name : BlockID,
-    #[serde(rename = "Properties")]
-    pub properties : Option<HashMap<String, String>>,
+impl From<&str> for StructureId {
+    fn from(id: &str) -> Self {
+        StructureId(id.to_string())
+    }
 }
 
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct BlockData {
-    pub state: usize,
-    pub pos : [i32; 3],
-    pub nbt : Option<fastnbt::Value>
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Structure {
+    pub id : StructureId,
+    #[serde(flatten)]
+    pub meta : NBTMeta,
+    #[serde(default)]
+    pub facing : Cardinal,
+    #[serde(default)]
+    pub origin : Point3D
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Entity {
-    pub pos: [f64; 3],
-    #[serde(rename = "blockPos")]
-    pub block_pos: [i32; 3],
-    pub nbt: fastnbt::Value,
+impl Loadable<'_, Structure, StructureId> for Structure {
+    fn get_key(item: &Structure) -> StructureId {
+        item.id.clone()
+    }
+
+    fn post_load(items : &mut std::collections::HashMap<StructureId, Structure>) -> anyhow::Result<()> {
+        for item in items.values_mut() {
+            item.meta.path = item.meta.path.replace('\\', "/");
+        }
+        Ok(())
+    }
+
+    fn path() -> &'static str {
+        "structures"
+    }
 }
