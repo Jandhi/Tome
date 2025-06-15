@@ -1,12 +1,12 @@
 use std::{fmt::Debug, hash::Hash};
 
-pub fn a_star<TNode>(
+pub async fn a_star<TNode>(
     start : TNode,
     is_end: impl Fn(&TNode) -> bool,
     neighbors : impl Fn(&TNode) -> Vec<TNode>,
-    cost : impl Fn(&TNode) -> u64,
+    cost : impl Fn(u64, &TNode) -> u64,
     heuristic : impl Fn(&TNode) -> u64,
-    explore_node_callback : impl Fn(&TNode),
+    mut explore_node_callback : impl AsyncFnMut(&TNode),
 ) -> Option<TNode> where TNode: Clone + Eq + Hash + Debug {
     use std::collections::{BinaryHeap, HashSet};
 
@@ -39,7 +39,7 @@ pub fn a_star<TNode>(
     });
 
     while let Some(current_node) = open_set.pop() {
-        explore_node_callback(&current_node.state);
+        explore_node_callback(&current_node.state).await;
 
         if is_end(&current_node.state) {
             return Some(current_node.state);
@@ -52,7 +52,7 @@ pub fn a_star<TNode>(
                 continue;
             }
 
-            let new_cost = cost(&neighbor);
+            let new_cost = cost(current_node.cost, &neighbor);
             let new_heuristic = heuristic(&neighbor);
 
             open_set.push(Node {

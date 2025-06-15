@@ -177,7 +177,7 @@ impl World {
         self.super_district_map[point.x as usize][point.y as usize]
     }   
 
-    pub fn add_height(&mut self, point : Point2D) -> Point3D {
+    pub fn add_height(&self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
     }
 

@@ -19,8 +19,8 @@ mod tests {
 
         let palette = "test2".into();
 
-        let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
+        let midpoint = editor.world_mut().world_rect_2d().size / 2;
+        let point = editor.world_mut().add_height(midpoint);
 
         println!("Placing structure at: {:?}", point);
 
@@ -54,8 +54,8 @@ mod tests {
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
 
-        let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
+        let midpoint = editor.world_mut().world_rect_2d().size / 2;
+        let point = editor.world_mut().add_height(midpoint);
 
         println!("Placing structure at: {:?}", point);
 

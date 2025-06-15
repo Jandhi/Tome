@@ -28,7 +28,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let point = editor.world().add_height(Point2D { x, y: z });
+                let point = editor.world_mut().add_height(Point2D { x, y: z });
                 info!("Placing block at: {:?}", point);
                 editor.place_block( &block, point).await;
             }

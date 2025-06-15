@@ -21,8 +21,8 @@ mod tests {
         let path = env::current_dir().expect("Should get current dir")
             .join("data").join("structures").join("bedroom1.nbt");
         
-        let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
+        let midpoint = editor.world_mut().world_rect_2d().size / 2;
+        let point = editor.world_mut().add_height(midpoint);
 
         // Place the NBT structure in the world
         place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &Placer::new(&data.materials), &data, &"test1".into(), &"test2".into(), None, None)

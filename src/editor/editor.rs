@@ -34,6 +34,10 @@ impl Editor {
         editor
     }
 
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buffer_size = size;
+    }
+
     fn load_data(&mut self) -> anyhow::Result<()> {
         info!("Loading editor data");
         self.materials = Material::load()?;
@@ -113,7 +117,19 @@ impl Editor {
         self.block_buffer.clear();
     }
 
-    pub fn world(&mut self) -> &mut World {
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        if !self.block_buffer.is_empty() {
+            error!("Editor was dropped with non-empty block buffer!");
+        }
     }
 }

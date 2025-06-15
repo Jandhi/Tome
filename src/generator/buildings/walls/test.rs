@@ -37,8 +37,8 @@ mod tests {
             ]
         );
 
-        let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
+        let midpoint = editor.world_mut().world_rect_2d().size / 2;
+        let point = editor.world_mut().add_height(midpoint);
 
         info!("Placing structure at: {:?}", point);
 

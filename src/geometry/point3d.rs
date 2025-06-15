@@ -71,14 +71,14 @@ impl Point3D {
         Point3D { x, y, z }
     }
 
-    pub fn distance(&self, other: &Point3D) -> f64 {
+    pub fn distance(&self, other: Point3D) -> f64 {
         let dx = (self.x - other.x).pow(2) as f64;
         let dy = (self.y - other.y).pow(2) as f64;
         let dz = (self.z - other.z).pow(2) as f64;
         (dx + dy + dz).sqrt()
     }
 
-    pub fn distance_squared(&self, other: &Point3D) -> i32 {
+    pub fn distance_squared(&self, other: Point3D) -> i32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         let dz = self.z - other.z;
