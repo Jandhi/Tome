@@ -107,6 +107,8 @@ impl BlockForm {
             BlockForm::Chiseled => 1.0,
             BlockForm::Sign | BlockForm::WallSign | BlockForm::HangingSign | BlockForm::HangingWallSign => 0.1,
             BlockForm::Sparse => 0.0,
+            BlockForm::Wood => 1.0,
+            BlockForm::Log => 1.0,
         }
     }
 }
