@@ -74,7 +74,7 @@ pub fn is_point_surrounded_by_points(
     point: Point2D, points: &HashSet<Point2D>
 ) -> bool {
     ALL_8.iter().all(|direction| {
-        let neighbour = *point + *direction;
+        let neighbour = point + *direction;
         points.contains(&neighbour)
     })
 }

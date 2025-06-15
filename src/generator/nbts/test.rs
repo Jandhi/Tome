@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::{place::place_nbt, place_nbt_without_palette, NBTMeta}}, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{data::LoadedData, materials::{Material, Palette, Placer}, nbts::{place::place_nbt, place_nbt_without_palette, NBTMeta}}, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]

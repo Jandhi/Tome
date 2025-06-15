@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, env};
 use std::path::Path;
 use log::info;
-use crate::{editor::World, generator::{districts::wall, materials::MaterialPlacer, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_straight_not_diagonal_point2d, Point2D, Point3D, EAST_2D, NORTH_2D}, generator::nbts::place_nbt_without_palette, minecraft::{Block, BlockID, BlockForm}, noise::RNG};
+use crate::{editor::World, generator::{districts::wall, materials::{MaterialPlacer, Placer}, nbts::place_nbt_without_palette, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_straight_not_diagonal_point2d, Point2D, Point3D, EAST_2D, NORTH_2D}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 use crate::editor::Editor;
 
@@ -15,7 +15,7 @@ pub fn get_wall_points(
     let mut to_remove = Vec::new();
 
     for point in &wall_points {
-        editor.world().claim(*point, BuildClaim::Wall); // mark wall points as claimed
+        editor.world_mut().claim(*point, BuildClaim::Wall); // mark wall points as claimed
         //let neighbours = get_neighbours_in_set(*point, inner_points);
         //if neighbours.len() == 1 { // supposed to remove extra points
         //    to_remove.push(*point);
@@ -104,7 +104,7 @@ pub fn order_wall_points(
     list_of_ordered_vec
 }
 
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: & MaterialPlacer<'_>){
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &MaterialPlacer<'_>){
     let wall_points = get_wall_points(urban_points, editor);
     let ordered_wall_points = order_wall_points(&wall_points);
 
@@ -141,11 +141,11 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
     material_placer.place_blocks(
             editor, 
             main_points.into_iter(),
-            BlockForm::Log).await;
+            BlockForm::Log, None, None).await;
     material_placer.place_blocks(
             editor, 
             top_points.into_iter(),
-            BlockForm::Fence).await;
+            BlockForm::Fence, None, None).await;
 
 
     //add gates

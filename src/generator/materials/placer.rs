@@ -78,3 +78,25 @@ impl<'materials> Placer<'materials> {
         }
     }
 }
+
+pub struct MaterialPlacer<'materials> {
+    placer: Placer<'materials>,
+    material: MaterialId,
+}
+
+impl<'materials> MaterialPlacer<'materials> {
+    pub fn new(placer: Placer<'materials>, material: MaterialId) -> Self {
+        MaterialPlacer { placer, material }
+    }
+
+    pub async fn place_block(&self, editor: &mut Editor, point: Point3D, form: BlockForm, state: Option<&HashMap<String, String>>, data: Option<&String>) {
+        self.placer.place_block(editor, point, &self.material, form, state, data).await;
+    }
+
+    pub async fn place_blocks<Iter>(&self, editor: &mut Editor, points: Iter, form: BlockForm, state: Option<&HashMap<String, String>>, data: Option<&String>)
+    where
+        Iter: IntoIterator<Item = Point3D>,
+    {
+        self.placer.place_blocks(editor, points, &self.material, form, state, data).await;
+    }
+}

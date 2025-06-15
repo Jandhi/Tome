@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
-    use crate::generator::materials::{MaterialPlacer, Material, MaterialId};
+    use crate::{data::Loadable, editor::World, generator::{districts::{build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, materials::{MaterialPlacer, Placer}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::generator::materials::{Material, MaterialId};
 
     fn get_block_for_id(id : usize) -> Block {
         use BlockID::*;
@@ -494,8 +494,8 @@ mod tests {
         let material = MaterialId::new("oak_planks".to_string());
 
         let placer: MaterialPlacer = MaterialPlacer::new(
+            Placer::new(&materials),
             material.clone(),
-            &materials,
         );
 
         let glass = Block {
