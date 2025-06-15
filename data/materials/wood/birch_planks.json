@@ -16,6 +16,8 @@
         "sign"               : "minecraft:birch_sign",
         "wall_sign"          : "minecraft:birch_wall_sign",
         "hanging_sign"       : "minecraft:birch_hanging_sign",
-        "hanging_wall_sign"  : "minecraft:birch_hanging_wall_sign"
+        "hanging_wall_sign"  : "minecraft:birch_hanging_wall_sign",
+        "log"                : "minecraft:birch_log",
+        "wood"               : "minecraft:birch_wood"
     }
 }

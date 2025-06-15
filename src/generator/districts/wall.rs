@@ -1,11 +1,11 @@
-use std::collections::{HashMap, HashSet};
+use std::{collections::{HashMap, HashSet}, env};
+use std::path::Path;
 use log::info;
-
-use crate::{editor::World, generator::{BuildClaim, materials::MaterialPlacer}, noise::RNG, geometry::{get_neighbours_in_set, get_outer_points, Point2D, Point3D,}};
+use crate::{editor::World, generator::{districts::wall, materials::MaterialPlacer, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_straight_not_diagonal_point2d, Point2D, Point3D, EAST_2D, NORTH_2D}, generator::nbts::place_nbt_without_palette, minecraft::{Block, BlockID, BlockForm}, noise::RNG};
 
 use crate::editor::Editor;
 
-fn get_wall_points(
+pub fn get_wall_points(
     inner_points: &HashSet<Point2D>,
     editor: &mut Editor,
 ) -> (HashSet<Point2D>) {
@@ -16,10 +16,10 @@ fn get_wall_points(
 
     for point in &wall_points {
         editor.world().claim(*point, BuildClaim::Wall); // mark wall points as claimed
-        let neighbours = get_neighbours_in_set(*point, inner_points);
-        if neighbours.len() == 1 { // supposed to remove extra points
-            to_remove.push(*point);
-        }
+        //let neighbours = get_neighbours_in_set(*point, inner_points);
+        //if neighbours.len() == 1 { // supposed to remove extra points
+        //    to_remove.push(*point);
+        //}
     }
 
     for point in to_remove {
@@ -104,11 +104,175 @@ pub fn order_wall_points(
     list_of_ordered_vec
 }
 
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &RNG, MaterialPlacer: & MaterialPlacer<'_>){
-    let mut wall_points = get_wall_points(urban_points, editor);
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: & MaterialPlacer<'_>){
+    let wall_points = get_wall_points(urban_points, editor);
     let ordered_wall_points = order_wall_points(&wall_points);
 
     for wall_point_list in ordered_wall_points {
-        continue
+        build_wall_palisade(&wall_point_list, editor, rng, material_placer).await;
     }
+}
+
+pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &MaterialPlacer<'_>) {
+    let wall_points_with_height = wall_points.iter()
+        .map(|&point| {
+            let height = rng.rand_i32_range(4, 7);
+            let new_point = editor.world().add_height(point);
+            (new_point, height)
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut main_points = Vec::new();
+    let mut top_points = Vec::new();
+    let wall_points_with_world_height = wall_points.iter()
+        .map(|&point| editor.world().add_height(point))
+        .collect::<Vec<_>>();
+
+    for (point, height) in wall_points_with_height {
+        if editor.world().is_water(point.drop_y()) {
+            continue; // Skip water points
+        }
+        for y in point.y..point.y + height {
+            main_points.push(Point3D { x: point.x, y, z: point.z });
+        }
+        top_points.push(Point3D { x: point.x, y: point.y + height, z: point.z });
+        
+    }
+    material_placer.place_blocks(
+            editor, 
+            main_points.into_iter(),
+            BlockForm::Log).await;
+    material_placer.place_blocks(
+            editor, 
+            top_points.into_iter(),
+            BlockForm::Fence).await;
+
+
+    //add gates
+    build_wall_gate(&wall_points_with_world_height, editor, rng, material_placer, false, true, None).await
+
+}
+
+pub async fn build_wall_gate(
+    wall_points: &Vec<Point3D>,
+    editor: &mut Editor,
+    rng: &mut RNG,
+    material_placer: &MaterialPlacer<'_>,
+    is_thin: bool,
+    is_palisade: bool,
+    inner_wall_set: Option<&HashSet<Point2D>>,
+) {
+    let distance_to_next_gate = 60;
+    let gate_size = 7; // eventually this should depend on some type of gate we place
+    let mut gate_possible = 0;
+    let gate_height = 10; // height of the gate
+    let palisade_gate = env::current_dir().expect("Should get current dir")
+            .join("data").join("structures").join("city_wall").join("basic_palisade_gate.nbt");
+    let thin_gate = env::current_dir().expect("Should get current dir")
+            .join("data").join("structures").join("city_wall").join("basic_thin_gate.nbt");
+    let wide_gate = env::current_dir().expect("Should get current dir")
+            .join("data").join("structures").join("city_wall").join("basic_wide_gate.nbt");
+
+    let air = Block {
+            id: BlockID::Air,
+            data: None,
+            state: None,
+    };
+     let bedrock = Block {
+            id: BlockID::Bedrock,
+            data: None,
+            state: None,
+    };
+
+    for (i, point) in wall_points.iter().enumerate() {
+        if gate_possible == 0 {
+            if is_gate_possible(*point, wall_points, gate_size, i) {
+                if is_palisade {
+                    let middle_point = Point3D::new(wall_points[i+2].x, editor.world().get_height_at(wall_points[i+2].drop_y()) - 1, wall_points[i+2].z);
+                    let direction: Point2D;
+                    let neighbours: Vec<Point2D>;
+                    if point.x == wall_points[i + 6].x {
+                        direction = EAST_2D;
+                    } else {
+                        direction = NORTH_2D;
+                    }
+                    if direction == NORTH_2D {
+                        neighbours = ((middle_point.x - 2)..=(middle_point.x + 2))
+                            .flat_map(|x| {
+                                ((middle_point.z - 1)..=(middle_point.z + 1))
+                                    .map(move |z| Point2D { x, y: z })
+                            })
+                            .collect::<Vec<Point2D>>();
+                    } else {
+                        neighbours = ((middle_point.x - 1)..=(middle_point.x + 1))
+                            .flat_map(|x| {
+                                ((middle_point.z - 2)..=(middle_point.z + 2))
+                                    .map(move |z| Point2D { x, y: z })
+                            })
+                            .collect::<Vec<Point2D>>();
+                    }
+                    let height = middle_point.y + 1;
+                    for height in height..height + gate_height {
+                        for neighbour in neighbours.iter() {
+                            editor.place_block(
+                                &air,
+                                neighbour.add_y(height)
+                            ).await;
+                        }
+
+                    }
+                    println!("Placing palisade gate at: {:?}", middle_point);
+                    
+                    place_nbt_without_palette(Path::new(&palisade_gate), middle_point.into(), editor)
+                    .await
+                    .expect("Failed to place gate");
+
+                    editor.place_block(&bedrock, Point3D { x: middle_point.x, y: middle_point.y + 5, z: middle_point.z }).await;
+
+
+
+
+                } else if is_thin {
+                    continue; // thin gates are not implemented yet
+                } else {
+                    continue; // thin gates are not implemented yet
+                }
+                gate_possible = distance_to_next_gate;
+            }
+
+
+            
+        } else {
+            gate_possible -= 1;
+        }
+    }
+}
+
+pub fn is_gate_possible(
+    point: Point3D,
+    wall_list: &Vec<Point3D>,
+    gate_size: i32,
+    index: usize,
+) -> bool {
+    // Check if the point is a valid gate position
+    if index + gate_size as usize > wall_list.len() {
+        return false; // Not enough points to form a gate, doesnt loop
+    }
+    println!("Checking gate at index: {}, point: {:?}", index, point);
+    println!("{:?}", is_straight_not_diagonal_point2d(
+        Point2D { x: point.x, y: point.z },
+        Point2D { x: wall_list[index + gate_size as usize - 1].x, y: wall_list[index + gate_size as usize - 1].z },
+        gate_size - 1,
+    ));
+    println!("{:?}", (point.y - wall_list[index + gate_size as usize - 1].y).abs());
+    // Check if the point is straight and not diagonal
+    if is_straight_not_diagonal_point2d(
+        Point2D { x: point.x, y: point.z },
+        Point2D { x: wall_list[index + gate_size as usize - 1].x, y: wall_list[index + gate_size as usize - 1].z },
+        gate_size - 1,
+    ) && (point.y - wall_list[index + gate_size as usize - 1].y).abs() <= 1 {
+        return true;
+    }
+
+    false
 }

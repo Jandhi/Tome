@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::place::place_nbt}, http_mod::GDMCHTTPProvider, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{materials::{Material, Palette}, nbts::{place::place_nbt, place_nbt_without_palette}}, http_mod::GDMCHTTPProvider, util::init_logger};
 
 
     #[tokio::test]
@@ -30,6 +30,32 @@ mod tests {
 
         // Place the NBT structure in the world
         place_nbt(Path::new(&path), point.into(), &mut editor, &materials, input_palette, output_palette)
+            .await
+            .expect("Failed to place NBT structure");
+
+        info!("NBT structure placed successfully");
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn test_place_nbt_without_palette() {
+        init_logger();
+
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+
+        // Assuming you have a valid NBT file path
+        let path = env::current_dir().expect("Should get current dir")
+            .join("data").join("structures").join("city_wall").join("basic_palisade_gate.nbt");
+
+        let mut midpoint = editor.world().world_rect_2d().size / 2;
+        let mut point = editor.world().add_height(midpoint);
+        point.y = point.y - 1; // Adjust height if necessary
+
+        // Place the NBT structure in the world
+        place_nbt_without_palette(Path::new(&path), point.into(), &mut editor)
             .await
             .expect("Failed to place NBT structure");
 

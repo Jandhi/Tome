@@ -1,10 +1,10 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrict, SuperDistrictID, DistrictType}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 
 use super::Editor;
@@ -260,5 +260,17 @@ impl World {
         } else {
             log::warn!("Tried to claim point {:?} out of bounds", point);
         }
+    }
+
+    pub fn get_urban_points(&self) -> HashSet<Point2D> { // BUG, doesnt get all points for some reason a handful of points are missing
+        self.iter_points_2d()
+            .filter(|&point| self.get_district_type(point).expect("Failed to get district type") == DistrictType::Urban)
+            .collect()
+    }
+
+    pub fn get_district_type(&self, point: Point2D) -> Option<DistrictType> {
+        self.get_super_district_at(point).and_then(|district_id| {
+            self.super_districts.get(&district_id).map(|district| district.data.district_type)
+        })
     }
 }
