@@ -117,6 +117,7 @@ impl Iterator for Rect3DIterator {
         }
 
         self.current = Some(next);
+
         Some(current)
     }
 }

@@ -1,6 +1,6 @@
 use lerp::num_traits::clamp;
 
-use crate::{editor::Editor, generator::paths::a_star, geometry::{Point2D, Point3D, ALL_8}};
+use crate::{editor::Editor, generator::{materials::MaterialId, paths::{a_star, path::{Path, PathPriority}}}, geometry::{Point2D, Point3D, ALL_8}};
 
 fn mod4_point(point : Point3D, editor : &Editor) -> Point3D {
     let point = Point2D{
@@ -25,6 +25,37 @@ fn get_best_mod4_point(point : Point3D, editor : &Editor) -> Point3D {
             p.y.abs_diff(point.y)
         })
         .unwrap_or(mod4_point(point, editor))
+}
+
+pub async fn get_path(
+    editor: &Editor,
+    start: Point3D,
+    end: Point3D,
+    priority : PathPriority,
+    material : MaterialId,
+    explore_callback: impl AsyncFnMut(&Vec<Point3D>)
+) -> Option<Path> {
+    let new_start = get_best_mod4_point(start, editor);
+    let new_end = get_best_mod4_point(end, editor);
+
+    let width = match priority {
+        PathPriority::Low => 1,
+        PathPriority::Medium => 2,
+        PathPriority::High => 3,
+    };
+
+    let mut path = route_path(editor, new_start, new_end, explore_callback).await?;
+
+    if !path.is_empty() {
+        path = fill_out_path(path, priority != PathPriority::Low);
+    }
+
+    Some(Path::new(
+        path,
+        width,
+        material,
+        priority,
+    ))
 }
 
 pub async fn route_path(

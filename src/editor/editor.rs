@@ -92,7 +92,7 @@ impl Editor {
             return block.clone();
         }
 
-        self.world.get_block(point).expect("Failed to get block from world")
+        self.world.get_block(point).expect(&format!("Block at {:?} not found in world", point))
     }
 
     pub async fn flush_buffer(&mut self) {

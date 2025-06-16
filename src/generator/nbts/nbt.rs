@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_derive::{Serialize, Deserialize};
 
-use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
+use crate::{geometry::Point3D, http_mod::PositionedBlock, minecraft::{Block, BlockID}};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NBTStructure {
@@ -27,6 +27,51 @@ impl NBTStructure {
             pos: [pos.x as i32, pos.y as i32, pos.z as i32],
             nbt: block.data.map(|s| fastnbt::Value::from(s)),
         });
+    }
+
+    pub fn from_blocks(blocks : Vec<(Block, Point3D)>) -> Self {
+        let mut palette = Vec::new();
+        let mut block_data = Vec::new();
+
+        let min : Point3D = blocks.iter().fold(
+            Point3D { x: 0, y: 0, z: 0 },
+            |acc, (_, pos)| Point3D {
+                x: acc.x.min(pos.x),
+                y: acc.y.min(pos.y),
+                z: acc.z.min(pos.z),
+            },
+        );
+        let max : Point3D = blocks.iter().fold(
+            Point3D { x: 0, y: 0, z: 0 },
+            |acc, (_, pos)| Point3D {
+                x: acc.x.max(pos.x),
+                y: acc.y.max(pos.y),
+                z: acc.z.max(pos.z),
+            },
+        );
+
+        for (block, pos) in blocks {
+            let state = palette.iter().position(|b : &PaletteBlock| b.name == block.id && b.properties == block.state).unwrap_or_else(|| {
+                palette.push(PaletteBlock {
+                    name: block.id,
+                    properties: block.state,
+                });
+                palette.len() - 1
+            });
+
+            block_data.push(BlockData {
+                state,
+                pos: [pos.x as i32, pos.y as i32, pos.z as i32],
+                nbt: block.data.map(|s| fastnbt::Value::from(s)),
+            });
+        }
+
+        NBTStructure {
+            size: [max.x - min.x + 1, max.y - min.y + 1, max.z - min.z + 1],
+            palette,
+            blocks: block_data,
+            entities: Vec::new(), // Entities can be added later if needed
+        }
     }
 }
 

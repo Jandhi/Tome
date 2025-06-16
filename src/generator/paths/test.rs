@@ -3,7 +3,7 @@ mod tests {
     use lerp::num_traits::Signed;
     use log::info;
 
-    use crate::{editor::{self, World}, generator::paths::{a_star, routing::route_path}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::init_logger};
+    use crate::{editor::{self, World}, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::{Path, PathPriority}, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::init_logger};
 use std::{sync::Mutex, time::Instant};
 
     #[tokio::test]
@@ -70,6 +70,28 @@ use std::{sync::Mutex, time::Instant};
         for point in path {
             editor.place_block(&BlockID::RedWool.into(), point).await;
         }
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn build() {
+        init_logger();
+
+        let world = World::new(&GDMCHTTPProvider::new()).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let rect = editor.world().world_rect_2d();
+
+        let start = editor.world().add_height(rect.origin);
+        let end = editor.world().add_height(rect.last());
+
+        let data = LoadedData::load().expect("Failed to load data");
+
+        
+        let path = get_path(&editor, start, end, PathPriority::Medium, MaterialId::new("cobblestone".to_string()), async |_| {}).await.expect("Failed to route path");
+
+        build_path(&mut editor, &data, &path).await;
 
         editor.flush_buffer().await;
     }

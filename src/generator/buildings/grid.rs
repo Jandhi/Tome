@@ -62,6 +62,10 @@ impl Grid {
         let origin = self.grid_to_world(grid_coordinate);
 
         let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
+
+
+        println!("Facing: {:?}, Direction: {:?}, Rotation: {:?}", structure.facing, direction, rotation);
+        println!("Building structure: {:?} at grid coordinate: {:?} with rotation: {:?}", structure.id, grid_coordinate, rotation);
         
         let mut transform = match rotation {
             Rotation::None => origin.into(),
