@@ -1,0 +1,7 @@
+{
+    "id" : "white_wool",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:white_wool"
+    }
+}

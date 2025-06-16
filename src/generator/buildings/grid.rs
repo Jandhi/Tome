@@ -58,7 +58,7 @@ impl Grid {
         point - self.origin
     }
 
-    pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
+    pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
 
         let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
@@ -80,7 +80,7 @@ impl Grid {
         place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette, None, None).await
     }
 
-    pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
+    pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &mut Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
         
         let transform = match rotation {

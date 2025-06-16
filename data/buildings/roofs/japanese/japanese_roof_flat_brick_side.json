@@ -4,7 +4,7 @@
     "path" : "data/buildings/roofs/japanese/japanese_roof_flat_brick_side.nbt",
     "origin" : {
         "x": 1,
-        "y": -1
+        "y": 0
     },
     "palette" : "japanese_dark_blackstone",
     "tags" : ["japanese", "wet"]

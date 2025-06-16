@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{walls::Wall, Grid}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::Structure}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{walls::Wall, Grid}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::Structure}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::init_logger};
 
 
     #[tokio::test]
@@ -29,15 +29,16 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
         let structure = structures.get(&"rotation_test".into()).expect("Structure not found");
 
-        let placer = Placer::new(&data.materials);
+        let mut rng = RNG::new(42.into());
+        let mut placer = Placer::new(&data.materials, &mut rng);
 
-        grid.build_structure(&mut editor, &placer, &structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &palette).await
+        grid.build_structure(&mut editor, &mut placer, &structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &structure, Point3D::new(0, 1, 0), Cardinal::East, &data, &palette).await
+        grid.build_structure(&mut editor, &mut placer, &structure, Point3D::new(0, 1, 0), Cardinal::East, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &structure, Point3D::new(0, 2, 0), Cardinal::South, &data, &palette).await
+        grid.build_structure(&mut editor, &mut placer, &structure, Point3D::new(0, 2, 0), Cardinal::South, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &structure, Point3D::new(0, 3, 0), Cardinal::West, &data, &palette).await
+        grid.build_structure(&mut editor, &mut placer, &structure, Point3D::new(0, 3, 0), Cardinal::West, &data, &palette).await
             .expect("Failed to build structure");
 
         info!("NBT structure placed successfully");
@@ -67,15 +68,16 @@ mod tests {
         let wall = walls.get(&"japanese_wall_single_plain".into()).expect("Structure not found");
         let door_wall = walls.get(&"japanese_wall_single_plain_door".into()).expect("Structure not found");
         
-        let placer = Placer::new(&data.materials);
+        let mut rng = RNG::new(42.into());
+        let mut placer = Placer::new(&data.materials, &mut rng);
 
-        grid.build_structure(&mut editor, &placer, &door_wall.structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &door_wall.structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &"test1".into()).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::South, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::South, &data, &"test1".into()).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::East, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::East, &data, &"test1".into()).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::West, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::West, &data, &"test1".into()).await
             .expect("Failed to build structure");
 
         info!("NBT structure placed successfully");

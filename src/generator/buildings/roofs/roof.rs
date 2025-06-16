@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, nbts::{place_nbt, place_structure, Structure, StructureId}}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}, minecraft::BlockID};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_nbt, place_structure, Structure, StructureId}}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}, minecraft::BlockID, noise::RNG};
 
 #[derive(Serialize, Deserialize)]
 pub struct Roof {
     #[serde(flatten)]
-    structure : Structure,
+    pub structure : Structure,
 
-    roof_type : RoofType,
+    pub(crate) roof_type : RoofType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,12 +46,19 @@ impl Loadable<'_, Roof, StructureId> for Roof {
     }
 }
 
-pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &BuildingData) -> anyhow::Result<()> {
-    let placer = crate::generator::materials::Placer::new(&data.materials);
-    
-    let side = data.roofs.values().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Side)).expect("No side roof found");
-    let corner = data.roofs.values().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Corner)).expect("No corner roof found");
-    let inner = data.roofs.values().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Inner)).expect("No inner roof found");
+pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &BuildingData, rng : &mut RNG) -> anyhow::Result<()> {
+    let mut placer = Placer::new(&data.materials, rng);
+
+    let roofs = data.roofs.values().filter(|roof| 
+        roof.structure.style.is_some_and(|style| style == building.style) && !roof.structure.id.0.contains("stairs")
+    ).collect::<Vec<_>>();
+
+    let side = roofs.iter().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Side))
+        .expect("No side roof found");
+    let corner = roofs.iter().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Corner))
+        .expect("No corner roof found");
+    let inner = roofs.iter().find(|roof| roof.roof_type == RoofType::Hip(HipRoofPart::Inner))
+        .expect("No inner roof found");
 
     for cell in building.shape.cells().iter() {
         if building.shape.cells().iter().any(|other_cell| *other_cell == *cell + UP) {
@@ -76,7 +83,7 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &placer, &corner.structure, offset, direction, data, &building.palette, false ,false).await?;
+                //place_structure(editor, &mut placer, &corner.structure, offset, direction, data, &building.palette, false ,false).await?;
             }
             else if !neighbours[&direction] {
                 offset += Point3D::from(direction.turn_right()) * (match direction {
@@ -87,17 +94,17 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
 
-                place_structure(editor, &placer, &side.structure, offset, direction.turn_right(), data, &building.palette, false, false).await?;
+                //place_structure(editor, &mut placer, &side.structure, offset, direction.turn_right(), data, &building.palette, false, false).await?;
             }
             else if !neighbours[&direction.turn_left()] {
-                place_structure(editor, &placer, &side.structure, offset, direction, data, &building.palette, false, true).await?;
+                place_structure(editor, &mut placer, &side.structure, offset, direction, data, &building.palette, true, false).await?;
             }
             else {
                 offset += Point3D::from(direction) * (match direction {
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &placer, &inner.structure, offset, direction, data, &building.palette, false, false).await?;
+                //place_structure(editor, &mut placer, &inner.structure, offset, direction, data, &building.palette, false, false).await?;
             }
         }
     }

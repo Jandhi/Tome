@@ -493,8 +493,9 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("oak_planks".to_string());
 
-        let placer: MaterialPlacer = MaterialPlacer::new(
-            Placer::new(&materials),
+        let mut placer_rng = rng.derive();
+        let mut placer: MaterialPlacer = MaterialPlacer::new(
+            Placer::new(&materials, &mut placer_rng),
             material.clone(),
         );
 
@@ -543,7 +544,7 @@ mod tests {
             }
         }
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &mut placer).await;
 
     }
 }

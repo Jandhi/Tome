@@ -3,7 +3,7 @@
 mod tests {
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::Placer, Material, MaterialId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockForm, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::Placer, Material, MaterialId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockForm, noise::RNG, util::init_logger};
 
     #[test]
     fn deserialize_material() {
@@ -51,8 +51,10 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
         let world_rect = editor.world_mut().world_rect_2d();
-        let placer : Placer = Placer::new(
-            &materials
+        let mut rng = RNG::new(42.into());
+        let mut placer : Placer = Placer::new(
+            &materials,
+            &mut rng
         ).with_shade_function(move |point| {
             point.x as f32 / world_rect.size.x as f32
         });
@@ -74,8 +76,10 @@ mod tests {
         let material = MaterialId::new("cobblestone".to_string());
 
         let perlin = PerlinSettings::large(42.into());
-        let placer: Placer = Placer::new(
+        let mut rng = RNG::new(42.into());
+        let mut placer: Placer = Placer::new(
             &materials,
+            &mut rng
         ).with_shade_function(move |point| {
             perlin.get(point) as f32 + 0.5
         });
@@ -109,8 +113,10 @@ mod tests {
         let gradient = Gradient::new(PerlinSettings::small(25.into()), 1.0, 0.05)
             .with_x(0, editor.world_mut().build_area.width());
 
-        let placer: Placer = Placer::new(
+        let mut rng = RNG::new(42.into());
+        let mut placer: Placer = Placer::new(
             &materials,
+            &mut rng
         ).with_shade_function(move |point| {
             info!("Point: {:?}", gradient.get_value(point));
             gradient.get_value(point)

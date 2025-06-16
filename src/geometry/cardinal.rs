@@ -1,3 +1,5 @@
+use std::ops::Neg;
+
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 use crate::geometry::{Point2D, Point3D, EAST, EAST_2D, NORTH, NORTH_2D, SOUTH, SOUTH_2D, WEST, WEST_2D};
@@ -75,6 +77,19 @@ impl Cardinal {
             Cardinal::East  => Cardinal::North,
             Cardinal::South => Cardinal::East,
             Cardinal::West  => Cardinal::South,
+        }
+    }
+}
+
+impl Neg for Cardinal {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Cardinal::North => Cardinal::South,
+            Cardinal::East  => Cardinal::West,
+            Cardinal::South => Cardinal::North,
+            Cardinal::West  => Cardinal::East,
         }
     }
 }

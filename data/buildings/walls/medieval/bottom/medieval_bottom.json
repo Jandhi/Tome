@@ -1,0 +1,14 @@
+{
+  "id": "medieval_bottom",
+  "path": "data/buildings/walls/medieval/bottom/medieval_bottom.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 0,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "vertical_position": "bottom"
+}

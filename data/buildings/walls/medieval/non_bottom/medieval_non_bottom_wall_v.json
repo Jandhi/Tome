@@ -1,0 +1,14 @@
+{
+  "id": "medieval_non_bottom_wall_v",
+  "path": "data/buildings/walls/medieval/non_bottom/medieval_non_bottom_wall_v.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 0,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "vertical_position": "non_bottom"
+}

@@ -1,0 +1,6 @@
+{
+  "id" : "medieval_roof",
+
+  "primary_roof" : "spruce_planks",
+  "secondary_roof" : "dark_oak_planks"
+}

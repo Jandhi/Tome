@@ -1,0 +1,14 @@
+{
+  "id": "medieval_single_wall",
+  "path": "data/buildings/walls/medieval/single/medieval_single_wall.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 1,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "vertical_position": "single"
+}

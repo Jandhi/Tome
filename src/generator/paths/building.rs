@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{editor::Editor, generator::{data::LoadedData, materials::{MaterialPlacer, Placer}, paths::path::Path}, geometry::{get_surrounding_set, Point2D, Point3D, DOWN, UP}, minecraft::{BlockForm, BlockID}, util::MeanExt};
+use crate::{editor::Editor, generator::{data::LoadedData, materials::{MaterialPlacer, Placer}, paths::path::Path}, geometry::{get_surrounding_set, Point2D, Point3D, DOWN, UP}, minecraft::{BlockForm, BlockID}, noise::RNG, util::MeanExt};
 
 pub async fn build_path(
     editor : &mut Editor,
     data : &LoadedData,
     path : &Path,
+    rng : &mut RNG,
 ) {
     let mut points_2d = path.points()
         .iter()
@@ -62,8 +63,8 @@ pub async fn build_path(
             .mean()); 
     }
 
-    let placer = MaterialPlacer::new(
-        Placer::new(&data.materials), 
+    let mut placer = MaterialPlacer::new(
+        Placer::new(&data.materials, rng),
         path.material().clone()
     );
 

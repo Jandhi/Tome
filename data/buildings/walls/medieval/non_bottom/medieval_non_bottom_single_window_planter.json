@@ -1,0 +1,15 @@
+{
+  "id": "medieval_non_bottom_single_window_planter",
+  "path": "data/buildings/walls/medieval/non_bottom/medieval_non_bottom_single_window_planter.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 1,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "wall_type": "window",
+  "vertical_position": "non_bottom"
+}

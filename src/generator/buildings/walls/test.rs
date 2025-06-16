@@ -3,7 +3,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{editor::World, generator::{buildings::{roofs::build_roof, shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::{build_compass, init_logger}};
+    use crate::{editor::World, generator::{buildings::{roofs::build_roof, shape::BuildingShape, walls::wall::build_walls, BuildingData, Grid}, data::LoadedData, materials::PaletteId, style::Style}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -21,19 +21,11 @@ mod tests {
             // Base layer
             Point3D::new(0, 0, 0),
             Point3D::new(1, 0, 0),
-            Point3D::new(2, 0, 0),
-            Point3D::new(2, 0, 1),
-            Point3D::new(2, 0, 2),
-            Point3D::new(1, 0, 2),
-            Point3D::new(0, 0, 2),
             Point3D::new(0, 0, 1),
-            // Second layer (for height)
+            // Second layer
             Point3D::new(0, 1, 0),
-            Point3D::new(2, 1, 0),
-            Point3D::new(2, 1, 2),
-            Point3D::new(0, 1, 2),
-            // Third layer (roof base)
-            Point3D::new(1, 2, 1),
+            Point3D::new(1, 1, 0),
+            Point3D::new(0, 1, 1),
             ]
         );
 
@@ -49,7 +41,8 @@ mod tests {
             id: 0.into(),
             shape,
             grid,
-            palette: palette.clone()
+            palette: palette.clone(),
+            style: Style::Medieval,
         };
 
         for cell in building.shape.cells().iter() {
@@ -57,9 +50,11 @@ mod tests {
             editor.place_block(&BlockID::RedMushroomBlock.into(), midpoint).await;
         }
 
-        build_walls(&mut editor, &walls.values().collect::<Vec<_>>(), &building, &data).await.expect("Failed to build walls");
+        let mut rng = RNG::new(100.into());
 
-        build_roof(&mut editor, &data, &building).await.expect("Failed to build roof");        
+        build_walls(&mut editor, &walls.values().collect::<Vec<_>>(), &building, &data, &mut rng).await.expect("Failed to build walls");
+
+        build_roof(&mut editor, &data, &building, &mut rng).await.expect("Failed to build roof");        
 
         build_compass(&mut editor).await;
 

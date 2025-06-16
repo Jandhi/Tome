@@ -44,6 +44,10 @@ pub enum BlockForm {
     #[serde(rename = "hanging_wall_sign")]
     HangingWallSign,
 
+    // DECORATION
+    #[serde(rename = "flower")]
+    Flower,
+
     // SPARSE
     #[serde(rename = "sparse")]
     Sparse,
@@ -109,6 +113,7 @@ impl BlockForm {
             BlockForm::Sparse => 0.0,
             BlockForm::Wood => 1.0,
             BlockForm::Log => 1.0,
+            BlockForm::Flower => 0.0,
         }
     }
 }

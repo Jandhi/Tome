@@ -1,0 +1,15 @@
+{
+  "id": "medieval_bottom_end_triple_log",
+  "path": "data/buildings/walls/medieval/bottom/medieval_bottom_end_triple_log.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 0,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 3.0,
+  "vertical_position": "bottom",
+  "horizontal_position": "end"
+}

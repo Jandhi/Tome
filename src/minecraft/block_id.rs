@@ -829,6 +829,10 @@ pub enum BlockID {
     #[serde(rename = "minecraft:chain")]
     Chain,
 
+    // === IRON BARS ===
+    #[serde(rename = "minecraft:iron_bars")]
+    IronBars,
+
     // === BEDROCK ===
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,

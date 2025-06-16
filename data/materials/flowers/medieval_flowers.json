@@ -1,0 +1,9 @@
+{
+    "id" : "medieval_flowers",
+    "connections" : {},
+    "blocks" : {
+        "flower" : {
+            "minecraft:poppy" : 1.0
+        }
+    }
+}

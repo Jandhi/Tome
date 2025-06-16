@@ -104,7 +104,7 @@ pub fn order_wall_points(
     list_of_ordered_vec
 }
 
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &MaterialPlacer<'_>){
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut MaterialPlacer<'_>){
     let wall_points = get_wall_points(urban_points, editor);
     let ordered_wall_points = order_wall_points(&wall_points);
 
@@ -113,7 +113,7 @@ pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rn
     }
 }
 
-pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &MaterialPlacer<'_>) {
+pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut MaterialPlacer<'_>) {
     let wall_points_with_height = wall_points.iter()
         .map(|&point| {
             let height = rng.rand_i32_range(4, 7);

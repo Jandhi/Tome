@@ -3,7 +3,7 @@ mod tests {
     use lerp::num_traits::Signed;
     use log::info;
 
-    use crate::{editor::{self, World}, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::{Path, PathPriority}, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, util::init_logger};
+    use crate::{editor::{self, World}, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::{Path, PathPriority}, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::init_logger};
 use std::{sync::Mutex, time::Instant};
 
     #[tokio::test]
@@ -90,8 +90,8 @@ use std::{sync::Mutex, time::Instant};
 
         
         let path = get_path(&editor, start, end, PathPriority::Medium, MaterialId::new("cobblestone".to_string()), async |_| {}).await.expect("Failed to route path");
-
-        build_path(&mut editor, &data, &path).await;
+        let mut rng = RNG::new(42.into());
+        build_path(&mut editor, &data, &path, &mut rng).await;
 
         editor.flush_buffer().await;
     }
