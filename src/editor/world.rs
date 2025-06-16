@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, districts::{District, DistrictID, SuperDistrict, SuperDistrictID, DistrictType}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, SuperDistrict, SuperDistrictID, DistrictType}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 
 use super::Editor;
@@ -18,6 +18,7 @@ pub struct World {
     pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
+    pub buildings : Vec<BuildingData>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -91,6 +92,7 @@ impl World {
             super_districts: HashMap::new(),
             district_map,
             super_district_map,
+            buildings: Vec::new(),
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,
@@ -181,6 +183,7 @@ impl World {
 
     pub fn get_block(&self, mut point: Point3D) -> Option<Block> {
         point = point + self.build_area.origin;
+        info!("Getting block at point: {:?}", point);
 
         let chunk_coordinates = point_to_chunk_coordinates(point);
 
@@ -232,7 +235,7 @@ impl World {
     }
 
     pub fn get_data_index(&self, data : &LongArray, point : Point3D) -> Option<usize> {
-        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
+        let index = ((point.x.rem_euclid(CHUNK_SIZE)) + (point.z.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE + (point.y.rem_euclid(CHUNK_SIZE)) * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
         let indices_per_long = ((CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as f32 / data.len() as f32).ceil() as usize;
 
@@ -248,6 +251,10 @@ impl World {
 
     pub fn is_water(&self, point : Point2D) -> bool {
         self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
+    }
+
+    pub fn is_water_3d(&self, point : Point3D) -> bool {
+        self.get_block(point).expect("failed to get block").id == BlockID::Water
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {

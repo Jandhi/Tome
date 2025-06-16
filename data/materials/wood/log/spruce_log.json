@@ -1,0 +1,7 @@
+{
+    "id" : "spruce_log",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:spruce_log"
+    }
+}

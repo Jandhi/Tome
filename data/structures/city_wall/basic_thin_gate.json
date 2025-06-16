@@ -1,6 +1,6 @@
 {
-    "name" : "basic_thin_gate",
-    "filepath" : "data/structures/city_wall/basic_thin_gate.nbt",
+    "id" : "basic_thin_gate",
+    "path" : "data/structures/city_wall/basic_thin_gate.nbt",
     "origin" : {
         "x" : 1,
         "y" : 1,

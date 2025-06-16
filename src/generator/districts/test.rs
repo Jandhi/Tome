@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
-    use crate::generator::materials::{MaterialPlacer, Material, MaterialId};
+    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::generator::materials::{Placer, Material, MaterialId};
+    use crate::generator::nbts::Structure;
 
     fn get_block_for_id(id : usize) -> Block {
         use BlockID::*;
@@ -493,8 +494,7 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("oak_planks".to_string());
 
-        let placer: MaterialPlacer = MaterialPlacer::new(
-            material.clone(),
+        let placer: Placer = Placer::new(
             &materials,
         );
 
@@ -509,41 +509,39 @@ mod tests {
             state: None,
         };
 
-        for x in 0..build_area.size.x {
-            for z in 0..build_area.size.z {
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
-                let district_id = editor.world().district_map[x as usize][z as usize];
+        let structures = Structure::load().expect("Failed to load structures");
 
-                let Some(district_id) = district_id else {
-                    continue;
-                };
-                let Some(super_district_id) = super_district_id else {
-                    continue;
-                };
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::Palisade).await;
 
-                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
-                let height = height_map[x as usize][z as usize] - build_area.origin.y - 1;
-                let point = Point3D::new(x, height + 1, z);
+    }
 
-                let World {districts,super_districts, .. } = editor.world();
-                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = districts.get(&district_id).expect("Failed to get district");
+    #[tokio::test]
+    async fn standard_wall() {
+        init_logger();
 
-                if super_district.data.edges.contains(&point) {
-                    editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
-                }
-                else if district.data.edges.contains(&point) {
-                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
-                    editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
-                }
-                else {
-                    editor.place_block(&block, Point3D::new(x, height, z)).await;
-                }
+        // Initialize the test data
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
 
-            }
-        }
+        
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer).await;
+        let world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+        generate_districts(seed, &mut editor).await;
+
+        let materials = Material::load().expect("Failed to load materials");
+        let material = MaterialId::new("stone_bricks".to_string());
+
+        let placer: Placer = Placer::new(
+            &materials,
+        );
+
+        let structures = Structure::load().expect("Failed to load structures");
+
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::Standard).await;
 
     }
 }

@@ -1,7 +1,6 @@
 {
-    "name" : "basic_wide_gate",
-    "type" : "gate",
-    "filepath" : "data/structures/city_wall/basic_wide_gate.nbt",
+    "id" : "basic_wide_gate",
+    "path" : "data/structures/city_wall/basic_wide_gate.nbt",
     "origin" : {
         "x" : 3,
         "y" : 1,

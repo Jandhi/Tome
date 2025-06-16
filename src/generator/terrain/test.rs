@@ -6,7 +6,7 @@ mod tests {
     use log::info;
     use schemars::gen;
 
-    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, geometry::Point3D, generator::districts::plant_forest};
+    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::districts::plant_forest,  geometry::{Point2D, Point3D}};
 
     #[test]
     fn deserialize_tree() {
@@ -116,6 +116,28 @@ mod tests {
         generate_tree(Tree::MegaPine, &mut editor, Point3D::new(100, 0, 150), &mut rng, &palette).await;
 
         editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn cut_trees() {
+        init_logger();
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        println!("Build area: {:?}", build_area);
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+        let mut points = HashSet::new();
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                points.insert(Point2D::new(x, z));
+            }
+        }
+
+        log_trees(&mut editor, points).await;
+        editor.flush_buffer().await;
+
     }
 
 }
