@@ -103,6 +103,5 @@ mod tests {
         to_writer(file, &nbt_structure).expect("Failed to write NBT structure to file");
     }
 
-
     
 }

@@ -38,7 +38,9 @@ pub fn extract_json(response : &str) -> Option<String> {
 pub async fn try_ai_json<T>(query : &str) -> Option<T> 
 where T: for<'de> Deserialize<'de> + schemars::JsonSchema {
     let schema = serde_json::to_string_pretty(&schema_for!(T)).unwrap();
-    let response = get_ai_message(&format!("You are a helpful assistant. Format your response in JSON according to the following schema: {}", schema), query).await;
+    let response = get_ai_message(&format!("You are a helpful assistant. Format your response in JSON according to the following schema: {}. Do NOT include the schema in teh response.", schema), query).await;
+
+    println!("AI Response: {}", response);
 
     let json_response = extract_json(&response).unwrap_or(response.to_string());
 

@@ -56,6 +56,16 @@ impl GDMCHTTPProvider {
         Ok(command_response)
     }
 
+    pub async fn give_player_book(&self, pages : &Vec<&str>, title : &str, author : &str) -> anyhow::Result<CommandResponse> {
+        let pages_json = pages.join(",");
+
+        let command = format!("give @a written_book[{{pages:[{}],title:\"{}\",author:\"{}\"}}]", pages_json, title, author);
+
+        println!("Command: {}", command);
+
+        Ok(self.command(vec![command]).await?[0].clone())
+    }
+
     pub async fn get_blocks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<PositionedBlock>> {        
         let include_state = true;
         let include_data = true;
