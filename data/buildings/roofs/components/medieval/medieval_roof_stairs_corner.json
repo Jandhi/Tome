@@ -1,17 +1,17 @@
 {
-  "id": "medieval_roof_side",
-  "path": "data/buildings/roofs/medieval//medieval_roof_side.nbt",
+  "id": "medieval_roof_stairs_corner",
+  "path": "data/buildings/roofs/components/medieval/medieval_roof_stairs_corner.nbt",
   "facing": "north",
   "origin": {
     "x": 1,
     "y": 1,
-    "z": 0
+    "z": 1
   },
   "palette": "medieval_roof",
   "style": "medieval",
   "weight": 1.0,
   "roof_type": {
     "type": "hip",
-    "shape": "side"
+    "shape": "corner"
   }
 }

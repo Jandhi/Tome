@@ -1,0 +1,7 @@
+{
+    "id" : "japanese_roof_flat_brick",
+    "style" : "japanese",
+    "side" : "japanese_roof_flat_brick_side",
+    "corner" : "japanese_roof_flat_brick_outer_corner",
+    "inner" : "japanese_roof_flat_brick_inner_corner"
+}

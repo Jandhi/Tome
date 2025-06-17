@@ -56,7 +56,7 @@ impl Palette {
             // This is useful for roles that might not be defined in the palette
             let new_role = role.backup_role();
 
-            if new_role == role {
+            if new_role == role || iterations >= 5 {
                 return None;
             }
 
@@ -89,6 +89,11 @@ impl Palette {
             MaterialRole::PrimaryWood,
         ] {
             let id = self.get_material(role);
+
+            if id.is_none() {
+                continue; // Skip if the material role is not defined in the palette
+            }
+
             let material = materials.get(id?).expect(&format!("Material {:?} not found", id)); 
             
             if let Some(form) = material.get_form(block) {

@@ -1174,6 +1174,8 @@ pub enum BlockID {
     BlackStainedGlassPane,
 
     // FURNITURE
+    #[serde(rename = "minecraft:decorated_pot")]
+    DecoratedPot,
     #[serde(rename = "minecraft:crafting_table")]
     CraftingTable,
     #[serde(rename = "minecraft:furnace")]
@@ -1462,6 +1464,74 @@ pub enum BlockID {
     RedMushroomBlock,
     #[serde(rename = "minecraft:brown_mushroom_block")]
     BrownMushroomBlock,
+
+    // === BANNERS ===
+    #[serde(rename = "minecraft:white_banner")]
+    WhiteBanner,
+    #[serde(rename = "minecraft:orange_banner")]
+    OrangeBanner,
+    #[serde(rename = "minecraft:magenta_banner")]
+    MagentaBanner,
+    #[serde(rename = "minecraft:light_blue_banner")]
+    LightBlueBanner,
+    #[serde(rename = "minecraft:yellow_banner")]
+    YellowBanner,
+    #[serde(rename = "minecraft:lime_banner")]
+    LimeBanner,
+    #[serde(rename = "minecraft:pink_banner")]
+    PinkBanner,
+    #[serde(rename = "minecraft:gray_banner")]
+    GrayBanner,
+    #[serde(rename = "minecraft:light_gray_banner")]
+    LightGrayBanner,
+    #[serde(rename = "minecraft:cyan_banner")]
+    CyanBanner,
+    #[serde(rename = "minecraft:purple_banner")]
+    PurpleBanner,
+    #[serde(rename = "minecraft:blue_banner")]
+    BlueBanner,
+    #[serde(rename = "minecraft:brown_banner")]
+    BrownBanner,
+    #[serde(rename = "minecraft:green_banner")]
+    GreenBanner,
+    #[serde(rename = "minecraft:red_banner")]
+    RedBanner,
+    #[serde(rename = "minecraft:black_banner")]
+    BlackBanner,
+
+    // === WALL BANNERS ===
+    #[serde(rename = "minecraft:white_wall_banner")]
+    WhiteWallBanner,
+    #[serde(rename = "minecraft:orange_wall_banner")]
+    OrangeWallBanner,
+    #[serde(rename = "minecraft:magenta_wall_banner")]
+    MagentaWallBanner,
+    #[serde(rename = "minecraft:light_blue_wall_banner")]
+    LightBlueWallBanner,
+    #[serde(rename = "minecraft:yellow_wall_banner")]
+    YellowWallBanner,
+    #[serde(rename = "minecraft:lime_wall_banner")]
+    LimeWallBanner,
+    #[serde(rename = "minecraft:pink_wall_banner")]
+    PinkWallBanner,
+    #[serde(rename = "minecraft:gray_wall_banner")]
+    GrayWallBanner,
+    #[serde(rename = "minecraft:light_gray_wall_banner")]
+    LightGrayWallBanner,
+    #[serde(rename = "minecraft:cyan_wall_banner")]
+    CyanWallBanner,
+    #[serde(rename = "minecraft:purple_wall_banner")]
+    PurpleWallBanner,
+    #[serde(rename = "minecraft:blue_wall_banner")]
+    BlueWallBanner,
+    #[serde(rename = "minecraft:brown_wall_banner")]
+    BrownWallBanner,
+    #[serde(rename = "minecraft:green_wall_banner")]
+    GreenWallBanner,
+    #[serde(rename = "minecraft:red_wall_banner")]
+    RedWallBanner,
+    #[serde(rename = "minecraft:black_wall_banner")]
+    BlackWallBanner,
 
     #[serde(other)]
     Unknown,

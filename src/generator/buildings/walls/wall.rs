@@ -63,8 +63,6 @@ pub enum HorizontalWallPosition {
 }
 
 pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &BuildingData, data : &LoadedData, rng : &mut RNG) -> anyhow::Result<()> {
-    
-    
     for cell in building.shape.cells().iter() {
         let is_bottom = !building.shape.cells().contains(&(*cell + DOWN));
         let is_top = !building.shape.cells().contains(&(*cell + UP));
@@ -79,9 +77,9 @@ pub async fn build_walls(editor : &mut Editor, walls : &[&Wall], building : &Bui
                 wall.structure.style.is_some_and(|style| style == building.style) &&
                 wall.vertical_position.is_none_or(|pos| {
                     match pos {
-                        VerticalWallPosition::Top => is_top && !is_bottom,
+                        VerticalWallPosition::Top => is_top,
                         VerticalWallPosition::NonBottom => !is_bottom,
-                        VerticalWallPosition::Bottom => is_bottom && !is_top,
+                        VerticalWallPosition::Bottom => is_bottom,
                         VerticalWallPosition::Middle => !is_top && !is_bottom,
                         VerticalWallPosition::Single => is_bottom && is_top,
                     }

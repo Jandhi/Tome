@@ -68,7 +68,20 @@ impl<'a> Placer<'a> {
         };
 
         if let Some(material) = self.materials.get(&material) {
-            material.place_block(editor, point, form, self.materials, state, data, parameters, self.rng).await;
+            material.place_block(editor, point, form, self.materials, state, data, parameters, self.rng, false).await;
+        }
+    }
+
+    pub async fn place_block_forced(&mut self, editor: &mut Editor, point: Point3D, material : &MaterialId, form: BlockForm, state : Option<&HashMap<String, String>>, data : Option<&String>) {
+        let parameters = MaterialParameters {
+            shade: self.shade_function.as_ref().map_or(0.5, |f| f(point)),
+            wear: self.wear_function.as_ref().map_or(0.5, |f| f(point)),
+            moisture: self.wetness_function.as_ref().map_or(0.5, |f| f(point)),
+            decoration: self.decorativeness_function.as_ref().map_or(0.5, |f| f(point)),
+        };
+
+        if let Some(material) = self.materials.get(&material) {
+            material.place_block(editor, point, form, self.materials, state, data, parameters, self.rng, true).await;
         }
     }
 
@@ -94,6 +107,10 @@ impl<'materials> MaterialPlacer<'materials> {
 
     pub async fn place_block(&mut self, editor: &mut Editor, point: Point3D, form: BlockForm, state: Option<&HashMap<String, String>>, data: Option<&String>) {
         self.placer.place_block(editor, point, &self.material, form, state, data).await;
+    }
+
+    pub async fn place_block_forced(&mut self, editor: &mut Editor, point: Point3D, form: BlockForm, state: Option<&HashMap<String, String>>, data: Option<&String>) {
+        self.placer.place_block_forced(editor, point, &self.material, form, state, data).await;
     }
 
     pub async fn place_blocks<Iter>(&mut self, editor: &mut Editor, points: Iter, form: BlockForm, state: Option<&HashMap<String, String>>, data: Option<&String>)

@@ -1,6 +1,6 @@
 {
-  "id": "medieval_roof_inner",
-  "path": "data/buildings/roofs/medieval//medieval_roof_inner.nbt",
+  "id": "medieval_roof_corner",
+  "path": "data/buildings/roofs/components/medieval/medieval_roof_corner.nbt",
   "facing": "north",
   "origin": {
     "x": 1,
@@ -12,6 +12,6 @@
   "weight": 1.0,
   "roof_type": {
     "type": "hip",
-    "shape": "inner"
+    "shape": "corner"
   }
 }

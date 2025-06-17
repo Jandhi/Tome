@@ -1,0 +1,14 @@
+{
+    "id" : "cut_red_sandstone",
+    "connections" : {
+        "lighter" : "cut_sandstone"
+    },
+    "blocks" : {
+        "block" : "minecraft:cut_red_sandstone",
+        "stairs" : "minecraft:red_sandstone_stairs",
+        "slab" : "minecraft:red_sandstone_slab",
+        "wall" : "minecraft:red_sandstone_wall",
+        "pressure_plate" : "minecraft:acacia_pressure_plate",
+        "button" : "minecraft:acacia_button"
+    }
+}

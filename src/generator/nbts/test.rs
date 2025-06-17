@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, Roof, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place_nbt_without_palette, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place_nbt_without_palette, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
     use std::fs::File;
     use fastnbt::to_writer;
 
@@ -95,8 +95,8 @@ mod tests {
             },
         } - build_area.origin)).collect::<Vec<_>>();
 
-        let folder = "data/buildings/walls/medieval/single";
-        let name = "medieval_single_double_window";
+        let folder = "data/buildings/walls/desert/bottom";
+        let name = "desert_bottom_door_banner";
         
         let nbt_structure = NBTStructure::from_blocks(blocks);
         let path = env::current_dir().expect("Should get current dir")
@@ -111,14 +111,14 @@ mod tests {
                 meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") }, 
                 facing: Cardinal::East, 
                 origin: Point3D { x: -6, y: 1, z: 0 }, 
-                palette: "medieval_spruce".into(), 
+                palette: "desert_prismarine".into(), 
                 tags: None, 
                 mirror_x: false, 
                 mirror_z: false,
-                style: Some(Style::Medieval),
+                style: Some(Style::Desert),
                 weight: 1.0,
             },
-            wall_type: Some(WallType::Window),
+            wall_type: Some(WallType::Door),
             vertical_position: Some(VerticalWallPosition::Single),
             horizontal_position: None,
         };
@@ -162,8 +162,8 @@ mod tests {
             },
         } - build_area.origin)).collect::<Vec<_>>();
 
-        let folder = "data/buildings/roofs/medieval";
-        let name = "medieval_roof_stairs_inner";
+        let folder = "data/buildings/roofs/desert";
+        let name = "desert_roof_dome_inner";
         
         let nbt_structure = NBTStructure::from_blocks(blocks);
         let path = env::current_dir().expect("Should get current dir")
@@ -172,7 +172,7 @@ mod tests {
         let file = File::create(&path).expect("Failed to create NBT file");
         to_writer(file, &nbt_structure).expect("Failed to write NBT structure to file");
 
-        let roof = Roof {
+        let roof = RoofComponent {
             structure: Structure {
                 id: name.into(),
                 meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") },
@@ -182,7 +182,7 @@ mod tests {
                 tags: None,
                 mirror_x: false,
                 mirror_z: false,
-                style: Some(Style::Medieval),
+                style: Some(Style::Desert),
                 weight: 1.0,
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),

@@ -25,7 +25,7 @@ impl NBTStructure {
         self.blocks.push(BlockData {
             state,
             pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-            nbt: block.data.map(|s| fastnbt::Value::from(s)),
+            nbt: block.data,
         });
     }
 
@@ -62,7 +62,7 @@ impl NBTStructure {
             block_data.push(BlockData {
                 state,
                 pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-                nbt: block.data.map(|s| fastnbt::Value::from(s)),
+                nbt: block.data,
             });
         }
 
@@ -88,7 +88,7 @@ pub struct PaletteBlock {
 pub struct BlockData {
     pub state: usize,
     pub pos : [i32; 3],
-    pub nbt : Option<fastnbt::Value>
+    pub nbt : Option<String>
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

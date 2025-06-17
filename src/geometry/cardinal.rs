@@ -62,7 +62,7 @@ impl Cardinal {
         }
     }
 
-    pub fn turn_right(&self) -> Self {
+    pub fn rotate_right(&self) -> Self {
         match self {
             Cardinal::North => Cardinal::East,
             Cardinal::East  => Cardinal::South,
@@ -71,7 +71,7 @@ impl Cardinal {
         }
     }
 
-    pub fn turn_left(&self) -> Self {
+    pub fn rotate_left(&self) -> Self {
         match self {
             Cardinal::North => Cardinal::West,
             Cardinal::East  => Cardinal::North,

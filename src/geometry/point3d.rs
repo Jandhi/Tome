@@ -27,6 +27,14 @@ pub const EAST  : Point3D = Point3D { x: 1, y: 0, z: 0 };
 pub const SOUTH : Point3D = Point3D { x: 0, y: 0, z: 1 };
 pub const WEST  : Point3D = Point3D { x: -1, y: 0, z: 0 };
 
+// Aliases for axis directions
+pub const X_PLUS: Point3D = Point3D { x: 1, y: 0, z: 0 };
+pub const X_MINUS: Point3D = Point3D { x: -1, y: 0, z: 0 };
+pub const Y_PLUS: Point3D = Point3D { x: 0, y: 1, z: 0 };
+pub const Y_MINUS: Point3D = Point3D { x: 0, y: -1, z: 0 };
+pub const Z_PLUS: Point3D = Point3D { x: 0, y: 0, z: 1 };
+pub const Z_MINUS: Point3D = Point3D { x: 0, y: 0, z: -1 };
+
 pub const CARDINALS : [Point3D; 4] = [
     LEFT,
     RIGHT,
@@ -99,6 +107,14 @@ impl Point3D {
 
     pub fn neighbours_2d(&self) -> Vec<Point3D> {
         CARDINALS.iter().map(|&d| *self + d).collect()
+    }
+
+    pub fn rotate_left(&self) -> Point3D {
+        Point3D { x: -self.z, y: self.y, z: self.x }
+    }
+
+    pub fn rotate_right(&self) -> Point3D {
+        Point3D { x: self.z, y: self.y, z: -self.x }
     }
 }
 

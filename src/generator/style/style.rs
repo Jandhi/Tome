@@ -6,4 +6,6 @@ pub enum Style {
     Medieval,
     #[serde(rename = "japanese")]
     Japanese,
+    #[serde(rename = "desert")]
+    Desert,
 }

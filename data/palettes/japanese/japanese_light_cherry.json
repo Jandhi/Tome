@@ -3,7 +3,7 @@
 
   "primary_wall" : "white_concrete",
   "primary_roof" : "mangrove_planks",
-  "secondary_roof" : "mangrove_planks",
+  "secondary_roof" : "polished_blackstone_bricks",
   "primary_wood" : "cherry_planks",
   "secondary_wood" : "mangrove_planks",
   "wood_pillar" : "cherry_log",

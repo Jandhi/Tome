@@ -45,6 +45,14 @@ impl Editor {
     }
 
     pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
+        self.place_block_options(block, point, false).await;
+    }
+
+    pub async fn place_block_forced(&mut self,  block : &Block, point : Point3D) {
+        self.place_block_options(block, point, true).await;
+    }
+
+    pub async fn place_block_options(&mut self,  block : &Block, point : Point3D, force : bool) {          
         if !self.world.build_area.contains(point + self.build_area.origin) {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point + self.build_area.origin, self.world.build_area);
             return;
@@ -55,7 +63,7 @@ impl Editor {
             return;
         }
 
-        if self.block_cache.contains_key(&(point)) {
+        if !force && self.block_cache.contains_key(&(point)) {
             let current_block = self.block_cache.get(&(point)).expect("Block should be in cache").id;
 
             if self.get_block_form(block.id).density() <= self.get_block_form(current_block).density() {
