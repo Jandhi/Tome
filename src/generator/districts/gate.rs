@@ -6,7 +6,8 @@ use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardin
 use crate::noise::RNG;
 use crate::minecraft::{Block, BlockID};
 use crate::generator::BuildClaim;
-use log::info;
+use crate::generator::districts::WallType;
+use log::{info, warn};
 
 
 
@@ -17,7 +18,8 @@ pub async fn build_wall_gate(
     material_placer: &Placer<'_>,
     is_thin: bool,
     is_palisade: bool,
-    inner_wall_set: Option<&HashSet<Point2D>>,
+    enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,
+    inner_wall_set: Option<&HashSet<Point3D>>,
     structures: & HashMap<StructureId, Structure>,
     gate_height: i32,
 ) {
@@ -28,17 +30,15 @@ pub async fn build_wall_gate(
     let thin_gate = structures.get(&"basic_thin_gate".into()).expect("Structure not found");
     let wide_gate = structures.get(&"basic_wide_gate".into()).expect("Structure not found");
 
+    let inner_wall_points = inner_wall_set
+        .map(|set| set.iter().map(|p| p.drop_y()).collect::<HashSet<Point2D>>())
+        .unwrap_or_default();
+
     let air = Block {
             id: BlockID::Air,
             data: None,
             state: None,
     };
-     let bedrock = Block {
-            id: BlockID::Bedrock,
-            data: None,
-            state: None,
-    };
-
     for (i, point) in wall_points.iter().enumerate() {
         if gate_possible == 0 {
             if is_gate_possible(*point, wall_points, gate_size, i) {
@@ -68,7 +68,7 @@ pub async fn build_wall_gate(
                     }
                     let height = middle_point.y;
                     for neighbour in neighbours.iter() {
-                        editor.world().claim(*neighbour, BuildClaim::Wall);
+                        editor.world().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
                             editor.place_block_force(
                                 &air,
@@ -78,8 +78,8 @@ pub async fn build_wall_gate(
                     }
                     info!("Placing palisade gate at: {:?}", middle_point);
                     place_structure(editor, None, &palisade_gate, middle_point, direction, None, None, false, false).await.expect("Failed to place gate");
-
-                } else if is_thin {
+                    gate_possible = distance_to_next_gate;
+                } else if is_thin{
                     let middle_point = Point3D::new(wall_points[i+3].x, editor.world().get_height_at(wall_points[i+3].drop_y()), wall_points[i+3].z);
                     let direction: Cardinal; // to do based on additional wall info
                     let neighbours: Vec<Point2D>;
@@ -105,7 +105,7 @@ pub async fn build_wall_gate(
                     }
                     let height = middle_point.y;
                     for neighbour in neighbours.iter() {
-                        editor.world().claim(*neighbour, BuildClaim::Wall);
+                        editor.world().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
                             editor.place_block_force(
                                 &air,
@@ -117,17 +117,47 @@ pub async fn build_wall_gate(
                     // look if mirror is working
                     info!("Placing thin gate at: {:?}", middle_point);
                     place_structure(editor, None, &thin_gate, middle_point, direction, None, None, mirror_x, false).await.expect("Failed to place gate");
-
+                    gate_possible = distance_to_next_gate;
                 } else {
-                    continue; // thin gates are not implemented yet
+                    let enhanced_points = enhanced_wall_points.expect("Enhanced wall points should be provided for this wall type");
+                    let direction: Cardinal = enhanced_points[i+3].1[0]; //might need to deal with error case if no directions
+                    let middle_point = enhanced_points[i+3].0.drop_y() + Point2D::from(direction) * 2;
+
+                    for a in i..i + gate_size as usize {
+                        let inner_wall_point = enhanced_points[a].0.drop_y() + Point2D::from(direction) * 5;
+                        if inner_wall_points.contains(&inner_wall_point) {
+                            break;
+                        }
+                        if a == i + 6 {
+                            info!("Building gate at {:?}", middle_point);
+                            let neighbours: Vec<Point2D> = ((middle_point.x - 3)..=(middle_point.x + 3))
+                                .flat_map(|x| {
+                                    ((middle_point.y - 3)..=(middle_point.y + 3))
+                                        .map(move |y| Point2D { x, y })
+                                })
+                                .collect::<Vec<Point2D>>();
+
+                            let height = editor.world().get_height_at(middle_point);
+                            for neighbour in neighbours.iter() {
+                                editor.world().claim(*neighbour, BuildClaim::Gate);
+                                    for height in height..height + gate_height {
+                                    editor.place_block_force(
+                                        &air,
+                                        neighbour.add_y(height)
+                                    ).await;
+                                }
+                            }
+                            let mirror_x = if direction == Cardinal::North || direction == Cardinal::South { true } else { false };
+                            // look if mirror is working
+                            info!("Placing wide gate at: {:?}", middle_point);
+                            place_structure(editor, None, &wide_gate, middle_point.add_y(height), direction.turn_right(), None, None, mirror_x, false).await.expect("Failed to place gate");
+                            gate_possible = distance_to_next_gate;
+                        }
+                    }
                 }
-                gate_possible = distance_to_next_gate;
             }
-
-
-            
         } else {
-            gate_possible -= 1;
+        gate_possible -= 1;
         }
     }
 }

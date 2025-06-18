@@ -525,9 +525,6 @@ mod tests {
 
         
         let provider = GDMCHTTPProvider::new();
-        let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
-
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         generate_districts(seed, &mut editor).await;
@@ -542,6 +539,33 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
 
         build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::Standard).await;
+
+    }
+
+    #[tokio::test]
+    async fn standard_wall_with_inner() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+        generate_districts(seed, &mut editor).await;
+
+        let materials = Material::load().expect("Failed to load materials");
+        let material = MaterialId::new("stone_bricks".to_string());
+
+        let placer: Placer = Placer::new(
+            &materials,
+        );
+
+        let structures = Structure::load().expect("Failed to load structures");
+
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::StandardWithInner).await;
 
     }
 }
