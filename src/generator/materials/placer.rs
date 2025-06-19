@@ -119,4 +119,8 @@ impl<'materials> MaterialPlacer<'materials> {
     {
         self.placer.place_blocks(editor, points, &self.material, form, state, data).await;
     }
+
+    pub fn placer_mut(&mut self) -> &mut Placer<'materials> {
+        &mut self.placer
+    }
 }

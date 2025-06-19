@@ -541,6 +541,7 @@ pub async fn build_wall_towers(
                         }
                     }
                 }
+                let placer : Placer<'_> = material_placer.into();
                 info!("Placing tower at: {:?}", point.add_y(point_height+6));
                 place_structure(editor, None, &tower, point.add_y(point_height+6), Cardinal::North, None, None, false, false).await.expect("Failed to place tower");
             }

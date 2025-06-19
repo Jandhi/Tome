@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D, Rect2D, Rect3D}};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grid {
     pub origin : Point3D,
     pub cell_size : Point3D,

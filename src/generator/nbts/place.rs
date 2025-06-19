@@ -6,8 +6,11 @@ use log::info;
 
 use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::{self, NBTStructure}, transform::Transform, Rotation, Structure}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockID}, noise::RNG};
 
+pub struct StructurePlacement {
+    
+}
 
-pub async fn place_structure<'materials>(editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
+pub async fn place_structure<'materials>(editor: &mut Editor, placer : Option<&mut Placer<'materials>>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
     let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
     
     let mut transform = match rotation {
@@ -26,7 +29,11 @@ pub async fn place_structure<'materials>(editor: &mut Editor, placer : &mut Plac
     ).await
 }
 
-pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &mut Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
+pub struct NBTPlacement {
+
+}
+
+pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : Option<&mut Placer<'materials>>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
     let LoadedData { materials, palettes, .. } = generator_data;
     info!("Placing NBT structure: {}", data.path);
 
@@ -88,14 +95,22 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                     data, // Now contains the SNBT string if data exists
                 });
 
-                placer.place_block(
-                    editor,
-                    transform.apply(pos),
-                    material_id,
-                    form,
-                    block.state.as_ref(),
-                    block.data.as_ref()
-                ).await
+                match placer {
+                    Some(placer) => {
+                        placer.place_block(
+                        editor,
+                        transform.apply(pos),
+                        material_id,
+                        form,
+                        block.state.as_ref(),
+                        block.data.as_ref()
+                    ).await
+                    }
+                    None => {
+                        let material = materials.get(&material_id).expect(&format!("Material {:?} not found", material_id));
+                        material.place_block(editor, transform.apply(pos), form, materials, block.stats.as_ref(), block.data.as_ref(), Default::default(), rng, false);
+                    }
+                }
             }
         }
     }

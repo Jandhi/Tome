@@ -29,28 +29,6 @@ impl Into<String> for PaletteId {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PaletteId(String);
-
-impl From<String> for PaletteId {
-    fn from(id: String) -> Self {
-        PaletteId(id)
-    }
-}
-
-impl From<&str> for PaletteId {
-    fn from(id: &str) -> Self {
-        PaletteId(id.to_string())
-    }
-}
-
-impl Into<String> for PaletteId {
-    fn into(self) -> String {
-        self.0
-    }
-}
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Palette {
     pub id : PaletteId,

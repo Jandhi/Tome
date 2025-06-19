@@ -22,28 +22,6 @@ impl Default for Cardinal {
     }
 }
 
-impl Into<Point2D> for Cardinal {
-    fn into(self) -> Point2D {
-        match self {
-            Cardinal::North => NORTH_2D,
-            Cardinal::East  => EAST_2D,
-            Cardinal::South => SOUTH_2D,
-            Cardinal::West  => WEST_2D,
-        }
-    }
-}
-
-impl Into<Point3D> for Cardinal {
-    fn into(self) -> Point3D {
-        match self {
-            Cardinal::North => NORTH,
-            Cardinal::East  => EAST,
-            Cardinal::South => SOUTH,
-            Cardinal::West  => WEST,
-        }
-    }
-}
-
 impl Cardinal {
     pub fn from_point(point: Point3D) -> Option<Self> {
         match point {

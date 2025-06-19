@@ -36,7 +36,7 @@ use std::{sync::Mutex, time::Instant};
             },
             |node| {
                 let (x, y) = *node.last().unwrap();
-                ((target.0 - x).abs() + (target.1 - y).abs()) as u64 // Heuristic: Manhattan distance to target
+                ((target.0 - x).abs() + (target.1 - y).abs()) as i64 as u64 // Heuristic: Manhattan distance to target
             },
             async |node| {},
         ).await.expect("A* algorithm failed to find a path");
