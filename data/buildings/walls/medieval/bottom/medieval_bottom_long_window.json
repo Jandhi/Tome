@@ -1,0 +1,15 @@
+{
+  "id": "medieval_bottom_long_window",
+  "path": "data/buildings/walls/medieval/bottom/medieval_bottom_long_window.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 0,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "wall_type": "window",
+  "vertical_position": "bottom"
+}

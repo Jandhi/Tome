@@ -33,6 +33,9 @@ pub enum BlockForm {
     #[serde(rename = "log")]
     Log,
 
+    #[serde(rename = "chiseled")]
+    Chiseled,
+    
     // SIGNS
     #[serde(rename = "sign")]
     Sign,
@@ -42,6 +45,10 @@ pub enum BlockForm {
     HangingSign,
     #[serde(rename = "hanging_wall_sign")]
     HangingWallSign,
+
+    // DECORATION
+    #[serde(rename = "flower")]
+    Flower,
 
     // SPARSE
     #[serde(rename = "sparse")]
@@ -104,10 +111,11 @@ impl BlockForm {
             BlockForm::Button => 0.1,
             BlockForm::PressurePlate => 0.1,
             BlockForm::Chiseled => 1.0,
-            BlockForm::Wood => 1.0,
-            BlockForm::Log => 1.0,
             BlockForm::Sign | BlockForm::WallSign | BlockForm::HangingSign | BlockForm::HangingWallSign => 0.1,
             BlockForm::Sparse => 0.0,
+            BlockForm::Wood => 1.0,
+            BlockForm::Log => 1.0,
+            BlockForm::Flower => 0.0,
         }
     }
 }

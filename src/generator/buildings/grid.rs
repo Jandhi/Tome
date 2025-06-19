@@ -58,10 +58,14 @@ impl Grid {
         point - self.origin
     }
 
-    pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
+    pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
 
         let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
+
+
+        println!("Facing: {:?}, Direction: {:?}, Rotation: {:?}", structure.facing, direction, rotation);
+        println!("Building structure: {:?} at grid coordinate: {:?} with rotation: {:?}", structure.id, grid_coordinate, rotation);
         
         let mut transform = match rotation {
             Rotation::None => origin.into(),
@@ -73,12 +77,10 @@ impl Grid {
         // Shift the transform to account for the structure's origin
         transform.shift(rotation.apply_to_point(-structure.origin));
 
-        let input_palette = structure.palette.as_ref().map(|p| p.clone());
-
-        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), input_palette.as_ref(), Some(&palette), None, None).await
+        place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette, None, None).await
     }
 
-    pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
+    pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &mut Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
         
         let transform = match rotation {
@@ -88,7 +90,7 @@ impl Grid {
             Rotation::Thrice => Transform::new(origin + Point3D { x: self.cell_size.x - 1, y: 0, z: 0 }, Rotation::Thrice),
         };
 
-        place_nbt(nbt, transform, editor, Some(placer), Some(data), Some(input_palette), Some(output_palette), None, None).await
+        place_nbt(nbt, transform, editor, placer, data, input_palette, output_palette, None, None).await
     }
 
     pub fn get_door_world_position(&self, grid_coordinate: Point3D, direction : Cardinal) -> Point3D {

@@ -34,7 +34,7 @@ pub async fn merge_down(superdistricts : &mut HashMap<SuperDistrictID, SuperDist
 
             // Remove garbage districts
             if superdistricts.get(&child).expect(&format!("Superdistrict with id {} not found", child.0)).size() < 10 {
-                remove_district(superdistricts, child, editor.world());
+                remove_district(superdistricts, child, editor.world_mut());
                 district_count -= 1;
             }
 
@@ -69,7 +69,7 @@ async fn merge(superdistricts : &mut HashMap<SuperDistrictID, SuperDistrict>, di
         }
     }
     let parent = superdistricts.get_mut(&parent).expect(&format!("Superdistrict with id {} not found", parent.0));
-    parent.add_superdistrict(&child, districts, editor.world());
+    parent.add_superdistrict(&child, districts, editor.world_mut());
     let new_analysis = analyze_district(parent.data(), editor).await;
     district_analysis_data.insert(parent.id(), new_analysis);
 }

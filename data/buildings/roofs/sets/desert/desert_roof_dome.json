@@ -1,0 +1,7 @@
+{
+    "id" : "desert_roof_dome",
+    "style" : "desert",
+    "side" : "desert_roof_dome_side",
+    "corner" : "desert_roof_dome_corner",
+    "inner" : "desert_roof_dome_inner"
+}

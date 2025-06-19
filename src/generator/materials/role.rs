@@ -29,6 +29,12 @@ pub enum MaterialRole {
     PrimaryWood,
     #[serde(rename = "secondary_wood")]
     SecondaryWood,
+<<<<<<< HEAD
+=======
+
+    #[serde(rename = "flower")]
+    Flower,
+>>>>>>> master
 }
 
 impl MaterialRole {

@@ -28,7 +28,7 @@ pub fn get_wall_points(
     let mut to_remove = Vec::new();
 
     for point in &wall_points {
-        editor.world().claim(*point, BuildClaim::Wall); // mark wall points as claimed
+        editor.world_mut().claim(*point, BuildClaim::Wall); // mark wall points as claimed
         //let neighbours = get_neighbours_in_set(*point, inner_points);
         //if neighbours.len() == 1 { // supposed to remove extra points
         //    to_remove.push(*point);

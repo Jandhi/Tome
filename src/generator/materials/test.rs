@@ -3,7 +3,11 @@
 mod tests {
     use log::info;
 
+<<<<<<< HEAD
     use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::Placer, Material, MaterialId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockForm, util::init_logger};
+=======
+    use crate::{data::Loadable, editor::World, generator::materials::{gradient::{Gradient, PerlinSettings}, placer::Placer, Material, MaterialId}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockForm, noise::RNG, util::init_logger};
+>>>>>>> master
 
     #[test]
     fn deserialize_material() {
@@ -50,15 +54,28 @@ mod tests {
         let mut editor = world.get_editor();
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
+<<<<<<< HEAD
         let world_rect = editor.world().world_rect_2d();
         let placer : Placer = Placer::new(
             &materials
+=======
+        let world_rect = editor.world_mut().world_rect_2d();
+        let mut rng = RNG::new(42.into());
+        let mut placer : Placer = Placer::new(
+            &materials,
+            &mut rng
+>>>>>>> master
         ).with_shade_function(move |point| {
             point.x as f32 / world_rect.size.x as f32
         });
 
+<<<<<<< HEAD
         for point in editor.world().world_rect_2d().clone().iter() {
             let point = editor.world().add_height(point);
+=======
+        for point in editor.world_mut().world_rect_2d().clone().iter() {
+            let point = editor.world_mut().add_height(point);
+>>>>>>> master
             placer.place_block(&mut editor, point, &material, BlockForm::Block, None, None).await;
         }
     }
@@ -74,18 +91,24 @@ mod tests {
         let material = MaterialId::new("cobblestone".to_string());
 
         let perlin = PerlinSettings::large(42.into());
+<<<<<<< HEAD
         let placer: Placer = Placer::new(
+=======
+        let mut rng = RNG::new(42.into());
+        let mut placer: Placer = Placer::new(
+>>>>>>> master
             &materials,
+            &mut rng
         ).with_shade_function(move |point| {
             perlin.get(point) as f32 + 0.5
         });
 
 
-        let points : Vec<Point3D> = editor.world()
+        let points : Vec<Point3D> = editor.world_mut()
             .world_rect_2d()
             .clone()
             .iter()
-            .map(|point| editor.world().add_height(point))
+            .map(|point| editor.world_mut().add_height(point))
             .collect();
         placer.place_blocks(
             &mut editor, 
@@ -107,20 +130,26 @@ mod tests {
         let material = MaterialId::new("cobblestone".to_string());
 
         let gradient = Gradient::new(PerlinSettings::small(25.into()), 1.0, 0.05)
-            .with_x(0, editor.world().build_area.width());
+            .with_x(0, editor.world_mut().build_area.width());
 
+<<<<<<< HEAD
         let placer: Placer = Placer::new(
+=======
+        let mut rng = RNG::new(42.into());
+        let mut placer: Placer = Placer::new(
+>>>>>>> master
             &materials,
+            &mut rng
         ).with_shade_function(move |point| {
             info!("Point: {:?}", gradient.get_value(point));
             gradient.get_value(point)
         });
 
-        let points : Vec<Point3D> = editor.world()
+        let points : Vec<Point3D> = editor.world_mut()
             .world_rect_2d()
             .clone()
             .iter()
-            .map(|point| editor.world().add_height(point))
+            .map(|point| editor.world_mut().add_height(point))
             .collect();
         placer.place_blocks(
             &mut editor, 

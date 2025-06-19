@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+use std::ops::Neg;
+
+>>>>>>> master
 use serde_derive::{Deserialize, Serialize};
 use strum_macros::EnumIter;
 use crate::geometry::{Point2D, Point3D, EAST, EAST_2D, NORTH, NORTH_2D, SOUTH, SOUTH_2D, WEST, WEST_2D};
@@ -20,6 +25,31 @@ impl Default for Cardinal {
     }
 }
 
+<<<<<<< HEAD
+=======
+impl Into<Point2D> for Cardinal {
+    fn into(self) -> Point2D {
+        match self {
+            Cardinal::North => NORTH_2D,
+            Cardinal::East  => EAST_2D,
+            Cardinal::South => SOUTH_2D,
+            Cardinal::West  => WEST_2D,
+        }
+    }
+}
+
+impl Into<Point3D> for Cardinal {
+    fn into(self) -> Point3D {
+        match self {
+            Cardinal::North => NORTH,
+            Cardinal::East  => EAST,
+            Cardinal::South => SOUTH,
+            Cardinal::West  => WEST,
+        }
+    }
+}
+
+>>>>>>> master
 impl Cardinal {
     pub fn from_point(point: Point3D) -> Option<Self> {
         match point {
@@ -60,7 +90,11 @@ impl Cardinal {
         }
     }
 
+<<<<<<< HEAD
     pub fn turn_right(&self) -> Self {
+=======
+    pub fn rotate_right(&self) -> Self {
+>>>>>>> master
         match self {
             Cardinal::North => Cardinal::East,
             Cardinal::East  => Cardinal::South,
@@ -69,7 +103,11 @@ impl Cardinal {
         }
     }
 
+<<<<<<< HEAD
     pub fn turn_left(&self) -> Self {
+=======
+    pub fn rotate_left(&self) -> Self {
+>>>>>>> master
         match self {
             Cardinal::North => Cardinal::West,
             Cardinal::East  => Cardinal::North,
@@ -77,8 +115,17 @@ impl Cardinal {
             Cardinal::West  => Cardinal::South,
         }
     }
+<<<<<<< HEAD
 
     pub fn opposite(&self) -> Self {
+=======
+}
+
+impl Neg for Cardinal {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+>>>>>>> master
         match self {
             Cardinal::North => Cardinal::South,
             Cardinal::East  => Cardinal::West,

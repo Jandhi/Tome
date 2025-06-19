@@ -1,0 +1,18 @@
+{
+  "id" : "medieval_spruce",
+
+  "primary_wall" : "white_wool",
+  "primary_roof" : "polished_blackstone_bricks",
+  "secondary_roof" : "polished_blackstone",
+  "primary_wood" : "spruce_planks",
+  "secondary_wood" : "dark_oak_planks",
+  "wood_pillar" : "spruce_log",
+  "primary_stone" : "stone_bricks",
+  "secondary_stone" : "cobblestone",
+
+  "primary_color" : "red",
+  "secondary_color" : "white",
+  "flower" : "medieval_flowers",
+
+  "tags" : ["japanese", "wet"]
+}

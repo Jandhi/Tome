@@ -27,6 +27,14 @@ pub const EAST  : Point3D = Point3D { x: 1, y: 0, z: 0 };
 pub const SOUTH : Point3D = Point3D { x: 0, y: 0, z: 1 };
 pub const WEST  : Point3D = Point3D { x: -1, y: 0, z: 0 };
 
+// Aliases for axis directions
+pub const X_PLUS: Point3D = Point3D { x: 1, y: 0, z: 0 };
+pub const X_MINUS: Point3D = Point3D { x: -1, y: 0, z: 0 };
+pub const Y_PLUS: Point3D = Point3D { x: 0, y: 1, z: 0 };
+pub const Y_MINUS: Point3D = Point3D { x: 0, y: -1, z: 0 };
+pub const Z_PLUS: Point3D = Point3D { x: 0, y: 0, z: 1 };
+pub const Z_MINUS: Point3D = Point3D { x: 0, y: 0, z: -1 };
+
 pub const CARDINALS : [Point3D; 4] = [
     LEFT,
     RIGHT,
@@ -71,14 +79,14 @@ impl Point3D {
         Point3D { x, y, z }
     }
 
-    pub fn distance(&self, other: &Point3D) -> f64 {
+    pub fn distance(&self, other: Point3D) -> f64 {
         let dx = (self.x - other.x).pow(2) as f64;
         let dy = (self.y - other.y).pow(2) as f64;
         let dz = (self.z - other.z).pow(2) as f64;
         (dx + dy + dz).sqrt()
     }
 
-    pub fn distance_squared(&self, other: &Point3D) -> i32 {
+    pub fn distance_squared(&self, other: Point3D) -> i32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
         let dz = self.z - other.z;
@@ -100,6 +108,17 @@ impl Point3D {
     pub fn neighbours_2d(&self) -> Vec<Point3D> {
         CARDINALS.iter().map(|&d| *self + d).collect()
     }
+<<<<<<< HEAD
+=======
+
+    pub fn rotate_left(&self) -> Point3D {
+        Point3D { x: -self.z, y: self.y, z: self.x }
+    }
+
+    pub fn rotate_right(&self) -> Point3D {
+        Point3D { x: self.z, y: self.y, z: -self.x }
+    }
+>>>>>>> master
 }
 
 impl Add for Point3D {

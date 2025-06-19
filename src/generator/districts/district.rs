@@ -70,12 +70,12 @@ impl AdjacencyAnalyzeable<DistrictID> for District {
 pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Generating districts with seed: {:?}", seed);
 
-    let districts = spawn_districts(seed, editor.world());
+    let districts = spawn_districts(seed, editor.world_mut());
 
     for district in districts.iter() {
         let x = district.data.origin.x as usize;
         let z = district.data.origin.z as usize;
-        editor.world().district_map[x][z] = Some(district.id);
+        editor.world_mut().district_map[x][z] = Some(district.id);
     }
 
     let mut districts : HashMap<DistrictID, District> = districts.into_iter()
@@ -83,16 +83,16 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
         .collect();
 
     info!("Bubbling out districts...");
-    bubble_out(&mut districts, editor.world());
+    bubble_out(&mut districts, editor.world_mut());
     
     info!("Re-centering districts...");
     for _ in 0..NUM_RECENTER {
-        recenter_districts(editor.world(), &mut districts);
+        recenter_districts(editor.world_mut(), &mut districts);
     }
 
     info!("Analyzing adjacency of districts...");
     {
-        let world = editor.world();
+        let world = editor.world_mut();
         analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d(), false);
     }
     
@@ -112,7 +112,7 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
         let id = SuperDistrictID(super_district_id_counter);
         super_district_id_counter += 1;
         let mut super_district = SuperDistrict::new(id);
-        super_district.add_district(&district, editor.world());
+        super_district.add_district(&district, editor.world_mut());
         super_districts.insert(super_district.id(), super_district);
     }
 
@@ -127,21 +127,21 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     classify_districts(&mut districts, &district_analysis_data);
 
     {
-        let world = editor.world();
+        let world = editor.world_mut();
         analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(), true);
     }
     info!("Merging down superdistricts...");
     merge_down(&mut super_districts, &districts, &mut superdistrict_analysis_data, editor).await;
     {
-        let world = editor.world();
+        let world = editor.world_mut();
         analyze_adjacency(&mut super_districts, world.get_height_map(), &world.super_district_map, &world.world_rect_2d(),false);
     }
 
-    editor.world().districts = districts;
-    editor.world().super_districts = super_districts;
+    editor.world_mut().districts = districts;
+    editor.world_mut().super_districts = super_districts;
 
     // superdistrict classification
-    let world = editor.world();
+    let world = editor.world_mut();
     classify_superdistricts(&mut world.super_districts, &mut world.districts, &superdistrict_analysis_data);
     info!("Districts generated successfully");
 
@@ -224,7 +224,7 @@ fn spawn_districts(seed : Seed, world : &mut World) -> Vec<District> {
 
             let trial_point = world.add_height(rng.rand_point2d(rect.size) + rect.origin);
 
-            if points.iter().all(|p| p.distance_squared(&trial_point) > SPAWN_DISTRICTS_MIN_DISTANCE * SPAWN_DISTRICTS_MIN_DISTANCE) {
+            if points.iter().all(|p| p.distance_squared(trial_point) > SPAWN_DISTRICTS_MIN_DISTANCE * SPAWN_DISTRICTS_MIN_DISTANCE) {
                 points.push(trial_point);
                 break;
             }

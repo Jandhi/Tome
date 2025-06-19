@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, SuperDistrict, SuperDistrictID, DistrictType}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 
 use super::Editor;
@@ -173,7 +173,7 @@ impl World {
         self.super_district_map[point.x as usize][point.y as usize]
     }   
 
-    pub fn add_height(&mut self, point : Point2D) -> Point3D {
+    pub fn add_height(&self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
     }
 

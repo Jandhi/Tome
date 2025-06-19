@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.98"
+dotenv = "0.15.0"
 fastnbt = "2.5.0"
 fastsnbt = "0.2.0"
 flate2 = "1.1.1"
@@ -12,6 +13,7 @@ futures = "0.3.31"
 lerp = "0.5.0"
 log = "0.4.27"
 noise = "0.9.0"
+openai = "1.1.1"
 reqwest = {version = "0.12.15", features = ["blocking"]}
 reqwest-middleware = "0.4.2"
 reqwest-retry = "0.7.0"

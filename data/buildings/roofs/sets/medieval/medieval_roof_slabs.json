@@ -1,0 +1,7 @@
+{
+    "id" : "medieval_roof_slabs",
+    "style" : "medieval",
+    "side" : "medieval_roof_side",
+    "corner" : "medieval_roof_corner",
+    "inner" : "medieval_roof_inner"
+}

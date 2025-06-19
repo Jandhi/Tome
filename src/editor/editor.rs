@@ -34,31 +34,25 @@ impl Editor {
         editor
     }
 
+    pub fn set_buffer_size(&mut self, size: usize) {
+        self.buffer_size = size;
+    }
+
     fn load_data(&mut self) -> anyhow::Result<()> {
         info!("Loading editor data");
         self.materials = Material::load()?;
         Ok(())
     }
 
-    pub async fn place_block_force(&mut self, block: &Block, point: Point3D) {
-        if !self.world.build_area.contains(point + self.build_area.origin) {
-            warn!("Point {:?} is outside the build area {:?} and will be ignored", point + self.build_area.origin, self.world.build_area);
-            return;
-        }
-
-        if block.id == BlockID::Unknown {
-            warn!("Attempted to place an unknown block at {:?}, skipping", point);
-            return;
-        }
-
-        self.block_cache.insert(point, block.clone());
-        self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
-        if self.block_buffer.len() >= self.buffer_size {
-            self.flush_buffer().await;
-        }
+    pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
+        self.place_block_options(block, point, false).await;
     }
 
-    pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
+    pub async fn place_block_forced(&mut self,  block : &Block, point : Point3D) {
+        self.place_block_options(block, point, true).await;
+    }
+
+    pub async fn place_block_options(&mut self,  block : &Block, point : Point3D, force : bool) {          
         if !self.world.build_area.contains(point + self.build_area.origin) {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point + self.build_area.origin, self.world.build_area);
             return;
@@ -69,7 +63,7 @@ impl Editor {
             return;
         }
 
-        if self.block_cache.contains_key(&(point)) {
+        if !force && self.block_cache.contains_key(&(point)) {
             let current_block = self.block_cache.get(&(point)).expect("Block should be in cache").id;
 
             if self.get_block_form(block.id).density() <= self.get_block_form(current_block).density() {
@@ -106,7 +100,7 @@ impl Editor {
             return block.clone();
         }
 
-        self.world.get_block(point).expect("Failed to get block from world")
+        self.world.get_block(point).expect(&format!("Block at {:?} not found in world", point))
     }
 
     pub async fn flush_buffer(&mut self) {
@@ -131,7 +125,19 @@ impl Editor {
         self.block_buffer.clear();
     }
 
-    pub fn world(&mut self) -> &mut World {
+    pub fn world(&self) -> &World {
+        &self.world
+    }
+
+    pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+}
+
+impl Drop for Editor {
+    fn drop(&mut self) {
+        if !self.block_buffer.is_empty() {
+            error!("Editor was dropped with non-empty block buffer!");
+        }
     }
 }

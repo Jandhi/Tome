@@ -1,0 +1,12 @@
+{
+    "id" : "dark_prismarine",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:dark_prismarine",
+        "stairs" : "minecraft:dark_prismarine_stairs",
+        "slab" : "minecraft:dark_prismarine_slab",
+        "wall" : "minecraft:prismarine_wall",
+        "pressure_plate" : "minecraft:warped_pressure_plate",
+        "button" : "minecraft:warped_button"
+    }
+}

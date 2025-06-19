@@ -1,3 +1,3 @@
 mod roof;
 
-pub use roof::{Roof, RoofType, HipRoofPart, build_roof};
+pub use roof::{RoofSet, RoofSetId, RoofComponent, RoofType, HipRoofPart, build_roof};
