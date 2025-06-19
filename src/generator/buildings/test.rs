@@ -15,6 +15,7 @@ mod tests {
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
 
+
         let data = LoadedData::load().expect("Failed to load generator data");
 
         let palette = "test2".into();

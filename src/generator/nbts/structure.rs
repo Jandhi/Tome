@@ -1,3 +1,4 @@
+
 use std::hash::Hash;
 
 use serde_derive::{Deserialize, Serialize};
@@ -5,7 +6,6 @@ use crate::{data::Loadable, generator::{materials::PaletteId, nbts::NBTMeta, sty
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StructureId(pub String);
-
 impl From<String> for StructureId {
     fn from(id: String) -> Self {
         StructureId(id)

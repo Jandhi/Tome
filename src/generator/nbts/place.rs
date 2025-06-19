@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Read, path::Path};
+use std::{collections::HashMap, io::Read};
 
 use anyhow::Ok;
 use flate2::read::GzDecoder;
@@ -126,10 +126,13 @@ pub async fn place_nbt_without_palette(path : &Path, transform : Transform, edit
         let id = palette_data.name;
 
         editor.place_block(&Block{
+
             id,
             state: palette_data.properties.clone(),
             data, // Now contains the SNBT string if data exists
-        }, transform.apply(Point3D::from(block.pos))).await;
+        };
+
+        editor.place_block(&(-transform.rotation).apply_to_block(block), transform.apply(Point3D::from(blockdata.pos))).await;
     }
 
     Ok(())
