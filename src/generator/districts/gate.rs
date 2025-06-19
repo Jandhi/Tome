@@ -68,7 +68,7 @@ pub async fn build_wall_gate(
                     }
                     let height = middle_point.y;
                     for neighbour in neighbours.iter() {
-                        editor.world().claim(*neighbour, BuildClaim::Gate);
+                        editor.world_mut().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
                             editor.place_block_forced(
                                 &air,
@@ -105,7 +105,7 @@ pub async fn build_wall_gate(
                     }
                     let height = middle_point.y;
                     for neighbour in neighbours.iter() {
-                        editor.world().claim(*neighbour, BuildClaim::Gate);
+                        editor.world_mut().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
                             editor.place_block_forced(
                                 &air,
@@ -139,8 +139,8 @@ pub async fn build_wall_gate(
 
                             let height = editor.world().get_height_at(middle_point);
                             for neighbour in neighbours.iter() {
-                                editor.world().claim(*neighbour, BuildClaim::Gate);
-                                    for height in height..height + gate_height {
+                                editor.world_mut().claim(*neighbour, BuildClaim::Gate);
+                                for height in height..height + gate_height {
                                     editor.place_block_forced(
                                         &air,
                                         neighbour.add_y(height)

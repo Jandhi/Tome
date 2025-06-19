@@ -572,6 +572,7 @@ mod tests {
         );
 
         let structures = Structure::load().expect("Failed to load structures");
+        println!("Structures: {:?}", structures.keys());
 
         build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
 

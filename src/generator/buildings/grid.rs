@@ -77,7 +77,9 @@ impl Grid {
         // Shift the transform to account for the structure's origin
         transform.shift(rotation.apply_to_point(-structure.origin));
 
-        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), Some(&structure.palette), Some(&palette), None, None).await
+        let input_palette = structure.palette.as_ref().map(|p| p.clone());
+
+        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), input_palette.as_ref(), Some(&palette), None, None).await
     }
 
     pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &mut Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {

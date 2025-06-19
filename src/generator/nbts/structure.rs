@@ -27,7 +27,7 @@ pub struct Structure {
     pub facing : Cardinal,
     #[serde(default)]
     pub origin : Point3D,
-    pub palette : PaletteId,
+    pub palette : Option<PaletteId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags : Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

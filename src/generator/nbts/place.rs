@@ -20,7 +20,9 @@ pub async fn place_structure<'materials>(editor: &mut Editor, placer : Option<&m
     // Shift the transform to account for the structure's origin
     transform.shift(rotation.apply_to_point(-structure.origin));
 
-    place_nbt(&structure.meta, transform, editor, placer, data, Some(&structure.palette), palette, 
+    let input_palette = structure.palette.as_ref().map(|p| p.clone());
+
+    place_nbt(&structure.meta, transform, editor, placer, data, input_palette.as_ref(), palette, 
         if mirror_x { Some(structure.origin.x) } else { None }, 
         if mirror_z { Some(structure.origin.z) } else { None }
     ).await
@@ -32,7 +34,6 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
     let nbt_data = std::fs::read(data.path.clone())?;
     
     let structure : Result<NBTStructure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
-    let mut placer = placer.unwrap();
 
     // Try to decode the structure directly, if it fails, try decompressing and decoding
     let structure = match structure {
@@ -45,29 +46,27 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
         }
     };
 
-    for blockdata in structure.blocks {
+    if input_palette.is_none() && output_palette.is_none() {
+        for blockdata in structure.blocks {
+            let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
+            let mut data = blockdata.nbt;
 
-        let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
-        let mut data = blockdata.nbt;
+            if data.as_ref().is_some_and(|d| d == "\"{}\"") {
+                data = None;
+            }
 
-        if data.as_ref().is_some_and(|d| d == "\"{}\"") {
-            data = None;
-        }
+            if palette_data.name == BlockID::Air {
+                continue; // Skip air blocks
+            }
 
-        if palette_data.name == BlockID::Air {
-            continue; // Skip air blocks
-        }
+            let mut pos = Point3D::from(blockdata.pos);
 
-        let mut pos = Point3D::from(blockdata.pos);
-
-        if let Some(mx) = mirror_x {
-            pos.x = mx * 2 - pos.x;
-        }
-        if let Some(mz) = mirror_z {
-            pos.z = mz * 2 - pos.z;
-        }
-
-        if input_palette.is_none() && output_palette.is_none() {
+            if let Some(mx) = mirror_x {
+                pos.x = mx * 2 - pos.x;
+            }
+            if let Some(mz) = mirror_z {
+                pos.z = mz * 2 - pos.z;
+            }
             // If no palettes are specified, place the block directly
             let block = (-transform.rotation).apply_to_block(Block{
                 id: palette_data.name.clone(),
@@ -75,9 +74,33 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                 data, // Now contains the SNBT string if data exists
             });
             editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
-        } else {
-            let LoadedData { materials, palettes, .. } = generator_data.unwrap();
-            let palette = palettes.get(input_palette.unwrap()).expect(&format!("Palette {:?} not found", input_palette)).clone();
+        }
+        Ok(());
+    } else {
+        let mut placer = placer.unwrap();
+        let LoadedData { materials, palettes, .. } = generator_data.unwrap();
+        let palette = palettes.get(input_palette.unwrap()).expect(&format!("Palette {:?} not found", input_palette)).clone();
+        for blockdata in structure.blocks {
+            let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
+            let mut data = blockdata.nbt;
+
+            if data.as_ref().is_some_and(|d| d == "\"{}\"") {
+                data = None;
+            }
+
+            if palette_data.name == BlockID::Air {
+                continue; // Skip air blocks
+            }
+
+            let mut pos = Point3D::from(blockdata.pos);
+
+            if let Some(mx) = mirror_x {
+                pos.x = mx * 2 - pos.x;
+            }
+            if let Some(mz) = mirror_z {
+                pos.z = mz * 2 - pos.z;
+            }
+            
             let swap = palette.swap_with(palette_data.name, palettes.get(output_palette.unwrap()).expect(&format!("Palette {:?} not found", output_palette)), materials);
 
             match swap {
