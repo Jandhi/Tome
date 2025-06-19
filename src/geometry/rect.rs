@@ -55,8 +55,8 @@ impl Rect3D {
 
     pub fn drop_y(&self) -> Rect2D {
         Rect2D {
-            origin: Point2D::new(self.origin.x, self.origin.z),
-            size: Point2D::new(self.size.x, self.size.z),
+            origin: self.origin.drop_y(),
+            size: self.size.drop_y(),
         }
     }
 
@@ -117,6 +117,7 @@ impl Iterator for Rect3DIterator {
         }
 
         self.current = Some(next);
+
         Some(current)
     }
 }

@@ -1,0 +1,10 @@
+{
+    "name" : "basic_wide_gate",
+    "type" : "gate",
+    "filepath" : "data/structures/city_wall/basic_wide_gate.nbt",
+    "origin" : {
+        "x" : 3,
+        "y" : 1,
+        "z" : 3
+    }
+}

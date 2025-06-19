@@ -1,0 +1,19 @@
+{
+  "id" : "japanese_light_cherry",
+
+  "primary_wall" : "white_concrete",
+  "primary_roof" : "mangrove_planks",
+  "secondary_roof" : "polished_blackstone_bricks",
+  "primary_wood" : "cherry_planks",
+  "secondary_wood" : "mangrove_planks",
+  "wood_pillar" : "cherry_log",
+  "primary_stone" : "polished_blackstone_bricks",
+  "secondary_stone" : "polished_blackstone",
+  "flower" : "japanese_flowers",
+
+  "primary_color" : "red",
+  "secondary_color" : "white",
+  
+
+  "tags" : ["japanese", "wet"]
+}

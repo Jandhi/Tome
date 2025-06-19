@@ -1,5 +1,10 @@
+use crate::generator::buildings::BuildingID;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Copy)]
 pub enum BuildClaim {
     Nature,
-    None
+    Wall,
+    Gate,
+    Building(BuildingID),
+    None,
 }

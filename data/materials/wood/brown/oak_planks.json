@@ -17,6 +17,8 @@
         "sign"               : "minecraft:oak_sign",
         "wall_sign"          : "minecraft:oak_wall_sign",
         "hanging_sign"       : "minecraft:oak_hanging_sign",
-        "hanging_wall_sign"  : "minecraft:oak_hanging_wall_sign"
+        "hanging_wall_sign"  : "minecraft:oak_hanging_wall_sign",
+        "log"                : "minecraft:oak_log",
+        "wood"               : "minecraft:oak_wood"
     }
 }

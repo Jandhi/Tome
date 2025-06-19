@@ -1,0 +1,12 @@
+{
+    "id" : "japanese_roof_flat_brick_outer_corner",
+    "roof_type" : { "type" : "hip", "shape" : "corner"},
+    "path" : "data/buildings/roofs/components/japanese/japanese_roof_flat_brick_outer_corner.nbt",
+    "origin" : {
+        "x": 1,
+        "y": 0,
+        "z": 1
+    },
+    "palette" : "japanese_dark_blackstone",
+    "tags" : ["japanese", "wet"]
+}

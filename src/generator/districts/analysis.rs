@@ -70,19 +70,19 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
 
     
     for point in area.points() {
-        let biome = editor.world().get_surface_biome_at(point.drop_y());
+        let biome = editor.world_mut().get_surface_biome_at(point.drop_y());
         let block = editor.get_block(*point);
         let is_water = block.id.is_water();
-        let leaf_height = editor.world().get_motion_blocking_height_at(point.drop_y());
+        let leaf_height = editor.world_mut().get_motion_blocking_height_at(point.drop_y());
 
         root_mean_square_height += ((point.y - average_height) as f32).powi(2);
 
-        let height = editor.world().get_height_at(point.drop_y());
+        let height = editor.world_mut().get_height_at(point.drop_y());
         let average_neighbour_height = CARDINALS_2D.iter()
             .map(|cardinal| {
                 let neighbour = point.drop_y() + *cardinal;
-                if editor.world().is_in_bounds_2d(neighbour) {
-                    (height - editor.world().get_height_at(neighbour)).abs()
+                if editor.world_mut().is_in_bounds_2d(neighbour) {
+                    (height - editor.world_mut().get_height_at(neighbour)).abs()
                 } else {
                     0
                 }

@@ -16,6 +16,8 @@
         "sign"               : "minecraft:dark_oak_sign",
         "wall_sign"          : "minecraft:dark_oak_wall_sign",
         "hanging_sign"       : "minecraft:dark_oak_hanging_sign",
-        "hanging_wall_sign"  : "minecraft:dark_oak_hanging_wall_sign"
+        "hanging_wall_sign"  : "minecraft:dark_oak_hanging_wall_sign",
+        "log"                : "minecraft:dark_oak_log",
+        "wood"               : "minecraft:dark_oak_wood"
     }
 }

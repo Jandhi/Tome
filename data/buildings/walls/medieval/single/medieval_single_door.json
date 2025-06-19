@@ -1,0 +1,15 @@
+{
+  "id": "medieval_single_door",
+  "path": "data/buildings/walls/medieval/single/medieval_single_door.nbt",
+  "facing": "east",
+  "origin": {
+    "x": -6,
+    "y": 1,
+    "z": 0
+  },
+  "palette": "medieval_spruce",
+  "style": "medieval",
+  "weight": 1.0,
+  "wall_type": "door",
+  "vertical_position": "single"
+}

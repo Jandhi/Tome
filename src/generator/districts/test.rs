@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{editor::World, generator::districts::{district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{districts::{build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, materials::{MaterialPlacer, Placer}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::generator::materials::{Material, MaterialId};
 
     fn get_block_for_id(id : usize) -> Block {
         use BlockID::*;
@@ -54,7 +55,7 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let district_id = editor.world().district_map[x as usize][z as usize];
+                let district_id = editor.world_mut().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
@@ -65,7 +66,7 @@ mod tests {
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
                 //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
-                if let Some(district) = editor.world().districts.get(&district_id) {
+                if let Some(district) = editor.world_mut().districts.get(&district_id) {
                     
                     if district.data.edges.contains(&point) {
                         editor.place_block(&glass, Point3D::new(x, height , z)).await;
@@ -111,8 +112,8 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
-                let district_id = editor.world().district_map[x as usize][z as usize];
+                let super_district_id = editor.world_mut().super_district_map[x as usize][z as usize];
+                let district_id = editor.world_mut().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
@@ -125,7 +126,7 @@ mod tests {
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let World {districts,super_districts, .. } = editor.world();
+                let World {districts,super_districts, .. } = editor.world_mut();
 
                 let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
                 let district = districts.get(&district_id).expect("Failed to get district");
@@ -176,8 +177,8 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
-                let district_id = editor.world().district_map[x as usize][z as usize];
+                let super_district_id = editor.world_mut().super_district_map[x as usize][z as usize];
+                let district_id = editor.world_mut().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
@@ -186,11 +187,11 @@ mod tests {
                     continue;
                 };
 
-                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_district_type(editor.world_mut().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let World {districts,super_districts, .. } = editor.world();
+                let World {districts,super_districts, .. } = editor.world_mut();
                 let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
                 let district = districts.get(&district_id).expect("Failed to get district");
 
@@ -222,7 +223,7 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         println!("Build area: {:?}", build_area);
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
         let mut world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
@@ -236,18 +237,18 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let district_id = editor.world().district_map[x as usize][z as usize];
+                let district_id = editor.world_mut().district_map[x as usize][z as usize];
 
                 let Some(district_id) = district_id else {
                     continue;
                 };
                 
 
-                let block = get_block_for_district_type(editor.world().districts.get(&district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_district_type(editor.world_mut().districts.get(&district_id).expect("Failed to get district").data.district_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
                 //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
-                if let Some(district) = editor.world().districts.get(&district_id) {
+                if let Some(district) = editor.world_mut().districts.get(&district_id) {
                     
                     if district.data.edges.contains(&point) {
                         editor.place_block(&glass, Point3D::new(x, height , z)).await;
@@ -386,5 +387,164 @@ mod tests {
         ).await;
 
         editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
+    async fn get_wall_points() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
+
+        let world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+        generate_districts(seed, &mut editor).await;
+
+         let glass = Block {
+            id: BlockID::Glass,
+            data: None,
+            state: None,
+        };
+        let bedrock  = Block {
+            id: BlockID::Bedrock,
+            data: None,
+            state: None,
+        };
+        let black_wool: Block  = Block {
+            id: BlockID::BlackWool,
+            data: None,
+            state: None,
+        };
+        let lime_wool: Block  = Block {
+            id: BlockID::LimeWool,
+            data: None,
+            state: None,
+        };
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
+                let district_id = editor.world().district_map[x as usize][z as usize];
+
+                let Some(district_id) = district_id else {
+                    continue;
+                };
+                let Some(super_district_id) = super_district_id else {
+                    continue;
+                };
+
+                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let height = height_map[x as usize][z as usize] - build_area.origin.y - 1;
+                let point = Point3D::new(x, height + 1, z);
+
+                let World {districts,super_districts, .. } = editor.world();
+                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
+                let district = districts.get(&district_id).expect("Failed to get district");
+
+                if super_district.data.edges.contains(&point) {
+                    editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
+                }
+                else if district.data.edges.contains(&point) {
+                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                    editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
+                }
+                else {
+                    editor.place_block(&block, Point3D::new(x, height, z)).await;
+                }
+
+            }
+        }
+        let wall_points = crate::generator::districts::wall::get_wall_points(&editor.world().get_urban_points(), &mut editor);
+        for point in wall_points.clone() {
+            let height = height_map[point.x as usize][point.y as usize] - build_area.origin.y;
+            editor.place_block(&black_wool, Point3D::new(point.x, height, point.y)).await;
+        }
+        for point in editor.world().get_urban_points().difference(&wall_points) {
+            let height = height_map[point.x as usize][point.y as usize] - build_area.origin.y;
+            editor.place_block(&lime_wool, Point3D::new(point.x, height, point.y)).await;
+        }
+
+
+    }
+
+    #[tokio::test]
+    async fn palisade() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
+
+        let world = World::new(&provider).await.unwrap();
+        let mut editor = world.get_editor();
+        generate_districts(seed, &mut editor).await;
+
+        let materials = Material::load().expect("Failed to load materials");
+        let material = MaterialId::new("oak_planks".to_string());
+
+        let mut placer_rng = rng.derive();
+        let mut placer: MaterialPlacer = MaterialPlacer::new(
+            Placer::new(&materials, &mut placer_rng),
+            material.clone(),
+        );
+
+        let glass = Block {
+            id: BlockID::Glass,
+            data: None,
+            state: None,
+        };
+        let bedrock  = Block {
+            id: BlockID::Bedrock,
+            data: None,
+            state: None,
+        };
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
+                let district_id = editor.world().district_map[x as usize][z as usize];
+
+                let Some(district_id) = district_id else {
+                    continue;
+                };
+                let Some(super_district_id) = super_district_id else {
+                    continue;
+                };
+
+                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let height = height_map[x as usize][z as usize] - build_area.origin.y - 1;
+                let point = Point3D::new(x, height + 1, z);
+
+                let World {districts,super_districts, .. } = editor.world();
+                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
+                let district = districts.get(&district_id).expect("Failed to get district");
+
+                if super_district.data.edges.contains(&point) {
+                    editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
+                }
+                else if district.data.edges.contains(&point) {
+                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                    editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
+                }
+                else {
+                    editor.place_block(&block, Point3D::new(x, height, z)).await;
+                }
+
+            }
+        }
+
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &mut placer).await;
+
     }
 }

@@ -11,7 +11,7 @@ use crate::{
 
 pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
     for point in points {
-        let height = editor.world().get_height_at(point) - 1; // checking ground
+        let height = editor.world_mut().get_height_at(point) - 1; // checking ground
         let mut block_id = editor.get_block(Point3D::new(point.x, height, point.y)).id;
 
         if !block_id.is_tree() {
@@ -34,7 +34,7 @@ pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
 
 pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
     for point in points {
-        let height = editor.world().get_motion_blocking_height_at(point) - 1; // checking ground
+        let height = editor.world_mut().get_motion_blocking_height_at(point) - 1; // checking ground
         let mut point3d = Point3D::new(point.x, height, point.y);
         let mut block_id = editor.get_block(point3d).id;
 

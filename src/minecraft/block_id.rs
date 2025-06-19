@@ -11,6 +11,18 @@ pub enum BlockID {
     #[serde(rename = "minecraft:void_air")]
     VoidAir,
 
+    // === GLOWSTONE & CO. ===
+    #[serde(rename = "minecraft:glowstone")]
+    Glowstone,
+    #[serde(rename = "minecraft:shroomlight")]
+    Shroomlight,
+    #[serde(rename = "minecraft:sea_lantern")]
+    SeaLantern,
+    #[serde(rename = "minecraft:jack_o_lantern")]
+    JackOLantern,
+    #[serde(rename = "minecraft:redstone_lamp")]
+    RedstoneLamp,
+
     // === NATURAL BLOCKS ===
     #[serde(rename = "minecraft:grass_block")]
     GrassBlock,
@@ -554,6 +566,8 @@ pub enum BlockID {
     MangroveFence,
     #[serde(rename = "minecraft:bamboo_fence")]
     BambooFence,
+    #[serde(rename = "minecraft:bamboo_mosaic_fence")]
+    BambooMosaicFence,
     #[serde(rename = "minecraft:cherry_fence")]
     CherryFence,
     #[serde(rename = "minecraft:crimson_fence")]
@@ -815,6 +829,10 @@ pub enum BlockID {
     #[serde(rename = "minecraft:chain")]
     Chain,
 
+    // === IRON BARS ===
+    #[serde(rename = "minecraft:iron_bars")]
+    IronBars,
+
     // === BEDROCK ===
     #[serde(rename = "minecraft:bedrock")]
     Bedrock,
@@ -832,6 +850,8 @@ pub enum BlockID {
     NetherBrickStairs,
     #[serde(rename = "minecraft:nether_brick_wall")]
     NetherBrickWall,
+    #[serde(rename = "minecraft:nether_brick_fence")]
+    NetherBrickFence,
     #[serde(rename = "minecraft:chiseled_nether_bricks")]
     ChiseledNetherBricks,
     #[serde(rename = "minecraft:cracked_nether_bricks")]
@@ -845,6 +865,8 @@ pub enum BlockID {
     RedNetherBrickStairs,
     #[serde(rename = "minecraft:red_nether_brick_wall")]
     RedNetherBrickWall,
+    #[serde(rename = "minecraft:red_nether_brick_fence")]
+    RedNetherBrickFence,
 
     // CONCRETE
     #[serde(rename = "minecraft:white_concrete")]
@@ -983,6 +1005,102 @@ pub enum BlockID {
     #[serde(rename = "minecraft:prismarine_wall")]
     PrismarineWall,
 
+    // QUARTS
+    #[serde(rename = "minecraft:quartz_block")]
+    QuartzBlock,
+    #[serde(rename = "minecraft:smooth_quartz")]
+    SmoothQuartz,
+    #[serde(rename = "minecraft:chiseled_quartz_block")]
+    ChiseledQuartzBlock,
+    #[serde(rename = "minecraft:quartz_pillar")]
+    QuartzPillar,
+    #[serde(rename = "minecraft:quartz_bricks")]
+    QuartzBricks,
+    #[serde(rename = "minecraft:quartz_slab")]
+    QuartzSlab,
+    #[serde(rename = "minecraft:smooth_quartz_slab")]
+    SmoothQuartzSlab,
+    #[serde(rename = "minecraft:quartz_stairs")]
+    QuartzStairs,
+    #[serde(rename = "minecraft:smooth_quartz_stairs")]
+    SmoothQuartzStairs,
+
+    // PURPUR
+    #[serde(rename = "minecraft:purpur_block")]
+    PurpurBlock,
+    #[serde(rename = "minecraft:purpur_pillar")]
+    PurpurPillar,
+    #[serde(rename = "minecraft:purpur_stairs")]
+    PurpurStairs,
+    #[serde(rename = "minecraft:purpur_slab")]
+    PurpurSlab,
+
+    // COPPER BLOCKS
+    #[serde(rename = "minecraft:copper_block")]
+    CopperBlock,
+    #[serde(rename = "minecraft:cut_copper")]
+    CutCopper,
+    #[serde(rename = "minecraft:cut_copper_slab")]
+    CutCopperSlab,
+    #[serde(rename = "minecraft:cut_copper_stairs")]
+    CutCopperStairs,
+    #[serde(rename = "minecraft:exposed_copper")]
+    ExposedCopper,
+    #[serde(rename = "minecraft:exposed_cut_copper")]
+    ExposedCutCopper,
+    #[serde(rename = "minecraft:exposed_cut_copper_slab")]
+    ExposedCutCopperSlab,
+    #[serde(rename = "minecraft:exposed_cut_copper_stairs")]
+    ExposedCutCopperStairs,
+    #[serde(rename = "minecraft:weathered_copper")]
+    WeatheredCopper,
+    #[serde(rename = "minecraft:weathered_cut_copper")]
+    WeatheredCutCopper,
+    #[serde(rename = "minecraft:weathered_cut_copper_slab")]
+    WeatheredCutCopperSlab,
+    #[serde(rename = "minecraft:weathered_cut_copper_stairs")]
+    WeatheredCutCopperStairs,
+    #[serde(rename = "minecraft:oxidized_copper")]
+    OxidizedCopper,
+    #[serde(rename = "minecraft:oxidized_cut_copper")]
+    OxidizedCutCopper,
+    #[serde(rename = "minecraft:oxidized_cut_copper_slab")]
+    OxidizedCutCopperSlab,
+    #[serde(rename = "minecraft:oxidized_cut_copper_stairs")]
+    OxidizedCutCopperStairs,
+    #[serde(rename = "minecraft:waxed_copper_block")]
+    WaxedCopperBlock,
+    #[serde(rename = "minecraft:waxed_cut_copper")]
+    WaxedCutCopper,
+    #[serde(rename = "minecraft:waxed_cut_copper_slab")]
+    WaxedCutCopperSlab,
+    #[serde(rename = "minecraft:waxed_cut_copper_stairs")]
+    WaxedCutCopperStairs,
+    #[serde(rename = "minecraft:waxed_exposed_copper")]
+    WaxedExposedCopper,
+    #[serde(rename = "minecraft:waxed_exposed_cut_copper")]
+    WaxedExposedCutCopper,
+    #[serde(rename = "minecraft:waxed_exposed_cut_copper_slab")]
+    WaxedExposedCutCopperSlab,
+    #[serde(rename = "minecraft:waxed_exposed_cut_copper_stairs")]
+    WaxedExposedCutCopperStairs,
+    #[serde(rename = "minecraft:waxed_weathered_copper")]
+    WaxedWeatheredCopper,
+    #[serde(rename = "minecraft:waxed_weathered_cut_copper")]
+    WaxedWeatheredCutCopper,
+    #[serde(rename = "minecraft:waxed_weathered_cut_copper_slab")]
+    WaxedWeatheredCutCopperSlab,
+    #[serde(rename = "minecraft:waxed_weathered_cut_copper_stairs")]
+    WaxedWeatheredCutCopperStairs,
+    #[serde(rename = "minecraft:waxed_oxidized_copper")]
+    WaxedOxidizedCopper,
+    #[serde(rename = "minecraft:waxed_oxidized_cut_copper")]
+    WaxedOxidizedCutCopper,
+    #[serde(rename = "minecraft:waxed_oxidized_cut_copper_slab")]
+    WaxedOxidizedCutCopperSlab,
+    #[serde(rename = "minecraft:waxed_oxidized_cut_copper_stairs")]
+    WaxedOxidizedCutCopperStairs,
+
     // GLASS BLOCKS
     #[serde(rename = "minecraft:glass")]
     Glass,
@@ -1056,6 +1174,8 @@ pub enum BlockID {
     BlackStainedGlassPane,
 
     // FURNITURE
+    #[serde(rename = "minecraft:decorated_pot")]
+    DecoratedPot,
     #[serde(rename = "minecraft:crafting_table")]
     CraftingTable,
     #[serde(rename = "minecraft:furnace")]
@@ -1345,6 +1465,74 @@ pub enum BlockID {
     #[serde(rename = "minecraft:brown_mushroom_block")]
     BrownMushroomBlock,
 
+    // === BANNERS ===
+    #[serde(rename = "minecraft:white_banner")]
+    WhiteBanner,
+    #[serde(rename = "minecraft:orange_banner")]
+    OrangeBanner,
+    #[serde(rename = "minecraft:magenta_banner")]
+    MagentaBanner,
+    #[serde(rename = "minecraft:light_blue_banner")]
+    LightBlueBanner,
+    #[serde(rename = "minecraft:yellow_banner")]
+    YellowBanner,
+    #[serde(rename = "minecraft:lime_banner")]
+    LimeBanner,
+    #[serde(rename = "minecraft:pink_banner")]
+    PinkBanner,
+    #[serde(rename = "minecraft:gray_banner")]
+    GrayBanner,
+    #[serde(rename = "minecraft:light_gray_banner")]
+    LightGrayBanner,
+    #[serde(rename = "minecraft:cyan_banner")]
+    CyanBanner,
+    #[serde(rename = "minecraft:purple_banner")]
+    PurpleBanner,
+    #[serde(rename = "minecraft:blue_banner")]
+    BlueBanner,
+    #[serde(rename = "minecraft:brown_banner")]
+    BrownBanner,
+    #[serde(rename = "minecraft:green_banner")]
+    GreenBanner,
+    #[serde(rename = "minecraft:red_banner")]
+    RedBanner,
+    #[serde(rename = "minecraft:black_banner")]
+    BlackBanner,
+
+    // === WALL BANNERS ===
+    #[serde(rename = "minecraft:white_wall_banner")]
+    WhiteWallBanner,
+    #[serde(rename = "minecraft:orange_wall_banner")]
+    OrangeWallBanner,
+    #[serde(rename = "minecraft:magenta_wall_banner")]
+    MagentaWallBanner,
+    #[serde(rename = "minecraft:light_blue_wall_banner")]
+    LightBlueWallBanner,
+    #[serde(rename = "minecraft:yellow_wall_banner")]
+    YellowWallBanner,
+    #[serde(rename = "minecraft:lime_wall_banner")]
+    LimeWallBanner,
+    #[serde(rename = "minecraft:pink_wall_banner")]
+    PinkWallBanner,
+    #[serde(rename = "minecraft:gray_wall_banner")]
+    GrayWallBanner,
+    #[serde(rename = "minecraft:light_gray_wall_banner")]
+    LightGrayWallBanner,
+    #[serde(rename = "minecraft:cyan_wall_banner")]
+    CyanWallBanner,
+    #[serde(rename = "minecraft:purple_wall_banner")]
+    PurpleWallBanner,
+    #[serde(rename = "minecraft:blue_wall_banner")]
+    BlueWallBanner,
+    #[serde(rename = "minecraft:brown_wall_banner")]
+    BrownWallBanner,
+    #[serde(rename = "minecraft:green_wall_banner")]
+    GreenWallBanner,
+    #[serde(rename = "minecraft:red_wall_banner")]
+    RedWallBanner,
+    #[serde(rename = "minecraft:black_wall_banner")]
+    BlackWallBanner,
+
     #[serde(other)]
     Unknown,
 }
@@ -1407,6 +1595,64 @@ impl BlockID {
     }
     pub fn is_tree_or_leaf(self) -> bool {
         self.is_leaf() || self.is_log() || self.is_mushroom()
+    }
+
+    pub fn is_stairs(self) -> bool {
+        matches!(
+            self,
+            BlockID::OakStairs | BlockID::SpruceStairs | BlockID::BirchStairs | BlockID::JungleStairs
+            | BlockID::AcaciaStairs | BlockID::DarkOakStairs | BlockID::MangroveStairs
+            | BlockID::BambooStairs | BlockID::BambooMosaicStairs | BlockID::CherryStairs
+            | BlockID::CrimsonStairs | BlockID::WarpedStairs | BlockID::SandstoneStairs
+            | BlockID::SmoothSandstoneStairs | BlockID::RedSandstoneStairs | BlockID::SmoothRedSandstoneStairs
+            | BlockID::StoneStairs | BlockID::CobblestoneStairs | BlockID::MossyCobblestoneStairs
+            | BlockID::StoneBrickStairs | BlockID::MossyStoneBrickStairs | BlockID::AndesiteStairs
+            | BlockID::PolishedAndesiteStairs | BlockID::DioriteStairs | BlockID::PolishedDioriteStairs
+            | BlockID::GraniteStairs | BlockID::PolishedGraniteStairs | BlockID::DeepslateBrickStairs
+            | BlockID::DeepslateTileStairs | BlockID::CobbledDeepslateStairs | BlockID::PolishedDeepslateStairs
+            | BlockID::TuffBrickStairs | BlockID::PolishedTuffStairs | BlockID::BlackstoneStairs
+            | BlockID::PolishedBlackstoneStairs | BlockID::PolishedBlackstoneBrickStairs
+            | BlockID::NetherBrickStairs | BlockID::RedNetherBrickStairs | BlockID::PrismarineStairs
+            | BlockID::PrismarineBrickStairs | BlockID::DarkPrismarineStairs | BlockID::MudBrickStairs
+            | BlockID::QuartzStairs | BlockID::SmoothQuartzStairs | BlockID::PurpurStairs
+            | BlockID::CutCopperStairs | BlockID::ExposedCutCopperStairs | BlockID::WeatheredCutCopperStairs
+            | BlockID::OxidizedCutCopperStairs | BlockID::WaxedCutCopperStairs
+            | BlockID::WaxedExposedCutCopperStairs | BlockID::WaxedWeatheredCutCopperStairs
+            | BlockID::WaxedOxidizedCutCopperStairs
+        )
+    }
+
+    pub fn is_slab(self) -> bool {
+        matches!(
+            self,
+            BlockID::OakSlab | BlockID::SpruceSlab | BlockID::BirchSlab | BlockID::JungleSlab
+            | BlockID::AcaciaSlab | BlockID::DarkOakSlab | BlockID::MangroveSlab | BlockID::BambooSlab
+            | BlockID::BambooMosaicSlab | BlockID::CherrySlab | BlockID::CrimsonSlab | BlockID::WarpedSlab
+            | BlockID::SandstoneSlab | BlockID::CutSandstoneSlab | BlockID::SmoothSandstoneSlab
+            | BlockID::RedSandstoneSlab | BlockID::CutRedSandstoneSlab | BlockID::SmoothRedSandstoneSlab
+            | BlockID::StoneSlab | BlockID::SmoothStoneSlab | BlockID::CobblestoneSlab | BlockID::MossyCobblestoneSlab
+            | BlockID::StoneBrickSlab | BlockID::MossyStoneBrickSlab | BlockID::AndesiteSlab | BlockID::PolishedAndesiteSlab
+            | BlockID::DioriteSlab | BlockID::PolishedDioriteSlab | BlockID::GraniteSlab | BlockID::PolishedGraniteSlab
+            | BlockID::CobbledDeepslateSlab | BlockID::PolishedDeepslateSlab | BlockID::DeepslateBrickSlab
+            | BlockID::DeepslateTileSlab | BlockID::TuffBrickSlab | BlockID::PolishedTuffSlab | BlockID::BlackstoneSlab
+            | BlockID::PolishedBlackstoneSlab | BlockID::PolishedBlackstoneBrickSlab | BlockID::NetherBrickSlab
+            | BlockID::RedNetherBrickSlab | BlockID::PrismarineSlab | BlockID::PrismarineBrickSlab
+            | BlockID::DarkPrismarineSlab | BlockID::MudBrickSlab | BlockID::QuartzSlab | BlockID::SmoothQuartzSlab
+            | BlockID::PurpurSlab | BlockID::CutCopperSlab | BlockID::ExposedCutCopperSlab
+            | BlockID::WeatheredCutCopperSlab | BlockID::OxidizedCutCopperSlab | BlockID::WaxedCutCopperSlab
+            | BlockID::WaxedExposedCutCopperSlab | BlockID::WaxedWeatheredCutCopperSlab | BlockID::WaxedOxidizedCutCopperSlab
+        )
+    }
+
+    pub fn is_fence(self) -> bool {
+        matches!(
+            self,
+            BlockID::OakFence | BlockID::SpruceFence | BlockID::BirchFence | BlockID::JungleFence
+            | BlockID::AcaciaFence | BlockID::DarkOakFence | BlockID::MangroveFence | BlockID::CherryFence
+            | BlockID::CrimsonFence | BlockID::WarpedFence | BlockID::NetherBrickFence
+            | BlockID::RedNetherBrickFence | BlockID::BambooFence | BlockID::BambooMosaicFence
+            | BlockID::PolishedBlackstoneWall
+        )
     }
 }
 

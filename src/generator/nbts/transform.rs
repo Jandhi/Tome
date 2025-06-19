@@ -4,7 +4,7 @@ use crate::{generator::nbts::Rotation, geometry::Point3D};
 #[derive(Debug, Clone)]
 pub struct Transform {
     pub position : Point3D,
-    pub rotation : Rotation,
+    pub rotation : Rotation
 }
 
 impl Transform {

@@ -58,7 +58,7 @@ mod tests {
         let forests = Forest::load().expect("Failed to load forests");
         let forest_id = ForestId::new("birch_forest".to_string());
         let forest = forests.get(&forest_id).expect("Failed to get birch forest").clone();
-        let points = HashSet::from_iter(editor.world().world_rect_2d().iter());
+        let points = HashSet::from_iter(editor.world_mut().world_rect_2d().iter());
 
 
         plant_forest(&points, forest, &mut rng, &mut editor, None, true).await

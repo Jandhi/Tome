@@ -1,9 +1,8 @@
 use std::{collections::HashMap};
 use anyhow::Ok;
-use log::info;
 use serde_derive::{Serialize, Deserialize};
 
-use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}};
+use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MaterialId(String);
@@ -22,7 +21,14 @@ impl MaterialId {
 pub struct Material {
     id : MaterialId,
     connections : Option<MaterialConnections>,
-    blocks : HashMap<BlockForm, BlockID>,
+    blocks : HashMap<BlockForm, MaterialBlocks>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum MaterialBlocks {
+    Block(BlockID),
+    Blocks(HashMap<BlockID, f32>),
 }
 
 impl Material {
@@ -48,28 +54,40 @@ impl Material {
         })
     }
 
-    pub fn get_block(&self, form: &BlockForm) -> Option<&BlockID> {
-        self.blocks.get(form)
+    pub fn get_block(&self, form: &BlockForm, rng : &mut RNG) -> Option<&BlockID> {
+        match self.blocks.get(form)? {
+            MaterialBlocks::Block(block_id) => Some(block_id),
+            MaterialBlocks::Blocks(hash_map) => Some(rng.choose_weighted(hash_map)),
+        }
     }
 
-    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, states : Option<HashMap<String, String>>, data : Option<String>, parameters : MaterialParameters) {
+    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, state : Option<&HashMap<String, String>>, data : Option<&String>, parameters : MaterialParameters, rng : &mut RNG, is_forced : bool) {
         let material = map_features(&parameters, self.id(), materials);
         
-        if let Some(block_id) = materials.get(&material).unwrap().get_block(&form) {
-            editor.place_block(&Block{
+        if let Some(block_id) = materials.get(&material).unwrap().get_block(&form, rng) {
+            editor.place_block_options(&Block{
                 id: *block_id,
-                state: states,
-                data,
-            }, point).await;
+                state: state.cloned(),
+                data: data.cloned(),
+            }, point, is_forced).await;
         } else {
             log::warn!("No block found for material {} with form {:?}", self.id().0, form);
         }
     }
 
     pub fn get_form(&self, id : BlockID) -> Option<BlockForm> {
-        for (form, block_id) in &self.blocks {
-            if *block_id == id {
-                return Some(form.clone());
+        for (form, blocks) in &self.blocks {
+            match blocks {
+                MaterialBlocks::Block(block_id) => {
+                    if *block_id == id {
+                        return Some(*form);
+                    }
+                },
+                MaterialBlocks::Blocks(blocks_map) => {
+                    if blocks_map.contains_key(&id) {
+                        return Some(*form);
+                    }
+                }
             }
         }
 

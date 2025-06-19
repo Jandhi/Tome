@@ -1,9 +1,10 @@
 use std::io::Read;
 
-use crate::{geometry::Rect3D, http_mod::buildarea, minecraft::{Chunk, Chunks}};
+use crate::{generator::nbts::NBTStructure, geometry::Rect3D, http_mod::buildarea, minecraft::{Chunk, Chunks}};
 
 use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
+use fastnbt::Value;
 use flate2::read::GzDecoder;
 use log::{debug, info};
 use reqwest_middleware::ClientBuilder;
@@ -54,6 +55,16 @@ impl GDMCHTTPProvider {
         self.log_response(&text);
         let command_response: Vec<CommandResponse> = serde_json::from_str(&text)?;
         Ok(command_response)
+    }
+
+    pub async fn give_player_book(&self, pages : &Vec<&str>, title : &str, author : &str) -> anyhow::Result<CommandResponse> {
+        let pages_json = pages.join(",");
+
+        let command = format!("give @a written_book{{pages:[{}],title:\"{}\",author:\"{}\"}}", pages_json, title, author);
+
+        println!("Command: {}", command);
+
+        Ok(self.command(vec![command]).await?[0].clone())
     }
 
     pub async fn get_blocks(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32) -> anyhow::Result<Vec<PositionedBlock>> {        
@@ -200,5 +211,34 @@ impl GDMCHTTPProvider {
         }
     }
 
-    
+    pub async fn get_nbt(&self, x: i32, y: i32, z: i32, dx: i32, dy: i32, dz: i32, entities: bool) -> anyhow::Result<NBTStructure> {
+        let url = self.url(&format!(
+            "structure?x={}&y={}&z={}&dx={}&dy={}&dz={}&entities={}",
+            x, y, z, dx, dy, dz, entities
+        ));
+        let response = self.client
+            .get(&url)
+            .send()
+            .await?;
+
+        let raw_bytes = response.bytes().await?;
+        let mut decoder = GzDecoder::new(&raw_bytes[..]);
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        debug!("Decompressed {} bytes from chunk data", buf.len());
+
+        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&buf) {
+            return Ok(val);
+        }
+
+        let mut decoder = GzDecoder::new(buf.as_slice());
+        let mut buf = vec![];
+        decoder.read_to_end(&mut buf)?;
+        
+        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&buf) {
+            return Ok(val);
+        }
+
+        Err(anyhow::anyhow!("Failed to parse NBT structure from response"))
+    }
 }

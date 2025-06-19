@@ -1,0 +1,13 @@
+{
+    "id" : "japanese_flowers",
+    "connections" : {},
+    "blocks" : {
+        "flower" : {
+            "minecraft:lily_of_the_valley" : 1.0,
+            "minecraft:pink_tulip" : 1.0,
+            "minecraft:red_tulip" : 0.5,
+            "minecraft:white_tulip" : 0.5,
+            "minecraft:azure_bluet" : 1.0
+        }
+    }
+}

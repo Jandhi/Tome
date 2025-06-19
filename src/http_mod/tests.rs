@@ -85,4 +85,24 @@ mod tests {
 
         log::info!("a section: {:?}", chunks[0].sections[0]);
     }
+
+    
+    #[tokio::test]
+    async fn test_give_book() {
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+        let title = "Test Book";
+        let author = "Test Author";
+        let pages = vec![
+            "This is the first page of the book.",
+            "This is the second page of the book.",
+            "This is the third page of the book."
+        ];
+
+        let book = provider.give_player_book(&pages, title, author)
+            .await
+            .expect("Failed to give book");
+
+        println!("Book given: {:?}", book);
+    }
 }

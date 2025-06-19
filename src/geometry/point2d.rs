@@ -1,5 +1,7 @@
 use serde_derive::{Deserialize, Serialize};
 
+use crate::geometry::Cardinal;
+
 use super::Point3D;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 use std::ops::{AddAssign, SubAssign, MulAssign, DivAssign};
@@ -25,11 +27,27 @@ pub const SOUTH_2D : Point2D = Point2D { x: 0, y: 1 };
 pub const EAST_2D : Point2D = Point2D { x: 1, y: 0 };
 pub const WEST_2D : Point2D = Point2D { x: -1, y: 0 };
 
+pub const NORTHWEST_2D: Point2D = Point2D { x: -1, y: -1 };
+pub const NORTHEAST_2D: Point2D = Point2D { x: 1, y: -1 };
+pub const SOUTHWEST_2D: Point2D = Point2D { x: -1, y: 1 };
+pub const SOUTHEAST_2D: Point2D = Point2D { x: 1, y: 1 };
+
 pub const CARDINALS_2D: [Point2D; 4] = [
     NORTH_2D,
     SOUTH_2D,
     EAST_2D,
     WEST_2D,
+];
+
+pub const ALL_8 : [Point2D; 8] = [
+    NORTH_2D,
+    SOUTH_2D,
+    EAST_2D,
+    WEST_2D,
+    NORTHEAST_2D,
+    NORTHWEST_2D,
+    SOUTHEAST_2D,
+    SOUTHWEST_2D,
 ];
 
 pub fn cardinal_to_str(dir: &Point2D) -> Option<String> {
@@ -50,6 +68,17 @@ impl Default for Point2D {
 impl From<[i32; 2]> for Point2D {
     fn from(arr: [i32; 2]) -> Self {
         Point2D { x: arr[0], y: arr[1] }
+    }
+}
+
+impl From<Cardinal> for Point2D {
+    fn from(cardinal: Cardinal) -> Self {
+        match cardinal {
+            Cardinal::North => NORTH_2D,
+            Cardinal::East  => EAST_2D,
+            Cardinal::South => SOUTH_2D,
+            Cardinal::West  => WEST_2D,
+        }
     }
 }
 
@@ -77,6 +106,10 @@ impl Point2D {
     pub fn add_height(&self, height_map : &Vec<Vec<i32>>) -> Point3D {
         let height = height_map[self.x as usize][self.y as usize];
         Point3D { x: self.x, y: height, z: self.y }
+    }
+
+    pub fn neighbours(&self) -> Vec<Point2D> {
+        CARDINALS_2D.iter().map(|&d| *self + d).collect()
     }
 }
 

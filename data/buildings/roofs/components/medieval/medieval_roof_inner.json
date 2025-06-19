@@ -1,0 +1,17 @@
+{
+  "id": "medieval_roof_inner",
+  "path": "data/buildings/roofs/components/medieval/medieval_roof_inner.nbt",
+  "facing": "north",
+  "origin": {
+    "x": 1,
+    "y": 1,
+    "z": 1
+  },
+  "palette": "medieval_roof",
+  "style": "medieval",
+  "weight": 1.0,
+  "roof_type": {
+    "type": "hip",
+    "shape": "inner"
+  }
+}

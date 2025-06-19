@@ -1,0 +1,10 @@
+{
+    "name" : "basic_tower",
+    "type" : "tower",
+    "filepath" : "data/structures/city_wall/basic_tower.nbt",
+    "origin" : {
+        "x" : 3,
+        "y" : 1,
+        "z" : 3
+    }
+}

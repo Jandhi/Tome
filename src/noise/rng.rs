@@ -21,6 +21,13 @@ impl RNG {
         RNG { seed, state: 0 }
     }
 
+    pub fn derive(&mut self) -> RNG {
+        RNG {
+            seed: Seed(self.next_i64()),
+            state: 0,
+        }
+    }
+
     pub fn from_seed_and_string(seed: Seed, string: &str) -> Self {
         let mut hasher = DefaultHasher::new();
         hasher.write(string.as_bytes());

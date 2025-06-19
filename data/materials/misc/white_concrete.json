@@ -1,0 +1,7 @@
+{
+    "id" : "white_concrete",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:white_concrete"
+    }
+}

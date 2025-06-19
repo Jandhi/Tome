@@ -1,0 +1,13 @@
+{
+    "id" : "rustic_wall",
+    "path" : "data/buildings/walls/rustic/rustic_wall.nbt",
+    "origin" : {
+        "x" : -6,
+        "y" : 0,
+        "z" : 0
+    },
+    "facing" : "x_plus",
+    "palette" : "japanese_dark_blackstone",
+    "positions" : ["lower"],
+    "tags" : ["only_roof", "japanese"]
+}

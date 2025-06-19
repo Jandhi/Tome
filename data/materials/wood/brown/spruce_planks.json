@@ -17,6 +17,8 @@
         "sign"               : "minecraft:spruce_sign",
         "wall_sign"          : "minecraft:spruce_wall_sign",
         "hanging_sign"       : "minecraft:spruce_hanging_sign",
-        "hanging_wall_sign"  : "minecraft:spruce_hanging_wall_sign"
+        "hanging_wall_sign"  : "minecraft:spruce_hanging_wall_sign",
+        "log"                : "minecraft:spruce_log",
+        "wood"               : "minecraft:spruce_wood"
     }
 }

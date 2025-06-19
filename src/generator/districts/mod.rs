@@ -7,7 +7,7 @@ mod merge;
 mod constants;
 mod data;
 mod classification;
-
+mod wall;
 mod district_painter;
 
 pub use district::District;
@@ -19,3 +19,4 @@ pub use super_district::SuperDistrict;
 pub use super_district::SuperDistrictID;
 pub use data::{DistrictData, HasDistrictData};
 pub use district_painter::*;
+pub use wall::build_wall;
