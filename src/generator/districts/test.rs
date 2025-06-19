@@ -481,7 +481,7 @@ mod tests {
         // Initialize the test data
         let seed = Seed(12345);
         let mut rng = RNG::new(seed);
-
+        let mut rng2 = RNG::new(seed);
         
         let provider = GDMCHTTPProvider::new();
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
@@ -495,9 +495,13 @@ mod tests {
         let material = MaterialId::new("oak_planks".to_string());
 
         let mut placer_rng = rng.derive();
-        let mut placer: MaterialPlacer = MaterialPlacer::new(
-            Placer::new(&materials, &mut placer_rng),
-            material.clone(),
+        // let mut placer: MaterialPlacer = MaterialPlacer::new(
+        //     Placer::new(&materials, &mut placer_rng),
+        //     material.clone(),
+        // );
+        let mut placer: Placer = Placer::new(
+            &materials,
+            & mut rng,
         );
 
         let glass = Block {
@@ -513,7 +517,7 @@ mod tests {
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::Palisade).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Palisade).await;
 
     }
 
@@ -524,7 +528,7 @@ mod tests {
         // Initialize the test data
         let seed = Seed(12345);
         let mut rng = RNG::new(seed);
-
+        let mut rng2 = RNG::new(seed);
         
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.unwrap();
@@ -534,13 +538,14 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("stone_bricks".to_string());
 
-        let placer: Placer = Placer::new(
+        let mut placer: Placer = Placer::new(
             &materials,
+            &mut rng,
         );
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::Standard).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Standard).await;
 
     }
 
@@ -551,7 +556,7 @@ mod tests {
         // Initialize the test data
         let seed = Seed(12345);
         let mut rng = RNG::new(seed);
-
+        let mut rng2 = RNG::new(seed);
         
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.unwrap();
@@ -561,13 +566,14 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("stone_bricks".to_string());
 
-        let placer: Placer = Placer::new(
+        let mut placer: Placer = Placer::new(
             &materials,
+            &mut rng,
         );
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng, &placer, &material, &structures, WallType::StandardWithInner).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
 
     }
 }

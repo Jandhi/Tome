@@ -1,13 +1,8 @@
 use crate::{editor::Editor, geometry::{EAST, NORTH, SOUTH, UP, WEST}, minecraft::BlockID};
 
 pub async fn build_compass(editor : &mut Editor) {
-<<<<<<< HEAD
-    let midpoint = editor.world().world_rect_2d().size / 2;
-    let point = editor.world().add_height(midpoint);
-=======
     let midpoint = editor.world_mut().world_rect_2d().size / 2;
     let point = editor.world_mut().add_height(midpoint);
->>>>>>> master
     let offset = UP * 30;
     let point = point + offset;
 

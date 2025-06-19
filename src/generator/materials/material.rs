@@ -61,11 +61,7 @@ impl Material {
         }
     }
 
-<<<<<<< HEAD
-    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, state : Option<&HashMap<String, String>>, data : Option<&String>, parameters : MaterialParameters) {
-=======
     pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, state : Option<&HashMap<String, String>>, data : Option<&String>, parameters : MaterialParameters, rng : &mut RNG, is_forced : bool) {
->>>>>>> master
         let material = map_features(&parameters, self.id(), materials);
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form, rng) {
@@ -73,11 +69,7 @@ impl Material {
                 id: *block_id,
                 state: state.cloned(),
                 data: data.cloned(),
-<<<<<<< HEAD
-            }, point).await;
-=======
             }, point, is_forced).await;
->>>>>>> master
         } else {
             log::warn!("No block found for material {} with form {:?}", self.id().0, form);
         }

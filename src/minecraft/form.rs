@@ -33,9 +33,6 @@ pub enum BlockForm {
     #[serde(rename = "log")]
     Log,
 
-    #[serde(rename = "chiseled")]
-    Chiseled,
-    
     // SIGNS
     #[serde(rename = "sign")]
     Sign,

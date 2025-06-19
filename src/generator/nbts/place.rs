@@ -4,17 +4,10 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-<<<<<<< HEAD
 use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::NBTStructure, transform::Transform, Rotation, Structure}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockID}};
 
 
-pub async fn place_structure<'materials>(editor: &mut Editor, placer : Option<&Placer<'materials>>, structure: &Structure, offset : Point3D, direction : Cardinal, data : Option<&LoadedData>, palette: Option<&PaletteId>,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
-=======
-use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, PaletteSwapResult, Placer}, nbts::{meta::NBTMeta, nbt::{self, NBTStructure}, transform::Transform, Rotation, Structure}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockID}, noise::RNG};
-
-
-pub async fn place_structure<'materials>(editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, offset : Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
->>>>>>> master
+pub async fn place_structure<'materials>(editor: &mut Editor, placer : Option<&mut Placer<'materials>>, structure: &Structure, offset : Point3D, direction : Cardinal, data : Option<&LoadedData>, palette: Option<&PaletteId>,  mirror_x : bool, mirror_z : bool) -> anyhow::Result<()> {
     let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
     
     let mut transform = match rotation {
@@ -22,37 +15,24 @@ pub async fn place_structure<'materials>(editor: &mut Editor, placer : &mut Plac
         Rotation::Once => Transform::new(offset, Rotation::Once),
         Rotation::Twice => Transform::new(offset, Rotation::Twice),
         Rotation::Thrice => Transform::new(offset, Rotation::Thrice),
-<<<<<<< HEAD
     };
 
     // Shift the transform to account for the structure's origin
     transform.shift(rotation.apply_to_point(-structure.origin));
 
-    let input_palette = structure.palette.as_ref().map(|p| p.clone());
-
-    place_nbt(&structure.meta, transform, editor, placer, data, input_palette.as_ref(), palette, 
-        if mirror_x { Some(structure.origin.x) } else { None }, 
-        if mirror_z { Some(structure.origin.z) } else { None }
-    ).await
-=======
-    };
-
-    // Shift the transform to account for the structure's origin
-    transform.shift(rotation.apply_to_point(-structure.origin));
-
-    place_nbt(&structure.meta, transform, editor, placer, data, &structure.palette, &palette, 
+    place_nbt(&structure.meta, transform, editor, placer, data, Some(&structure.palette), palette, 
         if mirror_x { Some(structure.origin.x) } else { None }, 
         if mirror_z { Some(structure.origin.z) } else { None }
     ).await
 }
 
-pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : &mut Placer<'materials>,  generator_data : &LoadedData, input_palette : &PaletteId, output_palette : &PaletteId, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
-    let LoadedData { materials, palettes, .. } = generator_data;
+pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : Option<&mut Placer<'materials>>,  generator_data : Option<&LoadedData>, input_palette : Option<&PaletteId>, output_palette : Option<&PaletteId>, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
     info!("Placing NBT structure: {}", data.path);
 
     let nbt_data = std::fs::read(data.path.clone())?;
     
     let structure : Result<NBTStructure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
+    let mut placer = placer.unwrap();
 
     // Try to decode the structure directly, if it fails, try decompressing and decoding
     let structure = match structure {
@@ -66,94 +46,14 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
     };
 
     for blockdata in structure.blocks {
-        let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
 
-        
+        let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
         let mut data = blockdata.nbt;
-        let palette = palettes.get(&input_palette).expect(&format!("Palette {:?} not found", input_palette)).clone();
 
         if data.as_ref().is_some_and(|d| d == "\"{}\"") {
             data = None;
         }
 
-        if palette_data.name == BlockID::Air {
-            continue; // Skip air blocks
-        }
-
-        let mut pos = Point3D::from(blockdata.pos);
-
-        if let Some(mx) = mirror_x {
-            pos.x = mx * 2 - pos.x;
-        }
-        if let Some(mz) = mirror_z {
-            pos.z = mz * 2 - pos.z;
-        }
-
-        let swap = palette.swap_with(palette_data.name, palettes.get(&output_palette).expect(&format!("Palette {:?} not found", output_palette)), materials);
-        
-        match swap {
-            PaletteSwapResult::Block(id) => {
-                let block = (-transform.rotation).apply_to_block(Block{
-                    id,
-                    state: palette_data.properties.clone(),
-                    data, // Now contains the SNBT string if data exists
-                });
-
-                editor.place_block(&block, transform.apply(pos)).await;
-            },
-            PaletteSwapResult::Material(material_id, form) => {
-                let block = (-transform.rotation).apply_to_block(Block{
-                    id: BlockID::Unknown,
-                    state: palette_data.properties.clone(),
-                    data, // Now contains the SNBT string if data exists
-                });
-
-                placer.place_block(
-                    editor,
-                    transform.apply(pos),
-                    material_id,
-                    form,
-                    block.state.as_ref(),
-                    block.data.as_ref()
-                ).await
-            }
-        }
-    }
-
-    Ok(())
->>>>>>> master
-}
-
-pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, editor : &mut Editor, placer : Option<&Placer<'materials>>,  generator_data : Option<&LoadedData>, input_palette : Option<&PaletteId>, output_palette : Option<&PaletteId>, mirror_x : Option<i32>, mirror_z : Option<i32>) -> anyhow::Result<()> {
-    info!("Placing NBT structure: {}", data.path);
-
-    let nbt_data = std::fs::read(data.path.clone())?;
-    
-    let structure : Result<NBTStructure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
-
-    // Try to decode the structure directly, if it fails, try decompressing and decoding
-    let structure = match structure {
-        Result::Ok(s) => s,
-        Err(_) => {
-            let mut decoder = GzDecoder::new(nbt_data.as_slice());
-            let mut buf = vec![];
-            decoder.read_to_end(&mut buf)?;
-            fastnbt::from_bytes(&buf)?
-        }
-    };
-
-<<<<<<< HEAD
-    for blockdata in structure.blocks {
-=======
-    for block in structure.blocks {
-        let palette_data = structure.palette.get(block.state).expect("The block state index is out of bounds");
-        let data = block.nbt;
->>>>>>> master
-
-        let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
-        let data = blockdata.nbt.map(|nbt| to_snbt(&nbt));
-
-<<<<<<< HEAD
         if palette_data.name == BlockID::Air {
             continue; // Skip air blocks
         }
@@ -188,7 +88,7 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                         data, // Now contains the SNBT string if data exists
                     });
 
-                    editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
+                    editor.place_block(&block, transform.apply(pos)).await;
                 },
                 PaletteSwapResult::Material(material_id, form) => {
                     let block = (-transform.rotation).apply_to_block(Block{
@@ -196,8 +96,8 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                         state: palette_data.properties.clone(),
                         data, // Now contains the SNBT string if data exists
                     });
-
-                    placer.unwrap().place_block(
+                    
+                    placer.place_block(
                         editor,
                         transform.apply(pos),
                         material_id,
@@ -208,16 +108,6 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                 }
             }
         }
-=======
-        editor.place_block(&Block{
-
-            id,
-            state: palette_data.properties.clone(),
-            data, // Now contains the SNBT string if data exists
-        };
-
-        editor.place_block(&(-transform.rotation).apply_to_block(block), transform.apply(Point3D::from(blockdata.pos))).await;
->>>>>>> master
     }
 
     Ok(())

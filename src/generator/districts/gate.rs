@@ -15,7 +15,7 @@ pub async fn build_wall_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
     rng: &mut RNG,
-    material_placer: &Placer<'_>,
+    material_placer: &mut Placer<'_>,
     is_thin: bool,
     is_palisade: bool,
     enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,
@@ -70,7 +70,7 @@ pub async fn build_wall_gate(
                     for neighbour in neighbours.iter() {
                         editor.world().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
-                            editor.place_block_force(
+                            editor.place_block_forced(
                                 &air,
                                 neighbour.add_y(height)
                             ).await;
@@ -107,7 +107,7 @@ pub async fn build_wall_gate(
                     for neighbour in neighbours.iter() {
                         editor.world().claim(*neighbour, BuildClaim::Gate);
                             for height in height..height + gate_height {
-                            editor.place_block_force(
+                            editor.place_block_forced(
                                 &air,
                                 neighbour.add_y(height)
                             ).await;
@@ -141,7 +141,7 @@ pub async fn build_wall_gate(
                             for neighbour in neighbours.iter() {
                                 editor.world().claim(*neighbour, BuildClaim::Gate);
                                     for height in height..height + gate_height {
-                                    editor.place_block_force(
+                                    editor.place_block_forced(
                                         &air,
                                         neighbour.add_y(height)
                                     ).await;
@@ -150,7 +150,7 @@ pub async fn build_wall_gate(
                             let mirror_x = if direction == Cardinal::North || direction == Cardinal::South { true } else { false };
                             // look if mirror is working
                             info!("Placing wide gate at: {:?}", middle_point);
-                            place_structure(editor, None, &wide_gate, middle_point.add_y(height), direction.turn_right(), None, None, mirror_x, false).await.expect("Failed to place gate");
+                            place_structure(editor, None, &wide_gate, middle_point.add_y(height), direction.rotate_right(), None, None, mirror_x, false).await.expect("Failed to place gate");
                             gate_possible = distance_to_next_gate;
                         }
                     }

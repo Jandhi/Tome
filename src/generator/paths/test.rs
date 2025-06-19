@@ -3,17 +3,6 @@ mod tests {
     use lerp::num_traits::Signed;
     use log::info;
 
-<<<<<<< HEAD
-    use crate::{generator::paths::a_star, util::init_logger};
-use std::time::Instant;
-
-    #[test]
-    fn test_a_star() {
-
-        init_logger();
-
-        let target = (1000, 1000);
-=======
     use crate::{editor::{self, World}, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::{Path, PathPriority}, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::init_logger};
 use std::{sync::Mutex, time::Instant};
 
@@ -23,7 +12,6 @@ use std::{sync::Mutex, time::Instant};
         init_logger();
 
         let target = (100, 100);
->>>>>>> master
 
         let start_time = Instant::now();
 
@@ -43,33 +31,21 @@ use std::{sync::Mutex, time::Instant};
                     vec
                 }).collect()
             },
-<<<<<<< HEAD
-            |node| {
-                node.len() as u64 // Cost: number of steps taken
-=======
             |prev_cost, node| {
                 prev_cost + 1
->>>>>>> master
             },
             |node| {
                 let (x, y) = *node.last().unwrap();
                 ((target.0 - x).abs() + (target.1 - y).abs()) as u64 // Heuristic: Manhattan distance to target
             },
-<<<<<<< HEAD
-            |node| {},
-        ).expect("A* algorithm failed to find a path");
-=======
             async |node| {},
         ).await.expect("A* algorithm failed to find a path");
->>>>>>> master
 
         let duration = start_time.elapsed();
 
         println!("Path found: {:?}", path);
         println!("A* search took: {:?}", duration);
     }
-<<<<<<< HEAD
-=======
 
     #[tokio::test]
     async fn test_route() {
@@ -119,5 +95,4 @@ use std::{sync::Mutex, time::Instant};
 
         editor.flush_buffer().await;
     }
->>>>>>> master
 }

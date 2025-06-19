@@ -5,14 +5,9 @@ mod tests {
 
     use log::info;
 
-<<<<<<< HEAD
-    use crate::{data::Loadable, editor::World, generator::{data::LoadedData, materials::{Material, Palette, Placer}, nbts::{meta::NBTMeta, place::place_nbt, place_structure, Structure}}, http_mod::GDMCHTTPProvider, util::init_logger};
-    use crate::geometry::Cardinal;
-=======
-    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place_nbt_without_palette, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
     use std::fs::File;
     use fastnbt::to_writer;
->>>>>>> master
 
 
     #[tokio::test]
@@ -32,11 +27,7 @@ mod tests {
         let point = editor.world_mut().add_height(midpoint);
 
         // Place the NBT structure in the world
-<<<<<<< HEAD
-        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, Some(&Placer::new(&data.materials)), Some(&data), Some(&"test1".into()), Some(&"test2".into()), None, None)
-=======
-        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &mut Placer::new(&data.materials, &mut RNG::new(42.into())), &data, &"test1".into(), &"test2".into(), None, None)
->>>>>>> master
+        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, Some(&mut Placer::new(&data.materials, &mut RNG::new(42.into()))), Some(&data), Some(&"test1".into()), Some(&"test2".into()), None, None)
             .await
             .expect("Failed to place NBT structure");
 

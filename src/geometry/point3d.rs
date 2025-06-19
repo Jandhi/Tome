@@ -108,8 +108,6 @@ impl Point3D {
     pub fn neighbours_2d(&self) -> Vec<Point3D> {
         CARDINALS.iter().map(|&d| *self + d).collect()
     }
-<<<<<<< HEAD
-=======
 
     pub fn rotate_left(&self) -> Point3D {
         Point3D { x: -self.z, y: self.y, z: self.x }
@@ -118,7 +116,6 @@ impl Point3D {
     pub fn rotate_right(&self) -> Point3D {
         Point3D { x: self.z, y: self.y, z: -self.x }
     }
->>>>>>> master
 }
 
 impl Add for Point3D {

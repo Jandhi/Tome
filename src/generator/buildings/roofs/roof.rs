@@ -107,7 +107,7 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &mut placer, &corner.structure, offset, direction, data, &building.palette, false ,false).await?;
+                place_structure(editor, Some(&mut placer), &corner.structure, offset, direction, Some(data), Some(&building.palette), false ,false).await?;
             }
             else if !neighbours[&direction] {
                 offset += Point3D::from(direction.rotate_right()) * (match direction {
@@ -118,17 +118,17 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
 
-                place_structure(editor, &mut placer, &side.structure, offset, direction.rotate_right(), data, &building.palette, false, false).await?;
+                place_structure(editor, Some(&mut placer), &side.structure, offset, direction.rotate_right(), Some(data), Some(&building.palette), false, false).await?;
             }
             else if !neighbours[&direction.rotate_left()] {
-                place_structure(editor, &mut placer, &side.structure, offset, direction, data, &building.palette, false, true).await?;
+                place_structure(editor, Some(&mut placer), &side.structure, offset, direction, Some(data), Some(&building.palette), false, true).await?;
             }
             else {
                 offset += Point3D::from(direction) * (match direction {
                     Cardinal::North | Cardinal::South => building.grid.cell_size.z / 2,
                     Cardinal::East | Cardinal::West => building.grid.cell_size.x / 2,
                 });
-                place_structure(editor, &mut placer, &inner.structure, offset, direction, data, &building.palette, false, false).await?;
+                place_structure(editor, Some(&mut placer), &inner.structure, offset, direction, Some(data), Some(&building.palette), false, false).await?;
             }
         }
     }

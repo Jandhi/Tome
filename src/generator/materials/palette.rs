@@ -29,48 +29,15 @@ impl Into<String> for PaletteId {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct PaletteId(String);
-
-impl From<String> for PaletteId {
-    fn from(id: String) -> Self {
-        PaletteId(id)
-    }
-}
-
-impl From<&str> for PaletteId {
-    fn from(id: &str) -> Self {
-        PaletteId(id.to_string())
-    }
-}
-
-impl Into<String> for PaletteId {
-    fn into(self) -> String {
-        self.0
-    }
-}
-
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Palette {
     pub id : PaletteId,
-<<<<<<< HEAD
-
-    pub primary_stone : MaterialId,
-    pub primary_wood : MaterialId,
-=======
->>>>>>> master
     
     #[serde(flatten)]
     pub materials : HashMap<MaterialRole, MaterialId>,
 
-<<<<<<< HEAD
-    pub primary_color : Color,
-    pub secondary_color : Color,
-=======
     pub primary_color : Option<Color>,
     pub secondary_color : Option<Color>,
->>>>>>> master
 
     pub tags : Option<Vec<String>>,
 }
@@ -81,37 +48,6 @@ pub enum PaletteSwapResult<'a> {
 }
 
 impl Palette {
-<<<<<<< HEAD
-    pub fn get_material<'a>(&'a self, mut role : MaterialRole) -> &'a MaterialId {
-        let mut iterations = 0;
-
-        match role {
-            MaterialRole::PrimaryStone => &self.primary_stone,
-            MaterialRole::PrimaryWood => &self.primary_wood,
-            _ => {
-                while !self.materials.contains_key(&role) {
-                    // If the role is not found, we can use the backup role
-                    // This is useful for roles that might not be defined in the palette
-                    role = role.backup_role();
-
-                    if role == MaterialRole::PrimaryStone {
-                        return &self.primary_stone;
-                    }
-                    
-                    if role == MaterialRole::PrimaryWood {
-                        return &self.primary_wood;
-                    }
-
-                    if iterations > 10 {
-                        panic!("Infinite loop detected while trying to find material role {:?} in palette {:?}", role, self.id);
-                    }
-
-                    iterations += 1;
-                }
-
-                self.materials.get(&role).expect(&format!("Material role {:?} not found in palette {:?}", role, self.id))
-            }
-=======
     pub fn get_material<'a>(&'a self, mut role : MaterialRole) -> Option<&'a MaterialId> {
         let mut iterations = 0;
 
@@ -127,7 +63,6 @@ impl Palette {
             role = new_role;
 
             iterations += 1;
->>>>>>> master
         }
 
         Some(self.materials.get(&role).expect(&format!("Material role {:?} not found in palette {:?}", role, self.id)))
@@ -140,10 +75,7 @@ impl Palette {
     pub fn find_role_and_form(&self, block : BlockID, materials : &HashMap<MaterialId, Material>) -> Option<(MaterialRole, BlockForm)> {
         // Iterate through all material roles to find the matching block
         for role in [
-<<<<<<< HEAD
-=======
             MaterialRole::Flower,
->>>>>>> master
             MaterialRole::Accent,
             MaterialRole::PrimaryWall,
             MaterialRole::SecondaryWall,
@@ -174,16 +106,9 @@ impl Palette {
 
     pub fn swap_with<'palette>(&'palette self, block : BlockID, output_palette : &'palette Palette, materials : &'palette HashMap<MaterialId, Material>) -> PaletteSwapResult<'palette> {
         if let Some((role, form)) = self.find_role_and_form(block, &materials) {
-<<<<<<< HEAD
-            return PaletteSwapResult::Material(
-                output_palette.get_material(role),
-                form,
-            )
-=======
             if let Some(material_id) = output_palette.get_material(role) {
                 return PaletteSwapResult::Material(material_id, form);
             }
->>>>>>> master
         }
 
         PaletteSwapResult::Block(self.recolor_block(block, output_palette))

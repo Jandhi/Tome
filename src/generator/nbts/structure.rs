@@ -1,11 +1,3 @@
-<<<<<<< HEAD
-use serde_derive::{Deserialize, Serialize};
-use crate::{data::Loadable, generator::{materials::PaletteId, nbts::NBTMeta}, geometry::{Cardinal, Point3D}};
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct StructureId(String);
-
-=======
 
 use std::hash::Hash;
 
@@ -14,7 +6,6 @@ use crate::{data::Loadable, generator::{materials::PaletteId, nbts::NBTMeta, sty
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StructureId(pub String);
->>>>>>> master
 impl From<String> for StructureId {
     fn from(id: String) -> Self {
         StructureId(id)
@@ -27,11 +18,7 @@ impl From<&str> for StructureId {
     }
 }
 
-<<<<<<< HEAD
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-=======
 #[derive(Debug, Clone, Serialize, Deserialize)]
->>>>>>> master
 pub struct Structure {
     pub id : StructureId,
     #[serde(flatten)]
@@ -40,16 +27,6 @@ pub struct Structure {
     pub facing : Cardinal,
     #[serde(default)]
     pub origin : Point3D,
-<<<<<<< HEAD
-    pub palette : Option<PaletteId>,
-    pub tags : Option<Vec<String>>,
-    #[serde(default)]
-    pub mirror_x : bool,
-    #[serde(default)]
-    pub mirror_z : bool,
-}
-
-=======
     pub palette : PaletteId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tags : Option<Vec<String>>,
@@ -81,7 +58,6 @@ impl Hash for Structure {
     }
 }
 
->>>>>>> master
 impl Loadable<'_, Structure, StructureId> for Structure {
     fn get_key(item: &Structure) -> StructureId {
         item.id.clone()

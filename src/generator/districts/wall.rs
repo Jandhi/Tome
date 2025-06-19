@@ -117,7 +117,7 @@ pub fn order_wall_points(
     list_of_ordered_vec
 }
 
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: & Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, wall_type: WallType) {
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, wall_type: WallType) {
     let wall_points = get_wall_points(urban_points, editor);
     let ordered_wall_points = order_wall_points(&wall_points);
 
@@ -132,7 +132,7 @@ pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rn
     }
 }
 
-pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>) {
+pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>) {
     let wall_points_with_height = wall_points.iter()
         .map(|&point| {
             let height = rng.rand_i32_range(4, 7);
@@ -177,7 +177,7 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 }
 
-pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
+pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
 
@@ -201,7 +201,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
             if directions.len() > 0 {
                 previous_dir = directions[0];
             }
-            let state = HashMap::from([("facing".to_string(), previous_dir.turn_right().to_string())]);
+            let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
         
             for dir in directions.iter() {
@@ -215,11 +215,11 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
                         height_modifier = -1;
                     }
                 }
-                if directions.contains(&dir.turn_right()) {
+                if directions.contains(&dir.rotate_right()) {
                     for new_pt in [
-                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.turn_right()),
-                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.turn_right()) * 2,
-                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.turn_right())
+                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.rotate_right()),
+                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.rotate_right()) * 2,
+                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.rotate_right())
                     ] {
                         if wall_points.contains(&new_pt) {
                             break; // should this be continue?
@@ -252,7 +252,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
 }
 
 
-pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
+pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
 
@@ -287,7 +287,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
             if directions.len() > 0 {
                 previous_dir = directions[0];
             }
-            let state = HashMap::from([("facing".to_string(), previous_dir.turn_right().to_string())]);
+            let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
         
             for dir in directions.iter() {
@@ -301,11 +301,11 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
                         height_modifier = -1;
                     }
                 }
-                if directions.contains(&dir.turn_right()) {
+                if directions.contains(&dir.rotate_right()) {
                     for new_pt in [
-                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.turn_right()),
-                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.turn_right()) * 2,
-                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.turn_right())
+                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.rotate_right()),
+                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.rotate_right()) * 2,
+                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.rotate_right())
                     ] {
                         if wall_points.contains(&new_pt) {
                             break; // should this be continue?
@@ -326,9 +326,9 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
                     }
                     //inner wall
                     for new_pt in [
-                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.turn_right()) * 2,
-                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.turn_right()) * 3,
-                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.turn_right()) * 2
+                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.rotate_right()) * 2,
+                        point.drop_y() + Point2D::from(*dir) + Point2D::from(dir.rotate_right()) * 3,
+                        point.drop_y() + Point2D::from(*dir) * 2 + Point2D::from(dir.rotate_right()) * 2
                     ] {
                         if !wall_points.contains(&new_pt) && !walkway_points.contains(&new_pt) {
                             inner_wall_points.insert(new_pt.add_y(point.y));
@@ -492,7 +492,7 @@ pub fn check_water(
 pub async fn fill_water(
     point: Point2D,
     editor: &mut Editor,
-    material_placer: &Placer<'_>,
+    material_placer: &mut Placer<'_>,
     material_id: &MaterialId,
 ) {
     let mut water_points = Vec::new();
@@ -516,7 +516,7 @@ pub async fn flatten_walkway(
     walkway_points: &Vec<Point2D>,
     walkway_heights: &mut HashMap<Point2D, i32>,
     editor: &mut Editor,
-    material_placer: &Placer<'_>,
+    material_placer: &mut Placer<'_>,
     material_id: &MaterialId,
 ) -> HashMap<Point2D, f64> {
 
@@ -531,7 +531,7 @@ pub async fn flatten_walkway(
     for (&point, &height) in updated_walkway_heights.clone().iter() {
         let frac_height = height % 1.0;
         if (frac_height <= 0.25) || (frac_height > 0.75){
-            //let state = HashMap::from([("facing".to_string(), previous_dir.turn_right().to_string())]);
+            //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32, z: point.y }, material_id, BlockForm::Slab, None, None).await;
             updated_walkway_heights.insert(point, height.round());
         } else if (frac_height > 0.25) && (frac_height <= 0.5) {
@@ -539,7 +539,7 @@ pub async fn flatten_walkway(
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32, z: point.y }, material_id, BlockForm::Slab, Some(&state), None).await;
             updated_walkway_heights.insert(point, height.round() + 0.49);
         } else if (frac_height > 0.5) && (frac_height <= 0.75) {
-            //let state = HashMap::from([("facing".to_string(), previous_dir.turn_right().to_string())]);
+            //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, None, None).await;
             updated_walkway_heights.insert(point, height.round() - 0.51);
         }
@@ -598,7 +598,7 @@ pub async fn build_wall_towers(
     walkway_points: &Vec<Point2D>,
     walkway_heights: &HashMap<Point2D, i32>,
     editor: &mut Editor,
-    material_placer: &Placer<'_>,
+    material_placer: &mut Placer<'_>,
     material_id: &MaterialId,
     structures: & HashMap<StructureId, Structure>,
     rng: &mut RNG,

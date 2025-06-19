@@ -2,11 +2,7 @@ use std::collections::HashMap;
 
 use serde_derive::{Serialize, Deserialize};
 
-<<<<<<< HEAD
-use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
-=======
 use crate::{geometry::Point3D, http_mod::PositionedBlock, minecraft::{Block, BlockID}};
->>>>>>> master
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NBTStructure {
@@ -29,11 +25,6 @@ impl NBTStructure {
         self.blocks.push(BlockData {
             state,
             pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-<<<<<<< HEAD
-            nbt: block.data.map(|s| fastnbt::Value::from(s)),
-        });
-    }
-=======
             nbt: block.data,
         });
     }
@@ -82,7 +73,6 @@ impl NBTStructure {
             entities: Vec::new(), // Entities can be added later if needed
         }
     }
->>>>>>> master
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -98,11 +88,7 @@ pub struct PaletteBlock {
 pub struct BlockData {
     pub state: usize,
     pub pos : [i32; 3],
-<<<<<<< HEAD
-    pub nbt : Option<fastnbt::Value>
-=======
     pub nbt : Option<String>
->>>>>>> master
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

@@ -1465,8 +1465,6 @@ pub enum BlockID {
     #[serde(rename = "minecraft:brown_mushroom_block")]
     BrownMushroomBlock,
 
-<<<<<<< HEAD
-=======
     // === BANNERS ===
     #[serde(rename = "minecraft:white_banner")]
     WhiteBanner,
@@ -1535,7 +1533,6 @@ pub enum BlockID {
     #[serde(rename = "minecraft:black_wall_banner")]
     BlackWallBanner,
 
->>>>>>> master
     #[serde(other)]
     Unknown,
 }

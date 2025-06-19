@@ -6,9 +6,6 @@ pub mod nbts;
 pub mod buildings;
 pub mod data;
 pub mod paths;
-<<<<<<< HEAD
-=======
 pub mod style;
->>>>>>> master
 
 pub use build_claim::BuildClaim;
