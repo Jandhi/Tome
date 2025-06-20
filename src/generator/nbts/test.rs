@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place_nbt_without_palette, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, Wall, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
     use std::fs::File;
     use fastnbt::to_writer;
 
@@ -27,7 +27,7 @@ mod tests {
         let point = editor.world_mut().add_height(midpoint);
 
         // Place the NBT structure in the world
-        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, &mut Placer::new(&data.materials, &mut RNG::new(42.into())), &data, &"test1".into(), &"test2".into(), None, None)
+        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, Some(&mut Placer::new(&data.materials, &mut RNG::new(42.into()))), Some(&data), Some(&"test1".into()), Some(&"test2".into()), None, None)
             .await
             .expect("Failed to place NBT structure");
 
@@ -37,7 +37,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_place_nbt_without_palette() {
+    async fn test_place_structure_without_palette() {
         init_logger();
 
         let provider = GDMCHTTPProvider::new();
@@ -50,12 +50,12 @@ mod tests {
 
         let mut midpoint = editor.world().world_rect_2d().size / 2;
         let mut point = editor.world().add_height(midpoint);
-        point.y = point.y - 1; // Adjust height if necessary
+        //point.y = point.y - 1; // Adjust height if necessary
 
-        // Place the NBT structure in the world
-        place_nbt_without_palette(Path::new(&path), point.into(), &mut editor)
-            .await
-            .expect("Failed to place NBT structure");
+        let structures = Structure::load().expect("Failed to load structures");
+        let structure = structures.get(&"basic_palisade_gate".into()).expect("Structure not found");
+
+        place_structure(&mut editor, None, &structure, point, Cardinal::North, None, None, false ,false).await.expect("Failed to place structure");
 
         info!("NBT structure placed successfully");
 
@@ -111,7 +111,7 @@ mod tests {
                 meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") }, 
                 facing: Cardinal::East, 
                 origin: Point3D { x: -6, y: 1, z: 0 }, 
-                palette: "desert_prismarine".into(), 
+                palette: Some("desert_prismarine".into()), 
                 tags: None, 
                 mirror_x: false, 
                 mirror_z: false,
@@ -178,7 +178,7 @@ mod tests {
                 meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") },
                 facing: Cardinal::North,
                 origin: Point3D { x: 1, y: 1, z: if name.ends_with("side") { 0 } else { 1 } },
-                palette: "medieval_spruce".into(),
+                palette: Some("medieval_spruce".into()),
                 tags: None,
                 mirror_x: false,
                 mirror_z: false,

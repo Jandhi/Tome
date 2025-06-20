@@ -253,6 +253,10 @@ impl World {
         self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
     }
 
+    pub fn is_water_3d(&self, point : Point3D) -> bool {
+        self.get_block(point).expect("failed to get block").id == BlockID::Water
+    }
+
     pub fn is_claimed(&self, point : Point2D) -> bool {
         self.build_claim_map[point.x as usize][point.y as usize] != BuildClaim::None
     }

@@ -22,27 +22,28 @@ impl Default for Cardinal {
     }
 }
 
-impl Into<Point2D> for Cardinal {
-    fn into(self) -> Point2D {
-        match self {
-            Cardinal::North => NORTH_2D,
-            Cardinal::East  => EAST_2D,
-            Cardinal::South => SOUTH_2D,
-            Cardinal::West  => WEST_2D,
-        }
-    }
-}
+// complaining about the following trait already being implemented for `Cardinal` via from in point2d/3d
+// impl Into<Point2D> for Cardinal {
+//     fn into(self) -> Point2D {
+//         match self {
+//             Cardinal::North => NORTH_2D,
+//             Cardinal::East  => EAST_2D,
+//             Cardinal::South => SOUTH_2D,
+//             Cardinal::West  => WEST_2D,
+//         }
+//     }
+// }
 
-impl Into<Point3D> for Cardinal {
-    fn into(self) -> Point3D {
-        match self {
-            Cardinal::North => NORTH,
-            Cardinal::East  => EAST,
-            Cardinal::South => SOUTH,
-            Cardinal::West  => WEST,
-        }
-    }
-}
+// impl Into<Point3D> for Cardinal {
+//     fn into(self) -> Point3D {
+//         match self {
+//             Cardinal::North => NORTH,
+//             Cardinal::East  => EAST,
+//             Cardinal::South => SOUTH,
+//             Cardinal::West  => WEST,
+//         }
+//     }
+// }
 
 impl Cardinal {
     pub fn from_point(point: Point3D) -> Option<Self> {
@@ -100,6 +101,10 @@ impl Cardinal {
             Cardinal::South => Cardinal::East,
             Cardinal::West  => Cardinal::South,
         }
+    }
+
+    pub fn opposite(&self) -> Self {
+        return -(*self);
     }
 }
 

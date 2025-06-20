@@ -26,14 +26,13 @@ pub enum BlockForm {
     Button,
     #[serde(rename = "pressure_plate")]
     PressurePlate,
+    #[serde(rename = "chiseled")]
+    Chiseled,
     #[serde(rename = "wood")]
     Wood,
     #[serde(rename = "log")]
     Log,
 
-    #[serde(rename = "chiseled")]
-    Chiseled,
-    
     // SIGNS
     #[serde(rename = "sign")]
     Sign,

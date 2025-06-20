@@ -9,6 +9,7 @@ mod data;
 mod classification;
 mod wall;
 mod district_painter;
+mod gate;
 
 pub use district::District;
 pub use district::DistrictID;
@@ -19,4 +20,5 @@ pub use super_district::SuperDistrict;
 pub use super_district::SuperDistrictID;
 pub use data::{DistrictData, HasDistrictData};
 pub use district_painter::*;
-pub use wall::build_wall;
+pub use wall::{build_wall, WallType};
+pub use gate::build_wall_gate;
