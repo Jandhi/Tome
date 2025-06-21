@@ -71,7 +71,6 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Generating districts with seed: {:?}", seed);
 
     let districts = spawn_districts(seed, editor.world_mut());
-
     for district in districts.iter() {
         let x = district.data.origin.x as usize;
         let z = district.data.origin.z as usize;
@@ -82,8 +81,13 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
         .map(|district| (district.id, district))
         .collect();
 
+    
+
     info!("Bubbling out districts...");
     bubble_out(&mut districts, editor.world_mut());
+
+    editor.world_mut().districts = districts;
+    return;
     
     info!("Re-centering districts...");
     for _ in 0..NUM_RECENTER {
@@ -148,16 +152,16 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     //prune urban chokepoints??
 }
 
-fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) {
+fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) { // this is broken
     let mut queue : Vec<Point3D> = districts.iter().map(|(_, district)| district.data.origin).collect::<Vec<_>>();
     let mut visited : HashSet<Point3D> = queue.iter().cloned().collect();
 
     while queue.len() > 0 {
         let next = queue.remove(0);
 
-        info!("Bubbling out from {:?}", next);
+        println!("Bubbling out from {:?}", next);
         let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
-        info!("Current district: {:?}", current_district);
+        println!("Current district: {:?}", current_district);
 
         for neighbour in CARDINALS.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {

@@ -42,12 +42,12 @@ impl World {
 
         let district_map = vec![vec![None; size_z_usize]; size_x_usize];
         let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
-        
-        let chunk_rect = Rect3D {
-            origin: build_area.origin / CHUNK_SIZE,
-            size: build_area.last() / CHUNK_SIZE - build_area.origin / CHUNK_SIZE + Point3D::new(1, 1, 1),
-        };
 
+        let chunk_rect = Rect3D {
+            origin: point_to_chunk_coordinates(build_area.origin),
+            size: point_to_chunk_coordinates(build_area.last()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
+        };
+        println!("Chunk rect: {:?}", chunk_rect);
         info!("Loading chunks...");
         let chunks = provider
             .get_chunks(
@@ -186,10 +186,13 @@ impl World {
         info!("Getting block at point: {:?}", point);
 
         let chunk_coordinates = point_to_chunk_coordinates(point);
+        info!("Chunk coordinates: {:?}", chunk_coordinates);
 
         let chunk = self.chunks.get(&chunk_coordinates.drop_y())?;
+        //println!("Found chunk: {:?}", chunk);
 
-        let section = chunk.sections.iter().find(|s| s.y == (point.y / CHUNK_SIZE))?;
+        let section = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y)?;
+        //println!("Found section: {:?}", section);
 
         let block_states = section.block_states.as_ref()?;
 

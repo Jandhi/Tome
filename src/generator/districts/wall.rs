@@ -119,6 +119,7 @@ pub fn order_wall_points(
 
 pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, wall_type: WallType) {
     let wall_points = get_wall_points(urban_points, editor);
+    println!("[Wall] Found {} wall points", wall_points.len());
     let ordered_wall_points = order_wall_points(&wall_points);
 
     for wall_point_list in ordered_wall_points {
