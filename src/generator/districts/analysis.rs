@@ -2,6 +2,7 @@
 
 use crate::editor::Editor;
 use crate::geometry::CARDINALS_2D;
+use crate::geometry::DOWN;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
 use std::collections::HashMap;
@@ -71,7 +72,7 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
     
     for point in area.points() {
         let biome = editor.world_mut().get_surface_biome_at(point.drop_y());
-        let block = editor.get_block(*point);
+        let block = editor.get_block(*point + DOWN);
         let is_water = block.id.is_water();
         let leaf_height = editor.world_mut().get_motion_blocking_height_at(point.drop_y());
 
@@ -107,8 +108,8 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
         count: area.points().len(),
         roughness: (root_mean_square_height / num_points).sqrt(),
         gradient: neighbour_height_sum / num_points,
-        water_percentage: (water_blocks as f32 / num_points) * 100.0,
-        forested_percentage: (leaf_blocks as f32 / num_points) * 100.0,
+        water_percentage: (water_blocks as f32 / num_points),
+        forested_percentage: (leaf_blocks as f32 / num_points),
         surface_block_count,
         biome_count,
     }

@@ -470,7 +470,7 @@ mod tests {
             let height = height_map[point.x as usize][point.y as usize] - build_area.origin.y;
             editor.place_block(&lime_wool, Point3D::new(point.x, height, point.y)).await;
         }
-
+        editor.flush_buffer().await;
 
     }
 

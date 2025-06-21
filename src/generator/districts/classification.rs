@@ -27,12 +27,17 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
             info!("District {:?} is off-limits due to roughness or gradient", id);
             continue
         }
+        info!("District {:?} has data {:?}", id, analysis_data);
         if analysis_data.water_percentage() <= URBAN_WATER_LIMIT && district.data.district_type == DistrictType::Unknown {
             options.push(*id);
         }
     }
     info!("Options for prime urban district: {:?}", options);
-    let prime_urban_district: DistrictID = select_prime_urban_district(options, district_analysis_data).expect("No prime urban candidate found"); // Placeholder for prime urban district ID
+
+    let Some(prime_urban_district) = select_prime_urban_district(options, district_analysis_data) else {
+        println!("No prime urban candidate found");
+        return;
+    };
 
     if let Some(district) = districts.get_mut(&prime_urban_district) {
         district.data.district_type = DistrictType::Urban;
@@ -81,7 +86,10 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
     }
 
     info!("Options for prime urban district: {:?}", options);
-    let prime_urban_district: SuperDistrictID = select_prime_urban_superdistrict(options, district_analysis_data).expect("No prime urban candidate found"); // Placeholder for prime urban district ID
+    let Some(prime_urban_district) = select_prime_urban_superdistrict(options, district_analysis_data) else {
+        println!("No prime urban candidate found");
+        return;
+    };
     superdistricts.get_mut(&prime_urban_district).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
     classify_urban_districts(prime_urban_district, superdistricts, districts, district_analysis_data);
 
@@ -155,7 +163,7 @@ fn select_prime_urban_superdistrict(options: Vec<SuperDistrictID>, district_anal
         })
         .min_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
         .map(|(other, _score)| {
-            info!("Best candidate is {:?}", other);
+            println!("Best candidate is {:?}", other);
             other
         })
 }

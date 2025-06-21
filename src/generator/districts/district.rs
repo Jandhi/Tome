@@ -85,9 +85,6 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
 
     info!("Bubbling out districts...");
     bubble_out(&mut districts, editor.world_mut());
-
-    editor.world_mut().districts = districts;
-    return;
     
     info!("Re-centering districts...");
     for _ in 0..NUM_RECENTER {
@@ -159,9 +156,7 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
     while queue.len() > 0 {
         let next = queue.remove(0);
 
-        println!("Bubbling out from {:?}", next);
         let current_district = world.district_map[next.x as usize][next.y as usize].expect("Every explored tile should have a district");
-        println!("Current district: {:?}", current_district);
 
         for neighbour in CARDINALS_2D.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
