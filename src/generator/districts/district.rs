@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use log::info;
 
-use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
+use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS_2D}, noise::{Seed, RNG}};
 
 use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, classification::{classify_districts, classify_superdistricts}, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
@@ -153,22 +153,22 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
 }
 
 fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) { // this is broken
-    let mut queue : Vec<Point3D> = districts.iter().map(|(_, district)| district.data.origin).collect::<Vec<_>>();
-    let mut visited : HashSet<Point3D> = queue.iter().cloned().collect();
+    let mut queue : Vec<Point2D> = districts.iter().map(|(_, district)| district.data.origin.drop_y()).collect::<Vec<_>>();
+    let mut visited : HashSet<Point2D> = queue.iter().cloned().collect();
 
     while queue.len() > 0 {
         let next = queue.remove(0);
 
         println!("Bubbling out from {:?}", next);
-        let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
+        let current_district = world.district_map[next.x as usize][next.y as usize].expect("Every explored tile should have a district");
         println!("Current district: {:?}", current_district);
 
-        for neighbour in CARDINALS.iter().map(|c| *c + next) {
+        for neighbour in CARDINALS_2D.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
                 continue;
             }
 
-            if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
+            if !world.is_in_bounds_2d(neighbour) {
                 info!("Skipping {:?} because it is out of bounds", neighbour);
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
@@ -176,10 +176,10 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
 
             visited.insert(neighbour);
             queue.push(neighbour);
-            world.district_map[neighbour.x as usize][neighbour.z as usize] = Some(current_district);
+            world.district_map[neighbour.x as usize][neighbour.y as usize] = Some(current_district);
             districts.get_mut(&current_district)
                 .expect(&format!("No district found with id {}", current_district.0))
-                .add_point(neighbour);
+                .add_point(world.add_height(neighbour));
         }
     }
 }
