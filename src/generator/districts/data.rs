@@ -34,7 +34,7 @@ impl<TID> DistrictData<TID> {
     }
 
     pub fn new(origin: Point3D) -> Self {
-        DistrictData {
+        let mut data = DistrictData {
             origin,
             is_border: false,
             points: HashSet::new(),
@@ -44,7 +44,12 @@ impl<TID> DistrictData<TID> {
             district_type: DistrictType::Unknown,
             district_adjacency: HashMap::new(),
             adjacencies_count: 0,
-        }
+        };
+
+        data.points.insert(origin);
+        data.points_2d.insert(origin.drop_y());
+
+        data
     }
 }
 
