@@ -541,7 +541,8 @@ pub async fn flatten_walkway(
             updated_walkway_heights.insert(point, height.round() + 0.49);
         } else if (frac_height > 0.5) && (frac_height <= 0.75) {
             //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
-            material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, None, None).await;
+            let state = HashMap::from([("type".to_string(), "top".to_string())]);
+            material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, Some(&state), None).await;
             updated_walkway_heights.insert(point, height.round() - 0.51);
         }
     }
