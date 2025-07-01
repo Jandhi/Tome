@@ -1,7 +1,7 @@
 use std::{collections::{HashMap, HashSet}, env, hash::Hash};
 use std::path::Path;
 use log::info;
-use crate::{editor::World, generator::{buildings::walls::Wall, districts::{build_wall_gate, wall}, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D, EAST_2D, NORTH_2D}, minecraft::{Block, BlockForm, BlockID}, noise::{Seed, RNG}};
+use crate::{editor::World, generator::{buildings::walls::WallComponent, districts::{build_wall_gate, wall}, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D, EAST_2D, NORTH_2D}, minecraft::{Block, BlockForm, BlockID}, noise::{Seed, RNG}};
 
 use crate::editor::Editor;
 

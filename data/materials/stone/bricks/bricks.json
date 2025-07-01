@@ -1,0 +1,13 @@
+{
+    "id" : "bricks",
+    "connections" : {
+    },
+    "blocks" : {
+        "block" : "minecraft:bricks",
+        "stairs" : "minecraft:brick_stairs",
+        "slab" : "minecraft:brick_slab",
+        "wall" : "minecraft:mud_brick_wall",
+        "pressure_plate" : "minecraft:mangrove_pressure_plate",
+        "button" : "minecraft:mangrove_button"
+    }
+}

@@ -1,0 +1,22 @@
+{
+    "id" : "medieval_stone_tudor",
+    "style" : "medieval",
+    "roof_sets" : [
+        "medieval_roof_slabs",
+        "medieval_roof_stairs"
+    ],
+    "wall_sets" : [
+        "medieval_stone_tudor"
+    ],
+    "shapes" : [
+        {
+            "cells" : [
+                {
+                    "x" : 0,
+                    "y" : 0,
+                    "z" : 0
+                }
+            ]
+        }
+    ]
+}

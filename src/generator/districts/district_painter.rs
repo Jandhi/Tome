@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use log::info;
 
-use crate::{editor::{World, Editor}, generator::BuildClaim, geometry::{Point2D, Point3D, CARDINALS_2D, cardinal_to_str}, minecraft::{Block, BlockID}, noise::RNG, generator::terrain::{Forest, generate_tree}};
+use crate::{editor::{Editor, World}, generator::{paths::PathType, terrain::{generate_tree, Forest}, BuildClaim}, geometry::{cardinal_to_str, Point2D, Point3D, CARDINALS_2D}, minecraft::{Block, BlockID}, noise::RNG};
 
 pub async fn replace_ground(
     points: &HashSet<Point2D>,
@@ -105,7 +105,7 @@ pub async fn replace_ground_smooth(
             }
 
             editor.place_block(&block, Point3D::new(point.x, height-1, point.y)).await;// height-1 to ensure we are placing on the ground
-
+            editor.world_mut().claim(*point, BuildClaim::Path(PathType::Pavement));
         }
     }
 

@@ -78,6 +78,7 @@ pub async fn build_wall_gate(
                     }
                     info!("Placing palisade gate at: {:?}", middle_point);
                     place_structure(editor, None, &palisade_gate, middle_point, direction, None, None, false, false).await.expect("Failed to place gate");
+                    editor.world_mut().gate_locations.push((middle_point, direction));
                     gate_possible = distance_to_next_gate;
                 } else if is_thin{
                     let middle_point = Point3D::new(wall_points[i+3].x, editor.world().get_height_at(wall_points[i+3].drop_y()), wall_points[i+3].z);
@@ -117,6 +118,7 @@ pub async fn build_wall_gate(
                     // look if mirror is working
                     info!("Placing thin gate at: {:?}", middle_point);
                     place_structure(editor, None, &thin_gate, middle_point, direction, None, None, mirror_x, false).await.expect("Failed to place gate");
+                    editor.world_mut().gate_locations.push((middle_point, direction));
                     gate_possible = distance_to_next_gate;
                 } else {
                     let enhanced_points = enhanced_wall_points.expect("Enhanced wall points should be provided for this wall type");
@@ -151,6 +153,7 @@ pub async fn build_wall_gate(
                             // look if mirror is working
                             info!("Placing wide gate at: {:?}", middle_point);
                             place_structure(editor, None, &wide_gate, middle_point.add_y(height), direction.rotate_right(), None, None, mirror_x, false).await.expect("Failed to place gate");
+                            editor.world_mut().gate_locations.push((middle_point.add_y(height), direction));
                             gate_possible = distance_to_next_gate;
                         }
                     }

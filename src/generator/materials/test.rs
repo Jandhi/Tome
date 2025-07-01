@@ -51,7 +51,7 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
         let world_rect = editor.world_mut().world_rect_2d();
-        let mut rng = RNG::new(42.into());
+        let mut rng = RNG::new(42);
         let mut placer : Placer = Placer::new(
             &materials,
             &mut rng
@@ -75,8 +75,8 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
 
-        let perlin = PerlinSettings::large(42.into());
-        let mut rng = RNG::new(42.into());
+        let perlin = PerlinSettings::large(42);
+        let mut rng = RNG::new(42);
         let mut placer: Placer = Placer::new(
             &materials,
             &mut rng
@@ -110,10 +110,10 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("cobblestone".to_string());
 
-        let gradient = Gradient::new(PerlinSettings::small(25.into()), 1.0, 0.05)
+        let gradient = Gradient::new(PerlinSettings::small(25), 1.0, 0.05)
             .with_x(0, editor.world_mut().build_area.width());
 
-        let mut rng = RNG::new(42.into());
+        let mut rng = RNG::new(42);
         let mut placer: Placer = Placer::new(
             &materials,
             &mut rng

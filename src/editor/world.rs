@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 
 use super::Editor;
@@ -19,6 +19,7 @@ pub struct World {
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
     pub buildings : Vec<BuildingData>,
+    pub gate_locations : Vec<(Point3D, Cardinal)>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -93,6 +94,7 @@ impl World {
             district_map,
             super_district_map,
             buildings: Vec::new(),
+            gate_locations: Vec::new(),
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,
@@ -282,5 +284,23 @@ impl World {
         self.get_super_district_at(point).and_then(|district_id| {
             self.super_districts.get(&district_id).map(|district| district.data.district_type)
         })
+    }
+
+    pub fn get_urban_districts(&self) -> Vec<&District> {
+        let World { districts, super_districts, super_district_map, .. } = self;
+
+        districts.values()
+            .filter(|district| {
+                let origin = district.data.origin.drop_y();
+                let super_district_id = super_district_map[origin.x as usize][origin.y as usize];
+                if let Some(super_district_id) = super_district_id {
+                    if let Some(super_district) = super_districts.get(&super_district_id) {
+                        return super_district.data.district_type == DistrictType::Urban;
+                    }
+                }
+
+                false
+            })
+            .collect()
     }
 }

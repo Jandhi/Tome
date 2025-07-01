@@ -17,8 +17,8 @@ pub struct RNG {
 }
 
 impl RNG {
-    pub fn new(seed: Seed) -> Self {
-        RNG { seed, state: 0 }
+    pub fn new(seed: impl Into<Seed>) -> Self {
+        RNG { seed: seed.into(), state: 0 }
     }
 
     pub fn derive(&mut self) -> RNG {

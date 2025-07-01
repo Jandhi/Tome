@@ -93,6 +93,10 @@ impl Point2D {
         (dx + dy).sqrt()
     }
 
+    pub fn distance_manhattan(&self, other: &Point2D) -> i32 {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
+    }
+
     pub fn distance_squared(&self, other: &Point2D) -> i32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;

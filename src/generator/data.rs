@@ -1,15 +1,17 @@
 use std::collections::HashMap;
 
-use crate::{data::Loadable, generator::{buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::Wall}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
+use crate::{data::Loadable, generator::{buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
 
 #[derive(Debug, Clone)]
 pub struct LoadedData {
     pub palettes : HashMap<PaletteId, Palette>,
     pub materials : HashMap<MaterialId, Material>,
     pub structures : HashMap<StructureId, Structure>,
-    pub walls : HashMap<StructureId, Wall>,
+    pub wall_components : HashMap<StructureId, WallComponent>,
+    pub wall_sets : HashMap<WallSetId, WallSet>,
     pub roof_components : HashMap<StructureId, RoofComponent>,
     pub roof_sets : HashMap<RoofSetId, RoofSet>,
+    pub building_sets : HashMap<BuildingSetID, BuildingSet>,
 }
 
 impl LoadedData {
@@ -18,9 +20,11 @@ impl LoadedData {
             palettes: Palette::load()?,
             materials: Material::load()?,
             structures: Structure::load()?,
-            walls: Wall::load()?,
+            wall_components: WallComponent::load()?,
+            wall_sets: WallSet::load()?,
             roof_components: RoofComponent::load()?,
             roof_sets: RoofSet::load()?,
+            building_sets: BuildingSet::load()?,
         })
     }
 }

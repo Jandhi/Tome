@@ -1,5 +1,11 @@
 use crate::{generator::materials::MaterialId, geometry::Point3D};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PathType {
+    Pavement,
+    Road,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathPriority {
     Low,

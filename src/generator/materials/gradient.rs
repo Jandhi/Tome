@@ -51,9 +51,9 @@ impl PerlinSettings {
         value
     }
 
-    pub fn large(seed: Seed) -> PerlinSettings {
+    pub fn large(seed: impl Into<Seed>) -> PerlinSettings {
         PerlinSettings::new(
-            seed,
+            seed.into(),
             8,
             7.0 / 32.0,
             2.0,
@@ -61,9 +61,9 @@ impl PerlinSettings {
         )
     }
 
-    pub fn medium(seed : Seed) -> PerlinSettings {
+    pub fn medium(seed : impl Into<Seed>) -> PerlinSettings {
         PerlinSettings::new(
-            seed,
+            seed.into(),
             8,
             10.0 / 32.0,
             2.0,
@@ -71,9 +71,9 @@ impl PerlinSettings {
         )
     }
 
-    pub fn small(seed : Seed) -> PerlinSettings {
+    pub fn small(seed : impl Into<Seed>) -> PerlinSettings {
         PerlinSettings::new(
-            seed,
+            seed.into(),
             8,
             16.0 / 32.0,
             2.0,
