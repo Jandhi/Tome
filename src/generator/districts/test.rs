@@ -93,7 +93,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
@@ -159,7 +159,7 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         println!("Build area: {:?}", build_area);
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();

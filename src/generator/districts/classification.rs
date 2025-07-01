@@ -30,12 +30,14 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
         info!("District {:?} has data {:?}", id, analysis_data);
         if analysis_data.water_percentage() <= URBAN_WATER_LIMIT && district.data.district_type == DistrictType::Unknown {
             options.push(*id);
+        } else if analysis_data.water_percentage() > URBAN_WATER_LIMIT && district.data.district_type == DistrictType::Unknown{
+            district.data.district_type = DistrictType::Rural;
         }
     }
     info!("Options for prime urban district: {:?}", options);
 
     let Some(prime_urban_district) = select_prime_urban_district(options, district_analysis_data) else {
-        println!("No prime urban candidate found");
+        println!("No prime urban candidate found"); //will mean no other districts are classified beyond this point
         return;
     };
 
@@ -189,5 +191,5 @@ fn superdistrict_score(superdistrict: &SuperDistrict, districts: &mut HashMap<Di
                 _ => 2.0,
             }
         })
-        .sum()
+        .sum::<f32>() / superdistrict.districts().len() as f32
 }
