@@ -82,6 +82,24 @@ impl RNG {
         &options[index]
     }
 
+    pub fn choose_many<'a, T>(&mut self, options: &'a [T], count: usize) -> Vec<&'a T> 
+    {
+        if count == 0 || options.is_empty() {
+            return Vec::new();
+        }
+
+        let mut options = options.iter().collect::<Vec<_>>();
+
+        let mut chosen = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let index = self.rand_i32(options.len() as i32) as usize;
+            chosen.push(options.remove(index));
+        }
+
+        chosen
+    }
+
     pub fn pop<T>(&mut self, options: &mut Vec<T>) -> Option<T> {
         if options.is_empty() {
             return None;

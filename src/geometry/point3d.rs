@@ -75,6 +75,8 @@ impl From<Cardinal> for Point3D {
 }
 
 impl Point3D {
+    pub const ZERO: Point3D = Point3D { x: 0, y: 0, z: 0 };
+
     pub const fn new(x: i32, y: i32, z: i32) -> Self {
         Point3D { x, y, z }
     }

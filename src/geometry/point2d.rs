@@ -83,6 +83,8 @@ impl From<Cardinal> for Point2D {
 }
 
 impl Point2D {
+    pub const ZERO: Point2D = Point2D { x: 0, y: 0 };
+
     pub fn new(x: i32, y: i32) -> Self {
         Point2D { x, y }
     }

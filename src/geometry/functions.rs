@@ -39,7 +39,7 @@ pub fn get_outer_and_inner_points(points: &HashSet<Point2D>, distance: u32) -> (
             continue;
         }
 
-        for direction in CARDINALS_2D {
+        for direction in CARDINALS_2D { 
             let neighbour = point + direction;
             if !points.contains(&neighbour) {
                 continue;

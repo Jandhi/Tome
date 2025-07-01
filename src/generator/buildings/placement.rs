@@ -1,11 +1,11 @@
 use std::{collections::{HashMap, HashSet}, i32};
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, BuildClaim}, geometry::{get_outer_and_inner_points, Point2D}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, BuildClaim}, geometry::{get_outer_and_inner_points, get_outer_points, voronoi_fill_with_recenter, Point2D}, minecraft::{Block, BlockID}, noise::RNG};
 
 use super::BuildingID;
 
 pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
-    let mut points = editor.world().get_urban_points();
+    let points = editor.world().get_urban_points();
     let off_limits : HashSet<Point2D> = points.iter()
         .filter(|point| {
             editor.world().gate_locations.iter().any(|(gate_point, _)| gate_point.drop_y().distance_manhattan(point) < 10)
@@ -13,49 +13,22 @@ pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (
         .cloned()
         .collect();
 
-    for point in off_limits.iter() {
-        points.remove(point);
-    }
+    let points = points.difference(&off_limits).cloned().collect::<HashSet<_>>();
+    let sections = points.len() / 1500 + 1;
 
-    let num_city_blocks = points.len() / 500;
+    let city_blocks = voronoi_fill_with_recenter(
+        &points, 
+        &|point| { point.neighbours() },
+         &|set| { 
+            let average = set.iter().fold(Point2D::ZERO, |p1, p2| p1 + *p2) / set.len() as i32;
 
-    let mut  points_vec = points.iter().cloned().collect::<Vec<_>>();
-    let mut spawn_points = HashSet::new();
-
-    for _ in 0..num_city_blocks {
-        if points.is_empty() {
-            break;
-        }
-
-        let point = rng.choose::<Point2D>(&points_vec).clone();
-        spawn_points.insert(point);
-        points.remove(&point);
-        points_vec.retain(|p| *p != point);
-    }
-
-    let mut city_blocks = spawn_points.iter()
-        .map(|point| {
-            let mut block = HashSet::new();
-            block.insert(*point);
-            block
-        })
-        .collect::<Vec<_>>();
-    let mut visited = spawn_points.iter().cloned().collect::<HashSet<_>>();
-    let mut queue = spawn_points.iter().enumerate().map(|(i, p)| (i, *p)).collect::<Vec<_>>();
-
-    while queue.len() > 0 {
-        let (index, point) = queue.remove(0);
-
-        for neighbour in point.neighbours() {
-            if !editor.world().is_in_bounds_2d(neighbour) || visited.contains(&neighbour) || !points.contains(&neighbour) {
-                continue;
+            if !points.contains(&average) {
+                return set.iter().min_by_key(|p| p.distance_manhattan(&average)).expect("Set should not be empty").clone();
             }
 
-            city_blocks[index].insert(neighbour);
-            visited.insert(neighbour);
-            queue.push((index, neighbour));
-        }
-    }
+            average
+        }, 
+         rng, sections, 3);
 
     (city_blocks, off_limits)
 }
@@ -76,7 +49,12 @@ pub async fn place_buildings_in_area(editor : &mut Editor, rng : &mut RNG, data 
         inners.push(inner);
     }
     
+    let urban_area_edge = get_outer_points(&editor.world().get_urban_points());
 
+    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect()).await;
+}
+
+async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
     use BlockID::*;
     let block_vec : Vec<Block> = vec![
         Stone, Cobblestone, StoneBricks, Andesite, Gravel,
