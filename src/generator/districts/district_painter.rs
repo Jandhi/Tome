@@ -7,7 +7,7 @@ use crate::{editor::{Editor, World}, generator::{paths::PathType, terrain::{gene
 
 pub async fn replace_ground(
     points: &HashSet<Point2D>,
-    block_dict: &HashMap<u32, f32>,
+    block_dict: &HashMap<usize, f32>,
     block_list: &Vec<Block>,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -36,14 +36,14 @@ pub async fn replace_ground(
                 height += offset;
             }
             let block_pos = rng.choose_weighted(block_dict);
-            editor.place_block(&block_list[*block_pos as usize], Point3D::new(point.x, height, point.y)).await;
+            editor.place_block(&block_list[*block_pos], Point3D::new(point.x, height, point.y)).await;
 
         }
     }
 
 pub async fn replace_ground_smooth(
     points: &HashSet<Point2D>,
-    block_dict: &HashMap<u32, HashMap<u32, f32>>,
+    block_dict: &HashMap<usize, HashMap<usize, f32>>,
     block_list: &Vec<Block>,
     rng: &mut RNG,
     editor: &mut Editor,

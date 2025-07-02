@@ -286,7 +286,7 @@ mod tests {
             Stone, Cobblestone, StoneBricks, Andesite, Gravel,
         ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
-        let block_dict: HashMap<u32, f32> = [
+        let block_dict: HashMap<usize, f32> = [
             (0, 3.0),  // Stone
             (1, 2.0),  // Cobblestone
             (2, 8.0),  // Stone Bricks
@@ -340,7 +340,7 @@ mod tests {
             StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
         ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
-        let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
+        let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 
         let block_dict = [
             (0, 3.0),  // Stone

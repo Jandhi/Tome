@@ -152,6 +152,13 @@ impl World {
         &self.ground_height_map
     }   
 
+    pub fn set_heights(&mut self, points : &HashSet<Point3D>) {
+        for point in points {
+            self.ground_height_map[point.x as usize][point.z as usize] = point.y;
+            self.ocean_floor_height_map[point.x as usize][point.z as usize] = point.y;
+        }
+    }
+
     // Get height without counting water
     pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
         self.ocean_floor_height_map[point.x as usize][point.y as usize]

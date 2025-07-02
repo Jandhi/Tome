@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, i32};
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, BuildClaim}, geometry::{get_outer_and_inner_points, get_outer_points, voronoi_fill_with_recenter, Point2D}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_outer_and_inner_points, get_outer_points, voronoi_fill_with_recenter, Point2D}, minecraft::{Block, BlockID}, noise::RNG};
 
 use super::BuildingID;
 
@@ -55,6 +55,10 @@ pub async fn place_buildings_in_area(editor : &mut Editor, rng : &mut RNG, data 
 }
 
 async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
+    let mut points = outers.iter().map(|p| editor.world().add_height(*p)).collect::<HashSet<_>>();
+    points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
+    force_height(editor, &points, true).await;
+
     use BlockID::*;
     let block_vec : Vec<Block> = vec![
         Stone, Cobblestone, StoneBricks, Andesite, Gravel,
@@ -62,7 +66,7 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
         StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
     ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
-    let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
+    let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 
     let block_dict = [
         (0, 3.0),  // Stone
@@ -99,6 +103,17 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
         None, // No permit blocks
         Some(false), // Ignore water
     ).await;
+
+    // fill in below so we don't have weird artifacts
+    for point in outers.iter() {
+        let height = editor.world().get_height_at(*point);
+        
+        for dy in 1..=2 {
+            let index = rng.choose_weighted(&blocks_dict[&0]);
+            let block = block_vec[*index].clone();
+            editor.place_block(&block, point.add_y(height - dy)).await;
+        }
+    }
 }
 
 pub fn get_best_height_if_placeable(editor : &mut Editor, shape : &BuildingShape, grid : &Grid) -> Option<i32> {
