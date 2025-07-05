@@ -48,6 +48,14 @@ impl BuildingShape {
         self.windows.as_deref()
     }
 
+    pub fn doors(&self) -> Option<&[WallPlacement]> {
+        self.doors.as_deref()
+    }
+
+    pub fn doors_mut(&mut self) -> &mut Option<Vec<WallPlacement>> {
+        &mut self.doors
+    }
+
     pub fn has_door(&self, cell: Point3D, direction: Cardinal) -> bool {
         if let Some(doors) = &self.doors {
             doors.iter().any(|door| door.cell == cell && door.direction == direction)
@@ -78,5 +86,14 @@ impl BuildingShape {
                 window.direction = rotation.apply_to_cardinal(window.direction);
             }
         }
+    }
+
+    pub fn get_cells_at(&self, point: Point2D) -> Vec<Point3D> {
+        self.cells.iter()
+            .filter(|cell| {
+                cell.drop_y() == point
+            })
+            .cloned()
+            .collect()
     }
 }

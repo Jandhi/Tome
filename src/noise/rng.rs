@@ -157,7 +157,7 @@ impl RNG {
         rand_value < percent
     }
 
-    pub fn shuffle(&mut self, items : &mut [i32]) {
+    pub fn shuffle<T>(&mut self, items : &mut [T]) {
         let len = items.len();
         for i in (1..len).rev() {
             let j = self.rand_i32(i as i32) as usize;

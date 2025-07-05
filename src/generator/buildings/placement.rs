@@ -1,6 +1,8 @@
-use std::{collections::{HashMap, HashSet}, i32};
+use std::{collections::{HashMap, HashSet}, i32, os::windows};
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_outer_and_inner_points, get_outer_points, voronoi_fill_with_recenter, Point2D}, minecraft::{Block, BlockID}, noise::RNG};
+use strum::IntoEnumIterator;
+
+use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{Block, BlockID}, noise::RNG};
 
 use super::BuildingID;
 
@@ -43,15 +45,67 @@ pub async fn place_buildings_in_area(editor : &mut Editor, rng : &mut RNG, data 
         outers.insert(point);
     }
 
-    for block in city_blocks {
+    for block in city_blocks.iter() {
         let (outer, inner) = get_outer_and_inner_points(&block, 3);
         outers.extend(outer);
         inners.push(inner);
     }
     
-    let urban_area_edge = get_outer_points(&editor.world().get_urban_points());
-
+    let urban_area_edge = get_edge(&editor.world().get_urban_points());
     smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect()).await;
+
+    let sets = data.building_sets.iter().filter(|(_, set)| {
+        set.style == style
+    }).map(|(id, _)| id.clone()).collect::<Vec<_>>();
+
+    for block in inners.iter() {
+        for point in get_ordered_edge(&block) {
+            for direction in Cardinal::iter() {
+                if !outers.contains(&(point + direction.into())) {
+                    continue;
+                }
+
+                let y = editor.world().get_height_at(point); // todo
+
+                let grid = Grid::new((point + match direction {
+                    Cardinal::North => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 0 },
+                    Cardinal::East => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 1 - DEFAULT_GRID_CELL_SIZE.z  }, // TODO
+                    Cardinal::South => Point2D { x: 0, y: 1 - DEFAULT_GRID_CELL_SIZE.z }, 
+                    Cardinal::West => Point2D { x: 0, y: 0 },
+                }).add_y(y));
+
+                let set = rng.choose(&sets);
+                let shapes = &data.building_sets.get(set).expect("Building set not found").shapes;
+                let mut shapes_dict = shapes.iter()
+                    .enumerate()
+                    .map(|(index, shape)| {
+                        (index, shape.cells().iter().map(|cell| cell.drop_y()).collect::<HashSet<_>>().iter().count() as f32)
+                    })
+                    .collect::<HashMap<_, _>>();
+
+                while !shapes_dict.is_empty() {
+                    let index = rng.pop_weighted(&mut shapes_dict).expect("No shapes available").0;
+                    let shape = shapes.get(index).expect("Shape index out of bounds");
+                    let footprint = shape.get_footprint(&grid);
+                    let mut shape = shape.clone(); 
+
+                    shape.rotate(match direction {
+                        Cardinal::North => Rotation::Twice,
+                        Cardinal::East => Rotation::Thrice,
+                        Cardinal::South => Rotation::None,
+                        Cardinal::West => Rotation::Once,
+                    });
+
+                    if footprint.iter().any(|point| !block.contains(point) || editor.world().is_claimed(*point) || editor.world().is_water(*point)) {
+                        continue;
+                    }
+
+                    place_building(editor, &shape, grid, set, data, style, rng, palette).await;
+                    break;
+                }
+            }
+        }
+    }
 }
 
 async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
@@ -174,7 +228,7 @@ pub fn get_best_height_and_score(editor : &mut Editor, footprint : &HashSet<Poin
     (best_height, avg_score)
 }
 
-pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid : Grid, set : &BuildingSetID, data : LoadedData, style : Style, rng : &RNG, palette : &PaletteId) {
+pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid : Grid, set : &BuildingSetID, data : &LoadedData, style : Style, rng : &RNG, palette : &PaletteId) {
     let mut building = BuildingData {
         id: BuildingID(editor.world_mut().buildings.len()),
         grid,
@@ -200,10 +254,31 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
         }
     }
 
-    build_walls(editor, wall_set, &mut building, &data, &mut rng).await.expect("Failed to build walls");
-    build_roof(editor, &data, &mut building, roof_set, &mut rng).await.expect("Failed to build roof");        
-    build_floor(editor, &data, &mut building, &mut rng).await;
-    build_stairs(editor, &mut building, &data, &mut rng).await;
+    build_walls(editor, wall_set, &mut building, data, &mut rng).await.expect("Failed to build walls");
+    build_roof(editor, data, &mut building, roof_set, &mut rng).await.expect("Failed to build roof");        
+    build_floor(editor, data, &mut building, &mut rng).await;
+    build_stairs(editor, &mut building, data, &mut rng).await;
+    build_foundation(editor, &building, data, &mut rng).await;
+
+    // Claim points outside of windows and doors
+    if let Some(windows) = building.shape.windows() {
+        for window in windows {
+            let point = grid.get_door_world_position(window.cell, window.direction) + window.direction.into();
+            if editor.world().is_claimed(point.drop_y()) {
+                continue; // Skip if the point is already claimed
+            }
+            editor.world_mut().claim(point.drop_y(), BuildClaim::Building(building.id));
+        }
+    }   
+    if let Some(doors) = building.shape.doors() {
+        for door in doors {
+            let point = grid.get_door_world_position(door.cell, door.direction) + door.direction.into();
+            if editor.world().is_claimed(point.drop_y()) {
+                continue; // Skip if the point is already claimed
+            }
+            editor.world_mut().claim(point.drop_y(), BuildClaim::Building(building.id));
+        }
+    }
 
     editor.world_mut().buildings.push(building);
 }

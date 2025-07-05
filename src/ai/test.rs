@@ -71,8 +71,8 @@ mod tests {
             pages : Vec<Vec<Text>>,
         }
 
-        let user = r#"Generate a minecraft book with a title, author, and 10 pages of content, all about the history of a fictional town.
-            Use minecraft's formatting for color and such but ONLY for titles and keywords
+        let user = r#"Generate a minecraft book with a title, author, and 10 pages of content, about the history of a fictional town.
+            Only use color formatting or bold for keywords or titles. Leave most of the body text in plain format.
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#;

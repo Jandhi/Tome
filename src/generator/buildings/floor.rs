@@ -31,4 +31,11 @@ pub async fn build_floor(editor: &mut Editor, data: &LoadedData, building: &Buil
             }
         }
     }
+
+    if let Some(doors) = building.shape.doors() {
+        for door in doors.iter() {
+            let point = building.grid.get_door_world_position(door.cell, door.direction);
+            placer.place_block(editor, point + DOWN, BlockForm::Block, None, None).await;
+        }
+    }
 }

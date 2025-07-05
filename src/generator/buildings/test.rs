@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings_in_area}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings_in_area}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -130,13 +130,14 @@ mod tests {
         let data = LoadedData::load().expect("Failed to load generator data");
         let rng = &mut RNG::new(65);
 
-        place_building(&mut editor, &shape, grid, &set, data, Style::Medieval, rng, &"medieval_spruce".into()).await;
+        place_building(&mut editor, &shape, grid, &set, &data, Style::Medieval, rng, &"medieval_spruce".into()).await;
 
         editor.flush_buffer().await;
     }
 
     #[tokio::test]
     async fn placement_in_districts() {
+        println!("Running placement_in_districts test");
         init_logger();
 
         let provider = GDMCHTTPProvider::new();
@@ -160,6 +161,7 @@ mod tests {
 
         place_buildings_in_area(&mut editor, &mut rng.derive(), &data, Style::Medieval, &"medieval_spruce".into()).await;
         build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
+        build_compass(&mut editor).await;
         editor.flush_buffer().await;
     }
     

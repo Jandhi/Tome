@@ -7,6 +7,7 @@ mod data;
 mod floor;
 mod stairs;
 mod set;
+mod foundation;
 pub mod roofs;
 pub mod walls;
 pub mod constants;

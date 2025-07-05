@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_derive::{Deserialize, Serialize};
 use crate::{editor::{self, Editor}, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Placer}}, geometry::{Cardinal, Point3D, UP}, minecraft::{BlockForm, BlockID}, noise::RNG};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
 pub struct StairPlacement {
     pub cell : Point3D,
     pub direction : Cardinal,
@@ -12,7 +12,9 @@ pub struct StairPlacement {
 }
 
 pub async fn build_stairs(editor: &mut Editor, building: &BuildingData, data: &LoadedData, rng: &mut RNG) {
-    let stairs = building.shape.stairs().expect("Building shape must have stairs defined");
+    let Some(stairs) = building.shape.stairs() else {
+        return;
+    };
 
     for stair in stairs {
         build_stair(editor, building, data, stair.cell, stair.direction, rng, stair.left_to_right).await;

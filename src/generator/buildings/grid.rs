@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D, Rect2D, Rect3D}};
+use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grid {
@@ -58,6 +58,49 @@ impl Grid {
         point - self.origin
     }
 
+    // 2D versions (ignoring y)
+    pub fn grid_to_world_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x * (self.cell_size.x - 1) + self.origin.x,
+            y: point.y * (self.cell_size.z - 1) + self.origin.z,
+        }
+    }
+
+    pub fn world_to_grid_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: (point.x - self.origin.x) / (self.cell_size.x - 1),
+            y: (point.y - self.origin.z) / (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn grid_to_local_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x * (self.cell_size.x - 1),
+            y: point.y * (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn local_to_grid_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x / (self.cell_size.x - 1),
+            y: point.y / (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn local_to_world_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x + self.origin.x,
+            y: point.y + self.origin.z,
+        }
+    }
+
+    pub fn world_to_local_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x - self.origin.x,
+            y: point.y - self.origin.z,
+        }
+    }
+
     pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
 
@@ -102,9 +145,9 @@ impl Grid {
     }
 
     pub fn get_cell_rect(&self, grid_coordinate : Point3D) -> Rect3D {
-        let local = self.grid_to_local(grid_coordinate);
+        let world = self.grid_to_world(grid_coordinate);
         Rect3D {
-            origin: local,
+            origin: world,
             size: self.cell_size
         }
     }
