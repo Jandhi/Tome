@@ -265,6 +265,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn district_classification_district_points() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        println!("Build area: {:?}", build_area);
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
+        
+        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let _districts = generate_districts(seed, &mut editor).await;
+        let glass = Block {
+            id: BlockID::Glass,
+            data: None,
+            state: None,
+        };
+
+        // Collect district ids and their points to avoid multiple mutable borrows
+        let district_points: Vec<_> = {
+            let world = editor.world_mut();
+            world.districts.iter().map(|(district_id, district)| {
+                (*district_id, district.data.district_type, district.data.points.clone(), district.data.edges.clone())
+            }).collect()
+        };
+
+        for (district_id, district_type, points, edges) in district_points {
+            let block = get_block_for_district_type(district_type);
+            for point in points.iter() {
+                if edges.contains(point) {
+                    editor.place_block(&glass, *point).await;
+                    editor.place_block(&block, Point3D::new(point.x, point.y - 1, point.z)).await;
+                } else {
+                    editor.place_block(&block, *point).await;
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
     async fn district_replace_ground() {
         init_logger();
 

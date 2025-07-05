@@ -1565,6 +1565,7 @@ impl BlockID {
             | BlockID::DarkOakLog
             | BlockID::MangroveLog
             | BlockID::CherryLog
+            | BlockID::Bamboo
         )
     }
     pub fn is_mushroom(self) -> bool {

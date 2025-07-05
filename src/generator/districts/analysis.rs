@@ -45,7 +45,7 @@ impl DistrictAnalysis {
 
     pub fn biome_percentage(&self, biome: &Biome) -> f32 {
         if let Some(count) = self.biome_count.get(biome) {
-            (count * 100) as f32 / self.count as f32
+            *count as f32 / self.count as f32
         } else {
             0.0
         }
@@ -78,12 +78,12 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
 
         root_mean_square_height += ((point.y - average_height) as f32).powi(2);
 
-        let height = editor.world_mut().get_height_at(point.drop_y());
+        let height = editor.world_mut().get_non_tree_height(point.drop_y());
         let average_neighbour_height = CARDINALS_2D.iter()
             .map(|cardinal| {
                 let neighbour = point.drop_y() + *cardinal;
                 if editor.world_mut().is_in_bounds_2d(neighbour) {
-                    (height - editor.world_mut().get_height_at(neighbour)).abs()
+                    (height - editor.world_mut().get_non_tree_height(neighbour)).abs()
                 } else {
                     0
                 }

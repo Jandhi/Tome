@@ -40,6 +40,7 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
         println!("No prime urban candidate found"); //will mean no other districts are classified beyond this point
         return;
     };
+    println!("Prime urban district selected: {:?}", prime_urban_district);
 
     if let Some(district) = districts.get_mut(&prime_urban_district) {
         district.data.district_type = DistrictType::Urban;
@@ -59,7 +60,9 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
                 info!("District {:?} classified as Off-Limits with score {}", id, score);
             }
         }
+        
     }
+    
 }
 
 pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {

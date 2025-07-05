@@ -4,8 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
-
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D, DOWN}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 use super::Editor;
 
@@ -148,6 +147,16 @@ impl World {
         self.ground_height_map[point.x as usize][point.y as usize]
     }
 
+    pub fn get_non_tree_height(&self, point : Point2D) -> i32 {
+        let mut height = self.get_height_at(point);
+        let mut block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
+        while block.id.is_tree_or_leaf() {
+            height -= 1;
+            block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
+        }
+        height
+    }
+
     pub fn get_height_map(&self) -> &Vec<Vec<i32>> {
         &self.ground_height_map
     }   
@@ -184,6 +193,16 @@ impl World {
 
     pub fn add_height(&self, point : Point2D) -> Point3D {
         Point3D::new(point.x, self.get_height_at(point), point.y)
+    }
+
+    pub fn add_non_tree_height(&self, point : Point2D) -> Point3D {
+        let mut new_point = Point3D::new(point.x, self.get_height_at(point), point.y);
+        let mut block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
+        while block.id.is_tree_or_leaf() {
+            new_point += DOWN;
+            block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
+        }
+        new_point
     }
 
     pub fn is_in_bounds_2d(&self, point : Point2D) -> bool {
