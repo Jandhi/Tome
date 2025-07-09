@@ -1,8 +1,9 @@
-use std::{collections::{HashMap, HashSet}, i32, os::windows};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, i32, os::windows};
 
+use reqwest::header::VARY;
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData}, materials::PaletteId, nbts::{Rotation, Transform}, paths::PathType, style::Style, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData, SuperDistrictID}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{BiomeStonetype, BiomeWoodtype, Block, BlockID}, noise::RNG};
 
 use super::BuildingID;
 
@@ -35,47 +36,142 @@ pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (
     (city_blocks, off_limits)
 }
 
-pub async fn place_buildings_in_area(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, palette : &PaletteId) {
+pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>) {
     let mut outers : HashSet<Point2D> = HashSet::new();
     let mut inners : Vec<HashSet<Point2D>> = vec![];
-
+    
     let (city_blocks, off_limits) = get_city_blocks_and_off_limits(editor, rng);
-
+    
     for point in off_limits {
         outers.insert(point);
     }
-
+    
+    let mut block_superdistricts = vec![];
     for block in city_blocks.iter() {
         let (outer, inner) = get_outer_and_inner_points(&block, 3);
         outers.extend(outer);
+        
+        block_superdistricts.push(inner.iter().fold(HashMap::new(), |mut acc : HashMap::<SuperDistrictID, usize>, point| {
+            let super_district = editor.world().get_super_district_at(*point);
+            
+            if let Some(district) = super_district {
+                acc.entry(district).and_modify(|e| *e += 1).or_insert(1);
+            }
+            
+            acc
+        }).iter().max_by_key(|(_, count)| *count).map(|(district, _)| *district).unwrap());
+
         inners.push(inner);
+    }
+
+    let data = RefCell::new(data);
+    let flowers : MaterialId = (*rng.choose(&vec![
+        "cold_flowers",
+        "warm_flowers",
+        "tulips",
+    ])).into();
+    let cores = core_palettes.iter().map(|id| {
+        let mut palette = data.borrow().palettes.get(id).expect("Core palette not found").clone();
+        palette.materials.insert(MaterialRole::Flower, flowers.clone());
+        palette
+    }).collect::<Vec<_>>();
+    let roofs = rng.choose_many(&vec![
+        "acacia_wood_roof".into(),
+        "brick_roof".into(),
+        "oak_wood_roof".into(),
+        "red_wood_roof".into(),
+        "blackstone_roof".into(),
+        "blue_wood_roof".into(),
+    ], 3).iter().map(|id| data.borrow().palettes.get(id).expect("Roof palette not found")).collect::<Vec<_>>();
+    
+    
+
+    let mut superdistrict_styles : HashMap<SuperDistrictID, DistrictStyle> = HashMap::new();
+    for superdistrict_id in block_superdistricts.iter() {
+        if superdistrict_styles.contains_key(&*superdistrict_id) {
+            continue; // Already have a style for this superdistrict
+        }
+
+        let superdistrict_data = editor.world().super_district_analysis_data.get(superdistrict_id)
+            .expect("Super district analysis data not found");
+
+        
+
+        let woods = superdistrict_data.biome_count().keys().into_iter()
+            .map(|biome| 
+                BiomeWoodtype::from_biome(*biome)
+                    .map(|wood_type| 
+                        data.borrow().palettes.get(&wood_type.get_wood_palette_id())
+                            .expect("Wood palette not found")
+                    )
+                )
+            .filter_map(|wood| wood)
+            .collect::<Vec<_>>();
+
+        let stones = superdistrict_data.biome_count().keys().into_iter()
+            .map(|biome| 
+                BiomeStonetype::from_biome(*biome)
+                    .into_iter()
+                    .flat_map(|stone_type|
+                        stone_type.get_stone_palette_ids()
+                            .iter()
+                            .map(|id| data.borrow().palettes.get(id).unwrap_or_else(|| panic!("Stone palette {:?} not found", id)))
+                            .collect::<Vec<_>>()
+                    )
+                    .collect::<Vec<_>>()
+            )
+            .flatten()
+            .collect::<Vec<_>>();
+
+        superdistrict_styles.insert(*superdistrict_id, DistrictStyle::generate_style(rng, cores.iter().collect(), roofs.clone(), woods.clone(), stones.clone()));
     }
     
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
     smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect()).await;
 
-    let sets = data.building_sets.iter().filter(|(_, set)| {
+    let sets = data.borrow().building_sets.iter().filter(|(_, set)| {
         set.style == style
     }).map(|(id, _)| id.clone()).collect::<Vec<_>>();
 
-    for block in inners.iter() {
+    for (block_index, block) in inners.iter().enumerate() {
         for point in get_ordered_edge(&block) {
             for direction in Cardinal::iter() {
                 if !outers.contains(&(point + direction.into())) {
                     continue;
                 }
 
-                let y = editor.world().get_height_at(point); // todo
+                let door_position = point + match direction {
+                    Cardinal::South => Point2D { x: DEFAULT_GRID_CELL_SIZE.x / 2, y: 1 - DEFAULT_GRID_CELL_SIZE.z },
+                    Cardinal::West => Point2D { x: 0, y: DEFAULT_GRID_CELL_SIZE.z / 2 },
+                    Cardinal::East => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 1 - DEFAULT_GRID_CELL_SIZE.z - DEFAULT_GRID_CELL_SIZE.z / 2 },
+                    Cardinal::North => Point2D { x: -DEFAULT_GRID_CELL_SIZE.x / 2, y: 0 },
+                };
+                let mut height_point = door_position;
+                let mut distance = 0;
+                while block.contains(&height_point) {
+                    height_point += direction.into();
+                    distance += 1;
+                }
+
+                // if distance > 5 { // The door is too far from the road, height will be awkward
+                //     continue;
+                // }
+
+                let y = editor.world().get_height_at(height_point);
+
+                if y.abs_diff(editor.world().get_height_at(point)) > 3 {
+                    continue; // Skip if the height difference is too large, this is probably indicative of a bad spot to place
+                }
 
                 let grid = Grid::new((point + match direction {
                     Cardinal::North => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 0 },
-                    Cardinal::East => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 1 - DEFAULT_GRID_CELL_SIZE.z  }, // TODO
+                    Cardinal::East => Point2D { x: 1 - DEFAULT_GRID_CELL_SIZE.x, y: 1 - DEFAULT_GRID_CELL_SIZE.z },
                     Cardinal::South => Point2D { x: 0, y: 1 - DEFAULT_GRID_CELL_SIZE.z }, 
                     Cardinal::West => Point2D { x: 0, y: 0 },
                 }).add_y(y));
 
                 let set = rng.choose(&sets);
-                let shapes = &data.building_sets.get(set).expect("Building set not found").shapes;
+                let shapes = &data.borrow().building_sets.get(set).expect("Building set not found").shapes;
                 let mut shapes_dict = shapes.iter()
                     .enumerate()
                     .map(|(index, shape)| {
@@ -86,21 +182,26 @@ pub async fn place_buildings_in_area(editor : &mut Editor, rng : &mut RNG, data 
                 while !shapes_dict.is_empty() {
                     let index = rng.pop_weighted(&mut shapes_dict).expect("No shapes available").0;
                     let shape = shapes.get(index).expect("Shape index out of bounds");
-                    let footprint = shape.get_footprint(&grid);
                     let mut shape = shape.clone(); 
-
+                    
                     shape.rotate(match direction {
-                        Cardinal::North => Rotation::Twice,
-                        Cardinal::East => Rotation::Thrice,
                         Cardinal::South => Rotation::None,
                         Cardinal::West => Rotation::Once,
+                        Cardinal::North => Rotation::Twice,
+                        Cardinal::East => Rotation::Thrice,
                     });
-
+                    
+                    let footprint = shape.get_footprint(&grid);
                     if footprint.iter().any(|point| !block.contains(point) || editor.world().is_claimed(*point) || editor.world().is_water(*point)) {
                         continue;
                     }
 
-                    place_building(editor, &shape, grid, set, data, style, rng, palette).await;
+                    let data_ref = &data.borrow();
+                    let palette = superdistrict_styles.get(&block_superdistricts[block_index])
+                        .expect("Super district style not found")
+                        .generate_palette(rng);
+
+                    place_building(editor, &shape, grid, set, data_ref, style, rng, &palette).await;
                     break;
                 }
             }
@@ -170,65 +271,7 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
     }
 }
 
-pub fn get_best_height_if_placeable(editor : &mut Editor, shape : &BuildingShape, grid : &Grid) -> Option<i32> {
-    let footprint = shape.get_footprint(&grid);
-
-    for point in footprint.iter() {
-        if editor.world().is_claimed(*point) {
-            // If any point in the footprint is already claimed, we cannot place the building here
-            return None;
-        }
-    }
-
-    let (height, score) = get_best_height_and_score(editor, &footprint);
-
-    if score < BUILDING_MAX_AVERAGE_GROUND_COST {
-        Some(height)
-    } else {
-        None
-    }
-}
-
-pub fn get_best_height_and_score(editor : &mut Editor, footprint : &HashSet<Point2D>) -> (i32, f32) {
-    let min_height = footprint.iter()
-        .map(|point| editor.world().get_height_at(*point))
-        .min()
-        .unwrap_or(0);
-
-    let max_height = footprint.iter()
-        .map(|point| editor.world().get_height_at(*point))
-        .max()
-        .unwrap_or(0);
-
-    let mut best_score = f32::MAX;
-    let mut best_height = min_height;
-
-    for height in min_height..=max_height {
-        let score : f32 = footprint.iter()
-            .map(|point| {
-                let height_at_point = editor.world().get_height_at(*point);
-                let diff = height_at_point - height;
-
-                if diff < 0 {
-                    (diff.abs() as f32) * BUILDING_GROUND_DIG_COST
-                } else {
-                    (diff as f32) * BUILDING_GROUND_RAISE_COST // Prefer lower heights
-                }
-            })
-            .sum();
-
-        if score < best_score {
-            best_score = score;
-            best_height = height;
-        }
-    }
-
-    let avg_score = (best_score as f32) / (footprint.len() as f32);
-
-    (best_height, avg_score)
-}
-
-pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid : Grid, set : &BuildingSetID, data : &LoadedData, style : Style, rng : &RNG, palette : &PaletteId) {
+pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid : Grid, set : &BuildingSetID, data : &LoadedData, style : Style, rng : &mut RNG, palette : &Palette) {
     let mut building = BuildingData {
         id: BuildingID(editor.world_mut().buildings.len()),
         grid,
@@ -241,8 +284,6 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
         editor.world_mut().claim(point, BuildClaim::Building(building.id));
     }
 
-    let mut rng = RNG::new(100);
-
     let set = data.building_sets.get(set).expect("Building set not found");
 
     let roof_set = rng.choose(&set.roof_sets);
@@ -254,11 +295,11 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
         }
     }
 
-    build_walls(editor, wall_set, &mut building, data, &mut rng).await.expect("Failed to build walls");
-    build_roof(editor, data, &mut building, roof_set, &mut rng).await.expect("Failed to build roof");        
-    build_floor(editor, data, &mut building, &mut rng).await;
-    build_stairs(editor, &mut building, data, &mut rng).await;
-    build_foundation(editor, &building, data, &mut rng).await;
+    build_walls(editor, wall_set, &mut building, data, rng).await.expect("Failed to build walls");
+    build_roof(editor, data, &mut building, roof_set, rng).await.expect("Failed to build roof");        
+    build_floor(editor, data, &mut building, rng).await;
+    build_stairs(editor, &mut building, data, rng).await;
+    build_foundation(editor, &building, data, rng).await;
 
     // Claim points outside of windows and doors
     if let Some(windows) = building.shape.windows() {
@@ -273,10 +314,24 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
     if let Some(doors) = building.shape.doors() {
         for door in doors {
             let point = grid.get_door_world_position(door.cell, door.direction) + door.direction.into();
+            
+            let mut clear_point = point;
+
+            for _ in 0..5 {
+                editor.place_block_forced(&BlockID::Air.into(), point).await;
+                editor.place_block_forced(&BlockID::Air.into(), point + UP).await;
+                clear_point += door.direction.into();
+
+                if editor.world().is_claimed(clear_point.drop_y()) {
+                    break;
+                }
+            }
+
             if editor.world().is_claimed(point.drop_y()) {
                 continue; // Skip if the point is already claimed
             }
             editor.world_mut().claim(point.drop_y(), BuildClaim::Building(building.id));
+            
         }
     }
 

@@ -1,0 +1,7 @@
+{
+  "id": "stone_bricks",
+
+  "primary_stone": "stone_bricks",
+  "secondary_stone": "polished_andesite",
+  "stone_pillar": "stone_bricks"
+}

@@ -5,6 +5,6 @@ pub struct BuildingData {
     pub id : BuildingID,
     pub grid : Grid,
     pub shape : BuildingShape,
-    pub palette : PaletteId,
+    pub palette : Palette,
     pub style : Style,
 }

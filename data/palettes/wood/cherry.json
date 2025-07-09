@@ -1,0 +1,7 @@
+{
+  "id": "cherry",
+
+  "primary_wood": "cherry_planks",
+  "secondary_wood": "mangrove_planks",
+  "wood_pillar": "cherry_log"
+}

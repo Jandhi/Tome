@@ -1,0 +1,12 @@
+{
+    "id" : "tulips",
+    "connections" : {},
+    "blocks" : {
+        "flower" : {
+            "minecraft:red_tulip" : 1.0,
+            "minecraft:orange_tulip" : 1.0,
+            "minecraft:white_tulip" : 1.0,
+            "minecraft:pink_tulip" : 1.0
+        }
+    }
+}

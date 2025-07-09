@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D, DOWN}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D, DOWN}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
 
 use super::Editor;
 
@@ -14,6 +14,8 @@ const CHUNK_SIZE : i32 = 16;
 pub struct World {
     pub build_area : Rect3D,
     pub districts : HashMap<DistrictID, District>,
+    pub district_analysis_data : HashMap<DistrictID, DistrictAnalysis>,
+    pub super_district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis>,
     pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
@@ -101,6 +103,8 @@ impl World {
             chunks,
             ground_biome_map,
             ground_block_map,
+            district_analysis_data: HashMap::new(),
+            super_district_analysis_data: HashMap::new(),
         };
 
         let y_offset = build_area.origin.y;
@@ -297,6 +301,14 @@ impl World {
             self.build_claim_map[point.x as usize][point.y as usize] = claim;
         } else {
             log::warn!("Tried to claim point {:?} out of bounds", point);
+        }
+    }
+
+    pub fn get_claim(&self, point : Point2D) -> Option<BuildClaim> {
+        if self.is_in_bounds_2d(point) {
+            Some(self.build_claim_map[point.x as usize][point.y as usize])
+        } else {
+            None
         }
     }
 

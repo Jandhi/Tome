@@ -1,0 +1,21 @@
+{
+    "id" : "crimson_planks",
+    "connections" : {
+        "lighter" : "mangrove_planks"
+    },
+    "blocks" : {
+        "block"              : "minecraft:crimson_planks",
+        "stairs"             : "minecraft:crimson_stairs",
+        "slab"               : "minecraft:crimson_slab",
+        "fence"              : "minecraft:crimson_fence",
+        "fence_gate"         : "minecraft:crimson_fence_gate",
+        "door"               : "minecraft:crimson_door",
+        "trapdoor"           : "minecraft:crimson_trapdoor",
+        "button"             : "minecraft:crimson_button",
+        "pressure_plate"     : "minecraft:crimson_pressure_plate",
+        "sign"               : "minecraft:crimson_sign",
+        "wall_sign"          : "minecraft:crimson_wall_sign",
+        "hanging_sign"       : "minecraft:crimson_hanging_sign",
+        "hanging_wall_sign"  : "minecraft:crimson_hanging_wall_sign"
+    }
+}

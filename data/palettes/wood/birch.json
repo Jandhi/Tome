@@ -1,0 +1,7 @@
+{
+  "id": "birch",
+
+  "primary_wood": "birch_planks",
+  "secondary_wood": "oak_planks",
+  "wood_pillar": "stripped_birch_log"
+}

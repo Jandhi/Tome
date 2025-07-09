@@ -147,6 +147,10 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Districts generated successfully");
 
     //prune urban chokepoints??
+
+    // Set the district and superdistrict analysis data in the world
+    editor.world_mut().district_analysis_data = district_analysis_data;
+    editor.world_mut().super_district_analysis_data = superdistrict_analysis_data;
 }
 
 fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) { // this is broken

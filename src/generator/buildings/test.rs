@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings_in_area}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -18,7 +18,7 @@ mod tests {
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
-        let palette = "test2".into();
+        let palette = data.palettes.get(&"test2".into()).expect("Palette not found").clone();
 
         let midpoint = editor.world_mut().world_rect_2d().size / 2;
         let point = editor.world_mut().add_height(midpoint);
@@ -72,13 +72,15 @@ mod tests {
         let mut rng = RNG::new(42);
         let mut placer = Placer::new(&data.materials, &mut rng);
 
-        grid.build_structure(&mut editor, &mut placer, &door_wall.structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &"test1".into()).await
+        let palette = data.palettes.get(&"test1".into()).expect("Palette not found").clone();
+
+        grid.build_structure(&mut editor, &mut placer, &door_wall.structure, Point3D::new(0, 0, 0), Cardinal::North, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::South, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::South, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::East, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::East, &data, &palette).await
             .expect("Failed to build structure");
-        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::West, &data, &"test1".into()).await
+        grid.build_structure(&mut editor, &mut placer, &wall.structure, Point3D::new(0, 0, 0), Cardinal::West, &data, &palette).await
             .expect("Failed to build structure");
 
         info!("NBT structure placed successfully");
@@ -130,7 +132,7 @@ mod tests {
         let data = LoadedData::load().expect("Failed to load generator data");
         let rng = &mut RNG::new(65);
 
-        place_building(&mut editor, &shape, grid, &set, &data, Style::Medieval, rng, &"medieval_spruce".into()).await;
+        place_building(&mut editor, &shape, grid, &set, &data, Style::Medieval, rng, data.palettes.get(&"medieval_spruce".into()).expect("")).await;
 
         editor.flush_buffer().await;
     }
@@ -159,7 +161,7 @@ mod tests {
             &mut placer_rng,
         );
 
-        place_buildings_in_area(&mut editor, &mut rng.derive(), &data, Style::Medieval, &"medieval_spruce".into()).await;
+        place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()]).await;
         build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
         build_compass(&mut editor).await;
         editor.flush_buffer().await;

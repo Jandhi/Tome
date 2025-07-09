@@ -1,0 +1,7 @@
+{
+  "id": "cobblestone",
+
+  "primary_stone": "cobblestone",
+  "secondary_stone": "stone_bricks",
+  "stone_pillar": "cobblestone"
+}

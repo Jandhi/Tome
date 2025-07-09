@@ -1,0 +1,7 @@
+{
+  "id" : "spruce",
+
+  "primary_wood" : "spruce_planks",
+  "secondary_wood" : "dark_oak_planks",
+  "wood_pillar" : "spruce_log"
+}

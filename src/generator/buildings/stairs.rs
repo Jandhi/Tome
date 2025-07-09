@@ -22,9 +22,8 @@ pub async fn build_stairs(editor: &mut Editor, building: &BuildingData, data: &L
 }
 
 pub async fn build_stair(editor : &mut Editor, building : &BuildingData, data : &LoadedData, cell : Point3D, direction : Cardinal, rng : &mut RNG, left_to_right : bool) {
-    let wood_id = data.palettes.get(&building.palette)
-        .and_then(|palette| palette.get_material(MaterialRole::SecondaryWood))
-        .expect("Wood block not found in palette");
+    let wood_id = building.palette.get_material(MaterialRole::SecondaryWood)
+        .expect("Building must have a secondary wood material for stairs");
 
     let mut placer = MaterialPlacer::new(Placer::new(&data.materials, rng), wood_id.clone());
 

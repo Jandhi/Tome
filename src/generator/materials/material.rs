@@ -17,6 +17,12 @@ impl MaterialId {
     }
 }
 
+impl From<&str> for MaterialId {
+    fn from(id: &str) -> Self {
+        MaterialId(id.to_string())
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Material {
     id : MaterialId,

@@ -1,0 +1,7 @@
+{
+    "id" : "dark_oak_log",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:dark_oak_log"
+    }
+}

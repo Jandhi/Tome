@@ -82,10 +82,16 @@ impl RNG {
         &options[index]
     }
 
+    // Choose multiple items from a slice, removing them from the options as they are chosen.
+    // If count is greater than the number of options, it will return all options.
     pub fn choose_many<'a, T>(&mut self, options: &'a [T], count: usize) -> Vec<&'a T> 
     {
         if count == 0 || options.is_empty() {
             return Vec::new();
+        }
+
+        if count >= options.len() {
+            return options.iter().collect();
         }
 
         let mut options = options.iter().collect::<Vec<_>>();
@@ -110,6 +116,18 @@ impl RNG {
 
     pub fn choose_weighted<'map, T>(&mut self, options: &'map HashMap<T, f32>) -> &'map T {
         let total_weight: f32 = options.values().sum();
+        let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
+        for (item, weight) in options.iter() {
+            if rand_value < *weight {
+                return item;
+            }
+            rand_value -= weight;
+        }
+        unreachable!()
+    }
+
+    pub fn choose_weighted_vec<'map, T>(&mut self, options: &'map Vec<(T, f32)>) -> &'map T {
+        let total_weight: f32 = options.iter().map(|(_, weight)| *weight).sum();
         let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
         for (item, weight) in options.iter() {
             if rand_value < *weight {

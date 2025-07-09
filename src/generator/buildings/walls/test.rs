@@ -35,7 +35,7 @@ mod tests {
             id: 0.into(),
             shape,
             grid,
-            palette: palette.clone(),
+            palette: data.palettes.get(&palette).expect("Palette not found").clone(),
             style: Style::Desert,
         };
 

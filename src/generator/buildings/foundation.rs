@@ -12,10 +12,6 @@ pub async fn build_foundation(
 ) {
     let BuildingData { grid, shape, palette, .. } = building;
 
-    let palette = data.palettes.get(palette)
-        .expect("Palette not found")
-        .clone();
-
     let area = shape.get_footprint(grid);
     let edge = get_outer_edge(&area);
 
@@ -25,6 +21,12 @@ pub async fn build_foundation(
         palette.get_material(MaterialRole::PrimaryStone).expect("Primary stone material not found").clone()
     );
 
+    let mut second_placer_rng = rng.derive();
+    let mut secondary_stone_placer : MaterialPlacer = MaterialPlacer::new(
+        Placer::new(&data.materials, &mut second_placer_rng), 
+        palette.get_material(MaterialRole::SecondaryStone).expect("Secondary stone material not found").clone()
+    );
+
     for point in area.union(&edge).into_iter() {
         let height = editor.world().get_ocean_floor_height_at(*point);
         let grid_height = grid.origin.y; 
@@ -32,6 +34,15 @@ pub async fn build_foundation(
             let block = editor.world().get_block(point.add_y(height - 1)).expect("Block not found at point");
             editor.place_block(&block, point.add_y(grid_height - 1)).await;
         } else if height < grid_height {
+            let relative = *point - grid.origin.drop_y();
+            let placer = if (relative.x) % (grid.cell_size.x) == 0 || (relative.y) % (grid.cell_size.z) == 0 {
+                // Place secondary stone for the outer edge
+                &mut secondary_stone_placer
+            } else {
+                // Place primary stone for the outer edge
+                &mut primary_stone_placer
+            };
+
             if edge.contains(point) {
                 let out_direction = Cardinal::iter()
                     .find(|dir| {
@@ -42,14 +53,17 @@ pub async fn build_foundation(
                 let mut state : HashMap<String, String> = HashMap::new();
                 state.insert("facing".to_string(), (-out_direction).to_string());
                 state.insert("half".to_string(), "top".to_string());
-                primary_stone_placer.place_block(editor, point.add_y(grid_height - 1), BlockForm::Stairs, Some(&state), None).await;
+
+
+
+                placer.place_block(editor, point.add_y(grid_height - 1), BlockForm::Stairs, Some(&state), None).await;
 
                 continue;
             }
 
 
             for y in height..grid_height {
-                primary_stone_placer.place_block(editor, point.add_y(y), BlockForm::Block, None, None).await;
+                placer.place_block(editor, point.add_y(y), BlockForm::Block, None, None).await;
             }
         }
     }

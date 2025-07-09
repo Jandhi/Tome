@@ -124,6 +124,30 @@ impl Palette {
         }
         recolored
     }
+
+    pub fn merged_with(mut self, other : &Palette) -> Self {
+        for (role, material_id) in &other.materials {
+            self.materials.insert(*role, material_id.clone());
+        }
+
+        if other.primary_color.is_some() {
+            self.primary_color = other.primary_color;
+        }
+        if other.secondary_color.is_some() {
+            self.secondary_color = other.secondary_color;
+        }
+
+        if let Some(tags) = &other.tags {
+            if self.tags.is_none() {
+                self.tags = Some(Vec::new());
+            }
+            if let Some(existing_tags) = &mut self.tags {
+                existing_tags.extend(tags.iter().cloned());
+            }
+        }
+
+        self
+    }
 }
 
 impl Loadable<'_, Palette, PaletteId>  for Palette {

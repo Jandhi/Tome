@@ -1,7 +1,7 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{env, fs::write, path::Path};
+    use std::{cell::RefCell, env, fs::write, path::Path};
 
     use log::info;
 
@@ -26,8 +26,23 @@ mod tests {
         let midpoint = editor.world_mut().world_rect_2d().size / 2;
         let point = editor.world_mut().add_height(midpoint);
 
+        let data = RefCell::new(data);
+        let materials = &data.borrow().materials;
+        let data_ref = &data.borrow();
+        let input_palette = data_ref.palettes.get(&"test1".into());
+        let output_palette = data_ref.palettes.get(&"test2".into());
+
         // Place the NBT structure in the world
-        place_nbt(&NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, point.into(), &mut editor, Some(&mut Placer::new(&data.materials, &mut RNG::new(42))), Some(&data), Some(&"test1".into()), Some(&"test2".into()), None, None)
+        place_nbt(
+            &NBTMeta{ path: path.to_str().expect("Path is not valid unicode").into() }, 
+            point.into(), 
+            &mut editor, 
+            Some(&mut Placer::new(materials, &mut RNG::new(42))), 
+            Some(data_ref),
+            input_palette,
+            output_palette, 
+            None, 
+            None)
             .await
             .expect("Failed to place NBT structure");
 

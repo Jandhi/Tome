@@ -1025,6 +1025,16 @@ pub enum BlockID {
     #[serde(rename = "minecraft:smooth_quartz_stairs")]
     SmoothQuartzStairs,
 
+    // BRICKS
+    #[serde(rename = "minecraft:bricks")]
+    Bricks,
+    #[serde(rename = "minecraft:brick_slab")]
+    BrickSlab,
+    #[serde(rename = "minecraft:brick_stairs")]
+    BrickStairs,
+    #[serde(rename = "minecraft:brick_wall")]
+    BrickWall,
+
     // PURPUR
     #[serde(rename = "minecraft:purpur_block")]
     PurpurBlock,

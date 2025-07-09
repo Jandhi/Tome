@@ -1,0 +1,6 @@
+{
+  "id" : "acacia_wood_roof",
+
+  "primary_roof" : "acacia_planks",
+  "secondary_roof" : "mangrove_planks"
+}

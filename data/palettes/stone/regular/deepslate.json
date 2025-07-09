@@ -1,0 +1,7 @@
+{
+  "id": "deepslate",
+
+  "primary_stone": "deepslate_bricks",
+  "secondary_stone": "polished_deepslate",
+  "stone_pillar": "deepslate_bricks"
+}

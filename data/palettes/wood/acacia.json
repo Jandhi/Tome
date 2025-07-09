@@ -1,0 +1,7 @@
+{
+  "id": "acacia",
+
+  "primary_wood": "acacia_planks",
+  "secondary_wood": "jungle_planks",
+  "wood_pillar": "stripped_acacia_log"
+}

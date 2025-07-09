@@ -1,0 +1,6 @@
+{
+  "id" : "oak_wood_roof",
+
+  "primary_roof" : "oak_planks",
+  "secondary_roof" : "spruce_planks"
+}
