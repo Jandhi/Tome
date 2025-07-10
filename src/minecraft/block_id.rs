@@ -1827,6 +1827,10 @@ pub enum BlockID {
     LightningRod,
     #[serde(rename = "minecraft:lodestone")]
     Lodestone,
+    #[serde(rename = "minecraft:cave_vines_plant")]
+    CaveVinesPlant,
+    #[serde(rename = "minecraft:cave_vines")]
+    CaveVines
 }
 
 impl BlockID {
