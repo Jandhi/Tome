@@ -1827,6 +1827,24 @@ pub enum BlockID {
     LightningRod,
     #[serde(rename = "minecraft:lodestone")]
     Lodestone,
+
+    // GOLD BLOCKS & MORE
+    #[serde(rename = "minecraft:gold_block")]
+    GoldBlock,
+    #[serde(rename = "minecraft:iron_block")]
+    IronBlock,
+    #[serde(rename = "minecraft:diamond_block")]
+    DiamondBlock,
+    #[serde(rename = "minecraft:emerald_block")]
+    EmeraldBlock,
+    #[serde(rename = "minecraft:lapis_block")]
+    LapisBlock,
+    #[serde(rename = "minecraft:coal_block")]
+    CoalBlock,
+    #[serde(rename = "minecraft:redstone_block")]
+    RedstoneBlock,
+    #[serde(rename = "minecraft:netherite_block")]
+    NetheriteBlock,
 }
 
 impl BlockID {
