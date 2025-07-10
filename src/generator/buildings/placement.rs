@@ -98,12 +98,13 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
         
 
         let woods = superdistrict_data.biome_count().keys().into_iter()
-            .map(|biome| 
+            .map(|biome| {
+                println!("Processing biome: {:?}", biome);
                 BiomeWoodtype::from_biome(*biome)
                     .map(|wood_type| 
                         data.borrow().palettes.get(&wood_type.get_wood_palette_id())
                             .expect("Wood palette not found")
-                    )
+                    )}
                 )
             .filter_map(|wood| wood)
             .collect::<Vec<_>>();
@@ -210,7 +211,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
 }
 
 async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
-    let mut points = outers.iter().map(|p| editor.world().add_height(*p)).collect::<HashSet<_>>();
+    let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
     points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
     force_height(editor, &points, true).await;
 

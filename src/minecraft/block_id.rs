@@ -1845,6 +1845,10 @@ pub enum BlockID {
     RedstoneBlock,
     #[serde(rename = "minecraft:netherite_block")]
     NetheriteBlock,
+    #[serde(rename = "minecraft:cave_vines_plant")]
+    CaveVinesPlant,
+    #[serde(rename = "minecraft:cave_vines")]
+    CaveVines
 }
 
 impl BlockID {
