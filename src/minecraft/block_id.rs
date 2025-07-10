@@ -1774,6 +1774,59 @@ pub enum BlockID {
     DeadFireCoralFan,
     #[serde(rename = "minecraft:dead_horn_coral_fan")]
     DeadHornCoralFan,
+
+
+    // === CHERRY GROVE FLOWERS ===
+    #[serde(rename = "minecraft:pink_petals")]
+    PinkPetals,
+
+    // === MORE BLOCKS (examples, add as needed) ===
+    #[serde(rename = "minecraft:sculk")]
+    Sculk,
+    #[serde(rename = "minecraft:sculk_vein")]
+    SculkVein,
+    #[serde(rename = "minecraft:sculk_catalyst")]
+    SculkCatalyst,
+    #[serde(rename = "minecraft:sculk_shrieker")]
+    SculkShrieker,
+    #[serde(rename = "minecraft:amethyst_block")]
+    AmethystBlock,
+    #[serde(rename = "minecraft:budding_amethyst")]
+    BuddingAmethyst,
+    #[serde(rename = "minecraft:small_amethyst_bud")]
+    SmallAmethystBud,
+    #[serde(rename = "minecraft:medium_amethyst_bud")]
+    MediumAmethystBud,
+    #[serde(rename = "minecraft:large_amethyst_bud")]
+    LargeAmethystBud,
+    #[serde(rename = "minecraft:amethyst_cluster")]
+    AmethystCluster,
+    #[serde(rename = "minecraft:spawner")]
+    Spawner,
+    #[serde(rename = "minecraft:scaffolding")]
+    Scaffolding,
+    #[serde(rename = "minecraft:powder_snow")]
+    PowderSnow,
+    #[serde(rename = "minecraft:light")]
+    Light,
+    #[serde(rename = "minecraft:barrier")]
+    Barrier,
+    #[serde(rename = "minecraft:structure_block")]
+    StructureBlock,
+    #[serde(rename = "minecraft:jigsaw")]
+    Jigsaw,
+    #[serde(rename = "minecraft:command_block")]
+    CommandBlock,
+    #[serde(rename = "minecraft:repeating_command_block")]
+    RepeatingCommandBlock,
+    #[serde(rename = "minecraft:chain_command_block")]
+    ChainCommandBlock,
+    #[serde(rename = "minecraft:structure_void")]
+    StructureVoid,
+    #[serde(rename = "minecraft:lightning_rod")]
+    LightningRod,
+    #[serde(rename = "minecraft:lodestone")]
+    Lodestone,
 }
 
 impl BlockID {
