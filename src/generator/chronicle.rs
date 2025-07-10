@@ -177,10 +177,10 @@ pub async fn generate_chronicle(editor: &Editor) -> anyhow::Result<()> {
                 return anyhow::Ok(());
             },
             Err(e) => {
-                // if format!("{:?}", e).contains("sequence, expected a string") {
-                //     info!("Chronicle generated successfully.");
-                //     return;
-                // }
+                if format!("{:?}", e).contains("sequence, expected a string") {
+                    info!("Chronicle generated successfully.");
+                    return;
+                }
                 
                 error!("Error generating chronicle: {:?}, retrying", e);
             }

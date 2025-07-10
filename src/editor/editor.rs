@@ -134,7 +134,17 @@ impl Editor {
     }
 
     pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
-        self.provider.give_player_book(pages, title, author).await
+        let title = if title.chars().count() > 32 {
+            title.chars().take(32).collect::<String>()
+        } else {
+            title.to_string()
+        };
+        let author = if author.chars().count() > 32 {
+            author.chars().take(32).collect::<String>()
+        } else {
+            author.to_string()
+        };
+        self.provider.give_player_book(pages, &title, &author).await
     }
 }
 
