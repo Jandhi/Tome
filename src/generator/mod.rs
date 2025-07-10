@@ -7,5 +7,6 @@ pub mod buildings;
 pub mod data;
 pub mod paths;
 pub mod style;
+pub mod chronicle;
 
 pub use build_claim::BuildClaim;

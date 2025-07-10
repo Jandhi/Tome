@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 #[derive(Debug)]
 pub struct Editor {
@@ -131,6 +131,10 @@ impl Editor {
 
     pub fn world_mut(&mut self) -> &mut World {
         &mut self.world
+    }
+
+    pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
+        self.provider.give_player_book(pages, title, author).await
     }
 }
 
