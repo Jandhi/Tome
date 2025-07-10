@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use anyhow::Ok;
 use log::{error, info};
 use schemars::JsonSchema;
 use serde_derive::{Serialize, Deserialize};
@@ -118,6 +119,7 @@ struct Book {
 pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::Result<()> {
     let user = &format!(r#"{}.
             Use Color and Bold ONLY for KEYWORDS. Most of the body should not be colored or bolded. Leave most of the body text in plain format.
+            Please limit the title and author to less than 32 characters each.
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#, instruction);
@@ -154,7 +156,7 @@ pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::R
     Ok(())
 }
 
-pub async fn generate_chronicle(editor: &Editor) {
+pub async fn generate_chronicle(editor: &Editor) -> anyhow::Result<()> {
     let world = editor.world();
     let settlement_info = SettlementInfo::new(world);
     let retries = 3;
@@ -170,9 +172,9 @@ pub async fn generate_chronicle(editor: &Editor) {
         let result = give_player_book(editor, &instruction).await;
 
         match result {
-            Ok(_) => {
-                info!("Chronicle generated successfully.");
-                return;
+            Result::Ok(()) => {
+                println!("Chronicle generated successfully.");
+                return anyhow::Ok(());
             },
             Err(e) => {
                 // if format!("{:?}", e).contains("sequence, expected a string") {
@@ -184,4 +186,6 @@ pub async fn generate_chronicle(editor: &Editor) {
             }
         }
     }
+
+    Err(anyhow::anyhow!("Failed to generate chronicle after {} retries", retries))
 }
