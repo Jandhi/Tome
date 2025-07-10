@@ -28,6 +28,10 @@ pub enum BlockID {
     GrassBlock,
     #[serde(rename = "minecraft:dirt")]
     Dirt,
+    #[serde(rename = "minecraft:farmland")]
+    Farmland,
+    #[serde(rename = "minecraft:dirt_path")]
+    DirtPath,
     #[serde(rename = "minecraft:coarse_dirt")]
     CoarseDirt,
     #[serde(rename = "minecraft:podzol")]
@@ -66,6 +70,10 @@ pub enum BlockID {
     Gravel,
     #[serde(rename = "minecraft:sand")]
     Sand,
+    #[serde(rename = "minecraft:suspicious_sand")]
+    SuspiciousSand,
+    #[serde(rename = "minecraft:suspicious_gravel")]
+    SuspiciousGravel,
     #[serde(rename = "minecraft:red_sand")]
     RedSand,
     #[serde(rename = "minecraft:sandstone")]
@@ -1388,6 +1396,8 @@ pub enum BlockID {
     PitcherPlant,
     #[serde(rename = "minecraft:pitcher_crop")]
     PitcherCrop,
+    #[serde(rename = "minecraft:short_grass")]
+    ShortGrass,
 
     // === POTTED PLANTS ===
     #[serde(rename = "minecraft:potted_dandelion")]
@@ -1543,8 +1553,227 @@ pub enum BlockID {
     #[serde(rename = "minecraft:black_wall_banner")]
     BlackWallBanner,
 
-    #[serde(other)]
-    Unknown,
+    // === RAILS ===
+    #[serde(rename = "minecraft:rail")]
+    Rail,
+    #[serde(rename = "minecraft:powered_rail")]
+    PoweredRail,
+    #[serde(rename = "minecraft:detector_rail")]
+    DetectorRail,
+    #[serde(rename = "minecraft:activator_rail")]
+    ActivatorRail,
+
+    // === PUMPKIN & MELON & GOURDS ===
+    #[serde(rename = "minecraft:pumpkin")]
+    Pumpkin,
+    #[serde(rename = "minecraft:carved_pumpkin")]
+    CarvedPumpkin,
+    #[serde(rename = "minecraft:melon")]
+    Melon,
+    #[serde(rename = "minecraft:melon_stem")]
+    MelonStem,
+    #[serde(rename = "minecraft:pumpkin_stem")]
+    PumpkinStem,
+    #[serde(rename = "minecraft:attached_melon_stem")]
+    AttachedMelonStem,
+    #[serde(rename = "minecraft:attached_pumpkin_stem")]
+    AttachedPumpkinStem,
+    #[serde(rename = "minecraft:torchflower_crop")]
+    TorchflowerCrop,
+    #[serde(rename = "minecraft:beetroot")]
+    Beetroot,
+    #[serde(rename = "minecraft:beetroot_block")]
+    BeetrootBlock,
+    #[serde(rename = "minecraft:sweet_berry_bush")]
+    SweetBerryBush,
+    #[serde(rename = "minecraft:berry_bush")]
+    BerryBush,
+
+    // === CROPS ===
+    #[serde(rename = "minecraft:wheat")]
+    Wheat,
+    #[serde(rename = "minecraft:wheat_seeds")]
+    WheatSeeds,
+    #[serde(rename = "minecraft:carrots")]
+    Carrots,
+    #[serde(rename = "minecraft:potatoes")]
+    Potatoes,
+    #[serde(rename = "minecraft:beetroots")]
+    Beetroots,
+    #[serde(rename = "minecraft:beetroot_seeds")]
+    BeetrootSeeds,
+    #[serde(rename = "minecraft:melon_stem")]
+    MelonStemCrop,
+    #[serde(rename = "minecraft:pumpkin_stem")]
+    PumpkinStemCrop,
+    #[serde(rename = "minecraft:sweet_berry_bush")]
+    SweetBerryBushCrop,
+    #[serde(rename = "minecraft:cocoa")]
+    Cocoa,
+    #[serde(rename = "minecraft:bamboo_sapling")]
+    BambooSapling,
+    #[serde(rename = "minecraft:nether_wart")]
+    NetherWart,
+
+    // === TORCHES & LIGHT SOURCES ===
+    #[serde(rename = "minecraft:torch")]
+    Torch,
+    #[serde(rename = "minecraft:soul_torch")]
+    SoulTorch,
+    #[serde(rename = "minecraft:redstone_torch")]
+    RedstoneTorch,
+    #[serde(rename = "minecraft:wall_torch")]
+    WallTorch,
+    #[serde(rename = "minecraft:soul_wall_torch")]
+    SoulWallTorch,
+    #[serde(rename = "minecraft:redstone_wall_torch")]
+    RedstoneWallTorch,
+    #[serde(rename = "minecraft:campfire")]
+    Campfire,
+    #[serde(rename = "minecraft:soul_campfire")]
+    SoulCampfire,
+
+    // === SAPLINGS ===
+    #[serde(rename = "minecraft:oak_sapling")]
+    OakSapling,
+    #[serde(rename = "minecraft:spruce_sapling")]
+    SpruceSapling,
+    #[serde(rename = "minecraft:birch_sapling")]
+    BirchSapling,
+    #[serde(rename = "minecraft:jungle_sapling")]
+    JungleSapling,
+    #[serde(rename = "minecraft:acacia_sapling")]
+    AcaciaSapling,
+    #[serde(rename = "minecraft:dark_oak_sapling")]
+    DarkOakSapling,
+    #[serde(rename = "minecraft:mangrove_propagule")]
+    MangrovePropagule,
+    #[serde(rename = "minecraft:cherry_sapling")]
+    CherrySapling,
+
+    // === HAY BLOCK & CO. ===
+    #[serde(rename = "minecraft:hay_block")]
+    HayBlock,
+    #[serde(rename = "minecraft:target")]
+    Target,
+
+    // === MUSHROOMS ===
+    #[serde(rename = "minecraft:red_mushroom")]
+    RedMushroom,
+    #[serde(rename = "minecraft:brown_mushroom")]
+    BrownMushroom,
+    #[serde(rename = "minecraft:crimson_fungus")]
+    CrimsonFungus,
+    #[serde(rename = "minecraft:warped_fungus")]
+    WarpedFungus,
+    #[serde(rename = "minecraft:crimson_roots")]
+    CrimsonRoots,
+    #[serde(rename = "minecraft:warped_roots")]
+    WarpedRoots,
+    #[serde(rename = "minecraft:nether_sprouts")]
+    NetherSprouts,
+    #[serde(rename = "minecraft:huge_red_mushroom")]
+    HugeRedMushroom,
+    #[serde(rename = "minecraft:huge_brown_mushroom")]
+    HugeBrownMushroom,
+
+    // === FIRE & CO. ===
+    #[serde(rename = "minecraft:fire")]
+    Fire,
+    #[serde(rename = "minecraft:soul_fire")]
+    SoulFire,
+
+    // === OBSIDIAN & CO. ===
+    #[serde(rename = "minecraft:obsidian")]
+    Obsidian,
+    #[serde(rename = "minecraft:crying_obsidian")]
+    CryingObsidian,
+    #[serde(rename = "minecraft:respawn_anchor")]
+    RespawnAnchor,
+
+    // === MAGMA BLOCK & CO. ===
+    #[serde(rename = "minecraft:magma_block")]
+    MagmaBlock,
+    #[serde(rename = "minecraft:soul_sand")]
+    SoulSand,
+    #[serde(rename = "minecraft:soul_soil")]
+    SoulSoil,
+
+    // === COBWEB ===
+    #[serde(rename = "minecraft:cobweb")]
+    Cobweb,
+
+    // RAW ORES & BLOCKS
+    #[serde(rename = "minecraft:raw_iron_block")]
+    RawIronBlock,
+    #[serde(rename = "minecraft:raw_copper_block")]
+    RawCopperBlock,
+    #[serde(rename = "minecraft:raw_gold_block")]
+    RawGoldBlock,
+    
+    // === CORALS ===
+    #[serde(rename = "minecraft:tube_coral_block")]
+    TubeCoralBlock,
+    #[serde(rename = "minecraft:brain_coral_block")]
+    BrainCoralBlock,
+    #[serde(rename = "minecraft:bubble_coral_block")]
+    BubbleCoralBlock,
+    #[serde(rename = "minecraft:fire_coral_block")]
+    FireCoralBlock,
+    #[serde(rename = "minecraft:horn_coral_block")]
+    HornCoralBlock,
+    #[serde(rename = "minecraft:dead_tube_coral_block")]
+    DeadTubeCoralBlock,
+    #[serde(rename = "minecraft:dead_brain_coral_block")]
+    DeadBrainCoralBlock,
+    #[serde(rename = "minecraft:dead_bubble_coral_block")]
+    DeadBubbleCoralBlock,
+    #[serde(rename = "minecraft:dead_fire_coral_block")]
+    DeadFireCoralBlock,
+    #[serde(rename = "minecraft:dead_horn_coral_block")]
+    DeadHornCoralBlock,
+
+    #[serde(rename = "minecraft:tube_coral")]
+    TubeCoral,
+    #[serde(rename = "minecraft:brain_coral")]
+    BrainCoral,
+    #[serde(rename = "minecraft:bubble_coral")]
+    BubbleCoral,
+    #[serde(rename = "minecraft:fire_coral")]
+    FireCoral,
+    #[serde(rename = "minecraft:horn_coral")]
+    HornCoral,
+    #[serde(rename = "minecraft:dead_tube_coral")]
+    DeadTubeCoral,
+    #[serde(rename = "minecraft:dead_brain_coral")]
+    DeadBrainCoral,
+    #[serde(rename = "minecraft:dead_bubble_coral")]
+    DeadBubbleCoral,
+    #[serde(rename = "minecraft:dead_fire_coral")]
+    DeadFireCoral,
+    #[serde(rename = "minecraft:dead_horn_coral")]
+    DeadHornCoral,
+
+    #[serde(rename = "minecraft:tube_coral_fan")]
+    TubeCoralFan,
+    #[serde(rename = "minecraft:brain_coral_fan")]
+    BrainCoralFan,
+    #[serde(rename = "minecraft:bubble_coral_fan")]
+    BubbleCoralFan,
+    #[serde(rename = "minecraft:fire_coral_fan")]
+    FireCoralFan,
+    #[serde(rename = "minecraft:horn_coral_fan")]
+    HornCoralFan,
+    #[serde(rename = "minecraft:dead_tube_coral_fan")]
+    DeadTubeCoralFan,
+    #[serde(rename = "minecraft:dead_brain_coral_fan")]
+    DeadBrainCoralFan,
+    #[serde(rename = "minecraft:dead_bubble_coral_fan")]
+    DeadBubbleCoralFan,
+    #[serde(rename = "minecraft:dead_fire_coral_fan")]
+    DeadFireCoralFan,
+    #[serde(rename = "minecraft:dead_horn_coral_fan")]
+    DeadHornCoralFan,
 }
 
 impl BlockID {
@@ -1669,6 +1898,12 @@ impl BlockID {
 
 impl From<&str> for BlockID {
     fn from(value: &str) -> Self {
-        serde_json::from_str::<BlockID>(&format!("\"{}\"", value)).unwrap_or(BlockID::Unknown)
+        serde_json::from_str::<BlockID>(&format!("\"{}\"", value)).unwrap()
     }
 }
+
+impl Default for BlockID {
+    fn default() -> Self {
+        BlockID::Air
+    }
+}  

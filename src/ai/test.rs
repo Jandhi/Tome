@@ -76,9 +76,27 @@ mod tests {
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#;
-        let mut book: Book = try_ai_json::<Book>(user).await.expect("Failed to parse AI response");
+        let book: Book = try_ai_json::<Book>(user).await.expect("Failed to parse AI response");
 
-        let pages: Vec<String> = book.pages.iter().map(|page| format!("'[{}]'", page.iter().map(|text| serde_json::to_string(text).unwrap()).collect::<Vec<_>>().join(",").replace("\'", "\\'").replace("\\n", "\\\\n"))).collect();
+        let pages: Vec<String> = book.pages.iter().map(|page| {
+            let mut components = page.iter();
+            if let Some(first) = components.next() {
+                let mut first_obj = serde_json::to_value(first).unwrap();
+                if let Some(first_map) = first_obj.as_object_mut() {
+                    let extra: Vec<serde_json::Value> = components
+                        .map(|t| serde_json::to_value(t).unwrap())
+                        .collect();
+                    if !extra.is_empty() {
+                        first_map.insert("extra".to_string(), serde_json::Value::Array(extra));
+                    }
+                }
+
+                // Serialize and escape as a JSON string
+                format!("'{}'", (&first_obj.to_string().replace("\'", "\\\'"))).replace("\n", "\\\\n").replace("\\n", "\\\\n")
+            } else {
+                "\"\"".to_string() // Empty string for blank pages
+            }
+        }).collect();
         let page_refs = pages.iter().map(|s| s.as_str()).collect::<Vec<_>>();
         let book = provider.give_player_book(&page_refs, &book.title, &book.author)
             .await

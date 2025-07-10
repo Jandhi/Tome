@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use log::error;
+use log::{error, info};
 use schemars::JsonSchema;
 use serde_derive::{Serialize, Deserialize};
 
@@ -58,7 +58,7 @@ impl SettlementInfo {
 struct Text {
     text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    color: Option<String>,
+    color: Option<TextColors>,
     #[serde(skip_serializing_if = "Option::is_none")]
     bold: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -71,6 +71,43 @@ struct Text {
     obfuscated: Option<bool>,
 }
 
+#[derive(Debug, serde_derive::Deserialize, Serialize, JsonSchema)]
+enum TextColors {
+    #[serde(rename = "dark_blue")]
+    DarkBlue,
+    #[serde(rename = "dark_green")]
+    DarkGreen,
+    #[serde(rename = "dark_aqua")]
+    DarkAqua,
+    #[serde(rename = "dark_red")]
+    DarkRed,
+    #[serde(rename = "dark_purple")]
+    DarkPurple,
+    #[serde(rename = "gold")]
+    Gold,
+    #[serde(rename = "gray")]
+    Gray,
+    #[serde(rename = "dark_gray")]
+    DarkGray,
+    #[serde(rename = "blue")]
+    Blue,
+    #[serde(rename = "green")]
+    Green,
+    #[serde(rename = "aqua")]
+    Aqua,
+    #[serde(rename = "red")]
+    Red,
+    #[serde(rename = "light_purple")]
+    LightPurple,
+    #[serde(rename = "yellow")]
+    Yellow,
+    #[serde(rename = "white")]
+    White,
+    #[serde(rename = "black")]
+    #[serde(other)]
+    Black,
+}
+
 #[derive(Debug, serde_derive::Deserialize, JsonSchema)]
 struct Book {
     title: String,
@@ -78,32 +115,73 @@ struct Book {
     pages : Vec<Vec<Text>>,
 }
 
-pub async fn give_player_book(editor : &Editor, instruction : &str) {
+pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::Result<()> {
     let user = &format!(r#"{}.
-            Only use color formatting or bold for keywords or titles. Leave most of the body text in plain format.
+            Use Color and Bold ONLY for KEYWORDS. Most of the body should not be colored or bolded. Leave most of the body text in plain format.
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#, instruction);
     let book: Book = try_ai_json::<Book>(user).await.expect("Failed to parse AI response");
 
-    let pages: Vec<String> = book.pages.iter().map(|page| format!("'[{}]'", page.iter().map(|text| serde_json::to_string(text).unwrap()).collect::<Vec<_>>().join(",").replace("\'", "\\'").replace("\\n", "\\\\n"))).collect();
+    let pages: Vec<String> = book.pages.iter().map(|page| {
+            let mut components = page.iter();
+            if let Some(first) = components.next() {
+                let mut first_obj = serde_json::to_value(first).unwrap();
+                if let Some(first_map) = first_obj.as_object_mut() {
+                    let extra: Vec<serde_json::Value> = components
+                        .map(|t| serde_json::to_value(t).unwrap())
+                        .collect();
+                    if !extra.is_empty() {
+                        first_map.insert("extra".to_string(), serde_json::Value::Array(extra));
+                    }
+                }
+
+                // Serialize and escape as a JSON string
+                format!("'{}'", (&first_obj.to_string().replace("\'", "\\\'")))
+                    .replace("\n", "\\\\n")
+                    .replace("\\n", "\\\\n") // Only double escaped newlines allowed
+                    .replace("\\\"", "\"") // We don't want to escape quotes
+            } else {
+                "\"\"".to_string() // Empty string for blank pages
+            }
+        }).collect();
     let page_refs = pages.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     if let Err(e) = editor.give_player_book(&page_refs, &book.title, &book.author).await {
         error!("Error while giving player book: {:?}", e);
+        return Err(e);
     }
+
+    Ok(())
 }
 
 pub async fn generate_chronicle(editor: &Editor) {
     let world = editor.world();
     let settlement_info = SettlementInfo::new(world);
-    
+    let retries = 3;
     let mut settlement_info = settlement_info;
     settlement_info.generate_name().await;
 
-    let instruction = format!("Generate a long book about a settlement named '{}', which has {} houses and the following most common biomes: {:?}.", 
+    for _ in 0..retries {
+        let instruction = format!("Generate a long book about a settlement named '{}', which has {} houses and the following most common biomes: {:?}.", 
                               settlement_info.name, 
                               settlement_info.house_count, 
                               settlement_info.top_three_biomes);
 
-    give_player_book(editor, &instruction).await;
+        let result = give_player_book(editor, &instruction).await;
+
+        match result {
+            Ok(_) => {
+                info!("Chronicle generated successfully.");
+                return;
+            },
+            Err(e) => {
+                if format!("{:?}", e).contains("sequence, expected a string") {
+                    info!("Chronicle generated successfully.");
+                    return;
+                }
+                
+                error!("Error generating chronicle: {:?}, retrying", e);
+            }
+        }
+    }
 }

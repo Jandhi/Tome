@@ -60,7 +60,7 @@ impl GDMCHTTPProvider {
     pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
         let pages_json = pages.join(",");
 
-        let command = format!("give @a written_book{{pages:[{}],title:\"{}\",author:\"{}\"}}", pages_json, title, author);
+        let command = format!("give @a written_book[written_book_content={{title:\"{}\",author:\"{}\",pages:[{}]}}]", title, author, pages_json);
 
         println!("Command: {}", command);
 

@@ -73,7 +73,7 @@ pub async fn replace_ground_smooth(
             }
 
             let mut y_in_dir: HashMap<Point2D, i32> = HashMap::new();
-            let mut block = Block::new(BlockID::Unknown, None, None);
+            let mut block = Block::new(Default::default(), None, None);
 
             for direction in CARDINALS_2D {
                 let neighbor = *point + direction;
@@ -99,7 +99,7 @@ pub async fn replace_ground_smooth(
                 // all neighbors are less than or equal to the current height, and at least one is less
                 block = block_list[*rng.choose_weighted(block_dict.get(&2).unwrap()) as usize].clone();
             }
-            if block.id == BlockID::Unknown {
+            if block.id == Default::default() {
                 // normal block
                 block = block_list[*rng.choose_weighted(block_dict.get(&0).unwrap()) as usize].clone();
             }

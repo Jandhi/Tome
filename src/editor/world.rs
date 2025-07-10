@@ -84,7 +84,7 @@ impl World {
         let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let ground_block_map = vec![vec![Block::new(BlockID::Unknown, None, None); size_z_usize]; size_x_usize];
+        let ground_block_map = vec![vec![Block::new(Default::default(), None, None); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
         let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
 

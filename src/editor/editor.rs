@@ -58,10 +58,10 @@ impl Editor {
             return;
         }
 
-        if block.id == BlockID::Unknown {
-            warn!("Attempted to place an unknown block at {:?}, skipping", point);
-            return;
-        }
+        // if block.id == BlockID::Unknown {
+        //     warn!("Attempted to place an unknown block at {:?}, skipping", point);
+        //     return;
+        // }
 
         if !force && self.block_cache.contains_key(&(point)) {
             let current_block = self.block_cache.get(&(point)).expect("Block should be in cache").id;

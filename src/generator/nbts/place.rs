@@ -117,7 +117,7 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
                 },
                 PaletteSwapResult::Material(material_id, form) => {
                     let block = (-transform.rotation).apply_to_block(Block{
-                        id: BlockID::Unknown,
+                        id: Default::default(),
                         state: palette_data.properties.clone(),
                         data, // Now contains the SNBT string if data exists
                     });
