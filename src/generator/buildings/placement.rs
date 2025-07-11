@@ -211,9 +211,9 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
 }
 
 async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
-    let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
-    points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
-    force_height(editor, &points, true).await;
+    //let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
+    //points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
+    //force_height(editor, &points, true).await;
 
     use BlockID::*;
     let block_vec : Vec<Block> = vec![
@@ -261,15 +261,15 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
     ).await;
 
     // fill in below so we don't have weird artifacts
-    for point in outers.iter() {
-        let height = editor.world().get_height_at(*point);
+    // for point in outers.iter() {
+    //     let height = editor.world().get_height_at(*point);
         
-        for dy in 1..=2 {
-            let index = rng.choose_weighted(&blocks_dict[&0]);
-            let block = block_vec[*index].clone();
-            editor.place_block(&block, point.add_y(height - dy)).await;
-        }
-    }
+    //     for dy in 1..=2 {
+    //         let index = rng.choose_weighted(&blocks_dict[&0]);
+    //         let block = block_vec[*index].clone();
+    //         editor.place_block(&block, point.add_y(height - dy)).await;
+    //     }
+    // }
 }
 
 pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid : Grid, set : &BuildingSetID, data : &LoadedData, style : Style, rng : &mut RNG, palette : &Palette) {
