@@ -1848,7 +1848,33 @@ pub enum BlockID {
     #[serde(rename = "minecraft:cave_vines_plant")]
     CaveVinesPlant,
     #[serde(rename = "minecraft:cave_vines")]
-    CaveVines
+    CaveVines,
+
+    // INFESTED BLOCKS
+    #[serde(rename = "minecraft:infested_stone")]
+    InfestedStone,
+    #[serde(rename = "minecraft:infested_cobblestone")]
+    InfestedCobblestone,
+    #[serde(rename = "minecraft:infested_stone_bricks")]
+    InfestedStoneBricks,
+    #[serde(rename = "minecraft:infested_mossy_stone_bricks")]
+    InfestedMossyStoneBricks,
+    #[serde(rename = "minecraft:infested_cracked_stone_bricks")]
+    InfestedCrackedStoneBricks,
+    #[serde(rename = "minecraft:infested_chiseled_stone_bricks")]
+    InfestedChiseledStoneBricks,
+
+    // TUFF & VARIANTS
+    #[serde(rename = "minecraft:tuff_slab")]
+    TuffSlab,
+    #[serde(rename = "minecraft:tuff_stairs")]
+    TuffStairs,
+    #[serde(rename = "minecraft:tuff_wall")]
+    TuffWall,
+
+    // UNKNOWN
+    #[serde(other)]
+    Unknown,
 }
 
 impl BlockID {

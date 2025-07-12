@@ -1,7 +1,7 @@
 {
   "id": "sandstone",
 
-  "primary_stone": "polished_sandstone",
+  "primary_stone": "cut_sandstone",
   "secondary_stone": "smooth_sandstone",
-  "stone_pillar": "polished_sandstone"
+  "stone_pillar": "cut_sandstone"
 }

@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, chronicle::generate_chronicle, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}, generator::terrain::log_trees};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -150,6 +150,7 @@ mod tests {
         let mut rng = RNG::new(32);
 
         generate_districts(rng.next_i64().into(), &mut editor).await;
+        let mut info = SettlementInfo::new(editor.world());
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
@@ -164,10 +165,10 @@ mod tests {
         let urban_points = &editor.world().get_urban_points();
         log_trees(&mut editor, urban_points.clone()).await;
 
-        place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()]).await;
+        place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()], &info).await;
+        info = SettlementInfo::new(editor.world());
         build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
-        build_compass(&mut editor).await;
-        generate_chronicle(&mut editor).await;
+        let _ = generate_chronicle(&mut editor, &mut info).await;
         editor.flush_buffer().await;
     }
     

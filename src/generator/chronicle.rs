@@ -156,11 +156,9 @@ pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::R
     Ok(())
 }
 
-pub async fn generate_chronicle(editor: &Editor) -> anyhow::Result<()> {
+pub async fn generate_chronicle(editor: &Editor, settlement_info : &mut SettlementInfo) -> anyhow::Result<()> {
     let world = editor.world();
-    let settlement_info = SettlementInfo::new(world);
     let retries = 3;
-    let mut settlement_info = settlement_info;
     settlement_info.generate_name().await;
 
     for _ in 0..retries {
@@ -179,7 +177,7 @@ pub async fn generate_chronicle(editor: &Editor) -> anyhow::Result<()> {
             Err(e) => {
                 if format!("{:?}", e).contains("sequence, expected a string") {
                     info!("Chronicle generated successfully.");
-                    return;
+                    return Ok(());
                 }
                 
                 error!("Error generating chronicle: {:?}, retrying", e);

@@ -21,3 +21,6 @@ pub use set::{
     BuildingSet,
     BuildingSetID,
 };
+pub use placement::{
+    place_buildings,
+};

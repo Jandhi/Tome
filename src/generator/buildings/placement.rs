@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, i32, os::windows};
 use reqwest::header::VARY;
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData, SuperDistrictID}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{BiomeStonetype, BiomeWoodtype, Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, chronicle::SettlementInfo, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData, SuperDistrictID}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block, BlockID}, noise::RNG};
 
 use super::BuildingID;
 
@@ -36,7 +36,7 @@ pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (
     (city_blocks, off_limits)
 }
 
-pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>) {
+pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>, settlement_info : &SettlementInfo) {
     let mut outers : HashSet<Point2D> = HashSet::new();
     let mut inners : Vec<HashSet<Point2D>> = vec![];
     
@@ -109,26 +109,27 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
             .filter_map(|wood| wood)
             .collect::<Vec<_>>();
 
-        let stones = superdistrict_data.biome_count().keys().into_iter()
-            .map(|biome| 
+        let stones = superdistrict_data.biome_count().into_iter()
+            .max_by_key(|item| item.1)
+            .map(|(biome, _)| 
                 BiomeStonetype::from_biome(*biome)
                     .into_iter()
-                    .flat_map(|stone_type|
-                        stone_type.get_stone_palette_ids()
-                            .iter()
-                            .map(|id| data.borrow().palettes.get(id).unwrap_or_else(|| panic!("Stone palette {:?} not found", id)))
-                            .collect::<Vec<_>>()
+                    .map(|stone_type| 
+                        stone_type.get_stone_palette_ids().iter().map(|id| 
+                            data.borrow().palettes.get(id)
+                                .expect("Stone palette not found")
+                        ).collect::<Vec<_>>()
                     )
+                    .flatten()
                     .collect::<Vec<_>>()
             )
-            .flatten()
-            .collect::<Vec<_>>();
+            .unwrap();
 
         superdistrict_styles.insert(*superdistrict_id, DistrictStyle::generate_style(rng, cores.iter().collect(), roofs.clone(), woods.clone(), stones.clone()));
     }
     
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
-    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect()).await;
+    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect(), PavingType::from_biome(settlement_info.top_three_biomes[0])).await;
 
     let sets = data.borrow().building_sets.iter().filter(|(_, set)| {
         set.style == style
@@ -210,17 +211,45 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     }
 }
 
-async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>) {
-    //let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
-    //points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
-    //force_height(editor, &points, true).await;
+enum PavingType {
+    Stone,
+    Sandstone,
+    RedSandstone
+}
+
+impl PavingType {
+    fn from_biome(biome : Biome) -> Self {
+        match biome {
+            Biome::Desert | Biome::DesertHills | Biome::DesertLakes | Biome::Beach => PavingType::Sandstone,
+            Biome::Badlands | Biome::ErodedBadlands | Biome::WoodedBadlands | Biome::Savanna | Biome::SavannaPlateau | Biome::ShatteredSavanna | Biome::ShatteredSavannaPlateau => PavingType::RedSandstone,
+            _ => PavingType::Stone,
+        }
+    }
+}
+
+async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>, paving_type : PavingType) {
+    let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
+    points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
+    force_height(editor, &points, true).await;
 
     use BlockID::*;
-    let block_vec : Vec<Block> = vec![
-        Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-        StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
-        StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
-    ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
+    let block_vec : Vec<Block> = match paving_type {
+        PavingType::Stone => vec![
+            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
+            StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
+            StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
+        ],
+        PavingType::Sandstone => vec![
+            Sandstone, CutSandstone, SmoothSandstone, BirchPlanks, Sand,
+            SandstoneStairs, SandstoneStairs, SmoothSandstoneStairs, BirchStairs,
+            SandstoneSlab, CutSandstoneSlab, SmoothSandstoneSlab, BirchSlab,
+        ],
+        PavingType::RedSandstone => vec![
+            RedSandstone, CutRedSandstone, SmoothRedSandstone, AcaciaPlanks, RedSand,
+            RedSandstoneStairs, RedSandstoneStairs, SmoothRedSandstoneStairs, AcaciaStairs,
+            RedSandstoneSlab, CutRedSandstoneSlab, SmoothRedSandstoneSlab, AcaciaSlab,
+        ],
+    }.into_iter().map(|id| Block { id, data: None, state: None }).collect();
 
     let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 
@@ -323,8 +352,18 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
                 editor.place_block_forced(&BlockID::Air.into(), point + UP).await;
                 clear_point += door.direction.into();
 
-                if editor.world().is_claimed(clear_point.drop_y()) {
-                    break;
+                match editor.world().get_claim(clear_point.drop_y()) {
+                    Some(claim) => match claim {
+                        BuildClaim::Building(building_id) => {
+                            if building_id != building.id {
+                                break;
+                            }
+                        },
+                        _ => {
+                            break;
+                        },
+                    },
+                    None => todo!(),
                 }
             }
 
