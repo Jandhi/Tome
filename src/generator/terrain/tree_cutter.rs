@@ -3,10 +3,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash};
 use log::info;
 
 use crate::{
-    editor::Editor,
-    geometry::{Point2D, Point3D},
-    noise::{RNG, Seed},
-    minecraft::{Block, BlockID},
+    editor::Editor, geometry::{Point2D, Point3D}, minecraft::{Block, BlockID, Dirt, NaturalBlock}, noise::{RNG, Seed}
 };
 
 pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
@@ -23,8 +20,8 @@ pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
             block_id = editor.get_block(Point3D::new(point.x, height - y, point.y)).id;
             if block_id.is_tree() {
                 editor.place_block(&Block::new(BlockID::Air, None, None), Point3D::new(point.x, height - y, point.y)).await;
-            } else if block_id == BlockID::Dirt {
-                editor.place_block(&Block::new(BlockID::GrassBlock, None, None), Point3D::new(point.x, height - y, point.y)).await;
+            } else if block_id == Dirt::Dirt.into() {
+                editor.place_block(&Dirt::GrassBlock.into(), Point3D::new(point.x, height - y, point.y)).await;
             } else if block_id != BlockID::Air {
                 continue;
             }
@@ -46,8 +43,8 @@ pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
             block_id = editor.get_block(Point3D::new(point.x, height - y, point.y)).id;
             if block_id.is_tree_or_leaf() {
                 editor.place_block(&Block::new(BlockID::Air, None, None), Point3D::new(point.x, height - y, point.y)).await;
-            } else if block_id == BlockID::Dirt {
-                editor.place_block(&Block::new(BlockID::GrassBlock, None, None), Point3D::new(point.x, height - y, point.y)).await;
+            } else if block_id == Dirt::Dirt.into() {
+                editor.place_block(&Dirt::GrassBlock.into(), Point3D::new(point.x, height - y, point.y)).await;
             } else if block_id != BlockID::Air {
                 continue;
             }

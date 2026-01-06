@@ -1,33 +1,31 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Andesite, BasicStone, Block, BlockID, Cobblestone, NaturalBlock, Special, StainedGlass, StoneBricks, Wool}, noise::{Seed, RNG}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
     fn get_block_for_id(id : usize) -> Block {
-        use BlockID::*;
         // List of all 16 wool colors in order
         let wool_colors = [
-            WhiteWool, OrangeWool, MagentaWool, LightBlueWool,
-            YellowWool, LimeWool, PinkWool, GrayWool,
-            LightGrayWool, CyanWool, PurpleWool, BlueWool,
-            BrownWool, GreenWool, RedWool, BlackWool,
+            Wool::White, Wool::Orange, Wool::Magenta, Wool::LightBlue,
+            Wool::Yellow, Wool::Lime, Wool::Pink, Wool::Gray,
+            Wool::LightGray, Wool::Cyan, Wool::Purple, Wool::Blue,
+            Wool::Brown, Wool::Green, Wool::Red, Wool::Black,
         ];
         Block {
-            id: wool_colors[id % wool_colors.len()],
+            id: wool_colors[id % wool_colors.len()].into(),
             data: None,
             state: None,
         }
     }
 
     fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
-        use BlockID::*;
         match district_type {
-            district::DistrictType::Urban => Block { id: BlueWool, data: None, state: None },
-            district::DistrictType::Rural => Block { id: GreenWool, data: None, state: None },
-            district::DistrictType::OffLimits => Block { id: RedWool, data: None, state: None },
-            _ => Block { id: Bedrock, data: None, state: None }, // Default case for unknown types
+            district::DistrictType::Urban => Block { id: Wool::Blue.into(), data: None, state: None },
+            district::DistrictType::Rural => Block { id: Wool::Green.into(), data: None, state: None },
+            district::DistrictType::OffLimits => Block { id: Wool::Red.into(), data: None, state: None },
+            _ => Block { id: Special::Bedrock.into(), data: None, state: None }, // Default case for unknown types
         }
     }
 
@@ -49,7 +47,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
@@ -101,12 +99,12 @@ mod tests {
         let _districts = generate_districts(seed, &mut editor).await;
 
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
         let bedrock = Block {
-            id: BlockID::Bedrock,
+            id: Special::Bedrock.into(),
             data: None,
             state: None,
         };
@@ -166,12 +164,12 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: BlockID::Bedrock,
+            id: Special::Bedrock.into(),
             data: None,
             state: None,
         };
@@ -231,7 +229,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
@@ -282,7 +280,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
@@ -327,10 +325,9 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
 
-        use BlockID::*;
         let block_vec : Vec<Block> = vec![
-            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
+            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
+        ];
 
         let block_dict: HashMap<usize, f32> = [
             (0, 3.0),  // Stone
@@ -379,12 +376,11 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
 
-        use BlockID::*;
         let block_vec : Vec<Block> = vec![
-            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-            StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
-            StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
-        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
+            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
+            BasicStone::StoneStairs.into(), Cobblestone::CobblestoneStairs.into(), StoneBricks::StoneBrickStairs.into(), Andesite::AndesiteStairs.into(),
+            BasicStone::StoneSlab.into(), Cobblestone::CobblestoneSlab.into(), StoneBricks::StoneBrickSlab.into(), Andesite::AndesiteSlab.into(),
+        ];
 
         let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 
@@ -454,22 +450,22 @@ mod tests {
         generate_districts(seed, &mut editor).await;
 
          let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: BlockID::Bedrock,
+            id: Special::Bedrock.into(),
             data: None,
             state: None,
         };
         let black_wool: Block  = Block {
-            id: BlockID::BlackWool,
+            id: Wool::Black.into(),
             data: None,
             state: None,
         };
         let lime_wool: Block  = Block {
-            id: BlockID::LimeWool,
+            id: Wool::Lime.into(),
             data: None,
             state: None,
         };
@@ -551,12 +547,12 @@ mod tests {
         );
 
         let glass = Block {
-            id: BlockID::Glass,
+            id: StainedGlass::Clear.into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: BlockID::Bedrock,
+            id: Special::Bedrock.into(),
             data: None,
             state: None,
         };

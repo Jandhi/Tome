@@ -12,7 +12,7 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
 
         let surface_block = editor.world().get_block(point.with_y(height)).expect("Expected a block at the surface");
 
-        if surface_block.id == BlockID::Water && skip_water {
+        if surface_block.id.is_water() && skip_water {
             continue;
         }
 

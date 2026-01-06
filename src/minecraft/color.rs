@@ -1,9 +1,8 @@
-use log::info;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 use strum_macros::EnumIter;
 
-use crate::minecraft::{block, BlockID};
+use crate::minecraft::BlockID;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, EnumIter)]
 pub enum Color {
@@ -104,7 +103,7 @@ pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> B
     block_id // If no color match found, return original block ID
 }
 
-pub fn color_block(block_id: BlockID, color: Color) -> BlockID {
+pub fn color_block(block_id: BlockID, new_color: Color) -> BlockID {
     let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
 
     if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
@@ -113,7 +112,7 @@ pub fn color_block(block_id: BlockID, color: Color) -> BlockID {
 
     for color in Color::iter() {
         let color_in: String = serde_json::to_string(&color).expect("Failed to serialize color");
-        let color_out: String = color.into();
+        let color_out: String = new_color.into();
         if block_id_str.contains(&color_in) {
             return serde_json::from_str(&block_id_str.replace(&color_in, &color_out))
                 .expect("Failed to replace color in block ID");

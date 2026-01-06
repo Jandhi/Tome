@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, i32, os::windows};
 use reqwest::header::VARY;
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{buildings::{build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls, BuildingData, Grid}, chronicle::SettlementInfo, data::LoadedData, districts::{replace_ground_smooth, DistrictType, HasDistrictData, SuperDistrictID}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height, BuildClaim}, geometry::{ average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter, Cardinal, Point2D, UP}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{DistrictType, HasDistrictData, SuperDistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Andesite, BasicStone, Biome, BiomeStonetype, BiomeWoodtype, Block, BlockID, Cobblestone, NaturalBlock, Planks, Sand, Sandstone, StoneBricks, WoodSlab, WoodStairs}, noise::RNG};
 
 use super::BuildingID;
 
@@ -232,24 +232,23 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
     points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
     force_height(editor, &points, true).await;
 
-    use BlockID::*;
     let block_vec : Vec<Block> = match paving_type {
         PavingType::Stone => vec![
-            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-            StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
-            StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
+            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
+            BasicStone::StoneStairs.into(), Cobblestone::CobblestoneStairs.into(), StoneBricks::StoneBrickStairs.into(), Andesite::AndesiteStairs.into(),
+            BasicStone::StoneSlab.into(), Cobblestone::CobblestoneSlab.into(), StoneBricks::StoneBrickSlab.into(), Andesite::AndesiteSlab.into(),
         ],
         PavingType::Sandstone => vec![
-            Sandstone, CutSandstone, SmoothSandstone, BirchPlanks, Sand,
-            SandstoneStairs, SandstoneStairs, SmoothSandstoneStairs, BirchStairs,
-            SandstoneSlab, CutSandstoneSlab, SmoothSandstoneSlab, BirchSlab,
+            Sandstone::Sandstone.into(), Sandstone::CutSandstone.into(), Sandstone::SmoothSandstone.into(), Planks::Birch.into(), Sand::Sand.into(),
+            Sandstone::SandstoneStairs.into(), Sandstone::SandstoneStairs.into(), Sandstone::SmoothSandstoneStairs.into(), WoodStairs::Birch.into(),
+            Sandstone::SandstoneSlab.into(), Sandstone::CutSandstoneSlab.into(), Sandstone::SmoothSandstoneSlab.into(), WoodSlab::Birch.into(),
         ],
         PavingType::RedSandstone => vec![
-            RedSandstone, CutRedSandstone, SmoothRedSandstone, AcaciaPlanks, RedSand,
-            RedSandstoneStairs, RedSandstoneStairs, SmoothRedSandstoneStairs, AcaciaStairs,
-            RedSandstoneSlab, CutRedSandstoneSlab, SmoothRedSandstoneSlab, AcaciaSlab,
+            Sandstone::RedSandstone.into(), Sandstone::CutRedSandstone.into(), Sandstone::SmoothRedSandstone.into(), Planks::Acacia.into(), Sand::RedSand.into(),
+            Sandstone::RedSandstoneStairs.into(), Sandstone::RedSandstoneStairs.into(), Sandstone::SmoothRedSandstoneStairs.into(), WoodStairs::Acacia.into(),
+            Sandstone::RedSandstoneSlab.into(), Sandstone::CutRedSandstoneSlab.into(), Sandstone::SmoothRedSandstoneSlab.into(), WoodSlab::Acacia.into(),
         ],
-    }.into_iter().map(|id| Block { id, data: None, state: None }).collect();
+    };
 
     let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 

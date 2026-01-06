@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod tests {
     use crate::http_mod::{GDMCHTTPProvider, PositionedBlock};
-    use crate::minecraft::BlockID;
+    use crate::minecraft::{BasicStone, BlockID};
     use crate::util::init_logger;
 
     #[tokio::test]
@@ -33,7 +33,7 @@ mod tests {
                 x: build_area.origin.x.into(),
                 y: build_area.origin.y.into(),
                 z: build_area.origin.z.into(),
-                id: BlockID::Stone,
+                id: BasicStone::Stone.into(),
                 data: None,
                 state: None,
             },
@@ -41,7 +41,7 @@ mod tests {
                 x: (build_area.origin.x + 1).into(),
                 y: build_area.origin.y.into(),
                 z: build_area.origin.z.into(),
-                id: BlockID::Stone,
+                id: BasicStone::Stone.into(),
                 data: None,
                 state: None,
             },

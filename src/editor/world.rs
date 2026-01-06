@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D, DOWN}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, Fluid, MiscBlock, util::point_to_chunk_coordinates}};
 
 use super::Editor;
 
@@ -285,11 +285,11 @@ impl World {
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
-        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
+        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::MiscBlock(MiscBlock::Fluid(Fluid::Water))
     }
 
     pub fn is_water_3d(&self, point : Point3D) -> bool {
-        self.get_block(point).expect("failed to get block").id == BlockID::Water
+        self.get_block(point).expect("failed to get block").id == BlockID::MiscBlock(MiscBlock::Fluid(Fluid::Water))
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {

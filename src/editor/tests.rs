@@ -6,6 +6,7 @@ mod tests {
 
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
+    use crate::minecraft::BasicStone;
     use crate::minecraft::Biome;
     use crate::minecraft::{Block, BlockID};
     use crate::util::init_logger;
@@ -21,7 +22,7 @@ mod tests {
         let mut editor = world.get_editor();
 
         let block = Block {
-            id: BlockID::Stone,
+            id: BasicStone::Stone.into(),
             data: None,
             state: None,
         };

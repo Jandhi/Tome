@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent, Grid}, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, Point3D, NORTH, UP}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, districts::{WallType, build_wall, generate_districts}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, minecraft::{BlockID, Wool}, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -85,7 +85,7 @@ mod tests {
 
         info!("NBT structure placed successfully");
 
-        editor.place_block(&BlockID::RedWool.into(), point + NORTH * 10 + UP * 5).await;
+        editor.place_block(&Wool::Red.into(), point + NORTH * 10 + UP * 5).await;
         editor.flush_buffer().await;
     }
 
