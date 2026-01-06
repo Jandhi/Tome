@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Read};
+use std::io::Read;
 
 use anyhow::Ok;
 use flate2::read::GzDecoder;
@@ -78,10 +78,9 @@ pub async fn place_nbt<'materials>(data : &NBTMeta, transform : Transform, edito
             });
             editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
         }
-        Ok(());
     } else {
-        let mut placer = placer.unwrap();
-        let LoadedData { materials, palettes, .. } = generator_data.unwrap();
+        let placer = placer.unwrap();
+        let LoadedData { materials, .. } = generator_data.unwrap();
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let mut data = blockdata.nbt;

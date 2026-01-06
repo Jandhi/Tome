@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde_derive::{Serialize, Deserialize};
 
-use crate::{geometry::Point3D, http_mod::PositionedBlock, minecraft::{Block, BlockID}};
+use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NBTStructure {

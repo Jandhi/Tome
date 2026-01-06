@@ -29,7 +29,7 @@ impl DistrictStyle {
         match rng.rand_i32(100) {
             0..33 => { // Bimodal
                 DistrictStyle::MultiVariant(MultiVariant {
-                    core: rng.choose(&cores).clone().clone(),
+                    core: (*rng.choose(&cores)).clone(),
                     roofs: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
                     woods: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
                     stones: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
@@ -37,7 +37,7 @@ impl DistrictStyle {
             }
             33..66 => { // Weighted MultiVariant
                 DistrictStyle::WeightedMultiVariant(WeightedMultiVariant {
-                    core: rng.choose(&cores).clone().clone(),
+                    core: (*rng.choose(&cores)).clone(),
                     roofs: roofs.into_iter().map(|palette| (palette.clone(), rng.rand_i32(100) as f32)).collect(),
                     woods: woods.into_iter().map(|palette| (palette.clone(), rng.rand_i32(100) as f32)).collect(),
                     stones: stones.into_iter().map(|palette| (palette.clone(), rng.rand_i32(100) as f32)).collect(),
@@ -45,7 +45,7 @@ impl DistrictStyle {
             }
             _ => {
                 DistrictStyle::Mono(Mono {
-                    palette: rng.choose(&cores).clone().clone()
+                    palette: (*rng.choose(&cores)).clone()
                         .merged_with(*rng.choose(&roofs))
                         .merged_with(*rng.choose(&woods))
                         .merged_with(*rng.choose(&stones)),

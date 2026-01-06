@@ -2,7 +2,7 @@ use log::info;
 use serde_derive::{Deserialize, Serialize};
 use std::{collections::HashMap};
 
-use crate::{data::Loadable, editor::Editor, generator::materials::MaterialId, geometry::Point3D, noise::{RNG, Seed}, minecraft::{string_to_block,Block}};
+use crate::{editor::Editor, geometry::Point3D, noise::{RNG, Seed}, minecraft::{string_to_block,Block}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Tree {

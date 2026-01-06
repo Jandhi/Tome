@@ -1,12 +1,11 @@
 use std::{collections::{HashMap, HashSet}, env, hash::Hash};
-use std::path::Path;
 use log::info;
-use crate::{editor::World, generator::{buildings::walls::WallComponent, districts::{build_wall_gate, wall}, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D, EAST_2D, NORTH_2D}, minecraft::{Block, BlockForm, BlockID}, noise::{Seed, RNG}};
+use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 
 pub const WALL_HEIGHT: i32 = 10; // optimal height of wall, will change based on smoothing and heightmap
-pub const WATER_CHECK: usize = 5;
+pub const _WATER_CHECK: usize = 5;
 pub const RANGE: i32 = 3;  // range for walkway flattening
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use serde::Deserialize;
 use serde_derive::Serialize;
-use strum::IntoEnumIterator;
 
 use crate::{data::Loadable, generator::materials::{role::MaterialRole, Material, MaterialId}, minecraft::{recolor_block, BlockForm, BlockID, Color}, noise::RNG};
 

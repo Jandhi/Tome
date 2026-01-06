@@ -2,7 +2,7 @@ use std::{collections::HashMap};
 use anyhow::Ok;
 use serde_derive::{Serialize, Deserialize};
 
-use crate::{data::Loadable,minecraft::{Block, BlockForm, BlockID}, generator::terrain::Tree};
+use crate::{data::Loadable, generator::terrain::Tree};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ForestId(String);

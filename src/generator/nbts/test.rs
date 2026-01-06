@@ -1,11 +1,11 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, env, fs::write, path::Path};
+    use std::{cell::RefCell, env, fs::write};
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{HorizontalWallPosition, VerticalWallPosition, WallComponent, WallType}}, data::LoadedData, materials::{Material, Palette, Placer}, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D, Rect3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::{Block, BlockID}, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{VerticalWallPosition, WallComponent, WallType}}, data::LoadedData, materials::Placer, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::Block, noise::RNG, util::init_logger};
     use std::fs::File;
     use fastnbt::to_writer;
 
@@ -59,12 +59,8 @@ mod tests {
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
 
-        // Assuming you have a valid NBT file path
-        let path = env::current_dir().expect("Should get current dir")
-            .join("data").join("structures").join("city_wall").join("basic_palisade_gate.nbt");
-
-        let mut midpoint = editor.world().world_rect_2d().size / 2;
-        let mut point = editor.world().add_height(midpoint);
+        let midpoint = editor.world().world_rect_2d().size / 2;
+        let point = editor.world().add_height(midpoint);
         //point.y = point.y - 1; // Adjust height if necessary
 
         let structures = Structure::load().expect("Failed to load structures");
