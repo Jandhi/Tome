@@ -1,9 +1,7 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash};
-
-use log::info;
+use std::collections::HashSet;
 
 use crate::{
-    editor::Editor, geometry::{Point2D, Point3D}, minecraft::{Block, BlockID, Dirt, NaturalBlock}, noise::{RNG, Seed}
+    editor::Editor, geometry::{Point2D, Point3D}, minecraft::{Block, BlockID, Dirt}
 };
 
 pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
@@ -32,7 +30,7 @@ pub async fn log_stems(editor: &mut Editor, points: HashSet<Point2D>) {
 pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
     for point in points {
         let height = editor.world_mut().get_motion_blocking_height_at(point) - 1; // checking ground
-        let mut point3d = Point3D::new(point.x, height, point.y);
+        let point3d = point.add_y(height);
         let mut block_id = editor.get_block(point3d).id;
 
         if !block_id.is_tree_or_leaf() {

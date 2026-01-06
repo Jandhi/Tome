@@ -7,15 +7,15 @@ use crate::noise::RNG;
 use crate::minecraft::{Block, BlockID};
 use crate::generator::BuildClaim;
 use crate::generator::districts::WallType;
-use log::{info, warn};
+use log::info;
 
 
 
 pub async fn build_wall_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
-    rng: &mut RNG,
-    material_placer: &mut Placer<'_>,
+    _rng: &mut RNG,
+    _material_placer: &mut Placer<'_>,
     is_thin: bool,
     is_palisade: bool,
     enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,

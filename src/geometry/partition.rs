@@ -1,6 +1,6 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash};
+use std::{collections::HashSet, hash::Hash};
 
-use crate::{geometry::Point2D, noise::RNG};
+use crate::noise::RNG;
 
 pub fn voronoi<TNode, TDist>(points : &HashSet<TNode>, distance_func : &impl Fn(TNode, TNode) -> TDist, rng : &mut RNG, sections : usize) -> Vec<HashSet<TNode>> 
     where TNode: Eq + Clone + Hash,
@@ -16,7 +16,7 @@ pub fn voronoi_with_points<TNode, TDist>(points : &HashSet<TNode>, distance_func
     where TNode: Eq + Clone + Hash,
           TDist : PartialOrd + Copy + Ord
 {
-    let mut sections : Vec<HashSet<TNode>> = start_points.iter().map(|node| {
+    let mut sections : Vec<HashSet<TNode>> = start_points.iter().map(|_| {
         HashSet::new()
     }).collect();
 

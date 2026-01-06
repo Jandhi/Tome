@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use log::info;
 
-use crate::{editor::{Editor, World}, generator::{paths::PathType, terrain::{generate_tree, Forest}, BuildClaim}, geometry::{cardinal_to_str, Point2D, Point3D, CARDINALS_2D}, minecraft::{Block, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{paths::PathType, terrain::{generate_tree, Forest}, BuildClaim}, geometry::{cardinal_to_str, Point2D, Point3D, CARDINALS_2D}, minecraft::{Block, BlockID}, noise::RNG};
 
 pub async fn replace_ground(
     points: &HashSet<Point2D>,
@@ -128,7 +128,7 @@ pub async fn plant_forest(
             continue; // skip water points if ignore_water is true
         }
 
-        let mut height = editor.world_mut().get_non_tree_height(point);
+        let height = editor.world_mut().get_non_tree_height(point);
         let block = editor.get_block(Point3D::new(point.x, height, point.y));
 
         if let Some(permit_blocks) = permit_blocks {

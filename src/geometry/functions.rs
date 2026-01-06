@@ -1,6 +1,6 @@
-use std::{collections::HashSet, hash::Hash};
+use std::collections::HashSet;
 
-use crate::geometry::{Cardinal, Point2D, ALL_8, CARDINALS_2D, X_PLUS, X_PLUS_2D};
+use crate::geometry::{Cardinal, Point2D, ALL_8, CARDINALS_2D};
 
 pub fn get_neighbours_in_set(point: Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
     point.neighbours()

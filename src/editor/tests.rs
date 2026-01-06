@@ -8,7 +8,7 @@ mod tests {
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::BasicStone;
     use crate::minecraft::Biome;
-    use crate::minecraft::{Block, BlockID};
+    use crate::minecraft::Block;
     use crate::util::init_logger;
 
     #[tokio::test]

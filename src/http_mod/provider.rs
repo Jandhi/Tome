@@ -4,7 +4,6 @@ use crate::{generator::nbts::NBTStructure, geometry::Rect3D, http_mod::buildarea
 
 use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
-use fastnbt::Value;
 use flate2::read::GzDecoder;
 use log::{debug, info};
 use reqwest_middleware::ClientBuilder;

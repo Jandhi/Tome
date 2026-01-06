@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Andesite, BasicStone, Block, BlockID, Cobblestone, NaturalBlock, Special, StainedGlass, StoneBricks, Wool}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Andesite, BasicStone, Block, Cobblestone, NaturalBlock, Special, StainedGlass, StoneBricks, Wool}, noise::{Seed, RNG}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
@@ -224,7 +224,7 @@ mod tests {
         println!("Build area: {:?}", build_area);
         let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
         let _districts = generate_districts(seed, &mut editor).await;
@@ -273,9 +273,8 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         println!("Build area: {:?}", build_area);
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
         let _districts = generate_districts(seed, &mut editor).await;
@@ -293,7 +292,7 @@ mod tests {
             }).collect()
         };
 
-        for (district_id, district_type, points, edges) in district_points {
+        for (_district_id, district_type, points, edges) in district_points {
             let block = get_block_for_district_type(district_type);
             for point in points.iter() {
                 if edges.contains(point) {
@@ -438,7 +437,6 @@ mod tests {
 
         // Initialize the test data
         let seed = Seed(12345);
-        let mut rng = RNG::new(seed);
 
         
         let provider = GDMCHTTPProvider::new();
@@ -526,9 +524,7 @@ mod tests {
         let mut rng2 = RNG::new(seed);
         
         let provider = GDMCHTTPProvider::new();
-        let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
-
+        
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         generate_districts(seed, &mut editor).await;
@@ -536,26 +532,10 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("oak_planks".to_string());
 
-        let mut placer_rng = rng.derive();
-        // let mut placer: MaterialPlacer = MaterialPlacer::new(
-        //     Placer::new(&materials, &mut placer_rng),
-        //     material.clone(),
-        // );
         let mut placer: Placer = Placer::new(
             &materials,
-            & mut rng,
+            &mut rng,
         );
-
-        let glass = Block {
-            id: StainedGlass::Clear.into(),
-            data: None,
-            state: None,
-        };
-        let bedrock  = Block {
-            id: Special::Bedrock.into(),
-            data: None,
-            state: None,
-        };
 
         let structures = Structure::load().expect("Failed to load structures");
 

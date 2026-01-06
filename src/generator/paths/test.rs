@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use lerp::num_traits::Signed;
-    use crate::{editor::World, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::PathPriority, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::{BlockID, Wool}, noise::RNG, util::init_logger};
+    use crate::{editor::World, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::PathPriority, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::Wool, noise::RNG, util::init_logger};
     use std::time::Instant;
 
     #[tokio::test]

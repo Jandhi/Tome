@@ -4,7 +4,7 @@ use log::{error, info};
 use schemars::JsonSchema;
 use serde_derive::{Serialize, Deserialize};
 
-use crate::{ai::try_ai_json, editor::{self, Editor, World}, minecraft::Biome};
+use crate::{ai::try_ai_json, editor::{Editor, World}, minecraft::Biome};
 
 pub struct SettlementInfo {
     pub name : String,
@@ -157,7 +157,6 @@ pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::R
 }
 
 pub async fn generate_chronicle(editor: &Editor, settlement_info : &mut SettlementInfo) -> anyhow::Result<()> {
-    let world = editor.world();
     let retries = 3;
     settlement_info.generate_name().await;
 

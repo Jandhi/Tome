@@ -2,7 +2,7 @@
 #[cfg(test)]
 mod tests {
     use crate::http_mod::{GDMCHTTPProvider, PositionedBlock};
-    use crate::minecraft::{BasicStone, BlockID};
+    use crate::minecraft::BasicStone;
     use crate::util::init_logger;
 
     #[tokio::test]
