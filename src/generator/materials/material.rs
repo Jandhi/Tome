@@ -67,12 +67,12 @@ impl Material {
         }
     }
 
-    pub async fn place_block(&self, editor : &mut Editor, point : Point3D, form : BlockForm, materials : &HashMap<MaterialId, Material>, state : Option<&HashMap<String, String>>, data : Option<&String>, parameters : MaterialParameters, rng : &mut RNG, is_forced : bool) {
+    pub async fn place_block(&self, editor: &Editor, point: Point3D, form: BlockForm, materials: &HashMap<MaterialId, Material>, state: Option<&HashMap<String, String>>, data: Option<&String>, parameters: MaterialParameters, rng: &mut RNG, is_forced: bool) {
         let material = map_features(&parameters, self.id(), materials);
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form, rng) {
             editor.place_block_options(&Block{
-                id: *block_id,
+                id: block_id.clone(),
                 state: state.cloned(),
                 data: data.cloned(),
             }, point, is_forced).await;
@@ -81,16 +81,16 @@ impl Material {
         }
     }
 
-    pub fn get_form(&self, id : BlockID) -> Option<BlockForm> {
+    pub fn get_form(&self, id : &BlockID) -> Option<BlockForm> {
         for (form, blocks) in &self.blocks {
             match blocks {
                 MaterialBlocks::Block(block_id) => {
-                    if *block_id == id {
+                    if *block_id == *id {
                         return Some(*form);
                     }
                 },
                 MaterialBlocks::Blocks(blocks_map) => {
-                    if blocks_map.contains_key(&id) {
+                    if blocks_map.contains_key(id) {
                         return Some(*form);
                     }
                 }

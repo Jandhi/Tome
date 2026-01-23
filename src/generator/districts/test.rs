@@ -1,17 +1,17 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Andesite, BasicStone, Block, Cobblestone, NaturalBlock, Special, StainedGlass, StoneBricks, Wool}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
     fn get_block_for_id(id : usize) -> Block {
         // List of all 16 wool colors in order
         let wool_colors = [
-            Wool::White, Wool::Orange, Wool::Magenta, Wool::LightBlue,
-            Wool::Yellow, Wool::Lime, Wool::Pink, Wool::Gray,
-            Wool::LightGray, Wool::Cyan, Wool::Purple, Wool::Blue,
-            Wool::Brown, Wool::Green, Wool::Red, Wool::Black,
+            "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+            "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+            "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+            "brown_wool", "green_wool", "red_wool", "black_wool",
         ];
         Block {
             id: wool_colors[id % wool_colors.len()].into(),
@@ -22,10 +22,10 @@ mod tests {
 
     fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
         match district_type {
-            district::DistrictType::Urban => Block { id: Wool::Blue.into(), data: None, state: None },
-            district::DistrictType::Rural => Block { id: Wool::Green.into(), data: None, state: None },
-            district::DistrictType::OffLimits => Block { id: Wool::Red.into(), data: None, state: None },
-            _ => Block { id: Special::Bedrock.into(), data: None, state: None }, // Default case for unknown types
+            district::DistrictType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
+            district::DistrictType::Rural => Block { id: "green_wool".into(), data: None, state: None },
+            district::DistrictType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+            _ => Block { id: "bedrock".into(), data: None, state: None }, // Default case for unknown types
         }
     }
 
@@ -47,7 +47,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
@@ -99,12 +99,12 @@ mod tests {
         let _districts = generate_districts(seed, &mut editor).await;
 
         let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock = Block {
-            id: Special::Bedrock.into(),
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
@@ -164,12 +164,12 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: Special::Bedrock.into(),
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
@@ -229,7 +229,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
@@ -279,7 +279,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
@@ -325,7 +325,7 @@ mod tests {
         let _districts = generate_districts(seed, &mut editor).await;
 
         let block_vec : Vec<Block> = vec![
-            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
+            "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
         ];
 
         let block_dict: HashMap<usize, f32> = [
@@ -376,9 +376,9 @@ mod tests {
         let _districts = generate_districts(seed, &mut editor).await;
 
         let block_vec : Vec<Block> = vec![
-            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
-            BasicStone::StoneStairs.into(), Cobblestone::CobblestoneStairs.into(), StoneBricks::StoneBrickStairs.into(), Andesite::AndesiteStairs.into(),
-            BasicStone::StoneSlab.into(), Cobblestone::CobblestoneSlab.into(), StoneBricks::StoneBrickSlab.into(), Andesite::AndesiteSlab.into(),
+            "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
+            "stone_stairs".into(), "cobblestone_stairs".into(), "stone_brick_stairs".into(), "andesite_stairs".into(),
+            "stone_slab".into(), "cobblestone_slab".into(), "stone_brick_slab".into(), "andesite_slab".into(),
         ];
 
         let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
@@ -448,22 +448,22 @@ mod tests {
         generate_districts(seed, &mut editor).await;
 
          let glass = Block {
-            id: StainedGlass::Clear.into(),
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: Special::Bedrock.into(),
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
         let black_wool: Block  = Block {
-            id: Wool::Black.into(),
+            id: "black_wool".into(),
             data: None,
             state: None,
         };
         let lime_wool: Block  = Block {
-            id: Wool::Lime.into(),
+            id: "lime_wool".into(),
             data: None,
             state: None,
         };

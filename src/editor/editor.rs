@@ -1,34 +1,41 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use anyhow::Ok;
 use log::{error, info, warn};
 
 use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
+/// Editor provides the interface for modifying the Minecraft world.
+///
+/// Uses interior mutability (RefCell) for block_buffer, block_cache, and block_form_cache
+/// so that generators can read from World and write blocks without borrow conflicts.
+///
+/// Note: Keep RefCell borrows short-lived, especially around async operations.
+/// Do not hold Ref/RefMut across .await points.
 #[derive(Debug)]
 pub struct Editor {
     build_area: Rect3D,
-    provider : GDMCHTTPProvider,
-    block_buffer : Vec<PositionedBlock>,
-    buffer_size : usize,
-    block_cache : HashMap<Point3D, Block>,
-    world : World,
-    materials : HashMap<MaterialId, Material>,
-    block_form_cache : HashMap<BlockID, BlockForm>,
+    provider: GDMCHTTPProvider,
+    block_buffer: RefCell<Vec<PositionedBlock>>,
+    buffer_size: usize,
+    block_cache: RefCell<HashMap<Point3D, Block>>,
+    world: World,
+    materials: HashMap<MaterialId, Material>,
+    block_form_cache: RefCell<HashMap<BlockID, BlockForm>>,
 }
 
 impl Editor {
-    // Note: You will need to update the new() function to accept a &'a mut World parameter
     pub fn new(build_area: Rect3D, world: World) -> Self {
         let mut editor = Self {
             build_area,
             provider: GDMCHTTPProvider::new(),
-            block_buffer: Vec::new(),
+            block_buffer: RefCell::new(Vec::new()),
             buffer_size: 32,
-            block_cache: HashMap::new(),
+            block_cache: RefCell::new(HashMap::new()),
             world,
             materials: HashMap::new(),
-            block_form_cache: HashMap::new(),
+            block_form_cache: RefCell::new(HashMap::new()),
         };
         editor.load_data().expect("Failed to load materials");
         editor
@@ -44,85 +51,98 @@ impl Editor {
         Ok(())
     }
 
-    pub async fn place_block(&mut self,  block : &Block, point : Point3D) {
+    pub async fn place_block(&self, block: &Block, point: Point3D) {
         self.place_block_options(block, point, false).await;
     }
 
-    pub async fn place_block_forced(&mut self,  block : &Block, point : Point3D) {
+    pub async fn place_block_forced(&self, block: &Block, point: Point3D) {
         self.place_block_options(block, point, true).await;
     }
 
-    pub async fn place_block_options(&mut self,  block : &Block, point : Point3D, force : bool) {          
+    pub async fn place_block_options(&self, block: &Block, point: Point3D, force: bool) {
         if !self.world.build_area.contains(point + self.build_area.origin) {
             warn!("Point {:?} is outside the build area {:?} and will be ignored", point + self.build_area.origin, self.world.build_area);
             return;
         }
 
-        // if block.id == BlockID::Unknown {
-        //     warn!("Attempted to place an unknown block at {:?}, skipping", point);
-        //     return;
-        // }
+        if !force {
+            let cache = self.block_cache.borrow();
+            if cache.contains_key(&point) {
+                let density = self.get_block_form(&block.id).density();
+                let current_block = cache.get(&point).expect("Block should be in cache").id.clone();
+                drop(cache); // Release borrow before calling get_block_form again
 
-        if !force && self.block_cache.contains_key(&(point)) {
-            let current_block = self.block_cache.get(&(point)).expect("Block should be in cache").id;
-
-            if self.get_block_form(block.id).density() <= self.get_block_form(current_block).density() {
-                info!("Block at {:?} is already placed with a denser block, skipping", point);
-                return;
+                if density <= self.get_block_form(&current_block).density() {
+                    info!("Block at {:?} is already placed with a denser block, skipping", point);
+                    return;
+                }
             }
         }
 
-        self.block_cache.insert(point, block.clone());
-        self.block_buffer.push(PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into()));
-        if self.block_buffer.len() >= self.buffer_size {
+        self.block_cache.borrow_mut().insert(point, block.clone());
+        self.block_buffer.borrow_mut().push(
+            PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into())
+        );
+
+        // Check buffer size and flush if needed
+        // Note: We get the length first, then flush, to avoid holding borrow across await
+        let should_flush = self.block_buffer.borrow().len() >= self.buffer_size;
+        if should_flush {
             self.flush_buffer().await;
         }
     }
 
-    fn get_block_form(&mut self, id : BlockID) -> BlockForm {
-        if !self.block_form_cache.contains_key(&id) {
-            let form = BlockForm::infer_from_block(id);
-            self.block_form_cache.insert(id, form.clone());
+    fn get_block_form(&self, id: &BlockID) -> BlockForm {
+        // Check if already cached
+        if let Some(form) = self.block_form_cache.borrow().get(id) {
+            return *form;
         }
 
-        *self.block_form_cache.get(&id).expect("Block form not found")
+        // Compute and cache
+        let form = BlockForm::infer_from_block(id);
+        self.block_form_cache.borrow_mut().insert(id.clone(), form);
+        form
     }
 
-    pub async fn place_block_chance(&mut self, block : &Block, point : Point3D, rng : &mut RNG, chance : i32) {
-
+    pub async fn place_block_chance(&self, block: &Block, point: Point3D, rng: &mut RNG, chance: i32) {
         if rng.rand_i32_range(1, 100) <= chance {
             self.place_block(block, point).await;
         }
     }
 
-    pub fn get_block(&mut self, point : Point3D) -> Block {
-        if let Some(block) = self.block_cache.get(&(point - self.build_area.origin)) {
+    pub fn get_block(&self, point: Point3D) -> Block {
+        if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
             return block.clone();
         }
 
         self.world.get_block(point).expect(&format!("Block at {:?} not found in world", point))
     }
 
-    pub async fn flush_buffer(&mut self) {
-        let result = self.provider.put_blocks(&self.block_buffer).await.expect("Failed to send blocks");
-        
+    pub async fn flush_buffer(&self) {
+        // Drain the buffer first, releasing the borrow before the await
+        let buffer: Vec<_> = self.block_buffer.borrow_mut().drain(..).collect();
+
+        if buffer.is_empty() {
+            return;
+        }
+
+        let result = self.provider.put_blocks(&buffer).await.expect("Failed to send blocks");
+
         for (index, response) in result.iter().enumerate() {
-            let point : Point3D = self.block_buffer[index].get_coordinate().into();
-            let block = self.block_buffer[index].get_block();
+            let point: Point3D = buffer[index].get_coordinate().into();
+            let block = buffer[index].get_block();
             if response.status == 0 && self.world.get_block(point).is_none_or(|b| b != block) {
-                if block.id == BlockID::Air && self.world.get_block(point).is_none() {
+                if block.id == "air".into() && self.world.get_block(point).is_none() {
                     continue;
                 }
 
-                if self.block_cache.contains_key(&(point - self.build_area.origin)) && self.get_block(point) == block {
+                if self.block_cache.borrow().contains_key(&(point - self.build_area.origin)) && self.get_block(point) == block {
                     continue;
                 }
-                
+
                 error!("Failed to place block {:?} at {:?}, world block is {:?}", block, point, self.world.get_block(point));
             }
         }
-        
-        self.block_buffer.clear();
     }
 
     pub fn world(&self) -> &World {
@@ -150,7 +170,7 @@ impl Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
-        if !self.block_buffer.is_empty() {
+        if !self.block_buffer.borrow().is_empty() {
             error!("Editor was dropped with non-empty block buffer!");
         }
     }

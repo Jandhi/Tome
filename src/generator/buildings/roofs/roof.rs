@@ -73,7 +73,7 @@ impl Loadable<'_, RoofComponent, StructureId> for RoofComponent {
     }
 }
 
-pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &BuildingData, roof_set : &RoofSetId, rng : &mut RNG) -> anyhow::Result<()> {
+pub async fn build_roof(editor: &Editor, data: &LoadedData, building: &BuildingData, roof_set: &RoofSetId, rng: &mut RNG) -> anyhow::Result<()> {
     let mut placer_rng = rng.derive();
     let mut placer = Placer::new(&data.materials, &mut placer_rng);
 

@@ -4,7 +4,7 @@ mod chunk;
 mod block_entity;
 mod form;
 mod color;
-mod ids;
+mod block_id;
 
 pub mod util;
 pub use block::Block;
@@ -14,4 +14,4 @@ pub use block_entity::BlockEntity;
 pub use form::BlockForm;
 pub use color::{Color, recolor_block, color_block};
 pub use block::string_to_block;
-pub use ids::*;
+pub use block_id::BlockID;

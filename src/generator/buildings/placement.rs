@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, i32, os::windows};
 use reqwest::header::VARY;
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, constants::{BUILDING_GROUND_DIG_COST, BUILDING_GROUND_RAISE_COST, BUILDING_MAX_AVERAGE_GROUND_COST}, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::{BuildingSet, BuildingSetID}, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{DistrictType, HasDistrictData, SuperDistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::{Rotation, Transform}, paths::PathType, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Andesite, BasicStone, Biome, BiomeStonetype, BiomeWoodtype, Block, BlockID, Cobblestone, NaturalBlock, Planks, Sand, Sandstone, StoneBricks, WoodSlab, WoodStairs}, noise::RNG};
+use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{SuperDistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
 
 use super::BuildingID;
 
@@ -234,19 +234,19 @@ async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &Ha
 
     let block_vec : Vec<Block> = match paving_type {
         PavingType::Stone => vec![
-            BasicStone::Stone.into(), Cobblestone::Cobblestone.into(), StoneBricks::StoneBricks.into(), Andesite::Andesite.into(), NaturalBlock::Gravel.into(),
-            BasicStone::StoneStairs.into(), Cobblestone::CobblestoneStairs.into(), StoneBricks::StoneBrickStairs.into(), Andesite::AndesiteStairs.into(),
-            BasicStone::StoneSlab.into(), Cobblestone::CobblestoneSlab.into(), StoneBricks::StoneBrickSlab.into(), Andesite::AndesiteSlab.into(),
+            "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
+            "stone_stairs".into(), "cobblestone_stairs".into(), "stone_bricks_stairs".into(), "andesite_stairs".into(),
+            "stone_slab".into(), "cobblestone_slab".into(), "stone_bricks_slab".into(), "andesite_slab".into(),
         ],
         PavingType::Sandstone => vec![
-            Sandstone::Sandstone.into(), Sandstone::CutSandstone.into(), Sandstone::SmoothSandstone.into(), Planks::Birch.into(), Sand::Sand.into(),
-            Sandstone::SandstoneStairs.into(), Sandstone::SandstoneStairs.into(), Sandstone::SmoothSandstoneStairs.into(), WoodStairs::Birch.into(),
-            Sandstone::SandstoneSlab.into(), Sandstone::CutSandstoneSlab.into(), Sandstone::SmoothSandstoneSlab.into(), WoodSlab::Birch.into(),
+            "sandstone".into(), "cut_sandstone".into(), "smooth_sandstone".into(), "birch_planks".into(), "sand".into(),
+            "sandstone_stairs".into(), "sandstone_stairs".into(), "smooth_sandstone_stairs".into(), "birch_wood_stairs".into(),
+            "sandstone_slab".into(), "cut_sandstone_slab".into(), "smooth_sandstone_slab".into(), "birch_wood_slab".into(),
         ],
         PavingType::RedSandstone => vec![
-            Sandstone::RedSandstone.into(), Sandstone::CutRedSandstone.into(), Sandstone::SmoothRedSandstone.into(), Planks::Acacia.into(), Sand::RedSand.into(),
-            Sandstone::RedSandstoneStairs.into(), Sandstone::RedSandstoneStairs.into(), Sandstone::SmoothRedSandstoneStairs.into(), WoodStairs::Acacia.into(),
-            Sandstone::RedSandstoneSlab.into(), Sandstone::CutRedSandstoneSlab.into(), Sandstone::SmoothRedSandstoneSlab.into(), WoodSlab::Acacia.into(),
+            "red_sandstone".into(), "cut_red_sandstone".into(), "smooth_red_sandstone".into(), "acacia_planks".into(), "red_sand".into(),
+            "red_sandstone_stairs".into(), "red_sandstone_stairs".into(), "smooth_red_sandstone_stairs".into(), "acacia_wood_stairs".into(),
+            "red_sandstone_slab".into(), "cut_red_sandstone_slab".into(), "smooth_red_sandstone_slab".into(), "acacia_wood_slab".into(),
         ],
     };
 
@@ -320,7 +320,7 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
 
     for cell in building.shape.cells().iter() {
         for point in grid.get_cell_rect(*cell).iter() {
-            editor.place_block_forced(&BlockID::Air.into(), point).await;
+            editor.place_block_forced(&"air".into(), point).await;
         }
     }
 
@@ -347,8 +347,8 @@ pub async fn place_building(editor : &mut Editor, shape : &BuildingShape, grid :
             let mut clear_point = point;
 
             for _ in 0..5 {
-                editor.place_block_forced(&BlockID::Air.into(), point).await;
-                editor.place_block_forced(&BlockID::Air.into(), point + UP).await;
+                editor.place_block_forced(&"air".into(), point).await;
+                editor.place_block_forced(&"air".into(), point + UP).await;
                 clear_point += door.direction.into();
 
                 match editor.world().get_claim(clear_point.drop_y()) {

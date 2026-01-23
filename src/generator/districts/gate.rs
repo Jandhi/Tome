@@ -4,7 +4,6 @@ use crate::generator::materials::Placer;
 use crate::generator::nbts::{place_structure, Structure, StructureId};
 use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardinal};
 use crate::noise::RNG;
-use crate::minecraft::{Block, BlockID};
 use crate::generator::BuildClaim;
 use crate::generator::districts::WallType;
 use log::info;
@@ -34,11 +33,7 @@ pub async fn build_wall_gate(
         .map(|set| set.iter().map(|p| p.drop_y()).collect::<HashSet<Point2D>>())
         .unwrap_or_default();
 
-    let air = Block {
-            id: BlockID::Air,
-            data: None,
-            state: None,
-    };
+    let air = "air".into();
     for (i, point) in wall_points.iter().enumerate() {
         if gate_possible == 0 {
             if is_gate_possible(*point, wall_points, gate_size, i) {

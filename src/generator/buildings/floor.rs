@@ -2,7 +2,7 @@ use strum::IntoEnumIterator;
 
 use crate::{editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Placer}}, geometry::{Cardinal, Point2D, DOWN, X_PLUS, Z_PLUS}, minecraft::BlockForm, noise::RNG};
 
-pub async fn build_floor(editor: &mut Editor, data: &LoadedData, building: &BuildingData, rng: &mut RNG) {
+pub async fn build_floor(editor: &Editor, data: &LoadedData, building: &BuildingData, rng: &mut RNG) {
 
     let wood_id = building.palette.get_material(MaterialRole::SecondaryWood).expect("Secondary wood material not found");
     let mut placer = MaterialPlacer::new(Placer::new(&data.materials, rng), 

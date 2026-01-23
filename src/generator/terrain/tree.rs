@@ -58,7 +58,7 @@ pub enum Tree {
 
 pub async fn generate_tree(
     tree: Tree,
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     rng: &mut RNG,
     palette: &HashMap<String, HashMap<String, f32>>,
@@ -173,7 +173,7 @@ pub async fn generate_tree(
 
 
 async fn generate_small_birch(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -209,7 +209,7 @@ async fn generate_small_birch(
 }
 
 async fn generate_medium_birch(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -410,7 +410,7 @@ async fn generate_medium_birch(
 }
 
 async fn generate_large_birch(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -841,7 +841,7 @@ async fn generate_large_birch(
 }
 
 async fn generate_mega_birch(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -858,7 +858,7 @@ async fn generate_mega_birch(
 
 
 async fn generate_small_pine(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -904,7 +904,7 @@ async fn generate_small_pine(
 }
 
 async fn generate_medium_pine(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -963,7 +963,7 @@ async fn generate_medium_pine(
 }
 
 async fn generate_large_pine(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1037,7 +1037,7 @@ async fn generate_large_pine(
 }
 
 async fn generate_mega_pine(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1052,7 +1052,7 @@ async fn generate_mega_pine(
 }
 
 async fn generate_small_hedge(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1079,7 +1079,7 @@ async fn generate_small_hedge(
 }
 
 async fn generate_medium_hedge(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1112,7 +1112,7 @@ async fn generate_medium_hedge(
 }
 
 async fn generate_large_hedge(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1161,7 +1161,7 @@ async fn generate_large_hedge(
 }
 
 async fn generate_mega_hedge(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1175,7 +1175,7 @@ async fn generate_mega_hedge(
     }
 }
 async fn generate_small_oak(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1226,7 +1226,7 @@ async fn generate_small_oak(
 }
 
 async fn generate_medium_oak(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -1517,7 +1517,7 @@ async fn generate_medium_oak(
 }
 
 async fn generate_large_oak(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,
@@ -2135,7 +2135,7 @@ async fn generate_large_oak(
 }
 
 async fn generate_mega_oak(
-    editor: &mut Editor,
+    editor: &Editor,
     point: Point3D,
     wood: &Block,
     leaf: &Block,

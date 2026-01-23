@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{editor::World, generator::{buildings::{BuildingData, Grid, build_stairs, floor::build_floor, roofs::build_roof, shape::BuildingShape, stairs::StairPlacement, walls::wall::build_walls}, data::LoadedData, materials::PaletteId, style::Style}, geometry::{Cardinal, Point3D}, http_mod::GDMCHTTPProvider, minecraft::{BlockID, Mushroom}, noise::RNG, util::{build_compass, init_logger}};
+    use crate::{editor::World, generator::{buildings::{BuildingData, Grid, build_stairs, floor::build_floor, roofs::build_roof, shape::BuildingShape, stairs::StairPlacement, walls::wall::build_walls}, data::LoadedData, materials::PaletteId, style::Style}, geometry::{Cardinal, Point3D}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
 
 
     #[tokio::test]
@@ -41,7 +41,7 @@ mod tests {
 
         for cell in building.shape.cells().iter() {
             let midpoint = building.grid.grid_to_world(*cell) + building.grid.cell_size / 2;
-            editor.place_block(&Mushroom::RedMushroomBlock.into(), midpoint).await;
+            editor.place_block(&"red_mushroom_block".into(), midpoint).await;
         }
 
         let mut rng = RNG::new(100);

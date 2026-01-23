@@ -54,7 +54,7 @@ pub enum BlockForm {
 }
 
 impl BlockForm {
-    pub fn infer_from_block(block : BlockID) -> BlockForm {
+    pub fn infer_from_block(block : &BlockID) -> BlockForm {
         let id_string = serde_json::to_string(&block).expect("Failed to serialize BlockID to string");
 
         if id_string.contains("stairs") {

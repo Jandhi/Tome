@@ -71,7 +71,7 @@ impl Palette {
         materials.get(self.get_material(role)?).and_then(|material| material.get_block(form, rng))
     }
 
-    pub fn find_role_and_form(&self, block : BlockID, materials : &HashMap<MaterialId, Material>) -> Option<(MaterialRole, BlockForm)> {
+    pub fn find_role_and_form(&self, block : &BlockID, materials : &HashMap<MaterialId, Material>) -> Option<(MaterialRole, BlockForm)> {
         // Iterate through all material roles to find the matching block
         for role in [
             MaterialRole::Flower,
@@ -95,7 +95,7 @@ impl Palette {
 
             let material = materials.get(id?).expect(&format!("Material {:?} not found", id)); 
             
-            if let Some(form) = material.get_form(block) {
+            if let Some(form) = material.get_form(&block) {
                 return Some((role, form));
             }
         }
@@ -104,22 +104,22 @@ impl Palette {
     }
 
     pub fn swap_with<'palette>(&'palette self, block : BlockID, output_palette : &'palette Palette, materials : &'palette HashMap<MaterialId, Material>) -> PaletteSwapResult<'palette> {
-        if let Some((role, form)) = self.find_role_and_form(block, &materials) {
+        if let Some((role, form)) = self.find_role_and_form(&block, &materials) {
             if let Some(material_id) = output_palette.get_material(role) {
                 return PaletteSwapResult::Material(material_id, form);
             }
         }
 
-        PaletteSwapResult::Block(self.recolor_block(block, output_palette))
+        PaletteSwapResult::Block(self.recolor_block(&block, output_palette))
     }
 
-    pub fn recolor_block(&self, block : BlockID, output_palette : &Palette) -> BlockID {
-        let mut recolored = block;
+    pub fn recolor_block(&self, block : &BlockID, output_palette : &Palette) -> BlockID {
+        let mut recolored = block.clone();
         if let (Some(src), Some(dst)) = (self.primary_color, output_palette.primary_color) {
-            recolored = recolor_block(recolored, src, dst);
+            recolored = recolor_block(&recolored, src, dst);
         }
         if let (Some(src), Some(dst)) = (self.secondary_color, output_palette.secondary_color) {
-            recolored = recolor_block(recolored, src, dst);
+            recolored = recolor_block(&recolored, src, dst);
         }
         recolored
     }

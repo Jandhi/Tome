@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, Fluid, MiscBlock, util::point_to_chunk_coordinates}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, util::point_to_chunk_coordinates}};
 
 use super::Editor;
 
@@ -154,7 +154,7 @@ impl World {
     pub fn get_non_tree_height(&self, point : Point2D) -> i32 {
         let mut height = self.get_height_at(point);
         let mut block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
-        while block.id.is_tree_or_leaf() {
+        while block.id.is_tree() {
             height -= 1;
             block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
         }
@@ -202,7 +202,7 @@ impl World {
     pub fn add_non_tree_height(&self, point : Point2D) -> Point3D {
         let mut new_point = Point3D::new(point.x, self.get_height_at(point), point.y);
         let mut block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
-        while block.id.is_tree_or_leaf() {
+        while block.id.is_tree() {
             new_point += DOWN;
             block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
         }
@@ -285,11 +285,11 @@ impl World {
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
-        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::MiscBlock(MiscBlock::Fluid(Fluid::Water))
+        self.ground_block_map[point.x as usize][point.y as usize].id == "water".into()
     }
 
     pub fn is_water_3d(&self, point : Point3D) -> bool {
-        self.get_block(point).expect("failed to get block").id == BlockID::MiscBlock(MiscBlock::Fluid(Fluid::Water))
+        self.get_block(point).expect("failed to get block").id == "water".into()
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {

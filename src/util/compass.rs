@@ -1,14 +1,14 @@
-use crate::{editor::Editor, geometry::{EAST, NORTH, SOUTH, UP, WEST}, minecraft::{BasicStone, BlockID, ColoredBlock, Stone, Wool}};
+use crate::{editor::Editor, geometry::{EAST, NORTH, SOUTH, UP, WEST}};
 
-pub async fn build_compass(editor : &mut Editor) {
-    let midpoint = editor.world_mut().world_rect_2d().size / 2;
-    let point = editor.world_mut().add_height(midpoint);
+pub async fn build_compass(editor: &Editor) {
+    let midpoint = editor.world().world_rect_2d().size / 2;
+    let point = editor.world().add_height(midpoint);
     let offset = UP * 30;
     let point = point + offset;
 
-    editor.place_block(&BlockID::ColoredBlock(ColoredBlock::Wool(Wool::Red)).into(), point + NORTH).await;
-    editor.place_block(&BlockID::Stone(Stone::BasicStone(BasicStone::Stone)).into(), point).await;
-    editor.place_block(&BlockID::ColoredBlock(ColoredBlock::Wool(Wool::Blue)).into(), point + SOUTH).await;
-    editor.place_block(&BlockID::ColoredBlock(ColoredBlock::Wool(Wool::Green)).into(), point + EAST).await;
-    editor.place_block(&BlockID::ColoredBlock(ColoredBlock::Wool(Wool::Orange)).into(), point + WEST).await;
+    editor.place_block(&"red_wool".into(), point + NORTH).await;
+    editor.place_block(&"stone".into(), point).await;
+    editor.place_block(&"blue_wool".into(), point + SOUTH).await;
+    editor.place_block(&"green_wool".into(), point + EAST).await;
+    editor.place_block(&"orange_wool".into(), point + WEST).await;
 }

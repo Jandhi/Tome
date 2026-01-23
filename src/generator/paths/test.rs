@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use lerp::num_traits::Signed;
-    use crate::{editor::World, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::PathPriority, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::Wool, noise::RNG, util::init_logger};
+    use crate::{editor::World, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::PathPriority, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
     use std::time::Instant;
 
     #[tokio::test]
@@ -62,11 +62,11 @@ mod tests {
 
         
         let path = route_path(&editor, start, end, async |point : &Vec<Point3D>| {
-            editor2.place_block(&Wool::Pink.into(), *point.iter().last().unwrap()).await
+            editor2.place_block(&"pink_wool".into(), *point.iter().last().unwrap()).await
         }).await.expect("Failed to route path");
 
         for point in path {
-            editor.place_block(&Wool::Red.into(), point).await;
+            editor.place_block(&"red_wool".into(), point).await;
         }
 
         editor.flush_buffer().await;

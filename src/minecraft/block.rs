@@ -37,6 +37,16 @@ impl From<&BlockID> for Block {
     }
 }
 
+impl From<&str> for Block {
+    fn from(s: &str) -> Self {
+        Block {
+            id: s.into(),
+            state: None,
+            data: None,
+        }
+    }
+}
+
 // Converts a string representation of a block into a Block struct.
 pub fn string_to_block(block: &str) -> Option<Block> {
     if block.contains('[') {

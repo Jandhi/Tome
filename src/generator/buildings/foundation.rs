@@ -5,7 +5,7 @@ use strum::IntoEnumIterator;
 use crate::{editor::{self, Editor}, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Palette, Placer}}, geometry::{get_outer_edge, Cardinal, UP}, minecraft::{BlockForm, BlockID}, noise::RNG};
 
 pub async fn build_foundation(
-    editor : &mut Editor,
+    editor: &Editor,
     building : &BuildingData,
     data : &LoadedData,
     rng : &mut RNG,

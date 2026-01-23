@@ -76,11 +76,11 @@ const SWAPPABLE_STRINGS: &[&str] = &[
 ];
 
 // Only colors a block if it was the old color
-pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> BlockID {
+pub fn recolor_block(block_id: &BlockID, old_color: Color, new_color: Color) -> BlockID {
     let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
     
     if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
-        return block_id; // No swappable strings found, return original block ID
+        return block_id.clone(); // No swappable strings found, return original block ID
     }
 
     
@@ -89,10 +89,10 @@ pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> B
 
     // Don't replace light colors with dark colors
     if old_color_str == "blue" && block_id_str.contains("light_blue") {
-        return block_id;
+        return block_id.clone();
     }
     if old_color_str == "gray" && block_id_str.contains("light_gray") {
-        return block_id;
+        return block_id.clone();
     }
 
     if block_id_str.contains(&old_color_str) {
@@ -100,7 +100,7 @@ pub fn recolor_block(block_id: BlockID, old_color: Color, new_color: Color) -> B
             .expect("Failed to replace color in block ID");
     }
 
-    block_id // If no color match found, return original block ID
+    block_id.clone() // If no color match found, return original block ID
 }
 
 pub fn color_block(block_id: BlockID, new_color: Color) -> BlockID {

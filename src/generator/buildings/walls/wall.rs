@@ -70,7 +70,7 @@ pub enum HorizontalWallPosition {
     End, // Has no neighbours,
 }
 
-pub async fn build_walls(editor : &mut Editor, wall_set : &WallSetId, building : &mut BuildingData, data : &LoadedData, rng : &mut RNG) -> anyhow::Result<()> {
+pub async fn build_walls(editor: &Editor, wall_set: &WallSetId, building: &mut BuildingData, data: &LoadedData, rng: &mut RNG) -> anyhow::Result<()> {
     let walls = data.wall_sets.get(wall_set)
         .expect("Wall set not found")
         .components

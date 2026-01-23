@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{editor::Editor, geometry::Point3D, minecraft::BlockID};
+use crate::{editor::Editor, geometry::Point3D};
 
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     for point in points {
@@ -22,7 +22,7 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
             }
         } else {
             for y in point.y..=height {
-                editor.place_block_forced(&BlockID::Air.into(), point.with_y(y)).await;
+                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
             }
         }
     }
