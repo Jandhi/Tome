@@ -31,8 +31,8 @@ impl DistrictStyle {
                 DistrictStyle::MultiVariant(MultiVariant {
                     core: (*rng.choose(&cores)).clone(),
                     roofs: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
-                    woods: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
-                    stones: rng.choose_many(&roofs, 2).into_iter().cloned().cloned().collect(),
+                    woods: rng.choose_many(&woods, 2).into_iter().cloned().cloned().collect(),
+                    stones: rng.choose_many(&stones, 2).into_iter().cloned().cloned().collect(),
                 })
             }
             33..66 => { // Weighted MultiVariant

@@ -49,7 +49,7 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
         }
     };
 
-    if input_palette.is_none() && output_palette.is_none() {
+    if input_palette.is_none() || output_palette.is_none() {
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let mut data = blockdata.nbt;

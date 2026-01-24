@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap};
+use std::collections::HashMap;
 
 use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D}};
 
@@ -116,13 +116,9 @@ impl Grid {
         // Shift the transform to account for the structure's origin
         transform.shift(rotation.apply_to_point(-structure.origin));
 
-        let input_palette = structure.palette.as_ref().map(|p| p.clone());
+        let input_palette = structure.palette.as_ref().and_then(|id| data.palettes.get(id));
 
-        let data = RefCell::new(data); // A ref cell is used to allow multiple borrows of data
-        let input_palette = structure.palette.clone().map(|id| data.borrow().palettes.get(&id)).flatten();
-        let data_ref = &data.borrow();
-
-        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data_ref), input_palette, Some(palette), None, None).await
+        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), input_palette, Some(palette), None, None).await
     }
 
     pub async fn build_nbt<'materials>(&self, editor: &Editor, placer: &mut Placer<'materials>, nbt: &NBTMeta, grid_coordinate: Point3D, rotation: Rotation, data: &LoadedData, input_palette: &Palette, output_palette: &Palette) -> anyhow::Result<()> {
