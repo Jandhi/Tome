@@ -1,8 +1,7 @@
 use lerp::Lerp;
-use log::info;
 use noise::{NoiseFn, Perlin};
 
-use crate::{generator::materials::feature::MaterialParameters, geometry::{Point3D, Rect3D}, noise::Seed};
+use crate::{geometry::Point3D, noise::Seed};
 
 pub struct PerlinSettings {
     perlin : noise::Perlin,

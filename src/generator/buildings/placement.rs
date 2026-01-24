@@ -1,6 +1,5 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, i32, os::windows};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, i32};
 
-use reqwest::header::VARY;
 use strum::IntoEnumIterator;
 
 use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{SuperDistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
@@ -149,10 +148,8 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
                     Cardinal::North => Point2D { x: -DEFAULT_GRID_CELL_SIZE.x / 2, y: 0 },
                 };
                 let mut height_point = door_position;
-                let mut distance = 0;
                 while block.contains(&height_point) {
                     height_point += direction.into();
-                    distance += 1;
                 }
 
                 // if distance > 5 { // The door is too far from the road, height will be awkward

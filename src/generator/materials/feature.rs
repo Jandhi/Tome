@@ -18,6 +18,7 @@ pub const MATERIAL_FEATURE_TRAVERSAL_ORDER : [MaterialFeature; 4] = [
     MaterialFeature::Moisture,
 ];
 
+#[allow(dead_code)]
 pub enum MaterialFeatureMapping {
     Linear,
     Fitted,

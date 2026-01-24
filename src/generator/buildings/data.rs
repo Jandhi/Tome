@@ -1,4 +1,4 @@
-use crate::generator::{buildings::{shape::BuildingShape, BuildingID, Grid}, materials::{Palette, PaletteId}, style::Style};
+use crate::generator::{buildings::{shape::BuildingShape, BuildingID, Grid}, materials::Palette, style::Style};
 
 #[derive(Debug, Clone)]
 pub struct BuildingData {

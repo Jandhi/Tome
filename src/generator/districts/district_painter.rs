@@ -128,7 +128,7 @@ pub async fn plant_forest(
             continue; // skip water points if ignore_water is true
         }
 
-        let height = editor.world_mut().get_non_tree_height(point);
+        let height = editor.world().get_non_tree_height(point);
         let block = editor.get_block(Point3D::new(point.x, height, point.y));
 
         if let Some(permit_blocks) = permit_blocks {

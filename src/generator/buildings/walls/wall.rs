@@ -5,7 +5,7 @@ use log::error;
 use serde_derive::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::{shape::WallPlacement, walls::WallSetId, BuildingData}, data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{Structure, StructureId}}, geometry::{Cardinal, CARDINALS, DOWN, UP}, noise::RNG};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::{shape::WallPlacement, walls::WallSetId, BuildingData}, data::LoadedData, materials::Placer, nbts::{Structure, StructureId}}, geometry::{Cardinal, DOWN, UP}, noise::RNG};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallComponent {

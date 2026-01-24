@@ -81,7 +81,7 @@ pub async fn build_path(
 
         
 
-        let world_height = editor.world().get_height_at(*point);
+        let _world_height = editor.world().get_height_at(*point);
 
         for i in 0..=3 {
             editor.place_block(&"air".into(), point3d + UP * i).await;

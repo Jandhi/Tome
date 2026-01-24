@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_nbt, place_structure, Structure, StructureId}, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}, minecraft::BlockID, noise::RNG};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_structure, Structure, StructureId}, style::Style}, geometry::{Cardinal, Point3D, UP}, noise::RNG};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoofSetId(pub String);

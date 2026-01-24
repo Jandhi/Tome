@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use strum::IntoEnumIterator;
 
-use crate::{editor::{self, Editor}, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Palette, Placer}}, geometry::{get_outer_edge, Cardinal, UP}, minecraft::{BlockForm, BlockID}, noise::RNG};
+use crate::{editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Placer}}, geometry::{get_outer_edge, Cardinal}, minecraft::BlockForm, noise::RNG};
 
 pub async fn build_foundation(
     editor: &Editor,
