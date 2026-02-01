@@ -83,7 +83,19 @@ impl GDMCHTTPProvider {
     }
 
     pub async fn put_blocks(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
-        let url = self.url("blocks");
+        self.put_blocks_options(blocks, true).await
+    }
+
+    pub async fn put_blocks_no_updates(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
+        self.put_blocks_options(blocks, false).await
+    }
+
+    pub async fn put_blocks_options(&self, blocks : &Vec<PositionedBlock>, do_block_updates: bool) -> anyhow::Result<Vec<BlockPlacementResponse>> {
+        let url = if do_block_updates {
+            self.url("blocks")
+        } else {
+            self.url("blocks?doBlockUpdates=false")
+        };
 
         let body = serde_json::to_string(&blocks)?;
         info!("Sending PUT request to {} with body: {}", url, body);

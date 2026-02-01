@@ -18,9 +18,9 @@ pub enum BlockForm {
     FenceGate,
     #[serde(rename = "pillar")]
     Pillar,
-    #[serde(rename = "trapdoor")]
-    Door,
     #[serde(rename = "door")]
+    Door,
+    #[serde(rename = "trapdoor")]
     Trapdoor,
     #[serde(rename = "button")]
     Button,

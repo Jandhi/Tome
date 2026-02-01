@@ -110,6 +110,21 @@ impl Editor {
         }
     }
 
+    /// Place a block immediately without triggering block updates.
+    /// This is useful for placing support blocks (like floors) that might otherwise
+    /// cause attached blocks (like doors) to break.
+    pub async fn place_block_no_update(&self, block: &Block, point: Point3D) {
+        if !self.world.build_area.contains(point + self.build_area.origin) {
+            warn!("Point {:?} is outside the build area {:?} and will be ignored", point + self.build_area.origin, self.world.build_area);
+            return;
+        }
+
+        self.block_cache.borrow_mut().insert(point, block.clone());
+        let positioned = PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into());
+
+        let _ = self.provider.put_blocks_no_updates(&vec![positioned]).await;
+    }
+
     pub fn get_block(&self, point: Point3D) -> Block {
         if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
             return block.clone();
