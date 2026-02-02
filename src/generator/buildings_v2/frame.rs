@@ -157,9 +157,9 @@ mod tests {
 
         assert_eq!(corners.len(), 4);
         assert_eq!(corners[0], Point3D::new(0, 64, 0));
-        assert_eq!(corners[1], Point3D::new(10, 64, 0));
-        assert_eq!(corners[2], Point3D::new(10, 64, 5));
-        assert_eq!(corners[3], Point3D::new(0, 64, 5));
+        assert_eq!(corners[1], Point3D::new(9, 64, 0));  // width-1
+        assert_eq!(corners[2], Point3D::new(9, 64, 4));  // width-1, depth-1
+        assert_eq!(corners[3], Point3D::new(0, 64, 4));  // depth-1
     }
 
     #[test]
@@ -168,8 +168,8 @@ mod tests {
         let segments = frame.wall_segments();
 
         assert_eq!(segments.len(), 4);
-        assert_eq!(segments[0].length(), 10);
-        assert_eq!(segments[1].length(), 5);
+        assert_eq!(segments[0].length(), 9);  // width-1 (distance between corners)
+        assert_eq!(segments[1].length(), 4);  // depth-1
     }
 
     #[test]
@@ -178,6 +178,6 @@ mod tests {
         let (min, max) = frame.bounds().unwrap();
 
         assert_eq!(min, Point3D::new(5, 64, 10));
-        assert_eq!(max, Point3D::new(25, 72, 25));
+        assert_eq!(max, Point3D::new(24, 72, 24)); // 5+20-1=24, 10+15-1=24
     }
 }

@@ -3,7 +3,9 @@
     "allow": [
       "Bash(dir:*)",
       "Bash(cargo check:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "WebFetch(domain:media.discordapp.net)"
     ]
   }
 }

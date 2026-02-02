@@ -140,15 +140,17 @@ src/generator/buildings_v2/
 
 **Implemented Features:**
 - ✅ `RoofType` enum with `Hip` and `Gable` variants
-- ✅ `RoofConfig` struct (pitch, overhang, use_stairs, use_slabs)
+- ✅ `RoofPitch` enum with `Shallow`, `Medium`, `Steep` variants
+- ✅ `RoofConfig` struct (pitch: RoofPitch, overhang)
 - ✅ `Roof` struct with type, base_y, and config
-- ✅ `place_gable_roof()` - Slopes on two sides, vertical gable walls
-- ✅ `place_hip_roof()` - Slopes on all four sides
+- ✅ `place_gable_roof()` - Row-by-row algorithm, ridge along longest axis
+- ✅ `place_hip_roof()` - Slopes on all four sides using same pitch system
 - ✅ `place_roof()` - Dispatch based on roof type
 - ✅ `RoofRules` struct with auto-selection logic
 - ✅ `generate_roof()` - Auto-selects roof type based on building aspect ratio
 - ✅ Proper stair orientation using Cardinal directions
 - ✅ Material integration via Palette and MaterialRole::PrimaryRoof
+- ✅ Ridge cap with top slabs for all pitch types
 - ✅ Test demonstration showing gable, hip, and auto-selected roofs
 
 **Test Results:**
@@ -191,21 +193,25 @@ test generator::buildings_v2::test::tests::place_building_row ... ok
 ```rust
 pub enum RoofType {
     Hip,
-    Gable { facing: Cardinal }, // Direction gable faces (N/S or E/W)
+    Gable,
+}
+
+/// Roof pitch determines slope steepness and block types used.
+pub enum RoofPitch {
+    Shallow,  // 1/2 block rise per run, uses slabs alternating bottom/top
+    Medium,   // 1 block rise per run, uses stairs
+    Steep,    // 2 block rise per run, uses block + stair per row
 }
 
 pub struct RoofConfig {
-    pub roof_type: RoofType,
-    pub pitch: f32,              // Slope angle (0.5 = gentle, 1.0 = steep, 1.5 = very steep)
+    pub pitch: RoofPitch,        // Determines slope and block types
     pub overhang: i32,           // Blocks extending beyond walls (0-2)
-    pub use_stairs: bool,        // Use stair blocks vs full blocks
-    pub use_slabs: bool,         // Use slabs for smoother slopes
 }
 
 pub struct Roof {
-    pub config: RoofConfig,
-    pub footprint: Footprint,    // Base of roof (usually building footprint)
+    pub roof_type: RoofType,
     pub base_y: i32,             // Height where roof starts
+    pub config: RoofConfig,
 }
 ```
 
@@ -223,42 +229,48 @@ pub struct Roof {
 4. Add overhang by extending footprint outward
 
 **Gable Roof:**
-1. Determine gable orientation (e.g., gables on N/S, slopes on E/W)
-2. Calculate peak line along gable axis
-3. For each XZ position:
-   - If on gable side: place vertical wall blocks up to peak
-   - If on slope side: calculate height = distance_to_peak * pitch
-   - Place stairs/slabs oriented correctly
-4. Ridge along peak
-5. Add overhang on slope sides
+1. Determine gable orientation - ridge runs along the longest axis
+2. Determine slope based on `RoofPitch`:
+   - `Shallow`: 1/2 block rise per run, alternating bottom/top slabs
+   - `Medium`: 1 block rise per run, using stairs
+   - `Steep`: 2 block rise per run, using block + stair per row
+3. Start at the edge (including overhang), build row by row toward center:
+   - For each row, place blocks along the full ridge length
+   - Advance inward by 1 block, raise y according to pitch pattern
+   - Slabs alternate: row 0 = bottom slab, row 1 = top slab, row 2 = bottom at y+1, etc.
+4. At the ridge (center), cap with top slabs
+5. Mirror the process for the opposite side
+6. Fill gable walls (vertical triangular sections at each end)
+
+**Hip Roof:**
+Uses the same pitch system, but calculates height based on minimum distance to any edge.
 
 **Common Steps:**
-- Use stair blocks for most roof surface (oriented to face outward)
-- Use full blocks for peak/ridge
-- Use slabs for gentler transitions
+- Stairs face toward center (up the slope)
+- Ridge is always capped with top slabs
 - Account for overhang extending beyond footprint
+
+TODO: Tented corners
 
 ### Roof Placement
 
 ```rust
 pub async fn place_roof(
     roof: &Roof,
+    footprint: &Footprint,
     editor: &Editor,
     palette: &Palette,
     materials: &HashMap<MaterialId, Material>,
     rng: &mut RNG,
 ) {
-    // Get roof material (use WoodPillar or PrimaryWood for stairs)
-    let roof_block = palette.get_block(
-        MaterialRole::PrimaryWood,
-        &BlockForm::Stairs,
-        materials,
-        rng
-    );
-    
-    match roof.config.roof_type {
-        RoofType::Hip => place_hip_roof(...),
-        RoofType::Gable { facing } => place_gable_roof(..., facing),
+    // Blocks are selected based on pitch:
+    // - Shallow: slabs (MaterialRole::PrimaryRoof, BlockForm::Slab)
+    // - Medium: stairs (MaterialRole::PrimaryRoof, BlockForm::Stairs)
+    // - Steep: blocks + stairs
+
+    match roof.roof_type {
+        RoofType::Hip => place_hip_roof(roof, footprint, editor, palette, materials, rng).await,
+        RoofType::Gable => place_gable_roof(roof, footprint, editor, palette, materials, rng).await,
     }
 }
 ```
@@ -271,68 +283,44 @@ impl Frame {
     pub fn roof_base_y(&self) -> i32 {
         self.base_y + (self.floors as i32) * self.wall_height
     }
-    
-    /// Create a default roof for this frame
-    pub fn default_roof(&self, roof_type: RoofType) -> Roof {
-        Roof {
-            config: RoofConfig {
-                roof_type,
-                pitch: 1.0,
-                overhang: 1,
-                use_stairs: true,
-                use_slabs: false,
-            },
-            footprint: self.footprint.clone(),
-            base_y: self.roof_base_y(),
-        }
-    }
 }
+
+// Roofs are created via Roof::new(), Roof::gable(), or Roof::hip()
+// or auto-generated via generate_roof(frame, rules)
 ```
 
 ### Roof Generation Rules
 
 ```rust
 pub struct RoofRules {
-    pub prefer_type: Option<RoofType>,  // None = auto-select based on dimensions
-    pub pitch: f32,                      // Default pitch
-    pub overhang: i32,                   // Default overhang
+    pub preferred_type: RoofType, // Preferred roof type for square-ish buildings
+    pub gable_threshold: f32,     // Aspect ratio above which to use gable (default 1.5)
+    pub config: RoofConfig,       // Roof configuration (pitch, overhang)
 }
 
 impl Default for RoofRules {
     fn default() -> Self {
         Self {
-            prefer_type: None,  // Auto-select
-            pitch: 1.0,         // 45-degree slope
-            overhang: 1,        // 1 block overhang
+            preferred_type: RoofType::Hip,
+            gable_threshold: 1.5,
+            config: RoofConfig::default(),  // Medium pitch, 1 block overhang
         }
     }
 }
 
-pub fn generate_roof(
-    frame: &Frame,
-    rules: &RoofRules,
-    rng: &mut RNG,
-) -> Roof {
-    // Auto-select roof type if not specified
-    let roof_type = rules.prefer_type.unwrap_or_else(|| {
-        let bounds = frame.footprint.bounds();
-        let width = bounds.size.x;
-        let depth = bounds.size.y;
-        
-        // Gable works better for elongated buildings
-        if (width - depth).abs() > 4 {
-            let facing = if width > depth {
-                Cardinal::North  // Gables on N/S, slopes on E/W
-            } else {
-                Cardinal::East   // Gables on E/W, slopes on N/S
-            };
-            RoofType::Gable { facing }
-        } else {
-            RoofType::Hip  // Hip for square-ish buildings
-        }
-    });
-    
-    frame.default_roof(roof_type)
+pub fn generate_roof(frame: &Frame, rules: &RoofRules) -> Roof {
+    // Auto-select roof type based on building aspect ratio
+    let aspect_ratio = max(width, depth) / min(width, depth);
+
+    // Long rectangular buildings always get gable roofs
+    // Square-ish buildings use the preferred type
+    let roof_type = if aspect_ratio > rules.gable_threshold {
+        RoofType::Gable
+    } else {
+        rules.preferred_type
+    };
+
+    Roof::new(roof_type, base_y, rules.config.clone())
 }
 ```
 
@@ -344,16 +332,17 @@ src/generator/buildings_v2/roof.rs
 ```
 
 **Key Functions:**
-- `place_hip_roof()` - Generate and place hip roof geometry
-- `place_gable_roof()` - Generate and place gable roof geometry
-- `calculate_roof_height()` - Compute height at any XZ position
-- `get_roof_block_orientation()` - Determine stair/block facing
-- `place_roof()` - Main entry point
+- `place_gable_roof()` - Row-by-row roof generation with pitch-based block selection
+- `place_hip_roof()` - Distance-from-edge based roof generation
+- `place_roof()` - Main entry point, dispatches based on roof type
+- `generate_roof()` - Auto-select roof type based on building dimensions
+- `get_row_blocks()` - Helper to determine blocks per row based on pitch
+- `get_row_height()` - Calculate y offset for gable wall filling
 
 **Stair Orientation Rules:**
-- Stairs face down the slope (water flows off)
-- For hip roofs: stairs face away from peak line
-- For gable roofs: stairs face away from peak, parallel to gable walls
+- Stairs face toward center (up the slope)
+- For hip roofs: stairs face away from nearest edge
+- For gable roofs: stairs face toward ridge
 - Use `BlockForm::Stairs` with proper `facing` state
 
 ---

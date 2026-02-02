@@ -3,12 +3,63 @@ use std::collections::HashMap;
 use crate::{
     editor::Editor,
     generator::materials::{Material, MaterialId, MaterialRole, Palette},
-    geometry::{Cardinal, Point2D},
+    geometry::{Cardinal, Point2D, Point3D},
     minecraft::{Block, BlockForm, BlockID},
     noise::RNG,
 };
 
 use super::{Frame, Opening, OpeningKind, WallSegment};
+
+/// Resolved wall materials from a palette.
+/// Use this to ensure consistent wall blocks across regular walls and gable walls.
+pub struct WallMaterials {
+    pub wall_block: Block,
+    pub pillar_block: Block,
+}
+
+impl WallMaterials {
+    /// Create wall materials from a palette.
+    pub fn from_palette(
+        palette: &Palette,
+        materials: &HashMap<MaterialId, Material>,
+        rng: &mut RNG,
+    ) -> Self {
+        let wall_block_id = palette
+            .get_block(MaterialRole::PrimaryWall, &BlockForm::Block, materials, rng)
+            .cloned()
+            .unwrap_or_else(|| BlockID::from("stone_bricks"));
+
+        let pillar_block_id = palette
+            .get_block(MaterialRole::WoodPillar, &BlockForm::Block, materials, rng)
+            .cloned()
+            .unwrap_or_else(|| BlockID::from("oak_log"));
+
+        Self {
+            wall_block: Block::from(wall_block_id),
+            pillar_block: Block::from(pillar_block_id),
+        }
+    }
+}
+
+/// Place a single wall block at the given position.
+/// This is the core wall placement operation - customize this for different wall styles.
+pub async fn place_wall_block(
+    editor: &Editor,
+    pos: Point3D,
+    wall_mats: &WallMaterials,
+) {
+    editor.place_block(&wall_mats.wall_block, pos).await;
+}
+
+/// Place a single pillar block at the given position.
+/// Used for corner posts and gable wall edges.
+pub async fn place_pillar_block(
+    editor: &Editor,
+    pos: Point3D,
+    wall_mats: &WallMaterials,
+) {
+    editor.place_block(&wall_mats.pillar_block, pos).await;
+}
 
 /// Places corner posts (vertical columns) at each footprint vertex.
 /// Posts extend from base_y to the top of the building.
@@ -45,12 +96,19 @@ pub async fn place_wall_segment(
     materials: &HashMap<MaterialId, Material>,
     rng: &mut RNG,
 ) {
-    let wall_block = palette
-        .get_block(MaterialRole::PrimaryWall, &BlockForm::Block, materials, rng)
-        .cloned()
-        .unwrap_or_else(|| BlockID::from("stone_bricks"));
+    let wall_mats = WallMaterials::from_palette(palette, materials, rng);
+    place_wall_segment_with_materials(segment, floor_y, wall_height, editor, &wall_mats).await;
+}
 
-    let block = Block::from(wall_block);
+/// Places wall blocks for a single wall segment using pre-resolved materials.
+/// Use this when you need to place multiple segments with the same materials.
+pub async fn place_wall_segment_with_materials(
+    segment: &WallSegment,
+    floor_y: i32,
+    wall_height: i32,
+    editor: &Editor,
+    wall_mats: &WallMaterials,
+) {
     let positions = segment.positions();
 
     // Skip first and last positions (corners are handled by corner posts)
@@ -66,7 +124,7 @@ pub async fn place_wall_segment(
             }
 
             let pos = pos_2d.add_y(floor_y + y_offset);
-            editor.place_block(&block, pos).await;
+            place_wall_block(editor, pos, wall_mats).await;
         }
     }
 }
@@ -94,6 +152,30 @@ pub async fn place_walls(
             )
             .await;
         }
+    }
+}
+
+/// Place a gable wall block at the given position.
+/// Uses pillar blocks at edges (is_edge=true) and wall blocks elsewhere.
+/// Skips the crossbar level (skip_y) to avoid overriding timber frame crossbars.
+pub async fn place_gable_wall_block(
+    editor: &Editor,
+    pos: Point3D,
+    is_edge: bool,
+    skip_y: Option<i32>,
+    wall_mats: &WallMaterials,
+) {
+    // Skip if this is the crossbar level
+    if let Some(crossbar_y) = skip_y {
+        if !is_edge && pos.y == crossbar_y {
+            return;
+        }
+    }
+
+    if is_edge {
+        place_pillar_block(editor, pos, wall_mats).await;
+    } else {
+        place_wall_block(editor, pos, wall_mats).await;
     }
 }
 
@@ -140,7 +222,45 @@ pub async fn place_floors(
     }
 }
 
-/// Places a complete building frame (corners, walls, floors, doors, windows).
+/// Places horizontal pillar crossbars at the top of each floor's walls for a timber frame look.
+/// Crossbars run along each wall segment at the ceiling level.
+pub async fn place_wall_crossbars(
+    frame: &Frame,
+    editor: &Editor,
+    palette: &Palette,
+    materials: &HashMap<MaterialId, Material>,
+    rng: &mut RNG,
+) {
+    let pillar_block = palette
+        .get_block(MaterialRole::WoodPillar, &BlockForm::Block, materials, rng)
+        .cloned()
+        .unwrap_or_else(|| BlockID::from("oak_log"));
+
+    for floor in 0..frame.floors {
+        let ceiling_y = frame.ceiling_y(floor) - 1;
+
+        for segment in frame.wall_segments() {
+            let positions = segment.positions();
+
+            // Determine axis along the wall direction
+            let axis = if segment.is_x_aligned() { "x" } else { "z" };
+            let mut state = HashMap::new();
+            state.insert("axis".to_string(), axis.to_string());
+            let block = Block::new(pillar_block.clone(), Some(state), None);
+
+            // Skip first and last positions (corners are handled by corner posts)
+            for (i, pos_2d) in positions.iter().enumerate() {
+                if i == 0 || i == positions.len() - 1 {
+                    continue;
+                }
+
+                editor.place_block(&block, pos_2d.add_y(ceiling_y)).await;
+            }
+        }
+    }
+}
+
+/// Places a complete building frame (corners, walls, floors, doors, windows, wall crossbars).
 pub async fn place_frame(
     frame: &Frame,
     editor: &Editor,
@@ -149,6 +269,7 @@ pub async fn place_frame(
     rng: &mut RNG,
 ) {
     place_corner_posts(frame, editor, palette, materials, rng).await;
+    place_wall_crossbars(frame, editor, palette, materials, rng).await;
     place_walls(frame, editor, palette, materials, rng).await;
     place_floors(frame, editor, palette, materials, rng).await;
     place_doors(frame, editor, palette, materials, rng).await;
