@@ -11,6 +11,16 @@ use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 
 const PROVIDER_LOG_LIMIT : usize = 300;
 
+/// Try to gunzip bytes. Returns decompressed data on success, or the original bytes if not gzip.
+fn try_gunzip(bytes: &[u8]) -> Vec<u8> {
+    let mut decoder = GzDecoder::new(bytes);
+    let mut buf = vec![];
+    match decoder.read_to_end(&mut buf) {
+        std::result::Result::Ok(_) => buf,
+        Err(_) => bytes.to_vec(),
+    }
+}
+
 
 #[derive(Debug, Clone)]
 pub struct GDMCHTTPProvider {
@@ -159,24 +169,16 @@ impl GDMCHTTPProvider {
             .await?;
 
         let raw_bytes = response.bytes().await?;
-        let mut decoder = GzDecoder::new(&raw_bytes[..]);
-        let mut buf = vec![];
-        decoder.read_to_end(&mut buf)?;
-        debug!("Decompressed {} bytes from chunk data", buf.len());
+        let data = try_gunzip(&raw_bytes);
+        debug!("Chunk data: {} bytes (gzip: {})", data.len(), data.len() != raw_bytes.len());
 
-        if let std::result::Result::Ok(chunks) = fastnbt::from_bytes::<Chunks>(&buf) {
-            debug!("Decompressed NBT value: {:?}", chunks);
+        if let std::result::Result::Ok(chunks) = fastnbt::from_bytes::<Chunks>(&data) {
             return Ok(chunks.chunks);
         }
 
-        let mut decoder = GzDecoder::new(buf.as_slice());
-        let mut buf = vec![];
-        decoder.read_to_end(&mut buf)?;
-        debug!("Decompressed {} bytes from NBT data", buf.len());
-
-        let chunks : Chunks = fastnbt::from_bytes(&buf)?;
-        debug!("Decompressed NBT value: {:?}", chunks);
-
+        // Some responses are double-gzipped
+        let data2 = try_gunzip(&data);
+        let chunks: Chunks = fastnbt::from_bytes(&data2)?;
         Ok(chunks.chunks)
     }
 
@@ -233,20 +235,15 @@ impl GDMCHTTPProvider {
             .await?;
 
         let raw_bytes = response.bytes().await?;
-        let mut decoder = GzDecoder::new(&raw_bytes[..]);
-        let mut buf = vec![];
-        decoder.read_to_end(&mut buf)?;
-        debug!("Decompressed {} bytes from chunk data", buf.len());
+        let data = try_gunzip(&raw_bytes);
 
-        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&buf) {
+        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&data) {
             return Ok(val);
         }
 
-        let mut decoder = GzDecoder::new(buf.as_slice());
-        let mut buf = vec![];
-        decoder.read_to_end(&mut buf)?;
-        
-        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&buf) {
+        // Some responses are double-gzipped
+        let data2 = try_gunzip(&data);
+        if let std::result::Result::Ok(val) = fastnbt::from_bytes::<NBTStructure>(&data2) {
             return Ok(val);
         }
 

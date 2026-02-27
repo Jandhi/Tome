@@ -99,7 +99,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
         let woods = superdistrict_data.biome_count().keys().into_iter()
             .map(|biome| {
                 println!("Processing biome: {:?}", biome);
-                BiomeWoodtype::from_biome(*biome)
+                BiomeWoodtype::from_biome(biome.clone())
                     .map(|wood_type| 
                         data.borrow().palettes.get(&wood_type.get_wood_palette_id())
                             .expect("Wood palette not found")
@@ -111,7 +111,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
         let stones = superdistrict_data.biome_count().into_iter()
             .max_by_key(|item| item.1)
             .map(|(biome, _)| 
-                BiomeStonetype::from_biome(*biome)
+                BiomeStonetype::from_biome(biome.clone())
                     .into_iter()
                     .map(|stone_type| 
                         stone_type.get_stone_palette_ids().iter().map(|id| 
@@ -128,7 +128,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     }
     
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
-    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect(), PavingType::from_biome(settlement_info.top_three_biomes[0])).await;
+    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect(), PavingType::from_biome(settlement_info.top_three_biomes[0].clone())).await;
 
     let sets = data.borrow().building_sets.iter().filter(|(_, set)| {
         set.style == style
@@ -216,9 +216,9 @@ enum PavingType {
 
 impl PavingType {
     fn from_biome(biome : Biome) -> Self {
-        match biome {
-            Biome::Desert | Biome::DesertHills | Biome::DesertLakes | Biome::Beach => PavingType::Sandstone,
-            Biome::Badlands | Biome::ErodedBadlands | Biome::WoodedBadlands | Biome::Savanna | Biome::SavannaPlateau | Biome::ShatteredSavanna | Biome::ShatteredSavannaPlateau => PavingType::RedSandstone,
+        match biome.name() {
+            "desert" | "desert_hills" | "desert_lakes" | "beach" => PavingType::Sandstone,
+            "badlands" | "eroded_badlands" | "wooded_badlands" | "savanna" | "savanna_plateau" | "shattered_savanna" | "shattered_savanna_plateau" => PavingType::RedSandstone,
             _ => PavingType::Stone,
         }
     }

@@ -3,7 +3,7 @@ use openai::{chat::{ChatCompletion, ChatCompletionMessage, ChatCompletionMessage
 use schemars::schema_for;
 use serde::Deserialize;
 
-pub async fn get_ai_message(system :&str, user:&str) -> String {
+pub async fn get_ai_message(system :&str, user:&str) -> anyhow::Result<String> {
     // Relies on OPENAI_KEY and optionally OPENAI_BASE_URL.
     let credentials = Credentials::from_env();
     let messages = vec![
@@ -13,13 +13,14 @@ pub async fn get_ai_message(system :&str, user:&str) -> String {
     let chat_completion = ChatCompletion::builder("gpt-4o", messages.clone())
         .credentials(credentials.clone())
         .create()
-        .await
-        .unwrap();
-    let returned_message = chat_completion.choices.first().unwrap().message.clone();
+        .await?;
+    let returned_message = chat_completion.choices.first()
+        .ok_or_else(|| anyhow::anyhow!("No choices returned from AI"))?.message.clone();
 
-    let content = returned_message.content.unwrap();
+    let content = returned_message.content
+        .ok_or_else(|| anyhow::anyhow!("AI returned empty content"))?;
     let string_content = content.trim();
-    string_content.to_string()
+    Ok(string_content.to_string())
 }
 
 pub fn extract_json(response : &str) -> Option<String> {
@@ -36,10 +37,16 @@ pub fn extract_json(response : &str) -> Option<String> {
     None
 }
 
-pub async fn try_ai_json<T>(query : &str) -> Option<T> 
+pub async fn try_ai_json<T>(query : &str) -> Option<T>
 where T: for<'de> Deserialize<'de> + schemars::JsonSchema {
     let schema = serde_json::to_string_pretty(&schema_for!(T)).unwrap();
-    let response = get_ai_message(&format!("You are a helpful assistant. Format your response in JSON according to the following schema: {}. Do NOT include the schema in the response.", schema), query).await;
+    let response = match get_ai_message(&format!("You are a helpful assistant. Format your response in JSON according to the following schema: {}. Do NOT include the schema in the response.", schema), query).await {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("AI request failed: {e}");
+            return None;
+        }
+    };
 
     info!("AI Response: {}", response);
 
