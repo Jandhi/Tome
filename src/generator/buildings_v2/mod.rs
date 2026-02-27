@@ -23,5 +23,6 @@ pub use generate::{
 };
 pub use roof::{
     RoofType, RoofPitch, RoofConfig, Roof, RoofRules, GableConfig, HipConfig, GableDecoration,
-    place_roof, place_hip_roof, place_gable_roof, place_gable_walls, place_gable_decorations, generate_roof,
+    place_roof, place_hip_roof, place_gable_roof, place_gable_walls, place_gable_decorations,
+    place_composite_hip_roof, place_composite_gable_roof, generate_roof,
 };

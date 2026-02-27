@@ -2,6 +2,7 @@ mod hip;
 mod gable;
 mod x_decoration;
 mod overshoot;
+mod composite;
 
 use std::collections::HashMap;
 
@@ -15,6 +16,7 @@ use super::frame::Frame;
 
 pub use hip::place_hip_roof;
 pub use gable::{place_gable_roof, place_gable_walls, place_gable_decorations};
+pub use composite::{place_composite_hip_roof, place_composite_gable_roof};
 
 /// Type of roof geometry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,25 +143,21 @@ impl Roof {
     }
 }
 
-/// Rules for automatic roof generation.
+/// Rules for roof generation.
 #[derive(Debug, Clone)]
 pub struct RoofRules {
-    /// Preferred roof type for square-ish buildings.
-    pub preferred_type: RoofType,
-    /// Aspect ratio threshold: if width/depth ratio > this, use gable roof.
-    /// Default: 1.5 (buildings that are 1.5x longer than wide get gable roofs).
-    pub gable_threshold: f32,
-    /// Configuration for gable roofs.
+    /// Roof type to generate.
+    pub roof_type: RoofType,
+    /// Configuration for gable roofs (used when roof_type is Gable).
     pub gable: GableConfig,
-    /// Configuration for hip roofs.
+    /// Configuration for hip roofs (used when roof_type is Hip).
     pub hip: HipConfig,
 }
 
 impl Default for RoofRules {
     fn default() -> Self {
         Self {
-            preferred_type: RoofType::Hip,
-            gable_threshold: 1.5,
+            roof_type: RoofType::Hip,
             gable: GableConfig::default(),
             hip: HipConfig::default(),
         }
@@ -168,27 +166,9 @@ impl Default for RoofRules {
 
 /// Generate a roof for a frame based on rules.
 pub fn generate_roof(frame: &Frame, rules: &RoofRules) -> Roof {
-    let (bounds_min, bounds_max) = frame.footprint.bounds().unwrap();
-    let width = (bounds_max.x - bounds_min.x + 1) as f32;
-    let depth = (bounds_max.y - bounds_min.y + 1) as f32; // Point2D.y is Z
-
-    let aspect_ratio = if width > depth {
-        width / depth
-    } else {
-        depth / width
-    };
-
-    // Long rectangular buildings always get gable roofs (ridge along longest axis)
-    // Square-ish buildings use the preferred type
-    let roof_type = if aspect_ratio > rules.gable_threshold {
-        RoofType::Gable
-    } else {
-        rules.preferred_type
-    };
-
     let base_y = frame.roof_base_y() - 1;
 
-    match roof_type {
+    match rules.roof_type {
         RoofType::Gable => Roof::gable(base_y, rules.gable.clone()),
         RoofType::Hip => Roof::hip(base_y, rules.hip.clone()),
     }

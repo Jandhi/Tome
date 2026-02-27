@@ -7,7 +7,9 @@ mod tests {
         editor::World,
         generator::{
             buildings_v2::{
-                DoorRules, Footprint, Frame, GableConfig, GableDecoration, Opening, RoofPitch, RoofRules, RoofType, WindowRules, add_doors_to_frame, add_windows_to_frame, generate_roof, place_frame, place_gable_decorations, place_gable_walls, place_roof
+                DoorRules, Footprint, Frame, GableConfig, GableDecoration, Opening, RoofPitch, RoofRules, RoofType, WindowRules,
+                add_doors_to_frame, add_windows_to_frame, generate_roof, place_frame, place_gable_decorations, place_gable_walls,
+                place_roof, place_composite_hip_roof, place_composite_gable_roof
             },
             materials::Material,
         },
@@ -212,7 +214,7 @@ mod tests {
             let roof = if i == 0 {
                 // First building: Medium pitch gable with overhang (shows decorative upside-down stairs)
                 let rules = RoofRules {
-                    preferred_type: RoofType::Gable,
+                    roof_type: RoofType::Gable,
                     gable: GableConfig {
                         pitch: RoofPitch::Medium,
                         overhang: 1,
@@ -224,7 +226,7 @@ mod tests {
             } else if i == 1 {
                 // Second building: Steep pitch gable with overhang (shows decorative upside-down stairs)
                 let rules = RoofRules {
-                    preferred_type: RoofType::Gable,
+                    roof_type: RoofType::Gable,
                     gable: GableConfig {
                         pitch: RoofPitch::Steep,
                         overhang: 1,
@@ -236,7 +238,7 @@ mod tests {
             } else {
                 // Third building: Shallow pitch gable (no decorative stairs - uses slabs)
                 let rules = RoofRules {
-                    preferred_type: RoofType::Gable,
+                    roof_type: RoofType::Gable,
                     gable: GableConfig {
                         pitch: RoofPitch::Shallow,
                         overhang: 1,
@@ -305,7 +307,7 @@ mod tests {
             );
 
             let roof_rules = RoofRules {
-                preferred_type: RoofType::Gable,
+                roof_type: RoofType::Gable,
                 gable: GableConfig {
                     pitch,
                     overhang: 1,
@@ -359,9 +361,9 @@ mod tests {
         let depths = [6, 8, 10];
 
         let roof_rules = RoofRules {
-            preferred_type: RoofType::Gable,
+            roof_type: RoofType::Gable,
             gable: GableConfig {
-                pitch: RoofPitch::Medium,
+                pitch: RoofPitch::Steep,
                 overhang: 1,
                 decoration: GableDecoration::X,
             },
@@ -417,43 +419,59 @@ mod tests {
 
         let mut rng = RNG::new(1234);
 
-        // Create two overlapping rectangles forming an L-shape:
-        //     +------+
-        //     |  B   |
-        // +---+--+   |
-        // | A    |   |
-        // +------+---+
-        let offset = Point2D::new(midpoint.x - 8, midpoint.y - 6);
-        let rect_a = Footprint::rectangle(offset, 10, 6);  // horizontal part
-        let rect_b = Footprint::rectangle(
-            Point2D::new(offset.x + 4, offset.y + 3),
-            8,
-            8,
-        );  // vertical part overlapping
+        // Place two L-shaped buildings side by side: hip roof (left) and gable roof (right)
 
-        // Get the outer edges of the combined shape
-        let outer_edges = rect_a.outer_edges_with(&rect_b);
-        info!("L-shape has {} outer edges", outer_edges.len());
+        // === First building: Hip roof ===
+        let offset1 = Point2D::new(midpoint.x - 20, midpoint.y - 6);
+        let rect_a1 = Footprint::rectangle(offset1, 10, 6);
+        let rect_b1 = Footprint::rectangle(Point2D::new(offset1.x, offset1.y), 8, 8);
 
-        // Create footprint from the outer boundary vertices
-        let vertices: Vec<Point2D> = outer_edges.iter().map(|(start, _)| *start).collect();
-        let l_footprint = Footprint::new(vertices);
+        let outer_edges1 = rect_a1.outer_edges_with(&rect_b1);
+        let vertices1: Vec<Point2D> = outer_edges1.iter().map(|(start, _)| *start).collect();
+        let l_footprint1 = Footprint::new(vertices1);
+        let frame1 = Frame::new(l_footprint1, ground_y, 4, 1);
 
-        // Create frame from the L-shaped footprint
-        let frame = Frame::new(l_footprint, ground_y, 4, 1);
+        let rectangles1 = vec![rect_a1, rect_b1];
+        let roof_base_y1 = frame1.roof_base_y() - 1;
 
-        // Generate a hip roof (works better for non-rectangular shapes)
-        let roof_rules = RoofRules {
-            preferred_type: RoofType::Hip,
-            ..RoofRules::default()
-        };
-        let roof = generate_roof(&frame, &roof_rules);
+        place_composite_hip_roof(
+            &rectangles1,
+            roof_base_y1,
+            RoofPitch::Medium,
+            1,
+            &editor,
+            &palette,
+            &materials,
+            &mut rng,
+        ).await;
+        place_frame(&frame1, &editor, &palette, &materials, &mut rng).await;
 
-        // Place roof first, then frame walls (so walls overwrite any roof overlap)
-        place_roof(&roof, &frame.footprint, &editor, &palette, &materials, &mut rng).await;
-        place_frame(&frame, &editor, &palette, &materials, &mut rng).await;
+        // === Second building: Gable roof ===
+        let offset2 = Point2D::new(midpoint.x + 5, midpoint.y - 6);
+        let rect_a2 = Footprint::rectangle(offset2, 10, 6);
+        let rect_b2 = Footprint::rectangle(Point2D::new(offset2.x, offset2.y), 8, 8);
 
-        info!("L-shaped building placed successfully with {} walls", frame.wall_segments().len());
+        let outer_edges2 = rect_a2.outer_edges_with(&rect_b2);
+        let vertices2: Vec<Point2D> = outer_edges2.iter().map(|(start, _)| *start).collect();
+        let l_footprint2 = Footprint::new(vertices2);
+        let frame2 = Frame::new(l_footprint2, ground_y, 4, 1);
+
+        let rectangles2 = vec![rect_a2, rect_b2];
+        let roof_base_y2 = frame2.roof_base_y() - 1;
+
+        place_composite_gable_roof(
+            &rectangles2,
+            roof_base_y2,
+            RoofPitch::Medium,
+            1,
+            &editor,
+            &palette,
+            &materials,
+            &mut rng,
+        ).await;
+        place_frame(&frame2, &editor, &palette, &materials, &mut rng).await;
+
+        info!("L-shaped buildings placed: hip (left) and gable (right)");
         editor.flush_buffer().await;
     }
 }
