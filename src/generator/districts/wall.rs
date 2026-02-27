@@ -1,12 +1,11 @@
 use std::{collections::{HashMap, HashSet}, env, hash::Hash};
-use std::path::Path;
 use log::info;
-use crate::{editor::World, generator::{buildings::walls::Wall, districts::{build_wall_gate, wall}, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_outer_points, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D, EAST_2D, NORTH_2D}, minecraft::{Block, BlockForm, BlockID}, noise::{Seed, RNG}};
+use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 
 pub const WALL_HEIGHT: i32 = 10; // optimal height of wall, will change based on smoothing and heightmap
-pub const WATER_CHECK: usize = 5;
+pub const _WATER_CHECK: usize = 5;
 pub const RANGE: i32 = 3;  // range for walkway flattening
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,7 +21,7 @@ pub fn get_wall_points(
     inner_points: &HashSet<Point2D>,
     editor: &mut Editor,
 ) -> (HashSet<Point2D>) {
-    let mut wall_points = get_outer_points(inner_points);
+    let mut wall_points = get_edge(inner_points);
 
     // Collect points to remove to avoid mutating while iterating
     let mut to_remove = Vec::new();
@@ -119,6 +118,7 @@ pub fn order_wall_points(
 
 pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, wall_type: WallType) {
     let wall_points = get_wall_points(urban_points, editor);
+    println!("[Wall] Found {} wall points", wall_points.len());
     let ordered_wall_points = order_wall_points(&wall_points);
 
     for wall_point_list in ordered_wall_points {
@@ -540,7 +540,8 @@ pub async fn flatten_walkway(
             updated_walkway_heights.insert(point, height.round() + 0.49);
         } else if (frac_height > 0.5) && (frac_height <= 0.75) {
             //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
-            material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, None, None).await;
+            let state = HashMap::from([("type".to_string(), "top".to_string())]);
+            material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, Some(&state), None).await;
             updated_walkway_heights.insert(point, height.round() - 0.51);
         }
     }

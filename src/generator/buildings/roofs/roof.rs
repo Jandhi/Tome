@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_nbt, place_structure, Structure, StructureId}, style::Style}, geometry::{Cardinal, Point3D, NORTH, UP, WEST}, minecraft::BlockID, noise::RNG};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_structure, Structure, StructureId}, style::Style}, geometry::{Cardinal, Point3D, UP}, noise::RNG};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoofSetId(pub String);
@@ -73,12 +73,11 @@ impl Loadable<'_, RoofComponent, StructureId> for RoofComponent {
     }
 }
 
-pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &BuildingData, rng : &mut RNG) -> anyhow::Result<()> {
+pub async fn build_roof(editor: &Editor, data: &LoadedData, building: &BuildingData, roof_set: &RoofSetId, rng: &mut RNG) -> anyhow::Result<()> {
     let mut placer_rng = rng.derive();
     let mut placer = Placer::new(&data.materials, &mut placer_rng);
 
-    let sets = data.roof_sets.values().filter(|set| set.style == building.style).collect::<Vec<_>>();
-    let roof_set = rng.choose(&sets);
+    let roof_set = data.roof_sets.get(roof_set).expect("Roof set not found");
 
     let side = data.roof_components.get(&roof_set.side).expect("Roof set should have a side component");
     let corner = data.roof_components.get(&roof_set.corner).expect("Roof set should have a corner component");
@@ -99,8 +98,6 @@ pub async fn build_roof(editor: &mut Editor, data: &LoadedData, building : &Buil
 
         for direction in Cardinal::iter() {
             let mut offset = building.grid.get_door_world_position(*cell + UP, direction.rotate_left());
-            
-
 
             if !neighbours[&direction] && !neighbours[&direction.rotate_left()] {
                 offset += Point3D::from(direction) * (match direction {

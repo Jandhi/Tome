@@ -1,10 +1,10 @@
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, hash::Hash};
+    use std::collections::HashSet;
     use std::collections::HashMap;
     use log::info;
-    use schemars::gen;
+    
 
     use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::districts::plant_forest,  geometry::{Point2D, Point3D}};
 
@@ -95,8 +95,6 @@ mod tests {
             ("minecraft:birch_leaves[persistent=true]".to_string(), 5.0),
         ].into_iter().collect();
         palette.insert("leaves".to_string(), leaves);
-
-        let point = Point3D::new(0, 0, 0);
 
         generate_tree(Tree::SmallBirch, &mut editor, Point3D::new(100, 0, 0), &mut rng, &palette).await;
         generate_tree(Tree::MediumBirch, &mut editor, Point3D::new(100, 0, 10), &mut rng, &palette).await;

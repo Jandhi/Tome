@@ -15,6 +15,14 @@ impl Block {
     pub fn new(id: BlockID, state: Option<HashMap<String, String>>, data: Option<String>) -> Self {
         Block { id, state, data }
     }
+
+    pub fn from_id(id: BlockID) -> Self {
+        Block {
+            id,
+            state: None,
+            data: None,
+        }
+    }
 }
 
 impl From<BlockID> for Block {
@@ -31,6 +39,16 @@ impl From<&BlockID> for Block {
     fn from(id: &BlockID) -> Self {
         Block {
             id: id.clone(),
+            state: None,
+            data: None,
+        }
+    }
+}
+
+impl From<&str> for Block {
+    fn from(s: &str) -> Self {
+        Block {
+            id: s.into(),
             state: None,
             data: None,
         }

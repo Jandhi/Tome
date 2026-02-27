@@ -7,7 +7,7 @@ mod tests {
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::Biome;
-    use crate::minecraft::{Block, BlockID};
+    use crate::minecraft::Block;
     use crate::util::init_logger;
 
     #[tokio::test]
@@ -21,7 +21,7 @@ mod tests {
         let mut editor = world.get_editor();
 
         let block = Block {
-            id: BlockID::Stone,
+            id: "stone".into(),
             data: None,
             state: None,
         };
@@ -78,6 +78,30 @@ mod tests {
                 let block = world.get_block(Point3D::new(x, height, z));
                 let point = Point3D::new(x, height, z) + world.build_area.origin;
                 println!("Block at ({:?}) height:{} {:?}", point, height, block);
+                //assert_ne!(block.unwrap().id, BlockID::Unknown, "Block should not be unknown");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_surface_blocks() {
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let world = World::new(&provider).await.expect("Failed to create world");
+
+        let mut editor = world.get_editor();
+
+        println!("Build area: {:?}", build_area);
+        for x in 0..build_area.length() {
+            for z in 0..build_area.width() {
+                let height = editor.world().get_height_at(Point2D::new(x, z)) - 1;
+                let block = editor.world().get_block(Point3D::new(x, height, z));
+                let point = Point3D::new(x, height, z) + editor.world().build_area.origin;
+                let new_point = Point3D::new(x, 200, z);
+                println!("Block at ({:?}) height:{} {:?}", point, height, block);
+                editor.place_block( &block.unwrap(), new_point).await;
                 //assert_ne!(block.unwrap().id, BlockID::Unknown, "Block should not be unknown");
             }
         }

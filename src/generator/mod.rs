@@ -4,8 +4,10 @@ pub mod materials;
 pub mod terrain;
 pub mod nbts;
 pub mod buildings;
+pub mod buildings_v2;
 pub mod data;
 pub mod paths;
 pub mod style;
+pub mod chronicle;
 
 pub use build_claim::BuildClaim;

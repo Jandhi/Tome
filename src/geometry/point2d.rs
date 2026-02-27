@@ -83,6 +83,8 @@ impl From<Cardinal> for Point2D {
 }
 
 impl Point2D {
+    pub const ZERO: Point2D = Point2D { x: 0, y: 0 };
+
     pub fn new(x: i32, y: i32) -> Self {
         Point2D { x, y }
     }
@@ -91,6 +93,10 @@ impl Point2D {
         let dx = (self.x - other.x).pow(2) as f64;
         let dy = (self.y - other.y).pow(2) as f64;
         (dx + dy).sqrt()
+    }
+
+    pub fn distance_manhattan(&self, other: &Point2D) -> i32 {
+        (self.x - other.x).abs() + (self.y - other.y).abs()
     }
 
     pub fn distance_squared(&self, other: &Point2D) -> i32 {

@@ -1,6 +1,6 @@
-use std::{collections::HashSet, hash::Hash};
+use std::collections::HashSet;
 
-use crate::geometry::{Point2D, ALL_8, CARDINALS_2D};
+use crate::geometry::{Cardinal, Point2D, ALL_8, CARDINALS_2D};
 
 pub fn get_neighbours_in_set(point: Point2D, points: &HashSet<Point2D>) -> Vec<Point2D> {
     point.neighbours()
@@ -17,7 +17,7 @@ pub fn get_neighbours_not_in_set(point: Point2D, points: &HashSet<Point2D>) -> V
 }
 
 
-pub fn get_outer_points(points: &HashSet<Point2D>) -> (HashSet<Point2D>) {
+pub fn get_edge(points: &HashSet<Point2D>) -> HashSet<Point2D> {
     points.iter()
         .filter(|point| {
             point.neighbours()
@@ -28,8 +28,62 @@ pub fn get_outer_points(points: &HashSet<Point2D>) -> (HashSet<Point2D>) {
         .collect()
 }
 
+pub fn get_outer_edge(points : &HashSet<Point2D>) -> HashSet<Point2D> {
+    points.iter()
+        .flat_map(|point| {
+            point.neighbours()
+                .iter()
+                .filter(|neighbour| !points.contains(neighbour))
+                .map(|neighbour| *neighbour)
+                .collect::<HashSet<Point2D>>()
+        })
+        .collect::<HashSet<Point2D>>()
+}
+
+pub fn get_ordered_edge(points: &HashSet<Point2D>) -> Vec<Point2D> {
+    if points.len() < 3 {
+        return points.iter().cloned().collect();
+    }
+
+    let mut point = points.iter().next().expect("Points set should not be empty").clone();
+
+    while points.contains(&(point + Cardinal::North.into())) {
+        point += Cardinal::North.into();
+    }
+
+    let mut direction = Cardinal::North.rotate_right();
+    let mut ordered_points = vec![point];
+
+    loop {
+        if points.contains(&(point + direction.into() + direction.rotate_left().into())) {
+            point = point + direction.into() + direction.rotate_left().into();
+            direction = direction.rotate_left();
+
+            if ordered_points.contains(&point) {
+                break;
+            } else {
+                ordered_points.push(point);
+            }
+            
+        } else if points.contains(&(point + direction.into())) {
+            point = point + direction.into();
+        
+            if ordered_points.contains(&point) {
+                break;
+            } else {
+                ordered_points.push(point);
+            }
+
+        } else {
+            direction = direction.rotate_right();
+        }
+    }
+
+    ordered_points
+}
+
 pub fn get_outer_and_inner_points(points: &HashSet<Point2D>, distance: u32) -> (HashSet<Point2D>, HashSet<Point2D>) {
-    let mut outer_points = get_outer_points(points);
+    let mut outer_points = get_edge(points);
     let mut visited = outer_points.clone();
     let mut queue = outer_points.iter().map(|p| (*p, 0 as u32)).collect::<Vec<_>>();
 
@@ -39,7 +93,7 @@ pub fn get_outer_and_inner_points(points: &HashSet<Point2D>, distance: u32) -> (
             continue;
         }
 
-        for direction in CARDINALS_2D {
+        for direction in CARDINALS_2D { 
             let neighbour = point + direction;
             if !points.contains(&neighbour) {
                 continue;

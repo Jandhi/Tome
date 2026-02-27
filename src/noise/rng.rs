@@ -17,8 +17,8 @@ pub struct RNG {
 }
 
 impl RNG {
-    pub fn new(seed: Seed) -> Self {
-        RNG { seed, state: 0 }
+    pub fn new(seed: impl Into<Seed>) -> Self {
+        RNG { seed: seed.into(), state: 0 }
     }
 
     pub fn derive(&mut self) -> RNG {
@@ -82,6 +82,30 @@ impl RNG {
         &options[index]
     }
 
+    // Choose multiple items from a slice, removing them from the options as they are chosen.
+    // If count is greater than the number of options, it will return all options.
+    pub fn choose_many<'a, T>(&mut self, options: &'a [T], count: usize) -> Vec<&'a T> 
+    {
+        if count == 0 || options.is_empty() {
+            return Vec::new();
+        }
+
+        if count >= options.len() {
+            return options.iter().collect();
+        }
+
+        let mut options = options.iter().collect::<Vec<_>>();
+
+        let mut chosen = Vec::with_capacity(count);
+
+        for _ in 0..count {
+            let index = self.rand_i32(options.len() as i32) as usize;
+            chosen.push(options.remove(index));
+        }
+
+        chosen
+    }
+
     pub fn pop<T>(&mut self, options: &mut Vec<T>) -> Option<T> {
         if options.is_empty() {
             return None;
@@ -92,6 +116,18 @@ impl RNG {
 
     pub fn choose_weighted<'map, T>(&mut self, options: &'map HashMap<T, f32>) -> &'map T {
         let total_weight: f32 = options.values().sum();
+        let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
+        for (item, weight) in options.iter() {
+            if rand_value < *weight {
+                return item;
+            }
+            rand_value -= weight;
+        }
+        unreachable!()
+    }
+
+    pub fn choose_weighted_vec<'map, T>(&mut self, options: &'map Vec<(T, f32)>) -> &'map T {
+        let total_weight: f32 = options.iter().map(|(_, weight)| *weight).sum();
         let mut rand_value = self.rand_i32(100000) as f32 / 100000.0 * total_weight;
         for (item, weight) in options.iter() {
             if rand_value < *weight {
@@ -139,7 +175,7 @@ impl RNG {
         rand_value < percent
     }
 
-    pub fn shuffle(&mut self, items : &mut [i32]) {
+    pub fn shuffle<T>(&mut self, items : &mut [T]) {
         let len = items.len();
         for i in (1..len).rev() {
             let j = self.rand_i32(i as i32) as usize;

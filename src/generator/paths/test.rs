@@ -1,10 +1,8 @@
 #[cfg(test)]
 mod tests {
     use lerp::num_traits::Signed;
-    use log::info;
-
-    use crate::{editor::{self, World}, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::{Path, PathPriority}, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::init_logger};
-use std::{sync::Mutex, time::Instant};
+    use crate::{editor::World, generator::{data::LoadedData, materials::MaterialId, paths::{a_star, building::build_path, path::PathPriority, routing::{get_path, route_path}}}, geometry::Point3D, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_a_star() {
@@ -31,14 +29,14 @@ use std::{sync::Mutex, time::Instant};
                     vec
                 }).collect()
             },
-            |prev_cost, node| {
+            |prev_cost, _| {
                 prev_cost + 1
             },
             |node| {
                 let (x, y) = *node.last().unwrap();
                 ((target.0 - x).abs() + (target.1 - y).abs()) as u64 // Heuristic: Manhattan distance to target
             },
-            async |node| {},
+            async |_| {},
         ).await.expect("A* algorithm failed to find a path");
 
         let duration = start_time.elapsed();
@@ -64,11 +62,11 @@ use std::{sync::Mutex, time::Instant};
 
         
         let path = route_path(&editor, start, end, async |point : &Vec<Point3D>| {
-            editor2.place_block(&BlockID::PinkWool.into(), *point.iter().last().unwrap()).await
+            editor2.place_block(&"pink_wool".into(), *point.iter().last().unwrap()).await
         }).await.expect("Failed to route path");
 
         for point in path {
-            editor.place_block(&BlockID::RedWool.into(), point).await;
+            editor.place_block(&"red_wool".into(), point).await;
         }
 
         editor.flush_buffer().await;
@@ -90,7 +88,7 @@ use std::{sync::Mutex, time::Instant};
 
         
         let path = get_path(&editor, start, end, PathPriority::Medium, MaterialId::new("cobblestone".to_string()), async |_| {}).await.expect("Failed to route path");
-        let mut rng = RNG::new(42.into());
+        let mut rng = RNG::new(42);
         build_path(&mut editor, &data, &path, &mut rng).await;
 
         editor.flush_buffer().await;

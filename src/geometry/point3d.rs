@@ -75,6 +75,85 @@ impl From<Cardinal> for Point3D {
 }
 
 impl Point3D {
+    pub const ZERO: Point3D = Point3D { x: 0, y: 0, z: 0 };
+    pub const NEIGHBOURS_1_AWAY: [Point3D; 4] = [
+        Point3D { x: 1, y: 0, z: 0 },  // EAST
+        Point3D { x: -1, y: 0, z: 0 }, // WEST
+        Point3D { x: 0, y: 0, z: 1 },  // SOUTH
+        Point3D { x: 0, y: 0, z: -1 }, // NORTH
+    ];
+    pub const NEIGHBOURS_2_AWAY: [Point3D; 8] = [
+        Point3D { x: 2, y: 0, z: 0 },  // EAST
+        Point3D { x: -2, y: 0, z: 0 }, // WEST
+        Point3D { x: 0, y: 0, z: 2 },  // SOUTH
+        Point3D { x: 0, y: 0, z: -2 }, // NORTH
+        Point3D { x: 1, y: 0, z: 1 },  // SOUTHEAST
+        Point3D { x: -1, y: 0, z: -1 },// NORTHWEST
+        Point3D { x: -1, y: 0, z: 1 }, // SOUTHWEST
+        Point3D { x: 1, y: 0, z: -1 }, // NORTHEAST
+    ];
+
+    pub const NEIGHBOURS_3_AWAY : [Point3D; 12] = [
+        Point3D { x: 3, y: 0, z: 0 },  // EAST
+        Point3D { x: -3, y: 0, z: 0 }, // WEST
+        Point3D { x: 0, y: 0, z: 3 },  // SOUTH
+        Point3D { x: 0, y: 0, z: -3 }, // NORTH
+        Point3D { x: 2, y: 0, z: 1 },  // SOUTHEAST
+        Point3D { x: -2, y: 0, z: -1 },// NORTHWEST
+        Point3D { x: -2, y: 0, z: 1 }, // SOUTHWEST
+        Point3D { x: 2, y: 0, z: -1 }, // NORTHEAST
+        Point3D { x: 1, y: 0, z: 2 },  // SOUTHEAST
+        Point3D { x: -1, y: 0, z: -2 },// NORTHWEST
+        Point3D { x: -1, y: 0, z: 2 }, // SOUTHWEST
+        Point3D { x: 1, y: 0, z: -2 }, // NORTHEAST
+    ];
+
+    pub const NEIGHBOURS_4_AWAY : [Point3D; 16] = [
+        Point3D { x: 4, y: 0, z: 0 },  // EAST
+        Point3D { x: -4, y: 0, z: 0 }, // WEST
+        Point3D { x: 0, y: 0, z: 4 },  // SOUTH
+        Point3D { x: 0, y: 0, z: -4 }, // NORTH
+        Point3D { x: 3, y: 0, z: 1 },  // SOUTHEAST
+        Point3D { x: -3, y: 0, z: -1 },// NORTHWEST
+        Point3D { x: -3, y: 0, z: 1 }, // SOUTHWEST
+        Point3D { x: 3, y: 0, z: -1 }, // NORTHEAST
+        Point3D { x: 2, y: 0, z: 2 },  // SOUTHEAST
+        Point3D { x: -2, y: 0, z: -2 },// NORTHWEST
+        Point3D { x: -2, y: 0, z: 2 }, // SOUTHWEST
+        Point3D { x: 2, y: 0, z: -2 }, // NORTHEAST
+        Point3D { x: 1, y: 0, z: 3 },  // SOUTHEAST
+        Point3D { x: -1, y: 0, z: -3 },// NORTHWEST
+        Point3D { x: -1, y: 0, z: 3 }, // SOUTHWEST
+        Point3D { x: 1, y: 0, z: -3 }, // NORTHEAST
+    ];
+
+    pub const NEIGHBOURS_5_AWAY : [Point3D; 24] = [
+        Point3D { x: 5, y: 0, z: 0 },   // EAST
+        Point3D { x: -5, y: 0, z: 0 },  // WEST
+        Point3D { x: 0, y: 0, z: 5 },   // SOUTH
+        Point3D { x: 0, y: 0, z: -5 },  // NORTH
+        Point3D { x: 4, y: 0, z: 1 },   // SOUTHEAST
+        Point3D { x: -4, y: 0, z: -1 }, // NORTHWEST
+        Point3D { x: -4, y: 0, z: 1 },  // SOUTHWEST
+        Point3D { x: 4, y: 0, z: -1 },  // NORTHEAST
+        Point3D { x: 3, y: 0, z: 2 },   // SOUTHEAST
+        Point3D { x: -3, y: 0, z: -2 }, // NORTHWEST
+        Point3D { x: -3, y: 0, z: 2 },  // SOUTHWEST
+        Point3D { x: 3, y: 0, z: -2 },  // NORTHEAST
+        Point3D { x: 2, y: 0, z: 3 },   // SOUTHEAST
+        Point3D { x: -2, y: 0, z: -3 }, // NORTHWEST
+        Point3D { x: -2, y: 0, z: 3 },  // SOUTHWEST
+        Point3D { x: 2, y: 0, z: -3 },  // NORTHEAST
+        Point3D { x: 1, y: 0, z: 4 },   // SOUTHEAST
+        Point3D { x: -1, y: 0, z: -4 }, // NORTHWEST
+        Point3D { x: -1, y: 0, z: 4 },  // SOUTHWEST
+        Point3D { x: 1, y: 0, z: -4 },  // NORTHEAST
+        Point3D { x: 4, y: 0, z: 2 },   // ESE
+        Point3D { x: -4, y: 0, z: -2 }, // WNW
+        Point3D { x: 2, y: 0, z: 4 },   // SSE
+        Point3D { x: -2, y: 0, z: -4 }, // NNW
+    ];
+
     pub const fn new(x: i32, y: i32, z: i32) -> Self {
         Point3D { x, y, z }
     }
@@ -115,6 +194,10 @@ impl Point3D {
 
     pub fn rotate_right(&self) -> Point3D {
         Point3D { x: self.z, y: self.y, z: -self.x }
+    }
+    
+    pub fn with_y(&self, height: i32) -> Point3D {
+        Point3D { x: self.x, y: height, z: self.z } 
     }
 }
 

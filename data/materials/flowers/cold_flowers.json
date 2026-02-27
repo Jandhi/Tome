@@ -1,0 +1,15 @@
+{
+    "id" : "cold_flowers",
+    "connections" : {},
+    "blocks" : {
+        "flower" : {
+            "minecraft:blue_orchid" : 1.0,
+            "minecraft:allium" : 1.0,
+            "minecraft:azure_bluet" : 1.0,
+            "minecraft:white_tulip" : 1.0,
+            "minecraft:oxeye_daisy" : 1.0,
+            "minecraft:cornflower" : 1.0,
+            "minecraft:lily_of_the_valley" : 1.0
+        }
+    }
+}

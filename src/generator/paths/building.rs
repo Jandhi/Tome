@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{editor::Editor, generator::{data::LoadedData, materials::{MaterialPlacer, Placer}, paths::path::Path}, geometry::{get_surrounding_set, Point2D, Point3D, DOWN, UP}, minecraft::{BlockForm, BlockID}, noise::RNG, util::MeanExt};
+use crate::{editor::Editor, generator::{data::LoadedData, materials::{MaterialPlacer, Placer}, paths::path::Path}, geometry::{DOWN, Point2D, Point3D, UP, get_surrounding_set}, minecraft::BlockForm, noise::RNG, util::MeanExt};
 
 pub async fn build_path(
-    editor : &mut Editor,
+    editor: &Editor,
     data : &LoadedData,
     path : &Path,
     rng : &mut RNG,
@@ -81,10 +81,10 @@ pub async fn build_path(
 
         
 
-        let world_height = editor.world().get_height_at(*point);
+        let _world_height = editor.world().get_height_at(*point);
 
         for i in 0..=3 {
-            editor.place_block(&BlockID::Air.into(), point3d + UP * i).await;
+            editor.place_block(&"air".into(), point3d + UP * i).await;
         }
 
         if remainder > 0.3 {

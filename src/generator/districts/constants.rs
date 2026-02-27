@@ -8,4 +8,4 @@ pub const OFF_LIMITS_GRADIENT : f32 = 1.0;
 pub const URBAN_WATER_LIMIT: f32 = 0.33; // Maximum water percentage for urban districts
 pub const URBAN_SIZE: u32 = 3; // Number of urban districts to generate
 pub const ADJACENCY_WEIGHT: f32 = 3.0; // Weight for adjacency in district comparison scoring
-pub const URBAN_RELATIVE_TO_PRIME: f32 = 0.6; // score needed exceed to be under to be urban in relation to prime district
+pub const URBAN_RELATIVE_TO_PRIME: f32 = 0.0; // score needed exceed to be under to be urban in relation to prime district

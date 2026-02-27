@@ -1,33 +1,31 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{build_wall, WallType, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}, super_district, wall}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Block, BlockID}, noise::{Seed, RNG}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
     fn get_block_for_id(id : usize) -> Block {
-        use BlockID::*;
         // List of all 16 wool colors in order
         let wool_colors = [
-            WhiteWool, OrangeWool, MagentaWool, LightBlueWool,
-            YellowWool, LimeWool, PinkWool, GrayWool,
-            LightGrayWool, CyanWool, PurpleWool, BlueWool,
-            BrownWool, GreenWool, RedWool, BlackWool,
+            "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+            "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+            "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+            "brown_wool", "green_wool", "red_wool", "black_wool",
         ];
         Block {
-            id: wool_colors[id % wool_colors.len()],
+            id: wool_colors[id % wool_colors.len()].into(),
             data: None,
             state: None,
         }
     }
 
     fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
-        use BlockID::*;
         match district_type {
-            district::DistrictType::Urban => Block { id: BlueWool, data: None, state: None },
-            district::DistrictType::Rural => Block { id: GreenWool, data: None, state: None },
-            district::DistrictType::OffLimits => Block { id: RedWool, data: None, state: None },
-            _ => Block { id: Bedrock, data: None, state: None }, // Default case for unknown types
+            district::DistrictType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
+            district::DistrictType::Rural => Block { id: "green_wool".into(), data: None, state: None },
+            district::DistrictType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+            _ => Block { id: "bedrock".into(), data: None, state: None }, // Default case for unknown types
         }
     }
 
@@ -49,7 +47,7 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: "glass".into(),
             data: None,
             state: None,
         };
@@ -93,7 +91,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
@@ -101,12 +99,12 @@ mod tests {
         let _districts = generate_districts(seed, &mut editor).await;
 
         let glass = Block {
-            id: BlockID::Glass,
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock = Block {
-            id: BlockID::Bedrock,
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
@@ -159,19 +157,19 @@ mod tests {
 
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         println!("Build area: {:?}", build_area);
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::WorldSurface).await.expect("Failed to get heightmap");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: BlockID::Bedrock,
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
@@ -226,12 +224,12 @@ mod tests {
         println!("Build area: {:?}", build_area);
         let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
         
-        let mut world = World::new(&provider).await.expect("Failed to create world");
+        let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
         let _districts = generate_districts(seed, &mut editor).await;
         let glass = Block {
-            id: BlockID::Glass,
+            id: "glass".into(),
             data: None,
             state: None,
         };
@@ -265,6 +263,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn district_classification_district_points() {
+        init_logger();
+
+        // Initialize the test data
+        let seed = Seed(12345);
+
+        let provider = GDMCHTTPProvider::new();
+
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        println!("Build area: {:?}", build_area);
+        
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let _districts = generate_districts(seed, &mut editor).await;
+        let glass = Block {
+            id: "glass".into(),
+            data: None,
+            state: None,
+        };
+
+        // Collect district ids and their points to avoid multiple mutable borrows
+        let district_points: Vec<_> = {
+            let world = editor.world_mut();
+            world.districts.iter().map(|(district_id, district)| {
+                (*district_id, district.data.district_type, district.data.points.clone(), district.data.edges.clone())
+            }).collect()
+        };
+
+        for (_district_id, district_type, points, edges) in district_points {
+            let block = get_block_for_district_type(district_type);
+            for point in points.iter() {
+                if edges.contains(point) {
+                    editor.place_block(&glass, *point).await;
+                    editor.place_block(&block, Point3D::new(point.x, point.y - 1, point.z)).await;
+                } else {
+                    editor.place_block(&block, *point).await;
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+    }
+
+    #[tokio::test]
     async fn district_replace_ground() {
         init_logger();
 
@@ -281,12 +324,11 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
 
-        use BlockID::*;
         let block_vec : Vec<Block> = vec![
-            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
+            "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
+        ];
 
-        let block_dict: HashMap<u32, f32> = [
+        let block_dict: HashMap<usize, f32> = [
             (0, 3.0),  // Stone
             (1, 2.0),  // Cobblestone
             (2, 8.0),  // Stone Bricks
@@ -333,14 +375,13 @@ mod tests {
 
         let _districts = generate_districts(seed, &mut editor).await;
 
-        use BlockID::*;
         let block_vec : Vec<Block> = vec![
-            Stone, Cobblestone, StoneBricks, Andesite, Gravel,
-            StoneStairs, CobblestoneStairs, StoneBrickStairs, AndesiteStairs,
-            StoneSlab, CobblestoneSlab, StoneBrickSlab, AndesiteSlab,
-        ].into_iter().map(|id| Block { id, data: None, state: None }).collect();
+            "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
+            "stone_stairs".into(), "cobblestone_stairs".into(), "stone_brick_stairs".into(), "andesite_stairs".into(),
+            "stone_slab".into(), "cobblestone_slab".into(), "stone_brick_slab".into(), "andesite_slab".into(),
+        ];
 
-        let mut blocks_dict: HashMap<u32, HashMap<u32, f32>> = HashMap::new();
+        let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
 
         let block_dict = [
             (0, 3.0),  // Stone
@@ -396,7 +437,6 @@ mod tests {
 
         // Initialize the test data
         let seed = Seed(12345);
-        let mut rng = RNG::new(seed);
 
         
         let provider = GDMCHTTPProvider::new();
@@ -408,22 +448,22 @@ mod tests {
         generate_districts(seed, &mut editor).await;
 
          let glass = Block {
-            id: BlockID::Glass,
+            id: "glass".into(),
             data: None,
             state: None,
         };
         let bedrock  = Block {
-            id: BlockID::Bedrock,
+            id: "bedrock".into(),
             data: None,
             state: None,
         };
         let black_wool: Block  = Block {
-            id: BlockID::BlackWool,
+            id: "black_wool".into(),
             data: None,
             state: None,
         };
         let lime_wool: Block  = Block {
-            id: BlockID::LimeWool,
+            id: "lime_wool".into(),
             data: None,
             state: None,
         };
@@ -470,7 +510,7 @@ mod tests {
             let height = height_map[point.x as usize][point.y as usize] - build_area.origin.y;
             editor.place_block(&lime_wool, Point3D::new(point.x, height, point.y)).await;
         }
-
+        editor.flush_buffer().await;
 
     }
 
@@ -484,9 +524,7 @@ mod tests {
         let mut rng2 = RNG::new(seed);
         
         let provider = GDMCHTTPProvider::new();
-        let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
-
+        
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
         generate_districts(seed, &mut editor).await;
@@ -494,26 +532,10 @@ mod tests {
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("oak_planks".to_string());
 
-        let mut placer_rng = rng.derive();
-        // let mut placer: MaterialPlacer = MaterialPlacer::new(
-        //     Placer::new(&materials, &mut placer_rng),
-        //     material.clone(),
-        // );
         let mut placer: Placer = Placer::new(
             &materials,
-            & mut rng,
+            &mut rng,
         );
-
-        let glass = Block {
-            id: BlockID::Glass,
-            data: None,
-            state: None,
-        };
-        let bedrock  = Block {
-            id: BlockID::Bedrock,
-            data: None,
-            state: None,
-        };
 
         let structures = Structure::load().expect("Failed to load structures");
 

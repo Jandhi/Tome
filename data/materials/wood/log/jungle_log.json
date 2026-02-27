@@ -1,0 +1,7 @@
+{
+    "id" : "jungle_log",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:jungle_log"
+    }
+}

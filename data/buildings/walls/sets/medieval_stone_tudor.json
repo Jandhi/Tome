@@ -1,0 +1,11 @@
+{
+    "id" : "medieval_stone_tudor",
+    "components" : [
+        "medieval_single_door", "medieval_single_double_window", "medieval_single_wall",
+        "medieval_bottom_door", "medieval_bottom_double_windows", "medieval_bottom_end_triple_log", "medieval_bottom_long_window",
+        "medieval_bottom_single_window", "medieval_bottom",
+        "medieval_bottom_arch_supports",
+        "medieval_non_bottom_cross", "medieval_non_bottom_double_window_planter", "medieval_non_bottom_double_window",
+        "medieval_non_bottom_single_window_planter", "medieval_non_bottom_wall_v"
+    ]
+}

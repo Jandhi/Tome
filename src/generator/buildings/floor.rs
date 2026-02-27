@@ -2,9 +2,9 @@ use strum::IntoEnumIterator;
 
 use crate::{editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::{MaterialPlacer, MaterialRole, Placer}}, geometry::{Cardinal, Point2D, DOWN, X_PLUS, Z_PLUS}, minecraft::BlockForm, noise::RNG};
 
-pub async fn build_floor(editor: &mut Editor, data: &LoadedData, building: &BuildingData, rng: &mut RNG) {
+pub async fn build_floor(editor: &Editor, data: &LoadedData, building: &BuildingData, rng: &mut RNG) {
 
-    let wood_id = data.palettes.get(&building.palette).expect("Palette not found").get_material(MaterialRole::SecondaryWood).expect("Secondary wood material not found");
+    let wood_id = building.palette.get_material(MaterialRole::SecondaryWood).expect("Secondary wood material not found");
     let mut placer = MaterialPlacer::new(Placer::new(&data.materials, rng), 
         wood_id.clone()
     );
@@ -29,6 +29,13 @@ pub async fn build_floor(editor: &mut Editor, data: &LoadedData, building: &Buil
                 let point = building.grid.grid_to_world(*cell) + X_PLUS * x + Z_PLUS * z + DOWN;
                 placer.place_block(editor, point, BlockForm::Block, None, None).await;
             }
+        }
+    }
+
+    if let Some(doors) = building.shape.doors() {
+        for door in doors.iter() {
+            let point = building.grid.get_door_world_position(door.cell, door.direction);
+            placer.place_block(editor, point + DOWN, BlockForm::Block, None, None).await;
         }
     }
 }

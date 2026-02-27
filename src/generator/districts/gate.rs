@@ -4,18 +4,17 @@ use crate::generator::materials::Placer;
 use crate::generator::nbts::{place_structure, Structure, StructureId};
 use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardinal};
 use crate::noise::RNG;
-use crate::minecraft::{Block, BlockID};
 use crate::generator::BuildClaim;
 use crate::generator::districts::WallType;
-use log::{info, warn};
+use log::info;
 
 
 
 pub async fn build_wall_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
-    rng: &mut RNG,
-    material_placer: &mut Placer<'_>,
+    _rng: &mut RNG,
+    _material_placer: &mut Placer<'_>,
     is_thin: bool,
     is_palisade: bool,
     enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,
@@ -34,11 +33,7 @@ pub async fn build_wall_gate(
         .map(|set| set.iter().map(|p| p.drop_y()).collect::<HashSet<Point2D>>())
         .unwrap_or_default();
 
-    let air = Block {
-            id: BlockID::Air,
-            data: None,
-            state: None,
-    };
+    let air = "air".into();
     for (i, point) in wall_points.iter().enumerate() {
         if gate_possible == 0 {
             if is_gate_possible(*point, wall_points, gate_size, i) {
@@ -78,6 +73,7 @@ pub async fn build_wall_gate(
                     }
                     info!("Placing palisade gate at: {:?}", middle_point);
                     place_structure(editor, None, &palisade_gate, middle_point, direction, None, None, false, false).await.expect("Failed to place gate");
+                    editor.world_mut().gate_locations.push((middle_point, direction));
                     gate_possible = distance_to_next_gate;
                 } else if is_thin{
                     let middle_point = Point3D::new(wall_points[i+3].x, editor.world().get_height_at(wall_points[i+3].drop_y()), wall_points[i+3].z);
@@ -117,6 +113,7 @@ pub async fn build_wall_gate(
                     // look if mirror is working
                     info!("Placing thin gate at: {:?}", middle_point);
                     place_structure(editor, None, &thin_gate, middle_point, direction, None, None, mirror_x, false).await.expect("Failed to place gate");
+                    editor.world_mut().gate_locations.push((middle_point, direction));
                     gate_possible = distance_to_next_gate;
                 } else {
                     let enhanced_points = enhanced_wall_points.expect("Enhanced wall points should be provided for this wall type");
@@ -151,6 +148,7 @@ pub async fn build_wall_gate(
                             // look if mirror is working
                             info!("Placing wide gate at: {:?}", middle_point);
                             place_structure(editor, None, &wide_gate, middle_point.add_y(height), direction.rotate_right(), None, None, mirror_x, false).await.expect("Failed to place gate");
+                            editor.world_mut().gate_locations.push((middle_point.add_y(height), direction));
                             gate_possible = distance_to_next_gate;
                         }
                     }

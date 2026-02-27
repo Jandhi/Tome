@@ -1,7 +1,8 @@
 {
     "id" : "mangrove_planks",
     "connections" : {
-        "lighter" : "jungle_planks"
+        "lighter" : "jungle_planks",
+        "darker" : "crimson_planks"
     },
     "blocks" : {
         "block"              : "minecraft:mangrove_planks",

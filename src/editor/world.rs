@@ -4,8 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{util::point_to_chunk_coordinates, Biome, Block, BlockID, Chunk}};
-
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
 
 use super::Editor;
 
@@ -15,10 +14,13 @@ const CHUNK_SIZE : i32 = 16;
 pub struct World {
     pub build_area : Rect3D,
     pub districts : HashMap<DistrictID, District>,
+    pub district_analysis_data : HashMap<DistrictID, DistrictAnalysis>,
+    pub super_district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis>,
     pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
     pub buildings : Vec<BuildingData>,
+    pub gate_locations : Vec<(Point3D, Cardinal)>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -42,12 +44,12 @@ impl World {
 
         let district_map = vec![vec![None; size_z_usize]; size_x_usize];
         let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
-        
-        let chunk_rect = Rect3D {
-            origin: build_area.origin / CHUNK_SIZE,
-            size: build_area.last() / CHUNK_SIZE - build_area.origin / CHUNK_SIZE + Point3D::new(1, 1, 1),
-        };
 
+        let chunk_rect = Rect3D {
+            origin: point_to_chunk_coordinates(build_area.origin),
+            size: point_to_chunk_coordinates(build_area.last()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
+        };
+        println!("Chunk rect: {:?}", chunk_rect);
         info!("Loading chunks...");
         let chunks = provider
             .get_chunks(
@@ -82,7 +84,7 @@ impl World {
         let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
-        let ground_block_map = vec![vec![Block::new(BlockID::Unknown, None, None); size_z_usize]; size_x_usize];
+        let ground_block_map = vec![vec![Block::new(Default::default(), None, None); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
         let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
 
@@ -93,6 +95,7 @@ impl World {
             district_map,
             super_district_map,
             buildings: Vec::new(),
+            gate_locations: Vec::new(),
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,
@@ -100,6 +103,8 @@ impl World {
             chunks,
             ground_biome_map,
             ground_block_map,
+            district_analysis_data: HashMap::new(),
+            super_district_analysis_data: HashMap::new(),
         };
 
         let y_offset = build_area.origin.y;
@@ -146,9 +151,26 @@ impl World {
         self.ground_height_map[point.x as usize][point.y as usize]
     }
 
+    pub fn get_non_tree_height(&self, point : Point2D) -> i32 {
+        let mut height = self.get_height_at(point);
+        let mut block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
+        while block.id.is_tree() {
+            height -= 1;
+            block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
+        }
+        height
+    }
+
     pub fn get_height_map(&self) -> &Vec<Vec<i32>> {
         &self.ground_height_map
     }   
+
+    pub fn set_heights(&mut self, points : &HashSet<Point3D>) {
+        for point in points {
+            self.ground_height_map[point.x as usize][point.z as usize] = point.y;
+            self.ocean_floor_height_map[point.x as usize][point.z as usize] = point.y;
+        }
+    }
 
     // Get height without counting water
     pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
@@ -177,6 +199,16 @@ impl World {
         Point3D::new(point.x, self.get_height_at(point), point.y)
     }
 
+    pub fn add_non_tree_height(&self, point : Point2D) -> Point3D {
+        let mut new_point = Point3D::new(point.x, self.get_height_at(point), point.y);
+        let mut block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
+        while block.id.is_tree() {
+            new_point += DOWN;
+            block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
+        }
+        new_point
+    }
+
     pub fn is_in_bounds_2d(&self, point : Point2D) -> bool {
         self.build_area.drop_y().contains(point + self.build_area.origin.drop_y())
     }
@@ -186,10 +218,13 @@ impl World {
         info!("Getting block at point: {:?}", point);
 
         let chunk_coordinates = point_to_chunk_coordinates(point);
+        info!("Chunk coordinates: {:?}", chunk_coordinates);
 
         let chunk = self.chunks.get(&chunk_coordinates.drop_y())?;
+        //println!("Found chunk: {:?}", chunk);
 
-        let section = chunk.sections.iter().find(|s| s.y == (point.y / CHUNK_SIZE))?;
+        let section = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y)?;
+        //println!("Found section: {:?}", section);
 
         let block_states = section.block_states.as_ref()?;
 
@@ -250,11 +285,11 @@ impl World {
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
-        self.ground_block_map[point.x as usize][point.y as usize].id == BlockID::Water
+        self.ground_block_map[point.x as usize][point.y as usize].id == "water".into()
     }
 
     pub fn is_water_3d(&self, point : Point3D) -> bool {
-        self.get_block(point).expect("failed to get block").id == BlockID::Water
+        self.get_block(point).expect("failed to get block").id == "water".into()
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {
@@ -269,6 +304,14 @@ impl World {
         }
     }
 
+    pub fn get_claim(&self, point : Point2D) -> Option<BuildClaim> {
+        if self.is_in_bounds_2d(point) {
+            Some(self.build_claim_map[point.x as usize][point.y as usize])
+        } else {
+            None
+        }
+    }
+
     pub fn get_urban_points(&self) -> HashSet<Point2D> { // BUG, doesnt get all points for some reason a handful of points are missing
         self.iter_points_2d()
             .filter(|&point| self.get_district_type(point).expect("Failed to get district type") == DistrictType::Urban)
@@ -279,5 +322,23 @@ impl World {
         self.get_super_district_at(point).and_then(|district_id| {
             self.super_districts.get(&district_id).map(|district| district.data.district_type)
         })
+    }
+
+    pub fn get_urban_districts(&self) -> Vec<&District> {
+        let World { districts, super_districts, super_district_map, .. } = self;
+
+        districts.values()
+            .filter(|district| {
+                let origin = district.data.origin.drop_y();
+                let super_district_id = super_district_map[origin.x as usize][origin.y as usize];
+                if let Some(super_district_id) = super_district_id {
+                    if let Some(super_district) = super_districts.get(&super_district_id) {
+                        return super_district.data.district_type == DistrictType::Urban;
+                    }
+                }
+
+                false
+            })
+            .collect()
     }
 }

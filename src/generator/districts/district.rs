@@ -2,7 +2,7 @@ use std::{collections::{HashMap, HashSet}, hash::Hash};
 
 use log::info;
 
-use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS}, noise::{Seed, RNG}};
+use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS_2D}, noise::{Seed, RNG}};
 
 use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_district, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_DISTRICTS_MIN_DISTANCE, SPAWN_DISTRICTS_RETRIES}, data::{DistrictData, HasDistrictData}, merge::merge_down, classification::{classify_districts, classify_superdistricts}, DistrictAnalysis, SuperDistrict, SuperDistrictID};
 
@@ -71,7 +71,6 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Generating districts with seed: {:?}", seed);
 
     let districts = spawn_districts(seed, editor.world_mut());
-
     for district in districts.iter() {
         let x = district.data.origin.x as usize;
         let z = district.data.origin.z as usize;
@@ -81,6 +80,8 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     let mut districts : HashMap<DistrictID, District> = districts.into_iter()
         .map(|district| (district.id, district))
         .collect();
+
+    
 
     info!("Bubbling out districts...");
     bubble_out(&mut districts, editor.world_mut());
@@ -146,25 +147,27 @@ pub async fn generate_districts(seed : Seed, editor : &mut Editor) {
     info!("Districts generated successfully");
 
     //prune urban chokepoints??
+
+    // Set the district and superdistrict analysis data in the world
+    editor.world_mut().district_analysis_data = district_analysis_data;
+    editor.world_mut().super_district_analysis_data = superdistrict_analysis_data;
 }
 
-fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) {
-    let mut queue : Vec<Point3D> = districts.iter().map(|(_, district)| district.data.origin).collect::<Vec<_>>();
-    let mut visited : HashSet<Point3D> = queue.iter().cloned().collect();
+fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World) { // this is broken
+    let mut queue : Vec<Point2D> = districts.iter().map(|(_, district)| district.data.origin.drop_y()).collect::<Vec<_>>();
+    let mut visited : HashSet<Point2D> = queue.iter().cloned().collect();
 
     while queue.len() > 0 {
         let next = queue.remove(0);
 
-        info!("Bubbling out from {:?}", next);
-        let current_district = world.district_map[next.x as usize][next.z as usize].expect("Every explored tile should have a district");
-        info!("Current district: {:?}", current_district);
+        let current_district = world.district_map[next.x as usize][next.y as usize].expect("Every explored tile should have a district");
 
-        for neighbour in CARDINALS.iter().map(|c| *c + next) {
+        for neighbour in CARDINALS_2D.iter().map(|c| *c + next) {
             if visited.contains(&neighbour) {
                 continue;
             }
 
-            if !world.build_area.contains(world.build_area.origin.without_y() + neighbour) {
+            if !world.is_in_bounds_2d(neighbour) {
                 info!("Skipping {:?} because it is out of bounds", neighbour);
                 districts.get_mut(&current_district).expect("Every explored tile should have a district").set_to_border_district();
                 continue;
@@ -172,10 +175,10 @@ fn bubble_out(districts : &mut HashMap<DistrictID, District>, world : &mut World
 
             visited.insert(neighbour);
             queue.push(neighbour);
-            world.district_map[neighbour.x as usize][neighbour.z as usize] = Some(current_district);
+            world.district_map[neighbour.x as usize][neighbour.y as usize] = Some(current_district);
             districts.get_mut(&current_district)
                 .expect(&format!("No district found with id {}", current_district.0))
-                .add_point(neighbour);
+                .add_point(world.add_non_tree_height(neighbour));
         }
     }
 }
@@ -184,7 +187,7 @@ fn recenter_districts(world : &mut World, districts : &mut HashMap<DistrictID, D
     world.district_map = vec![vec![None; world.build_area.size.z as usize]; world.build_area.size.x as usize];
         
     for district in districts.values_mut() {
-        district.data.origin = world.add_height(district.average().drop_y());
+        district.data.origin = world.add_non_tree_height(district.average().drop_y());
         district.data.points.clear();
         district.data.points_2d.clear();
         district.data.sum = Point3D::default();
@@ -222,7 +225,7 @@ fn spawn_districts(seed : Seed, world : &mut World) -> Vec<District> {
         while trials < SPAWN_DISTRICTS_RETRIES {
             trials += 1;
 
-            let trial_point = world.add_height(rng.rand_point2d(rect.size) + rect.origin);
+            let trial_point = world.add_non_tree_height(rng.rand_point2d(rect.size) + rect.origin);//fix to use non tree height
 
             if points.iter().all(|p| p.distance_squared(trial_point) > SPAWN_DISTRICTS_MIN_DISTANCE * SPAWN_DISTRICTS_MIN_DISTANCE) {
                 points.push(trial_point);

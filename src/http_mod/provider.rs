@@ -4,7 +4,6 @@ use crate::{generator::nbts::NBTStructure, geometry::Rect3D, http_mod::buildarea
 
 use super::{biome::PositionedBiome, command_response::CommandResponse, entity::{EntityResponse, PositionedEntity}, height_map::HeightMapType, positioned_block::{BlockPlacementResponse, PositionedBlock}};
 use anyhow::Ok;
-use fastnbt::Value;
 use flate2::read::GzDecoder;
 use log::{debug, info};
 use reqwest_middleware::ClientBuilder;
@@ -57,10 +56,10 @@ impl GDMCHTTPProvider {
         Ok(command_response)
     }
 
-    pub async fn give_player_book(&self, pages : &Vec<&str>, title : &str, author : &str) -> anyhow::Result<CommandResponse> {
+    pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
         let pages_json = pages.join(",");
 
-        let command = format!("give @a written_book{{pages:[{}],title:\"{}\",author:\"{}\"}}", pages_json, title, author);
+        let command = format!("give @a written_book[written_book_content={{title:\"{}\",author:\"{}\",pages:[{}]}}]", title, author, pages_json);
 
         println!("Command: {}", command);
 
@@ -84,7 +83,19 @@ impl GDMCHTTPProvider {
     }
 
     pub async fn put_blocks(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
-        let url = self.url("blocks");
+        self.put_blocks_options(blocks, true).await
+    }
+
+    pub async fn put_blocks_no_updates(&self, blocks : &Vec<PositionedBlock>) -> anyhow::Result<Vec<BlockPlacementResponse>> {
+        self.put_blocks_options(blocks, false).await
+    }
+
+    pub async fn put_blocks_options(&self, blocks : &Vec<PositionedBlock>, do_block_updates: bool) -> anyhow::Result<Vec<BlockPlacementResponse>> {
+        let url = if do_block_updates {
+            self.url("blocks")
+        } else {
+            self.url("blocks?doBlockUpdates=false")
+        };
 
         let body = serde_json::to_string(&blocks)?;
         info!("Sending PUT request to {} with body: {}", url, body);

@@ -1,9 +1,10 @@
 use crate::geometry::Point3D;
 
 pub fn point_to_chunk_coordinates(point: Point3D) -> Point3D {
+    // seems off when negative but throws an error if you -1 in neg case 
     Point3D {
-        x: (point.x / 16),
-        y: (point.y / 16),
-        z: (point.z / 16),
+        x: point.x >> 4,
+        y: point.y >> 4,
+        z: point.z >> 4,
     }
 }

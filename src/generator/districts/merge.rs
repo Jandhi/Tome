@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use log::info;
 
-use crate::editor::{self, Editor, World};
+use crate::editor::{Editor, World};
 
 use super::analysis::analyze_district;
 use super::{constants::{TARGET_DISTRICT_AMOUNT, ADJACENCY_WEIGHT}, DistrictAnalysis, SuperDistrict, SuperDistrictID};

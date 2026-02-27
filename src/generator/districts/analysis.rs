@@ -2,6 +2,7 @@
 
 use crate::editor::Editor;
 use crate::geometry::CARDINALS_2D;
+use crate::geometry::DOWN;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
 use std::collections::HashMap;
@@ -44,7 +45,7 @@ impl DistrictAnalysis {
 
     pub fn biome_percentage(&self, biome: &Biome) -> f32 {
         if let Some(count) = self.biome_count.get(biome) {
-            (count * 100) as f32 / self.count as f32
+            *count as f32 / self.count as f32
         } else {
             0.0
         }
@@ -55,7 +56,7 @@ impl DistrictAnalysis {
     }
 }
 
-pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &mut Editor) -> DistrictAnalysis {
+pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor: &Editor) -> DistrictAnalysis {
     let average = area.average();
     let average_height = average.y;
     let number_of_points = area.points().len() as f32;
@@ -68,21 +69,21 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
     let mut biome_count: HashMap<Biome, u32> = HashMap::new();
     let mut surface_block_count: HashMap<BlockID, u32> = HashMap::new();
 
-    
+
     for point in area.points() {
-        let biome = editor.world_mut().get_surface_biome_at(point.drop_y());
-        let block = editor.get_block(*point);
+        let biome = editor.world().get_surface_biome_at(point.drop_y());
+        let block = editor.get_block(*point + DOWN);
         let is_water = block.id.is_water();
-        let leaf_height = editor.world_mut().get_motion_blocking_height_at(point.drop_y());
+        let leaf_height = editor.world().get_motion_blocking_height_at(point.drop_y());
 
         root_mean_square_height += ((point.y - average_height) as f32).powi(2);
 
-        let height = editor.world_mut().get_height_at(point.drop_y());
+        let height = editor.world().get_non_tree_height(point.drop_y());
         let average_neighbour_height = CARDINALS_2D.iter()
             .map(|cardinal| {
                 let neighbour = point.drop_y() + *cardinal;
-                if editor.world_mut().is_in_bounds_2d(neighbour) {
-                    (height - editor.world_mut().get_height_at(neighbour)).abs()
+                if editor.world().is_in_bounds_2d(neighbour) {
+                    (height - editor.world().get_non_tree_height(neighbour)).abs()
                 } else {
                     0
                 }
@@ -107,8 +108,8 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor : &
         count: area.points().len(),
         roughness: (root_mean_square_height / num_points).sqrt(),
         gradient: neighbour_height_sum / num_points,
-        water_percentage: (water_blocks as f32 / num_points) * 100.0,
-        forested_percentage: (leaf_blocks as f32 / num_points) * 100.0,
+        water_percentage: (water_blocks as f32 / num_points),
+        forested_percentage: (leaf_blocks as f32 / num_points),
         surface_block_count,
         biome_count,
     }

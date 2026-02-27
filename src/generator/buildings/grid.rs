@@ -1,6 +1,5 @@
-use std::collections::HashMap;
 
-use crate::{editor::Editor, generator::{data::LoadedData, materials::{Material, MaterialId, Palette, PaletteId, Placer}, nbts::{place_nbt, place_structure, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point3D, Rect2D, Rect3D}};
+use crate::{editor::Editor, generator::{data::LoadedData, materials::{Palette, Placer}, nbts::{place_nbt, NBTMeta, Rotation, Structure, Transform}}, geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D}};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Grid {
@@ -58,14 +57,53 @@ impl Grid {
         point - self.origin
     }
 
-    pub async fn build_structure<'materials>(&self, editor: &mut Editor, placer : &mut Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction : Cardinal, data : &LoadedData, palette: &PaletteId) -> anyhow::Result<()> {
+    // 2D versions (ignoring y)
+    pub fn grid_to_world_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x * (self.cell_size.x - 1) + self.origin.x,
+            y: point.y * (self.cell_size.z - 1) + self.origin.z,
+        }
+    }
+
+    pub fn world_to_grid_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: (point.x - self.origin.x) / (self.cell_size.x - 1),
+            y: (point.y - self.origin.z) / (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn grid_to_local_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x * (self.cell_size.x - 1),
+            y: point.y * (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn local_to_grid_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x / (self.cell_size.x - 1),
+            y: point.y / (self.cell_size.z - 1),
+        }
+    }
+
+    pub fn local_to_world_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x + self.origin.x,
+            y: point.y + self.origin.z,
+        }
+    }
+
+    pub fn world_to_local_2d(&self, point: Point2D) -> Point2D {
+        Point2D {
+            x: point.x - self.origin.x,
+            y: point.y - self.origin.z,
+        }
+    }
+
+    pub async fn build_structure<'materials>(&self, editor: &Editor, placer: &mut Placer<'materials>, structure: &Structure, grid_coordinate: Point3D, direction: Cardinal, data: &LoadedData, palette: &Palette) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
 
         let rotation: Rotation = Rotation::from(structure.facing) - Rotation::from(direction);
-
-
-        println!("Facing: {:?}, Direction: {:?}, Rotation: {:?}", structure.facing, direction, rotation);
-        println!("Building structure: {:?} at grid coordinate: {:?} with rotation: {:?}", structure.id, grid_coordinate, rotation);
         
         let mut transform = match rotation {
             Rotation::None => origin.into(),
@@ -77,12 +115,12 @@ impl Grid {
         // Shift the transform to account for the structure's origin
         transform.shift(rotation.apply_to_point(-structure.origin));
 
-        let input_palette = structure.palette.as_ref().map(|p| p.clone());
+        let input_palette = structure.palette.as_ref().and_then(|id| data.palettes.get(id));
 
-        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), input_palette.as_ref(), Some(&palette), None, None).await
+        place_nbt(&structure.meta, transform, editor, Some(placer), Some(data), input_palette, Some(palette), None, None).await
     }
 
-    pub async fn build_nbt<'materials>(&self, editor : &mut Editor, placer : &mut Placer<'materials>, nbt : &NBTMeta, grid_coordinate : Point3D, rotation : Rotation, data : &LoadedData, input_palette: &PaletteId, output_palette: &PaletteId) -> anyhow::Result<()> {
+    pub async fn build_nbt<'materials>(&self, editor: &Editor, placer: &mut Placer<'materials>, nbt: &NBTMeta, grid_coordinate: Point3D, rotation: Rotation, data: &LoadedData, input_palette: &Palette, output_palette: &Palette) -> anyhow::Result<()> {
         let origin = self.grid_to_world(grid_coordinate);
         
         let transform = match rotation {
@@ -106,9 +144,9 @@ impl Grid {
     }
 
     pub fn get_cell_rect(&self, grid_coordinate : Point3D) -> Rect3D {
-        let local = self.grid_to_local(grid_coordinate);
+        let world = self.grid_to_world(grid_coordinate);
         Rect3D {
-            origin: local,
+            origin: world,
             size: self.cell_size
         }
     }

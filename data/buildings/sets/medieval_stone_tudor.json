@@ -1,0 +1,89 @@
+{
+    "id" : "medieval_stone_tudor",
+    "style" : "medieval",
+    "roof_sets" : [
+        "medieval_roof_slabs",
+        "medieval_roof_stairs"
+    ],
+    "wall_sets" : [
+        "medieval_stone_tudor"
+    ],
+    "shapes" : [
+        {
+            "cells" : [
+                { "x" : 0, "y" : 0, "z" : 0 }
+            ],
+            "doors" : [
+                { "cell" :  { "x" : 0, "y" : 0, "z" : 0 }, "direction" : "south" }
+            ]
+        },
+        {
+            "cells" : [
+                { "x" : 0, "y" : 0, "z" : 0 },
+                { "x" : 0, "y" : 1, "z" : 0 }
+            ],
+            "doors" : [
+                { "cell" :  { "x" : 0, "y" : 0, "z" : 0 }, "direction" : "south" }
+            ],
+            "stairs" : [
+                { "cell" :  { "x" : 0, "y" : 0, "z" : 0 }, "direction" : "north" }
+            ]
+        },
+        {
+            "cells" : [
+                { "x" : 0, "y" : 0, "z" : 0 },
+                { "x" : 0, "y" : 1, "z" : 0 },
+                { "x" : 1, "y" : 0, "z" : 0 },
+                { "x" : 1, "y" : 1, "z" : 0 },
+                { "x" : 0, "y" : 0, "z" : -1 },
+                { "x" : 0, "y" : 1, "z" : -1 },
+                { "x" : 1, "y" : 0, "z" : -1 },
+                { "x" : 1, "y" : 1, "z" : -1 }
+            ],
+            "doors" : [
+                { "cell" :  { "x" : 0, "y" : 0, "z" : 0 }, "direction" : "south" }
+            ],
+            "stairs" : [
+                { "cell" :  { "x" : 1, "y" : 0, "z" : 0 }, "direction" : "east" }
+            ]
+        },
+        {
+            "cells": [
+                { "x": 0, "y": 0, "z": 0 },
+                { "x": 0, "y": 0, "z": -1 },
+                { "x": 1, "y": 0, "z": 0 }
+            ],
+            "doors": [
+                { "cell": { "x": 0, "y": 0, "z": 0 }, "direction": "south" }
+            ]
+        },
+        {
+            "cells": [
+                { "x": 0, "y": 0, "z": 0 },
+                { "x": 0, "y": 1, "z": 0 },
+                { "x": 1, "y": 0, "z": 0 },
+                { "x": 1, "y": 1, "z": 0 }
+            ],
+            "doors": [
+                { "cell": { "x": 0, "y": 0, "z": 0 }, "direction": "south" }
+            ],
+            "stairs": [
+                { "cell": { "x": 1, "y": 0, "z": 0 }, "direction": "north" }
+            ]
+        },
+        {
+            "cells": [
+                { "x": 0, "y": 0, "z": 0 },
+                { "x": 0, "y": 1, "z": 0 },
+                { "x": 0, "y": 0, "z": -1 },
+                { "x": 0, "y": 1, "z": -1 }
+            ],
+            "doors": [
+                { "cell": { "x": 0, "y": 0, "z": 0 }, "direction": "south" }
+            ],
+            "stairs": [
+                { "cell": { "x": 0, "y": 0, "z": 0 }, "direction": "east" }
+            ]
+        }
+    ]
+}

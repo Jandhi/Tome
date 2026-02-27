@@ -1,0 +1,14 @@
+{
+    "id" : "warm_flowers",
+    "connections" : {},
+    "blocks" : {
+        "flower" : {
+            "minecraft:dandelion" : 1.0,
+            "minecraft:poppy" : 1.0,
+            "minecraft:red_tulip" : 1.0,
+            "minecraft:orange_tulip" : 1.0,
+            "minecraft:pink_tulip" : 1.0
+
+        }
+    }
+}
