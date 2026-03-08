@@ -47,7 +47,7 @@ impl World {
 
         let chunk_rect = Rect3D {
             origin: point_to_chunk_coordinates(build_area.origin),
-            size: point_to_chunk_coordinates(build_area.last()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
+            size: point_to_chunk_coordinates(build_area.max()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
         };
         println!("Chunk rect: {:?}", chunk_rect);
         info!("Loading chunks...");

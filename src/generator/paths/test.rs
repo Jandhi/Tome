@@ -58,7 +58,7 @@ mod tests {
         let rect = editor.world().world_rect_2d();
 
         let start = editor.world().add_height(rect.origin);
-        let end = editor.world().add_height(rect.last());
+        let end = editor.world().add_height(rect.max());
 
         
         let path = route_path(&editor, start, end, async |point : &Vec<Point3D>| {
@@ -82,7 +82,7 @@ mod tests {
         let rect = editor.world().world_rect_2d();
 
         let start = editor.world().add_height(rect.origin);
-        let end = editor.world().add_height(rect.last());
+        let end = editor.world().add_height(rect.max());
 
         let data = LoadedData::load().expect("Failed to load data");
 
