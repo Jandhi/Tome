@@ -352,15 +352,15 @@ pub fn select_layout(rng: &mut RNG, layouts: &[Layout], target_area: i32, candid
         return None;
     }
 
-    let scored: Vec<(Layout, f32)> = viable.into_iter()
+    let scored: Vec<(&Layout, f32)> = viable.into_iter()
         .map(|l| {
             let score = score_layout(l, target_area, candidate);
             // Square the score to bias more heavily toward better layouts.
-            (l.clone(), score * score)
+            (l, score * score)
         })
         .collect();
 
-    Some(rng.choose_weighted_vec(&scored).clone())
+    Some((*rng.choose_weighted_vec(&scored)).clone())
 }
 
 /// Generates a wing configuration for a given core.

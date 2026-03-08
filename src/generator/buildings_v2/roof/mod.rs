@@ -5,7 +5,7 @@ pub mod blocks;
 pub mod gable;
 pub mod heightmap;
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
@@ -97,21 +97,17 @@ pub async fn place_roof(
 
     let roof_rects = extend_rects_for_roof(rects, &rect_axes);
 
-    // Group rects by roof_y
-    let mut groups: HashMap<i32, Vec<usize>> = HashMap::new();
+    // Group rects by roof_y (BTreeMap keeps keys sorted)
+    let mut groups: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
     for i in 0..rects.len() {
         groups.entry(frame.roof_y(i)).or_default().push(i);
     }
 
-    let mut sorted_roof_ys: Vec<i32> = groups.keys().cloned().collect();
-    sorted_roof_ys.sort();
-
-    for &raw_roof_y in &sorted_roof_ys {
+    for (&raw_roof_y, group_indices) in &groups {
         let roof_y = match pitch {
             GablePitch::Stairs => raw_roof_y - 1,
             _ => raw_roof_y,
         };
-        let group_indices = &groups[&raw_roof_y];
         let group_rects: Vec<&Rect2D> = group_indices.iter().map(|&i| &rects[i]).collect();
 
         // Rects from higher groups (wall precedence)
