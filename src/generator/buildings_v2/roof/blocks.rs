@@ -120,7 +120,7 @@ pub async fn place_roof_blocks(
                 ).await;
 
                 // Double pitch: block below ridge slab (inside footprint)
-                if matches!(pitch, GablePitch::Double) && !is_overhang {
+                if matches!(pitch, GablePitch::Double) && !is_overhang && y_floor - 1 != roof_y {
                     placer.place_block(
                         editor,
                         Point3D::new(x, y_floor - 1, z),
@@ -210,13 +210,26 @@ pub async fn place_roof_blocks(
 
                 // Double pitch: block below stair (inside footprint, eave and upper stairs)
                 if matches!(pitch, GablePitch::Double) && !is_overhang && h >= 0.0 {
-                    placer.place_block(
-                        editor,
-                        Point3D::new(x, y_floor - 1, z),
-                        BlockForm::Block,
-                        None,
-                        None,
-                    ).await;
+                    if y_floor - 1 != roof_y {
+                        placer.place_block(
+                            editor,
+                            Point3D::new(x, y_floor - 1, z),
+                            BlockForm::Block,
+                            None,
+                            None,
+                        ).await;
+                    }
+
+                    // Extra interior block below, but don't cut through the ceiling
+                    if y_floor - 2 >= roof_y - 1 && y_floor - 2 != roof_y {
+                        placer.place_block(
+                            editor,
+                            Point3D::new(x, y_floor - 2, z),
+                            BlockForm::Block,
+                            None,
+                            None,
+                        ).await;
+                    }
                 }
 
                 // Overhang brackets — pitch-dependent

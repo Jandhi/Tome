@@ -1,11 +1,11 @@
 use crate::editor::World;
-use crate::generator::buildings_v2::floors::place_floors;
+use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::foundation::place_foundation;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
 use crate::generator::buildings_v2::walls::{
-    build_segments, place_doors, place_frame, place_openings, place_wall_infill, place_windows,
+    build_segments, place_doors, place_frame, place_openings, place_wall_infill,
 };
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
@@ -339,7 +339,7 @@ async fn build_full_buildings_with_roofs() {
     let bounds = Rect2D::from_points(plot_min, plot_max);
     let mut plot = Plot::fully_usable(bounds);
 
-    let mut rng = RNG::new(77);
+    let mut rng = RNG::new(123);
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::HALL, 50);
     println!("Placed {} house footprints", footprints.len());
 
@@ -358,10 +358,14 @@ async fn build_full_buildings_with_roofs() {
         let mut wall_segs = build_segments(&frame);
         let footprint_area = footprint.filled_points().len() as i32;
         place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
-        place_windows(&mut wall_segs, &mut rng);
 
-        // Upper floor slabs
-        place_floors(&editor, &frame, &data, &palette, &mut rng).await;
+
+        // Roof — cycle through pitches
+        let pitch = pitches[i % pitches.len()];
+        let has_attic = matches!(pitch, GablePitch::Double);
+
+        // Upper floor slabs + stairs
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
 
         // Wall infill
         place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
@@ -372,9 +376,13 @@ async fn build_full_buildings_with_roofs() {
         // Openings
         place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
 
-        // Roof — cycle through pitches
-        let pitch = pitches[i % pitches.len()];
+        // Roof
         place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+
+        // Re-clear headroom above attic stairs (roof blocks may have overwritten air)
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
 
         println!(
             "  Building {}: base_y={}, floors={}, rects={}, pitch={:?}",
@@ -440,13 +448,17 @@ async fn compare_three_pitches() {
         let mut wall_segs = build_segments(&frame);
         let footprint_area = shifted_footprint.filled_points().len() as i32;
         place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
-        place_windows(&mut wall_segs, &mut rng);
 
-        place_floors(&editor, &frame, &data, &palette, &mut rng).await;
+
+        let has_attic = matches!(pitch, GablePitch::Double);
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
         place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
         place_frame(&editor, &frame, &data, &palette, &mut rng).await;
         place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
         place_roof(&editor, &frame, *pitch, &data, &palette, &mut rng).await;
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
 
         println!("  {:?} pitch at x_offset={}", pitch, x_offset);
     }

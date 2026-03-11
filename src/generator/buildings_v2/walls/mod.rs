@@ -439,7 +439,7 @@ pub async fn place_openings(
                         if idx >= cells.len() { continue; }
                         let cell = cells[idx];
 
-                        let hinge = if dx == 0 { "left" } else { "right" };
+                        let hinge = if dx == 0 { "right" } else { "left" };
 
                         // Lower half
                         let lower_state = HashMap::from([
