@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{data::Loadable, generator::{buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
+use crate::{data::Loadable, generator::{resource_chain::ResourceRegistry,buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct LoadedData {
     pub palettes : HashMap<PaletteId, Palette>,
     pub materials : HashMap<MaterialId, Material>,
@@ -12,6 +12,7 @@ pub struct LoadedData {
     pub roof_components : HashMap<StructureId, RoofComponent>,
     pub roof_sets : HashMap<RoofSetId, RoofSet>,
     pub building_sets : HashMap<BuildingSetID, BuildingSet>,
+    pub resource_registry : ResourceRegistry,
 }
 
 impl LoadedData {
@@ -25,6 +26,7 @@ impl LoadedData {
             roof_components: RoofComponent::load()?,
             roof_sets: RoofSet::load()?,
             building_sets: BuildingSet::load()?,
+            resource_registry: ResourceRegistry::load()?,
         })
     }
 }

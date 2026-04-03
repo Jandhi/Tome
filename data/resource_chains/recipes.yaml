@@ -1,0 +1,193 @@
+recipes:
+  # --- Wood / Forest ---
+  wood_to_planks:
+    inputs:
+      wood: 2
+    outputs:
+      planks: 4
+    building: sawmill
+
+  planks_to_furniture:
+    inputs:
+      planks: 2
+    outputs:
+      furniture: 1
+    building: carpentry
+
+  wood_to_charcoal:
+    inputs:
+      wood: 2
+    outputs:
+      charcoal: 2
+    building: kiln
+
+  sugar_cane_to_paper:
+    inputs:
+      sugar_cane: 2
+    outputs:
+      paper: 3
+    building: paper_mill
+
+  paper_leather_to_books:
+    inputs:
+      paper: 1
+      leather: 1
+    outputs:
+      books: 1
+    building: scriptorium
+
+  # --- Food / Agriculture ---
+  wheat_to_flour:
+    inputs:
+      wheat: 2
+    outputs:
+      flour: 2
+    building: mill
+
+  flour_to_bread:
+    inputs:
+      flour: 1
+    outputs:
+      bread: 2
+    building: bakery
+
+  sugar_cane_to_sugar:
+    inputs:
+      sugar_cane: 1
+    outputs:
+      sugar: 1
+    building: mill
+
+  sugar_cocoa_to_chocolate:
+    inputs:
+      sugar: 1
+      cocoa_beans: 1
+    outputs:
+      chocolate: 2
+    building: confectionery
+
+  flour_wheat_to_ale: # does this make sense?
+    inputs:
+      flour: 1
+      wheat: 1
+    outputs:
+      ale: 2
+    building: brewery
+
+  # --- Honey / Bees ---
+  honey_wheat_to_mead:
+    inputs:
+      honey: 2
+      wheat: 1
+    outputs:
+      mead: 2
+    building: brewery
+
+  honey_to_wax:
+    inputs:
+      honey: 2
+    outputs:
+      wax: 2
+    building: apiary # do we want to have the wax be intermediate or have honey and beeswax be produced by the apiary?
+
+  wax_to_candles:
+    inputs:
+      wax: 2
+    outputs:
+      candles: 4
+    building: chandlery
+
+  # --- Fiber / Textile ---
+  wool_to_cloth:
+    inputs:
+      wool: 2
+    outputs:
+      cloth: 1
+    building: loom
+
+  cloth_to_clothing:
+    inputs:
+      cloth: 1
+    outputs:
+      clothing: 1
+    building: tailor
+
+  # --- Metal / Mining ---
+  iron_ore_charcoal_to_ingot:
+    inputs:
+      iron_ore: 2
+      charcoal: 1
+    outputs:
+      iron_ingot: 2
+    building: smelter
+
+  iron_ore_coal_to_ingot:
+    inputs:
+      iron_ore: 2
+      coal: 1
+    outputs:
+      iron_ingot: 2
+    building: smelter
+
+  iron_ingot_to_tools:
+    inputs:
+      iron_ingot: 1
+    outputs:
+      tools: 1
+    building: smithy
+
+  # --- Stone / Earth ---
+  sand_charcoal_to_glass:
+    inputs:
+      sand: 2
+      charcoal: 1
+    outputs:
+      glass: 2
+    building: glassworks
+
+  sand_coal_to_glass:
+    inputs:
+      sand: 2
+      coal: 1
+    outputs:
+      glass: 2
+    building: glassworks
+
+  glass_to_panes:
+    inputs:
+      glass: 2
+    outputs:
+      glass_panes: 2
+    building: glassworks
+
+  clay_charcoal_to_bricks:
+    inputs:
+      clay: 2
+      charcoal: 1
+    outputs:
+      bricks: 4
+    building: kiln
+
+  clay_coal_to_bricks:
+    inputs:
+      clay: 2
+      coal: 1
+    outputs:
+      bricks: 4
+    building: kiln
+
+  bricks_to_pottery:
+    inputs:
+      bricks: 1
+    outputs:
+      pottery: 1
+    building: pottery_works
+
+  # --- Military ---
+  flint_feather_to_arrows:
+    inputs:
+      flint: 1
+      feathers: 2
+    outputs:
+      arrows: 8
+    building: fletcher
