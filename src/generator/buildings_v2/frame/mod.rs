@@ -19,6 +19,17 @@ pub struct Frame {
 
 impl Frame {
     pub fn new(footprint: Footprint, base_y: i32, floor_counts: Vec<u32>, wall_height: u32) -> Self {
+        debug_assert_eq!(
+            floor_counts.len(),
+            footprint.rects().len(),
+            "floor_counts length ({}) must match footprint rects ({})",
+            floor_counts.len(),
+            footprint.rects().len(),
+        );
+        debug_assert!(
+            floor_counts.iter().all(|&c| c >= 1),
+            "all floor counts must be >= 1",
+        );
         Self { footprint, base_y, floor_counts, wall_height }
     }
 
@@ -115,8 +126,8 @@ pub fn generate_frame(
     rng: &mut RNG,
 ) -> Frame {
     let core_floors = rng.rand_i32_range(
-        size_class.min_floors as i32,
-        size_class.max_floors as i32 + 1,
+        size_class.min_floors() as i32,
+        size_class.max_floors() as i32 + 1,
     ) as u32;
 
     let mut floor_counts = vec![core_floors];

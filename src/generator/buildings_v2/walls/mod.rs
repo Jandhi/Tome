@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
@@ -233,7 +233,7 @@ fn segment_midpoint(seg: &WallSegment) -> Point2D {
 /// Place doors on ground-floor segments. Picks the segment closest to the plot
 /// edge (likely road-facing). For large buildings, adds a second door on the
 /// opposite side.
-pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint_area: i32, _rng: &mut RNG) {
+pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint_area: i32, boundary_cells: &HashSet<Point2D>, _rng: &mut RNG) {
     let door_style = if footprint_area > 150 {
         DoorStyle::Double
     } else {
@@ -278,12 +278,17 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
 
     // For larger buildings, place a second door on the opposite wall.
     // Falls back to any non-adjacent facing if opposite isn't available.
+    // Skip segments that overlap with interior boundary cells (where archways go).
     if footprint_area > 100 {
         let primary_facing = wall_segs.segments[primary_idx].facing;
         let opposite = -primary_facing;
+        let not_on_boundary = |&&(i, _): &&(usize, i32)| {
+            !segment_cells(&wall_segs.segments[i]).iter().any(|c| boundary_cells.contains(c))
+        };
         if let Some(&(idx, _)) = scored.iter()
+            .filter(not_on_boundary)
             .find(|&&(i, _)| wall_segs.segments[i].facing == opposite)
-            .or_else(|| scored.iter().find(|&&(i, _)| {
+            .or_else(|| scored.iter().filter(not_on_boundary).find(|&&(i, _)| {
                 wall_segs.segments[i].facing != primary_facing
             }))
         {
@@ -297,6 +302,16 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
             });
         }
     }
+}
+
+/// Collect all interior boundary cells between adjacent rects into a HashSet.
+/// Used to prevent side doors from overlapping with interior archway positions.
+pub fn boundary_cell_set(rects: &[Rect2D]) -> HashSet<Point2D> {
+    use super::footprint::find_boundaries;
+    find_boundaries(rects)
+        .into_iter()
+        .flat_map(|b| b.wall_cells)
+        .collect()
 }
 
 /// Place windows on all wall segments. Even spacing, denser on upper floors.

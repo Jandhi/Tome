@@ -19,7 +19,7 @@ fn single_rect_floor_y() {
     assert_eq!(frame.floor_y(1), 68); // 64 + 1 * 4
     assert_eq!(frame.ceiling_y(0), 67); // 64 + 3
     assert_eq!(frame.ceiling_y(1), 71); // 68 + 3
-    assert_eq!(frame.roof_y(0), 72); // 64 + 2 * 4
+    assert_eq!(frame.roof_y(0), 73); // 64 + 2*4 + 1 (one above top wall)
     assert_eq!(frame.max_floors(), 2);
     assert_eq!(frame.rect_height(0), 8);
 }
@@ -32,7 +32,7 @@ fn single_rect_single_floor() {
 
     assert_eq!(frame.floor_y(0), 100);
     assert_eq!(frame.ceiling_y(0), 103);
-    assert_eq!(frame.roof_y(0), 104);
+    assert_eq!(frame.roof_y(0), 105); // 100 + 1*4 + 1
     assert_eq!(frame.max_floors(), 1);
     assert_eq!(frame.floors().collect::<Vec<_>>(), vec![0]);
 }
@@ -45,8 +45,8 @@ fn multi_rect_different_heights() {
     let frame = Frame::new(footprint, 64, vec![3, 2], 3);
 
     assert_eq!(frame.max_floors(), 3);
-    assert_eq!(frame.roof_y(0), 76); // 64 + 3*4
-    assert_eq!(frame.roof_y(1), 72); // 64 + 2*4
+    assert_eq!(frame.roof_y(0), 77); // 64 + 3*4 + 1
+    assert_eq!(frame.roof_y(1), 73); // 64 + 2*4 + 1
 
     // Floor 0: both rects active
     assert_eq!(frame.active_rects(0), vec![0, 1]);
@@ -78,7 +78,7 @@ fn generate_frame_cottage_always_one_floor() {
     for seed in 0..20 {
         let footprint = simple_footprint(vec![rect]);
         let mut rng = RNG::new(seed as i64);
-        let frame = generate_frame(footprint, 64, &SizeClass::COTTAGE, &mut rng);
+        let frame = generate_frame(footprint, 64, &SizeClass::Cottage, &mut rng);
         assert_eq!(frame.max_floors(), 1, "Cottage should always be 1 floor (seed {seed})");
     }
 }
@@ -90,7 +90,7 @@ fn generate_frame_wing_floors_bounded() {
     for seed in 0..20 {
         let footprint = simple_footprint(vec![core, wing]);
         let mut rng = RNG::new(seed as i64);
-        let frame = generate_frame(footprint, 64, &SizeClass::HALL, &mut rng);
+        let frame = generate_frame(footprint, 64, &SizeClass::Hall, &mut rng);
         let core_floors = frame.floor_counts()[0];
         let wing_floors = frame.floor_counts()[1];
         assert!(core_floors >= 2 && core_floors <= 3);

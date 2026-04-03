@@ -1,17 +1,20 @@
 #[cfg(test)]
 mod test;
 
+use std::collections::{HashMap, HashSet};
+
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Palette, Placer};
 use crate::geometry::{Point2D, Point3D, Rect2D};
 use crate::minecraft::BlockForm;
 use crate::noise::RNG;
-use std::collections::HashSet;
 use super::footprint::merge::{walk_edge_cells, concave_corner_cells};
+use super::footprint::{find_boundaries, SizeClass};
 use super::frame::Frame;
 use super::floors::FloorPlan;
 use super::walls::{self, WallSegments};
+use super::RoomType;
 
 /// Role of a room within a building, assigned during partitioning.
 /// Combined with BuildingType later to determine furniture/decoration.
@@ -29,6 +32,24 @@ pub enum RoomRole {
     Attic,
 }
 
+/// State of a cell in a room's walkability grid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloorCell {
+    /// Empty floor — walkable, furniture can be placed here.
+    Open,
+    /// Door/interior door — walkable, no furniture, must be reachable by BFS.
+    ReachableOpen,
+    /// Must be adjacent to a reachable cell (player can interact), but not
+    /// walkable. E.g. foot of a bed, chest.
+    ReachableBlocked,
+    /// Impassable with no reachability requirement (stairwells, walls, bed head).
+    Blocked,
+}
+
+/// 2D walkability grid for a room's interior.
+/// Keys are world (x, z) coords. Only interior cells (inside walls) are present.
+pub type FloorMap = HashMap<(i32, i32), FloorCell>;
+
 /// A room within a building.
 #[derive(Debug, Clone)]
 pub struct Room {
@@ -40,6 +61,10 @@ pub struct Room {
     pub floor: u32,
     /// Assigned role.
     pub role: RoomRole,
+    /// What furniture/decoration this room gets.
+    pub room_type: RoomType,
+    /// Walkability grid for furniture placement and connectivity checks.
+    pub floor_map: FloorMap,
 }
 
 /// Result of room partitioning, consumed by the interior/furniture module.
@@ -53,78 +78,190 @@ impl RoomPlan {
     }
 }
 
-/// A boundary between two adjacent rects where an interior wall goes.
-pub struct RectBoundary {
-    pub rect_a: usize,
-    pub rect_b: usize,
-    /// Cell positions where wall blocks are placed.
-    pub wall_cells: Vec<Point2D>,
+/// A room assignment: rect index, floor, and room type.
+pub type RoomAssignment = (usize, u32, RoomType);
+
+/// Assign room types for every room in a building.
+/// Returns (rect_index, floor, RoomType) for each room, including attics.
+pub fn assign_room_types(
+    frame: &Frame,
+    size_class: SizeClass,
+    has_attic: bool,
+    rng: &mut RNG,
+) -> Vec<RoomAssignment> {
+    match size_class {
+        SizeClass::Cottage => assign_cottage_rooms(frame, has_attic),
+        SizeClass::House => assign_house_rooms(frame, has_attic),
+        SizeClass::Hall => assign_hall_rooms(frame, has_attic, rng),
+        SizeClass::Manor => assign_manor_rooms(frame, has_attic, rng),
+    }
 }
 
-/// Find pairs of adjacent rects and compute the cells for each shared boundary wall.
-/// The wall is placed on the inside edge of the core rect (index 0) so that
-/// wings keep their full interior space. For wing-to-wing boundaries, the wall
-/// goes on the lower-indexed rect's edge.
-pub fn find_boundaries(rects: &[Rect2D]) -> Vec<RectBoundary> {
-    let mut boundaries = Vec::new();
+fn assign_cottage_rooms(frame: &Frame, has_attic: bool) -> Vec<RoomAssignment> {
+    let rects = frame.footprint().rects();
+    let mut rooms = Vec::new();
 
-    for i in 0..rects.len() {
-        for j in (i + 1)..rects.len() {
-            let a = &rects[i];
-            let b = &rects[j];
-
-            // East: A's east side adjacent to B's west side
-            if a.max().x + 1 == b.min().x {
-                let z_start = a.min().y.max(b.min().y);
-                let z_end = a.max().y.min(b.max().y);
-                if z_start <= z_end {
-                    // Wall on A's inside edge (last column of A)
-                    let cells = (z_start..=z_end)
-                        .map(|z| Point2D::new(a.max().x, z))
-                        .collect();
-                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
-                }
-            }
-            // West: B's east side adjacent to A's west side
-            else if b.max().x + 1 == a.min().x {
-                let z_start = a.min().y.max(b.min().y);
-                let z_end = a.max().y.min(b.max().y);
-                if z_start <= z_end {
-                    // Wall on A's inside edge (first column of A)
-                    let cells = (z_start..=z_end)
-                        .map(|z| Point2D::new(a.min().x, z))
-                        .collect();
-                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
-                }
-            }
-            // South: A's south side adjacent to B's north side
-            else if a.max().y + 1 == b.min().y {
-                let x_start = a.min().x.max(b.min().x);
-                let x_end = a.max().x.min(b.max().x);
-                if x_start <= x_end {
-                    // Wall on A's inside edge (last row of A)
-                    let cells = (x_start..=x_end)
-                        .map(|x| Point2D::new(x, a.max().y))
-                        .collect();
-                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
-                }
-            }
-            // North: B's south side adjacent to A's north side
-            else if b.max().y + 1 == a.min().y {
-                let x_start = a.min().x.max(b.min().x);
-                let x_end = a.max().x.min(b.max().x);
-                if x_start <= x_end {
-                    // Wall on A's inside edge (first row of A)
-                    let cells = (x_start..=x_end)
-                        .map(|x| Point2D::new(x, a.min().y))
-                        .collect();
-                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
-                }
-            }
+    for floor in frame.floors() {
+        for &idx in &frame.active_rects(floor) {
+            let room_type = if idx == 0 { RoomType::Common } else { RoomType::Storage };
+            rooms.push((idx, floor, room_type));
         }
     }
 
-    boundaries
+    if has_attic {
+        for i in 0..rects.len() {
+            rooms.push((i, frame.floor_counts()[i], RoomType::Storage));
+        }
+    }
+
+    rooms
+}
+
+fn assign_house_rooms(frame: &Frame, has_attic: bool) -> Vec<RoomAssignment> {
+    let rects = frame.footprint().rects();
+    let num_rects = rects.len();
+    let max_floors = frame.max_floors();
+    let mut rooms = Vec::new();
+
+    for floor in frame.floors() {
+        for &idx in &frame.active_rects(floor) {
+            let room_type = if max_floors == 1 {
+                if num_rects == 1 {
+                    RoomType::Common
+                } else if idx == 0 {
+                    RoomType::Hearth
+                } else {
+                    RoomType::Bedroom
+                }
+            } else if floor == 0 {
+                if idx == 0 { RoomType::Hearth } else { RoomType::Storage }
+            } else {
+                RoomType::Bedroom
+            };
+            rooms.push((idx, floor, room_type));
+        }
+    }
+
+    if has_attic {
+        for i in 0..rects.len() {
+            rooms.push((i, frame.floor_counts()[i], RoomType::Storage));
+        }
+    }
+
+    rooms
+}
+
+fn assign_hall_rooms(frame: &Frame, has_attic: bool, rng: &mut RNG) -> Vec<RoomAssignment> {
+    let rects = frame.footprint().rects();
+    let mut rooms = Vec::new();
+
+    // Sort wing indices by area descending so larger wings get priority roles
+    let mut wing_indices: Vec<usize> = (1..rects.len()).collect();
+    wing_indices.sort_by(|&a, &b| rects[b].area().cmp(&rects[a].area()));
+
+    // Map each rect index to its size rank among wings (0 = largest)
+    let mut wing_rank = vec![0usize; rects.len()];
+    for (rank, &idx) in wing_indices.iter().enumerate() {
+        wing_rank[idx] = rank;
+    }
+
+    let ground_wing_sequence = [RoomType::Kitchen, RoomType::Pantry, RoomType::Storage];
+    let upper_wing_sequence = [RoomType::MasterBedroom, RoomType::Study];
+
+    for floor in frame.floors() {
+        for &idx in &frame.active_rects(floor) {
+            let room_type = if floor == 0 {
+                if idx == 0 {
+                    RoomType::GreatRoom
+                } else {
+                    *ground_wing_sequence.get(wing_rank[idx]).unwrap_or(&RoomType::Storage)
+                }
+            } else {
+                if idx == 0 {
+                    RoomType::MultiBedroom
+                } else {
+                    match upper_wing_sequence.get(wing_rank[idx]) {
+                        Some(&t) => t,
+                        None => if rng.chance(1, 2) { RoomType::Bedroom } else { RoomType::Storage },
+                    }
+                }
+            };
+            rooms.push((idx, floor, room_type));
+        }
+    }
+
+    if has_attic {
+        for i in 0..rects.len() {
+            rooms.push((i, frame.floor_counts()[i], RoomType::Storage));
+        }
+    }
+
+    rooms
+}
+
+fn assign_manor_rooms(frame: &Frame, has_attic: bool, rng: &mut RNG) -> Vec<RoomAssignment> {
+    let rects = frame.footprint().rects();
+    let mut rooms = Vec::new();
+    let mut has_dining = false;
+    let mut has_bedroom = false;
+    let mut has_study = false;
+    let mut has_library = false;
+    let mut has_studio = false;
+    let mut has_armory = false;
+
+    for floor in frame.floors() {
+        for &idx in &frame.active_rects(floor) {
+            let room_type = if floor == 0 {
+                if idx == 0 {
+                    RoomType::Hearth
+                } else if !has_dining && rng.chance(1, 2) {
+                    has_dining = true;
+                    RoomType::Dining
+                } else {
+                    RoomType::Storage
+                }
+            } else {
+                if !has_bedroom {
+                    has_bedroom = true;
+                    RoomType::Bedroom
+                } else if !has_library && rng.chance(1, 5) {
+                    has_library = true;
+                    RoomType::Library
+                } else if !has_studio && rng.chance(1, 5) {
+                    has_studio = true;
+                    RoomType::Studio
+                } else if !has_armory && rng.chance(1, 5) {
+                    has_armory = true;
+                    RoomType::Armory
+                } else if !has_study && rng.chance(1, 4) {
+                    has_study = true;
+                    RoomType::Study
+                } else {
+                    RoomType::Bedroom
+                }
+            };
+            rooms.push((idx, floor, room_type));
+        }
+    }
+
+    if has_attic {
+        for i in 0..rects.len() {
+            rooms.push((i, frame.floor_counts()[i], RoomType::Storage));
+        }
+    }
+
+    rooms
+}
+
+
+/// Clamp a point to the nearest cell inside a (non-empty) interior rect.
+/// Used to find the entrance cell for a room given a door/interior-door position
+/// that may be on the wall edge rather than inside the shrunk interior.
+fn nearest_interior_cell(point: Point2D, interior: &Rect2D) -> Point2D {
+    Point2D::new(
+        point.x.clamp(interior.min().x, interior.max().x),
+        point.y.clamp(interior.min().y, interior.max().y),
+    )
 }
 
 /// Find which rect index contains the primary exterior door on the ground floor.
@@ -263,13 +400,13 @@ pub async fn build_rooms(
     wall_segs: &WallSegments,
     floor_plan: &FloorPlan,
     has_attic: bool,
+    size_class: SizeClass,
     data: &LoadedData,
     palette: &Palette,
     rng: &mut RNG,
 ) -> RoomPlan {
     let rects = frame.footprint().rects();
     let boundaries = find_boundaries(rects);
-    let entry_rect = find_entry_rect(rects, wall_segs);
 
     // Collect all stairwell (x,z) positions so archways can avoid them.
     // Skip positions[0] for straight stairs — it's just the landing with no block.
@@ -279,8 +416,6 @@ pub async fn build_rooms(
             sw.positions.iter().skip(skip).map(|p| (p.x, p.y))
         })
         .collect();
-
-    let mut rooms = Vec::new();
 
     // Interior walls use secondary wood (distinct from floors and exterior walls)
     let material_id = palette
@@ -293,6 +428,9 @@ pub async fn build_rooms(
         Placer::new(&data.materials, &mut placer_rng),
         material_id,
     );
+
+    // Interior doors: (floor, rect_a, rect_b, cell position of the gap).
+    let mut interior_doors: Vec<(u32, usize, usize, Point2D)> = Vec::new();
 
     for floor in frame.floors() {
         let active = frame.active_rects(floor);
@@ -326,12 +464,21 @@ pub async fn build_rooms(
                 .filter(|c| !perimeter.contains(&(c.x, c.y)))
                 .collect();
 
-            // Archway door: 1 wide, 2 tall, centered unless blocked by stairs
+            // Interior door: 1 wide, 2 tall, centered unless blocked by stairs
             let door_pos = find_archway_pos(&interior_cells, &stair_cells);
+
+            if door_pos < interior_cells.len() {
+                interior_doors.push((
+                    floor,
+                    boundary.rect_a,
+                    boundary.rect_b,
+                    *interior_cells[door_pos],
+                ));
+            }
 
             for (i, cell) in interior_cells.iter().enumerate() {
                 for ry in 0..height {
-                    // Leave a 1x2 archway opening
+                    // Leave a 1x2 opening for the interior door
                     if i == door_pos && ry < 2 {
                         continue;
                     }
@@ -346,29 +493,80 @@ pub async fn build_rooms(
                 }
             }
         }
-
-        // Assign roles and create rooms
-        let assignments = assign_roles(rects, &active, floor, entry_rect);
-        for (rect_idx, role) in assignments {
-            rooms.push(Room {
-                rect: rects[rect_idx],
-                rect_index: rect_idx,
-                floor,
-                role,
-            });
-        }
     }
 
-    // Add attic rooms for each rect (the attic floor is one above each rect's top floor)
-    if has_attic {
-        for (i, rect) in rects.iter().enumerate() {
-            rooms.push(Room {
-                rect: *rect,
-                rect_index: i,
-                floor: frame.floor_counts()[i],
-                role: RoomRole::Attic,
-            });
+    // All stairwell cells (for marking Blocked in floor maps)
+    let all_stair_cells: HashSet<(i32, i32)> = floor_plan.stairwells.iter()
+        .flat_map(|sw| sw.positions.iter().map(|p| (p.x, p.y)))
+        .collect();
+
+    // Assign room types for the whole building
+    let assignments = assign_room_types(frame, size_class, has_attic, rng);
+
+    // Build Room structs with floor maps
+    let entry_rect = find_entry_rect(rects, wall_segs);
+    let mut rooms = Vec::new();
+    for (rect_idx, floor, room_type) in assignments {
+        let role = if floor >= frame.floor_counts().get(rect_idx).copied().unwrap_or(0) {
+            RoomRole::Attic
+        } else if floor > 0 {
+            RoomRole::Upper
+        } else if Some(rect_idx) == entry_rect || (entry_rect.is_none() && rect_idx == 0) {
+            RoomRole::Entry
+        } else {
+            RoomRole::Secondary
+        };
+
+        let rect = rects[rect_idx];
+        let interior = rect.shrink(1);
+        let has_interior = interior.size.x > 0 && interior.size.y > 0;
+        let mut floor_map = FloorMap::new();
+
+        if has_interior {
+            // Start with all interior cells as Open
+            for cell in interior.iter() {
+                floor_map.insert((cell.x, cell.y), FloorCell::Open);
+            }
+
+            // Mark stairwell cells as Blocked
+            for cell in interior.iter() {
+                if all_stair_cells.contains(&(cell.x, cell.y)) {
+                    floor_map.insert((cell.x, cell.y), FloorCell::Blocked);
+                }
+            }
+
+            // Interior doors → Entrance
+            for &(door_floor, rect_a, rect_b, door_cell) in &interior_doors {
+                if door_floor != floor { continue; }
+                if rect_a != rect_idx && rect_b != rect_idx { continue; }
+                let entrance = nearest_interior_cell(door_cell, &interior);
+                floor_map.insert((entrance.x, entrance.y), FloorCell::ReachableOpen);
+            }
+
+            // Exterior doors → Entrance
+            for (seg, opening) in wall_segs.doors() {
+                if seg.floor != floor { continue; }
+                let cells = walls::segment_cells(seg);
+                let idx = opening.offset as usize;
+                if idx >= cells.len() { continue; }
+                let door_cell = cells[idx];
+                let inward: Point2D = (-seg.facing).into();
+                let stepped = door_cell + inward;
+                if rect.contains(stepped) {
+                    let entrance = nearest_interior_cell(stepped, &interior);
+                    floor_map.insert((entrance.x, entrance.y), FloorCell::ReachableOpen);
+                }
+            }
         }
+
+        rooms.push(Room {
+            rect,
+            rect_index: rect_idx,
+            floor,
+            role,
+            room_type,
+            floor_map,
+        });
     }
 
     RoomPlan { rooms }

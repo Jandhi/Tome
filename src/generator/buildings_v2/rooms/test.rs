@@ -1,5 +1,12 @@
-use crate::geometry::{Point2D, Rect2D};
-use super::{find_boundaries, assign_roles, RoomRole};
+use std::collections::HashMap;
+use crate::geometry::{Point2D, Point3D, Rect2D};
+use crate::noise::RNG;
+use crate::minecraft::Block;
+use crate::generator::buildings_v2::RoomType;
+use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint, find_boundaries};
+use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
+use crate::generator::buildings_v2::frame::{Frame, generate_frame};
+use super::{assign_roles, assign_room_types, RoomRole};
 
 // --- Unit tests for pure logic ---
 
@@ -137,4 +144,963 @@ fn assign_roles_three_rects() {
     assert_eq!(find_role(1), RoomRole::Entry);     // has door
     assert_eq!(find_role(0), RoomRole::Main);       // largest remaining
     assert_eq!(find_role(2), RoomRole::Secondary);  // the rest
+}
+
+/// Helper to make a Frame from hand-built rects and floor counts.
+fn make_test_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
+    let outline = outline_from_rects(&rects);
+    let footprint = Footprint::new(outline, rects);
+    Frame::new(footprint, 64, floor_counts, 3)
+}
+
+#[test]
+fn cottage_single_rect() {
+    let mut rng = RNG::new(42);
+    let frame = make_test_frame(
+        vec![Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6))],
+        vec![1],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::Cottage, false, &mut rng);
+    assert_eq!(rooms.len(), 1);
+    assert_eq!(rooms[0].2, RoomType::Common);
+}
+
+#[test]
+fn cottage_with_wing() {
+    let mut rng = RNG::new(42);
+    let frame = make_test_frame(
+        vec![
+            Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6)),
+            Rect2D::from_points(Point2D::new(9, 2), Point2D::new(13, 6)),
+        ],
+        vec![1, 1],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::Cottage, false, &mut rng);
+    assert_eq!(rooms.len(), 2);
+    assert_eq!(rooms[0].2, RoomType::Common);
+    assert_eq!(rooms[1].2, RoomType::Storage);
+}
+
+#[test]
+fn house_single_floor_no_wing() {
+    let mut rng = RNG::new(42);
+    let frame = make_test_frame(
+        vec![Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6))],
+        vec![1],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::House, false, &mut rng);
+    assert_eq!(rooms.len(), 1);
+    assert_eq!(rooms[0].2, RoomType::Common);
+}
+
+#[test]
+fn house_single_floor_with_wing() {
+    let mut rng = RNG::new(42);
+    let frame = make_test_frame(
+        vec![
+            Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6)),
+            Rect2D::from_points(Point2D::new(9, 2), Point2D::new(13, 6)),
+        ],
+        vec![1, 1],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::House, false, &mut rng);
+    assert_eq!(rooms[0].2, RoomType::Hearth);
+    assert_eq!(rooms[1].2, RoomType::Bedroom);
+}
+
+#[test]
+fn house_two_floors() {
+    let mut rng = RNG::new(42);
+    let frame = make_test_frame(
+        vec![
+            Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6)),
+            Rect2D::from_points(Point2D::new(9, 2), Point2D::new(13, 6)),
+        ],
+        vec![2, 2],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::House, false, &mut rng);
+    // Floor 0: core=Hearth, wing=Storage
+    assert_eq!(rooms[0], (0, 0, RoomType::Hearth));
+    assert_eq!(rooms[1], (1, 0, RoomType::Storage));
+    // Floor 1: all Bedroom
+    assert_eq!(rooms[2], (0, 1, RoomType::Bedroom));
+    assert_eq!(rooms[3], (1, 1, RoomType::Bedroom));
+}
+
+#[test]
+fn house_no_grand_types() {
+    for seed in 0..100 {
+        let mut r = RNG::new(seed);
+        let frame = make_test_frame(
+            vec![
+                Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6)),
+                Rect2D::from_points(Point2D::new(9, 2), Point2D::new(13, 6)),
+            ],
+            vec![2, 2],
+        );
+        let rooms = assign_room_types(&frame, SizeClass::House, false, &mut r);
+        for (_, _, rt) in &rooms {
+            assert!(!matches!(rt,
+                RoomType::Dining | RoomType::Library | RoomType::Studio | RoomType::Armory
+                | RoomType::GreatRoom | RoomType::Kitchen | RoomType::Pantry
+                | RoomType::MultiBedroom | RoomType::MasterBedroom),
+                "Grand type {:?} in House", rt);
+        }
+    }
+}
+
+#[test]
+fn hall_ground_floor_by_size() {
+    let mut rng = RNG::new(42);
+    // Wing idx 1 is small (5x5=25), wing idx 2 is large (7x5=35)
+    let frame = make_test_frame(
+        vec![
+            Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 8)),   // core
+            Rect2D::from_points(Point2D::new(11, 0), Point2D::new(15, 4)),  // small wing
+            Rect2D::from_points(Point2D::new(0, 9), Point2D::new(6, 13)),   // large wing
+        ],
+        vec![2, 2, 2],
+    );
+    let rooms = assign_room_types(&frame, SizeClass::Hall, false, &mut rng);
+    let ground: Vec<_> = rooms.iter().filter(|(_, f, _)| *f == 0).collect();
+
+    assert_eq!(ground.len(), 3);
+    // Core is always GreatRoom
+    let core = ground.iter().find(|r| r.0 == 0).unwrap();
+    assert_eq!(core.2, RoomType::GreatRoom);
+    // Larger wing (idx 2) gets Kitchen
+    let large = ground.iter().find(|r| r.0 == 2).unwrap();
+    assert_eq!(large.2, RoomType::Kitchen);
+    // Smaller wing (idx 1) gets Pantry
+    let small = ground.iter().find(|r| r.0 == 1).unwrap();
+    assert_eq!(small.2, RoomType::Pantry);
+}
+
+#[test]
+fn hall_upper_floor_by_size() {
+    for seed in 0..50 {
+        let mut r = RNG::new(seed);
+        // Wing idx 1 is small (5x5), wing idx 2 is large (7x5)
+        let frame = make_test_frame(
+            vec![
+                Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 8)),
+                Rect2D::from_points(Point2D::new(11, 0), Point2D::new(15, 4)),  // small
+                Rect2D::from_points(Point2D::new(0, 9), Point2D::new(6, 13)),   // large
+            ],
+            vec![2, 2, 2],
+        );
+        let rooms = assign_room_types(&frame, SizeClass::Hall, false, &mut r);
+        let upper: Vec<_> = rooms.iter().filter(|(_, f, _)| *f == 1).collect();
+
+        let core = upper.iter().find(|r| r.0 == 0).unwrap();
+        assert_eq!(core.2, RoomType::MultiBedroom);
+        // Larger wing gets MasterBedroom
+        let large = upper.iter().find(|r| r.0 == 2).unwrap();
+        assert_eq!(large.2, RoomType::MasterBedroom);
+        // Smaller wing gets Study
+        let small = upper.iter().find(|r| r.0 == 1).unwrap();
+        assert_eq!(small.2, RoomType::Study);
+    }
+}
+
+#[test]
+fn manor_first_upper_is_bedroom() {
+    for seed in 0..50 {
+        let mut r = RNG::new(seed);
+        let frame = make_test_frame(
+            vec![
+                Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 10)),
+                Rect2D::from_points(Point2D::new(13, 0), Point2D::new(17, 6)),
+                Rect2D::from_points(Point2D::new(0, 11), Point2D::new(6, 15)),
+            ],
+            vec![3, 2, 3],
+        );
+        let rooms = assign_room_types(&frame, SizeClass::Manor, false, &mut r);
+        let first_upper = rooms.iter().find(|(_, f, _)| *f == 1).unwrap();
+        assert_eq!(first_upper.2, RoomType::Bedroom, "First upper in Manor must be Bedroom");
+    }
+}
+
+#[test]
+fn hall_study_one_wing() {
+    // Study should appear on at most one wing (but on every floor that wing is active)
+    for seed in 0..50 {
+        let mut r = RNG::new(seed);
+        let frame = make_test_frame(
+            vec![
+                Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 8)),
+                Rect2D::from_points(Point2D::new(11, 0), Point2D::new(15, 4)),
+                Rect2D::from_points(Point2D::new(0, 9), Point2D::new(4, 13)),
+            ],
+            vec![3, 3, 3],
+        );
+        let rooms = assign_room_types(&frame, SizeClass::Hall, false, &mut r);
+        let study_rects: std::collections::HashSet<usize> = rooms.iter()
+            .filter(|(_, _, rt)| *rt == RoomType::Study)
+            .map(|(idx, _, _)| *idx)
+            .collect();
+        assert!(study_rects.len() <= 1, "Study in multiple wings: {:?} (seed={})", study_rects, seed);
+    }
+}
+
+#[test]
+fn hall_no_manor_types() {
+    for seed in 0..100 {
+        let mut r = RNG::new(seed);
+        let frame = make_test_frame(
+            vec![
+                Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 8)),
+                Rect2D::from_points(Point2D::new(11, 0), Point2D::new(15, 4)),
+                Rect2D::from_points(Point2D::new(0, 9), Point2D::new(4, 13)),
+            ],
+            vec![3, 3, 3],
+        );
+        let rooms = assign_room_types(&frame, SizeClass::Hall, false, &mut r);
+        for (_, _, rt) in &rooms {
+            assert!(!matches!(rt, RoomType::Library | RoomType::Studio | RoomType::Armory),
+                "Manor type {:?} in Hall", rt);
+        }
+    }
+}
+
+/// Generate buildings of all size classes and print ASCII floor plans with room type labels.
+#[test]
+fn room_type_ascii() {
+    let mut rng = RNG::new(123);
+
+    for (name, size_class, count) in [
+        ("Cottage", SizeClass::Cottage, 3),
+        ("House",   SizeClass::House,   3),
+        ("Hall",    SizeClass::Hall,    3),
+        ("Manor",   SizeClass::Manor,   3),
+    ] {
+        println!("\n########## {} ##########", name);
+        let bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(63, 63));
+        let mut plot = Plot::fully_usable(bounds);
+
+        for i in 0..count {
+            let footprint = match generate_footprint(&mut rng, &plot, &size_class) {
+                Some(f) => f,
+                None => break,
+            };
+
+            let frame = generate_frame(footprint, 64, &size_class, &mut rng);
+            let rects = frame.footprint().rects();
+
+            let assignments = assign_room_types(&frame, size_class, false, &mut rng);
+
+            println!("\n=== {} {} ===", name, i);
+            println!("  Rects: {}, Floors: {} (counts: {:?})", rects.len(), frame.max_floors(), frame.floor_counts());
+
+            let fp_bounds = frame.footprint().bounds();
+            let min_x = fp_bounds.min().x;
+            let min_z = fp_bounds.min().y;
+            let max_x = fp_bounds.max().x;
+            let max_z = fp_bounds.max().y;
+
+            for floor in frame.floors() {
+                println!("  Floor {}:", floor);
+
+                let floor_rooms: Vec<_> = assignments.iter()
+                    .filter(|(_, f, _)| *f == floor)
+                    .collect();
+
+                let w = (max_x - min_x + 1) as usize;
+                let h = (max_z - min_z + 1) as usize;
+                let mut grid = vec![vec![' '; w]; h];
+
+                let active = frame.active_rects(floor);
+                for &idx in &active {
+                    let rect = &rects[idx];
+                    for x in rect.min().x..=rect.max().x {
+                        for z in rect.min().y..=rect.max().y {
+                            let gx = (x - min_x) as usize;
+                            let gz = (z - min_z) as usize;
+                            grid[gz][gx] = '.';
+                        }
+                    }
+                }
+
+                for (rect_idx, _, room_type) in &floor_rooms {
+                    let rect = &rects[*rect_idx];
+                    let cx = ((rect.min().x + rect.max().x) / 2 - min_x) as usize;
+                    let cz = ((rect.min().y + rect.max().y) / 2 - min_z) as usize;
+                    let label = room_type.label();
+                    let start = cx.saturating_sub(label.len() / 2);
+                    for (j, ch) in label.chars().enumerate() {
+                        if start + j < w {
+                            grid[cz][start + j] = ch;
+                        }
+                    }
+                    println!("    rect[{}] {:?} ({}x{})",
+                        rect_idx, room_type,
+                        rect.length(), rect.width());
+                }
+
+                for row in &grid {
+                    let line: String = row.iter().collect();
+                    println!("    |{}|", line);
+                }
+            }
+
+            // Mark footprint as used
+            for point in frame.footprint().filled_points() {
+                for dx in -2..=2 {
+                    for dz in -2..=2 {
+                        let lx = (point.x + dx) as usize;
+                        let lz = (point.y + dz) as usize;
+                        if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                            plot.usable[lx][lz] = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Make a sign block with text on the front face.
+fn sign_block(line1: &str, line2: &str) -> Block {
+    let nbt = format!(
+        "{{front_text:{{messages:['\"{}\"','\"{}\"','\"\"','\"\"']}}}}",
+        line1, line2
+    );
+    Block::new(
+        "minecraft:oak_sign".into(),
+        Some(HashMap::from([("rotation".to_string(), "0".to_string())])),
+        Some(nbt),
+    )
+}
+
+/// Generate halls in Minecraft with signs labeling each room.
+#[tokio::test]
+async fn build_halls_with_signs() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
+    use crate::generator::buildings_v2::foundation::place_foundation;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::roof::place_roof;
+    use crate::generator::buildings_v2::walls::{
+        build_segments, boundary_cell_set, place_doors,
+        place_frame, place_wall_infill, place_openings,
+    };
+    use super::build_rooms;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let mut rng = RNG::new(42);
+    let mut plot = Plot::fully_usable(bounds);
+    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+
+    // Generate hall footprints
+    let mut footprints = Vec::new();
+    for _ in 0..20 {
+        let fp = match generate_footprint(&mut rng, &plot, &SizeClass::Hall) {
+            Some(f) => f,
+            None => break,
+        };
+        let plot_min = plot.bounds.min();
+        for point in fp.filled_points() {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let p = Point2D::new(point.x + dx, point.y + dz);
+                    let lx = (p.x - plot_min.x) as usize;
+                    let lz = (p.y - plot_min.y) as usize;
+                    if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                        plot.usable[lx][lz] = false;
+                    }
+                }
+            }
+        }
+        footprints.push(fp);
+    }
+
+    for (i, footprint) in footprints.iter().enumerate() {
+        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
+
+        let frame_footprint = Footprint::new(
+            outline_from_rects(footprint.rects()),
+            footprint.rects().to_vec(),
+        );
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
+
+        let mut wall_segs = build_segments(&frame);
+        let footprint_area = footprint.filled_points().len() as i32;
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
+        let pitch = pitches[i % pitches.len()];
+        let has_attic = matches!(pitch, GablePitch::Double);
+
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
+        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
+        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
+
+        let room_plan = build_rooms(
+            &editor, &frame, &wall_segs, &floor_plan, has_attic,
+            SizeClass::Hall, &data, &palette, &mut rng,
+        ).await;
+
+        // Place a sign in the center of each room
+        for room in &room_plan.rooms {
+            let cx = (room.rect.min().x + room.rect.max().x) / 2;
+            let cz = (room.rect.min().y + room.rect.max().y) / 2;
+            let y = frame.floor_y(room.floor) + 1;
+
+            let line1 = format!("F{} R{}", room.floor, room.rect_index);
+            let line2 = format!("{:?}", room.room_type);
+            let sign = sign_block(&line1, &line2);
+            editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+        }
+
+        println!(
+            "Hall {}: rects={}, floors={}, pitch={:?}, rooms={}",
+            i, footprint.rects().len(), frame.max_floors(), pitch, room_plan.rooms.len(),
+        );
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — {} halls placed with room signs", footprints.len());
+}
+
+#[tokio::test]
+async fn build_cottages_with_signs() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
+    use crate::generator::buildings_v2::foundation::place_foundation;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::roof::place_roof;
+    use crate::generator::buildings_v2::walls::{
+        build_segments, boundary_cell_set, place_doors,
+        place_frame, place_wall_infill, place_openings,
+    };
+    use super::build_rooms;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let mut rng = RNG::new(42);
+    let mut plot = Plot::fully_usable(bounds);
+    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+
+    let mut footprints = Vec::new();
+    for _ in 0..30 {
+        let fp = match generate_footprint(&mut rng, &plot, &SizeClass::Cottage) {
+            Some(f) => f,
+            None => break,
+        };
+        let plot_min = plot.bounds.min();
+        for point in fp.filled_points() {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let p = Point2D::new(point.x + dx, point.y + dz);
+                    let lx = (p.x - plot_min.x) as usize;
+                    let lz = (p.y - plot_min.y) as usize;
+                    if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                        plot.usable[lx][lz] = false;
+                    }
+                }
+            }
+        }
+        footprints.push(fp);
+    }
+
+    for (i, footprint) in footprints.iter().enumerate() {
+        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
+
+        let frame_footprint = Footprint::new(
+            outline_from_rects(footprint.rects()),
+            footprint.rects().to_vec(),
+        );
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Cottage, &mut rng);
+
+        let mut wall_segs = build_segments(&frame);
+        let footprint_area = footprint.filled_points().len() as i32;
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
+        let pitch = pitches[i % pitches.len()];
+        let has_attic = matches!(pitch, GablePitch::Double);
+
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
+        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
+        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
+
+        let room_plan = build_rooms(
+            &editor, &frame, &wall_segs, &floor_plan, has_attic,
+            SizeClass::Cottage, &data, &palette, &mut rng,
+        ).await;
+
+        for room in &room_plan.rooms {
+            let cx = (room.rect.min().x + room.rect.max().x) / 2;
+            let cz = (room.rect.min().y + room.rect.max().y) / 2;
+            let y = frame.floor_y(room.floor) + 1;
+
+            let line1 = format!("F{} R{}", room.floor, room.rect_index);
+            let line2 = format!("{:?}", room.room_type);
+            let sign = sign_block(&line1, &line2);
+            editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+        }
+
+        println!(
+            "Cottage {}: rects={}, floors={}, pitch={:?}, rooms={}",
+            i, footprint.rects().len(), frame.max_floors(), pitch, room_plan.rooms.len(),
+        );
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — {} cottages placed with room signs", footprints.len());
+}
+
+#[tokio::test]
+async fn build_houses_with_signs() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
+    use crate::generator::buildings_v2::foundation::place_foundation;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::roof::place_roof;
+    use crate::generator::buildings_v2::walls::{
+        build_segments, boundary_cell_set, place_doors,
+        place_frame, place_wall_infill, place_openings,
+    };
+    use super::build_rooms;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let mut rng = RNG::new(42);
+    let mut plot = Plot::fully_usable(bounds);
+    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+
+    let mut footprints = Vec::new();
+    for _ in 0..30 {
+        let fp = match generate_footprint(&mut rng, &plot, &SizeClass::House) {
+            Some(f) => f,
+            None => break,
+        };
+        let plot_min = plot.bounds.min();
+        for point in fp.filled_points() {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let p = Point2D::new(point.x + dx, point.y + dz);
+                    let lx = (p.x - plot_min.x) as usize;
+                    let lz = (p.y - plot_min.y) as usize;
+                    if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                        plot.usable[lx][lz] = false;
+                    }
+                }
+            }
+        }
+        footprints.push(fp);
+    }
+
+    for (i, footprint) in footprints.iter().enumerate() {
+        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
+
+        let frame_footprint = Footprint::new(
+            outline_from_rects(footprint.rects()),
+            footprint.rects().to_vec(),
+        );
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::House, &mut rng);
+
+        let mut wall_segs = build_segments(&frame);
+        let footprint_area = footprint.filled_points().len() as i32;
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
+        let pitch = pitches[i % pitches.len()];
+        let has_attic = matches!(pitch, GablePitch::Double);
+
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
+        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
+        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
+
+        let room_plan = build_rooms(
+            &editor, &frame, &wall_segs, &floor_plan, has_attic,
+            SizeClass::House, &data, &palette, &mut rng,
+        ).await;
+
+        for room in &room_plan.rooms {
+            let cx = (room.rect.min().x + room.rect.max().x) / 2;
+            let cz = (room.rect.min().y + room.rect.max().y) / 2;
+            let y = frame.floor_y(room.floor) + 1;
+
+            let line1 = format!("F{} R{}", room.floor, room.rect_index);
+            let line2 = format!("{:?}", room.room_type);
+            let sign = sign_block(&line1, &line2);
+            editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+        }
+
+        println!(
+            "House {}: rects={}, floors={}, pitch={:?}, rooms={}",
+            i, footprint.rects().len(), frame.max_floors(), pitch, room_plan.rooms.len(),
+        );
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — {} houses placed with room signs", footprints.len());
+}
+
+#[tokio::test]
+async fn build_mixed_sizes_with_random_roofs() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
+    use crate::generator::buildings_v2::foundation::place_foundation;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::roof::place_roof;
+    use crate::generator::buildings_v2::walls::{
+        build_segments, boundary_cell_set, place_doors,
+        place_frame, place_wall_infill, place_openings,
+    };
+    use super::build_rooms;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let base_palette_id: PaletteId = "medieval_spruce".into();
+    let base_palette = data.palettes.get(&base_palette_id).expect("Base palette not found").clone();
+
+    let roof_ids: Vec<PaletteId> = vec![
+        "acacia_wood_roof".into(),
+        "blackstone_roof".into(),
+        "blue_wood_roof".into(),
+        "brick_roof".into(),
+        "oak_wood_roof".into(),
+        "red_wood_roof".into(),
+    ];
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let mut rng = RNG::new(77);
+    let mut plot = Plot::fully_usable(bounds);
+    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+
+    // Lean small: mostly cottages and houses, some halls
+    let size_classes = [
+        SizeClass::Cottage, SizeClass::Cottage, SizeClass::Cottage,
+        SizeClass::House, SizeClass::House, SizeClass::House,
+        SizeClass::Hall, SizeClass::Manor,
+    ];
+
+    let mut footprints_with_class = Vec::new();
+    for i in 0..40 {
+        let size_class = size_classes[i % size_classes.len()];
+        let fp = match generate_footprint(&mut rng, &plot, &size_class) {
+            Some(f) => f,
+            None => continue,
+        };
+        let plot_min = plot.bounds.min();
+        for point in fp.filled_points() {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    let p = Point2D::new(point.x + dx, point.y + dz);
+                    let lx = (p.x - plot_min.x) as usize;
+                    let lz = (p.y - plot_min.y) as usize;
+                    if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                        plot.usable[lx][lz] = false;
+                    }
+                }
+            }
+        }
+        footprints_with_class.push((fp, size_class));
+    }
+
+    for (i, (footprint, size_class)) in footprints_with_class.iter().enumerate() {
+        // Pick a random roof palette and merge it onto the base
+        let roof_idx = rng.rand_i32_range(0, roof_ids.len() as i32) as usize;
+        let roof_palette = data.palettes.get(&roof_ids[roof_idx]).expect("Roof palette not found");
+        let palette = base_palette.clone().merged_with(roof_palette);
+
+        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
+
+        let frame_footprint = Footprint::new(
+            outline_from_rects(footprint.rects()),
+            footprint.rects().to_vec(),
+        );
+        let frame = generate_frame(frame_footprint, base_y, size_class, &mut rng);
+
+        let mut wall_segs = build_segments(&frame);
+        let footprint_area = footprint.filled_points().len() as i32;
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
+        let pitch = pitches[i % pitches.len()];
+        let has_attic = matches!(pitch, GablePitch::Double);
+
+        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
+        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
+        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
+        place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+        if has_attic {
+            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+        }
+
+        let room_plan = build_rooms(
+            &editor, &frame, &wall_segs, &floor_plan, has_attic,
+            *size_class, &data, &palette, &mut rng,
+        ).await;
+
+        for room in &room_plan.rooms {
+            let cx = (room.rect.min().x + room.rect.max().x) / 2;
+            let cz = (room.rect.min().y + room.rect.max().y) / 2;
+            let y = frame.floor_y(room.floor) + 1;
+
+            let line1 = format!("F{} R{}", room.floor, room.rect_index);
+            let line2 = format!("{:?}", room.room_type);
+            let sign = sign_block(&line1, &line2);
+            editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+        }
+
+        println!(
+            "{:?} {}: rects={}, floors={}, pitch={:?}, roof={:?}, rooms={}",
+            size_class, i, footprint.rects().len(), frame.max_floors(), pitch,
+            roof_ids[roof_idx], room_plan.rooms.len(),
+        );
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — {} buildings with random roof materials", footprints_with_class.len());
+}
+
+/// Full settlement pipeline using buildings_v2 instead of the original building system.
+/// Generates districts, partitions urban area into city blocks, then fills each block
+/// with buildings_v2 buildings of mixed sizes and randomized roof materials.
+#[tokio::test]
+async fn settlement_with_buildings_v2() {
+    use std::collections::HashSet;
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::districts::generate_districts;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
+    use crate::generator::buildings_v2::foundation::place_foundation;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::roof::place_roof;
+    use crate::generator::buildings_v2::walls::{
+        build_segments, boundary_cell_set, place_doors,
+        place_frame, place_wall_infill, place_openings,
+    };
+    use crate::generator::buildings::get_city_blocks_and_off_limits;
+    use crate::geometry::get_outer_and_inner_points;
+    use super::build_rooms;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let mut rng = RNG::new(42);
+
+    // Step 1: Generate districts (creates urban/rural classification)
+    generate_districts(rng.next_i64().into(), &mut editor).await;
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let base_palette_id: PaletteId = "medieval_spruce".into();
+    let base_palette = data.palettes.get(&base_palette_id).expect("Base palette not found").clone();
+
+    let roof_ids: Vec<PaletteId> = vec![
+        "acacia_wood_roof".into(),
+        "blackstone_roof".into(),
+        "blue_wood_roof".into(),
+        "brick_roof".into(),
+        "oak_wood_roof".into(),
+        "red_wood_roof".into(),
+    ];
+
+    // Step 2: Get city blocks from urban area
+    let (city_blocks, _off_limits) = get_city_blocks_and_off_limits(&mut editor, &mut rng.derive());
+
+    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let size_classes = [
+        SizeClass::Cottage, SizeClass::Cottage, SizeClass::Cottage,
+        SizeClass::House, SizeClass::House,
+        SizeClass::Hall,
+    ];
+
+    let mut total_buildings = 0;
+
+    // Step 3: For each city block, create a Plot and fill with buildings_v2
+    for (block_idx, block) in city_blocks.iter().enumerate() {
+        let (_outer, inner) = get_outer_and_inner_points(block, 3);
+        if inner.is_empty() {
+            continue;
+        }
+
+        // Convert inner HashSet<Point2D> to a Plot
+        let min_x = inner.iter().map(|p| p.x).min().unwrap();
+        let min_z = inner.iter().map(|p| p.y).min().unwrap();
+        let max_x = inner.iter().map(|p| p.x).max().unwrap();
+        let max_z = inner.iter().map(|p| p.y).max().unwrap();
+        let bounds = Rect2D::from_points(Point2D::new(min_x, min_z), Point2D::new(max_x, max_z));
+        let w = (max_x - min_x + 1) as usize;
+        let h = (max_z - min_z + 1) as usize;
+        let mut usable = vec![vec![false; h]; w];
+        for p in &inner {
+            let lx = (p.x - min_x) as usize;
+            let lz = (p.y - min_z) as usize;
+            usable[lx][lz] = true;
+        }
+        let mut plot = Plot::new(bounds, usable);
+
+        // Fill the plot with as many buildings as we can
+        let mut block_buildings = 0;
+        for attempt in 0..50 {
+            let size_class = size_classes[(total_buildings + attempt) % size_classes.len()];
+            let footprint = match generate_footprint(&mut rng, &plot, &size_class) {
+                Some(f) => f,
+                None => break,
+            };
+
+            // Mark footprint + 1-cell buffer as used
+            let plot_min = plot.bounds.min();
+            for point in footprint.filled_points() {
+                for dx in -1..=1 {
+                    for dz in -1..=1 {
+                        let p = Point2D::new(point.x + dx, point.y + dz);
+                        let lx = (p.x - plot_min.x) as usize;
+                        let lz = (p.y - plot_min.y) as usize;
+                        if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                            plot.usable[lx][lz] = false;
+                        }
+                    }
+                }
+            }
+
+            // Pick random roof palette
+            let roof_idx = rng.rand_i32_range(0, roof_ids.len() as i32) as usize;
+            let roof_palette = data.palettes.get(&roof_ids[roof_idx]).expect("Roof palette not found");
+            let palette = base_palette.clone().merged_with(roof_palette);
+
+            let base_y = place_foundation(&mut editor, &footprint, &data, &palette, &mut rng).await;
+
+            let frame_footprint = Footprint::new(
+                outline_from_rects(footprint.rects()),
+                footprint.rects().to_vec(),
+            );
+            let frame = generate_frame(frame_footprint, base_y, &size_class, &mut rng);
+
+            let mut wall_segs = build_segments(&frame);
+            let footprint_area = footprint.filled_points().len() as i32;
+            let bc = boundary_cell_set(footprint.rects());
+            place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
+            let pitch = pitches[total_buildings % pitches.len()];
+            let has_attic = matches!(pitch, GablePitch::Double);
+
+            let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
+            place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
+            place_frame(&editor, &frame, &data, &palette, &mut rng).await;
+            place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
+            place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
+            if has_attic {
+                clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+            }
+
+            build_rooms(
+                &editor, &frame, &wall_segs, &floor_plan, has_attic,
+                size_class, &data, &palette, &mut rng,
+            ).await;
+
+            total_buildings += 1;
+            block_buildings += 1;
+        }
+
+        println!(
+            "Block {}: {} inner points, {} buildings placed",
+            block_idx, inner.len(), block_buildings,
+        );
+    }
+
+    editor.flush_buffer().await;
+    println!(
+        "Done — {} total buildings across {} city blocks",
+        total_buildings, city_blocks.len(),
+    );
 }

@@ -107,30 +107,117 @@ impl Footprint {
 }
 
 /// Size class for footprint generation, driven by building type and wealth.
-#[derive(Debug, Clone, Copy)]
-pub struct SizeClass {
-    pub target_area_min: i32,
-    pub target_area_max: i32,
-    pub min_side: i32,
-    pub min_wings: i32,
-    pub max_wings: i32,
-    pub min_floors: u32,
-    pub max_floors: u32,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SizeClass {
+    /// Small rural building on the outskirts. Simple rectangle.
+    Cottage,
+    /// Standard town building. L-shapes common.
+    House,
+    /// Larger building for craftsmen, taverns, shops. Complex shapes.
+    Hall,
+    /// Grand building for the elite. Largest and most complex.
+    Manor,
 }
 
 impl SizeClass {
-    /// Small rural building on the outskirts. Simple rectangle.
-    pub const COTTAGE: Self = Self { target_area_min: 45, target_area_max: 80, min_side: 5, min_wings: 0, max_wings: 1, min_floors: 1, max_floors: 1 };
-    /// Standard town building. L-shapes common.
-    pub const HOUSE: Self = Self { target_area_min: 80, target_area_max: 130, min_side: 5, min_wings: 1, max_wings: 2, min_floors: 1, max_floors: 2 };
-    /// Larger building for craftsmen, taverns, shops. Complex shapes.
-    pub const HALL: Self = Self { target_area_min: 130, target_area_max: 200, min_side: 7, min_wings: 2, max_wings: 3, min_floors: 2, max_floors: 3 };
-    /// Grand building for the elite. Largest and most complex.
-    pub const MANOR: Self = Self { target_area_min: 280, target_area_max: 450, min_side: 9, min_wings: 2, max_wings: 4, min_floors: 2, max_floors: 3 };
-
-    pub fn floor_range(&self) -> std::ops::RangeInclusive<u32> {
-        self.min_floors..=self.max_floors
+    pub fn target_area_min(&self) -> i32 {
+        match self { Self::Cottage => 45, Self::House => 80, Self::Hall => 130, Self::Manor => 280 }
     }
+    pub fn target_area_max(&self) -> i32 {
+        match self { Self::Cottage => 80, Self::House => 130, Self::Hall => 200, Self::Manor => 450 }
+    }
+    pub fn min_side(&self) -> i32 {
+        match self { Self::Cottage => 5, Self::House => 5, Self::Hall => 7, Self::Manor => 9 }
+    }
+    pub fn min_wings(&self) -> i32 {
+        match self { Self::Cottage => 0, Self::House => 1, Self::Hall => 2, Self::Manor => 2 }
+    }
+    pub fn max_wings(&self) -> i32 {
+        match self { Self::Cottage => 1, Self::House => 2, Self::Hall => 3, Self::Manor => 4 }
+    }
+    pub fn min_floors(&self) -> u32 {
+        match self { Self::Cottage => 1, Self::House => 1, Self::Hall => 2, Self::Manor => 2 }
+    }
+    pub fn max_floors(&self) -> u32 {
+        match self { Self::Cottage => 1, Self::House => 2, Self::Hall => 3, Self::Manor => 3 }
+    }
+    pub fn floor_range(&self) -> std::ops::RangeInclusive<u32> {
+        self.min_floors()..=self.max_floors()
+    }
+}
+
+/// A boundary between two adjacent rects where an interior wall goes.
+pub struct RectBoundary {
+    pub rect_a: usize,
+    pub rect_b: usize,
+    /// Cell positions where wall blocks are placed.
+    pub wall_cells: Vec<Point2D>,
+}
+
+/// Find pairs of adjacent rects and compute the cells for each shared boundary wall.
+/// The wall is placed on the inside edge of the core rect (index 0) so that
+/// wings keep their full interior space. For wing-to-wing boundaries, the wall
+/// goes on the lower-indexed rect's edge.
+pub fn find_boundaries(rects: &[Rect2D]) -> Vec<RectBoundary> {
+    let mut boundaries = Vec::new();
+
+    for i in 0..rects.len() {
+        for j in (i + 1)..rects.len() {
+            let a = &rects[i];
+            let b = &rects[j];
+
+            // East: A's east side adjacent to B's west side
+            if a.max().x + 1 == b.min().x {
+                let z_start = a.min().y.max(b.min().y);
+                let z_end = a.max().y.min(b.max().y);
+                if z_start <= z_end {
+                    // Wall on A's inside edge (last column of A)
+                    let cells = (z_start..=z_end)
+                        .map(|z| Point2D::new(a.max().x, z))
+                        .collect();
+                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
+                }
+            }
+            // West: B's east side adjacent to A's west side
+            else if b.max().x + 1 == a.min().x {
+                let z_start = a.min().y.max(b.min().y);
+                let z_end = a.max().y.min(b.max().y);
+                if z_start <= z_end {
+                    // Wall on A's inside edge (first column of A)
+                    let cells = (z_start..=z_end)
+                        .map(|z| Point2D::new(a.min().x, z))
+                        .collect();
+                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
+                }
+            }
+            // South: A's south side adjacent to B's north side
+            else if a.max().y + 1 == b.min().y {
+                let x_start = a.min().x.max(b.min().x);
+                let x_end = a.max().x.min(b.max().x);
+                if x_start <= x_end {
+                    // Wall on A's inside edge (last row of A)
+                    let cells = (x_start..=x_end)
+                        .map(|x| Point2D::new(x, a.max().y))
+                        .collect();
+                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
+                }
+            }
+            // North: B's south side adjacent to A's north side
+            else if b.max().y + 1 == a.min().y {
+                let x_start = a.min().x.max(b.min().x);
+                let x_end = a.max().x.min(b.max().x);
+                if x_start <= x_end {
+                    // Wall on A's inside edge (first row of A)
+                    let cells = (x_start..=x_end)
+                        .map(|x| Point2D::new(x, a.min().y))
+                        .collect();
+                    boundaries.push(RectBoundary { rect_a: i, rect_b: j, wall_cells: cells });
+                }
+            }
+        }
+    }
+
+    boundaries
 }
 
 /// Full footprint generation pipeline: generate layouts, score/select, merge into polygon.
@@ -138,7 +225,7 @@ impl SizeClass {
 pub fn generate_footprint(rng: &mut RNG, plot: &Plot, size_class: &SizeClass) -> Option<Footprint> {
     let result = generate::generate_layouts(rng, plot, size_class, 5, 4)?;
     let mut select_rng = rng.derive();
-    let min_area = size_class.min_side * size_class.min_side;
+    let min_area = size_class.min_side() * size_class.min_side();
     let winner = generate::select_layout(
         &mut select_rng, &result.layouts, result.target_area, &result.candidate, min_area,
     )?;

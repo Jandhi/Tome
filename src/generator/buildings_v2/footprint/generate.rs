@@ -31,7 +31,7 @@ fn find_candidate(plot: &Plot, size_class: &SizeClass) -> Option<Rect2D> {
         Point2D::new(min.x + rect.origin.x, min.y + rect.origin.y),
         rect.size,
     );
-    if candidate.length() < size_class.min_side || candidate.width() < size_class.min_side {
+    if candidate.length() < size_class.min_side() || candidate.width() < size_class.min_side() {
         return None;
     }
     Some(candidate)
@@ -46,10 +46,10 @@ fn generate_core(
 ) -> Option<Rect2D> {
     // Core takes less of the target area when more wings are expected
     // 0 wings: 100%, 1 wing: 50-65%, 2 wings: 40-55%, 3 wings: 35-50%
-    let core_fraction = if size_class.max_wings == 0 {
+    let core_fraction = if size_class.max_wings() == 0 {
         100
     } else {
-        let max_frac = 65 - (size_class.max_wings - 1) * 10;
+        let max_frac = 65 - (size_class.max_wings() - 1) * 10;
         let min_frac = max_frac - 15;
         rng.rand_i32_range(min_frac, max_frac + 1)
     };
@@ -60,8 +60,8 @@ fn generate_core(
     let width_f = (core_area as f32 * ratio).sqrt();
     let depth_f = (core_area as f32 / ratio).sqrt();
 
-    let mut width = snap_odd(width_f as i32).max(size_class.min_side);
-    let mut depth = snap_odd(depth_f as i32).max(size_class.min_side);
+    let mut width = snap_odd(width_f as i32).max(size_class.min_side());
+    let mut depth = snap_odd(depth_f as i32).max(size_class.min_side());
 
     if rng.percent(50) {
         std::mem::swap(&mut width, &mut depth);
@@ -70,7 +70,7 @@ fn generate_core(
     width = width.min(candidate.length());
     depth = depth.min(candidate.width());
 
-    if width < size_class.min_side || depth < size_class.min_side {
+    if width < size_class.min_side() || depth < size_class.min_side() {
         return None;
     }
 
@@ -371,7 +371,7 @@ fn generate_wings(
     size_class: &SizeClass,
     target_area: i32,
 ) -> Vec<Rect2D> {
-    if size_class.max_wings == 0 {
+    if size_class.max_wings() == 0 {
         return vec![];
     }
 
@@ -379,11 +379,11 @@ fn generate_wings(
     let mut occupied: HashMap<Side, Vec<Span>> = HashMap::new();
     let mut current_area = core.area();
 
-    let num_wings = rng.rand_i32_range(size_class.min_wings.max(1), size_class.max_wings + 1);
+    let num_wings = rng.rand_i32_range(size_class.min_wings().max(1), size_class.max_wings() + 1);
 
     for attempt in 0..num_wings {
         let remaining = target_area - current_area;
-        if remaining < MIN_WING_SIDE * MIN_WING_SIDE && wings.len() as i32 >= size_class.min_wings {
+        if remaining < MIN_WING_SIDE * MIN_WING_SIDE && wings.len() as i32 >= size_class.min_wings() {
             break;
         }
 
@@ -420,7 +420,7 @@ pub fn generate_layouts(
 ) -> Option<GeneratedLayouts> {
     let candidate = find_candidate(plot, size_class)?;
 
-    let target_area = rng.rand_i32_range(size_class.target_area_min, size_class.target_area_max + 1)
+    let target_area = rng.rand_i32_range(size_class.target_area_min(), size_class.target_area_max() + 1)
         .min(candidate.area());
 
     let mut layouts = Vec::new();
@@ -431,7 +431,7 @@ pub fn generate_layouts(
             None => continue,
         };
 
-        if size_class.max_wings == 0 {
+        if size_class.max_wings() == 0 {
             layouts.push(Layout { core, wings: vec![] });
         } else {
             for _ in 0..wings_per_core {
@@ -460,7 +460,7 @@ pub fn generate_cores(
         None => return vec![],
     };
 
-    let target_area = rng.rand_i32_range(size_class.target_area_min, size_class.target_area_max + 1)
+    let target_area = rng.rand_i32_range(size_class.target_area_min(), size_class.target_area_max() + 1)
         .min(candidate.area());
 
     let mut cores = Vec::new();
@@ -548,7 +548,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let cores = generate_cores(&mut rng, &plot, &SizeClass::HOUSE, 6);
+        let cores = generate_cores(&mut rng, &plot, &SizeClass::House, 6);
 
         println!("Generated {} cores for HOUSE:", cores.len());
         for (i, core) in cores.iter().enumerate() {
@@ -559,9 +559,9 @@ mod tests {
 
         assert!(!cores.is_empty());
         for core in &cores {
-            assert!(core.area() >= SizeClass::HOUSE.min_side * SizeClass::HOUSE.min_side);
-            assert!(core.length() >= SizeClass::HOUSE.min_side);
-            assert!(core.width() >= SizeClass::HOUSE.min_side);
+            assert!(core.area() >= SizeClass::House.min_side() * SizeClass::House.min_side());
+            assert!(core.length() >= SizeClass::House.min_side());
+            assert!(core.width() >= SizeClass::House.min_side());
         }
     }
 
@@ -571,10 +571,10 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
 
         for (name, class) in [
-            ("COTTAGE", SizeClass::COTTAGE),
-            ("HOUSE", SizeClass::HOUSE),
-            ("HALL", SizeClass::HALL),
-            ("MANOR", SizeClass::MANOR),
+            ("COTTAGE", SizeClass::Cottage),
+            ("HOUSE", SizeClass::House),
+            ("HALL", SizeClass::Hall),
+            ("MANOR", SizeClass::Manor),
         ] {
             let mut rng = RNG::new(42);
             let cores = generate_cores(&mut rng, &plot, &class, 5);
@@ -596,7 +596,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let cores = generate_cores(&mut rng, &plot, &SizeClass::COTTAGE, 5);
+        let cores = generate_cores(&mut rng, &plot, &SizeClass::Cottage, 5);
 
         println!("Small plot cores:");
         for (i, core) in cores.iter().enumerate() {
@@ -620,7 +620,7 @@ mod tests {
         }
 
         let mut rng = RNG::new(99);
-        let cores = generate_cores(&mut rng, &plot, &SizeClass::HALL, 5);
+        let cores = generate_cores(&mut rng, &plot, &SizeClass::Hall, 5);
 
         println!("Cores with obstacles:");
         for (i, core) in cores.iter().enumerate() {
@@ -646,7 +646,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::HOUSE, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::House, 4, 3).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} HOUSE layouts (target_area={}):", layouts.len(), result.target_area);
@@ -672,7 +672,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(77);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::HALL, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} TOWNHOUSE layouts (target_area={}):", layouts.len(), result.target_area);
@@ -693,7 +693,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(123);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::MANOR, 3, 4).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Manor, 3, 4).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} MANOR layouts (target_area={}):", layouts.len(), result.target_area);
@@ -714,7 +714,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::COTTAGE, 5, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Cottage, 5, 3).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} COTTAGE layouts:", layouts.len());
@@ -743,7 +743,7 @@ mod tests {
         }
 
         let mut rng = RNG::new(55);
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::HALL, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3).unwrap();
         let layouts = &result.layouts;
 
         println!("Layouts with obstacles:");
@@ -770,7 +770,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::HALL, 6, 4).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 6, 4).unwrap();
 
         // Print all scores
         println!("All layout scores (target_area={}):", result.target_area);
@@ -783,7 +783,7 @@ mod tests {
         let mut selected_scores = Vec::new();
         for seed in 0..20 {
             let mut select_rng = RNG::new(seed);
-            let selected = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, SizeClass::HALL.min_side * SizeClass::HALL.min_side).unwrap();
+            let selected = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, SizeClass::Hall.min_side() * SizeClass::Hall.min_side()).unwrap();
             let score = score_layout(&selected, result.target_area, &result.candidate);
             selected_scores.push(score);
         }

@@ -1,0 +1,1 @@
+{ "room_type": "great_room", "required": ["lantern"], "optional": ["chest", "bookshelf"] }

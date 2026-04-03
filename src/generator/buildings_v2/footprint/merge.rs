@@ -104,72 +104,6 @@ fn walk_boundary(grid: &[Vec<bool>], w: usize, h: usize) -> Vec<(i32, i32)> {
         x >= 0 && z >= 0 && (x as usize) < w && (z as usize) < h && grid[x as usize][z as usize]
     };
 
-    // When walking along an edge in direction `dir`, the cell to the right
-    // and the cell to the left of the edge are:
-    //   Right (+x): right_cell = (cx, cz), left_cell = (cx, cz-1)
-    //   Down  (+z): right_cell = (cx-1, cz), left_cell = (cx, cz)
-    //   Left  (-x): right_cell = (cx-1, cz-1), left_cell = (cx-1, cz)
-    //   Up    (-z): right_cell = (cx, cz-1), left_cell = (cx-1, cz-1)
-    // "right" means the interior side for a clockwise walk.
-    let right_cell = |x: i32, z: i32, d: Dir| -> (i32, i32) {
-        match d {
-            Dir::Right => (x, z),
-            Dir::Down => (x - 1, z),
-            Dir::Left => (x - 1, z - 1),
-            Dir::Up => (x, z - 1),
-        }
-    };
-
-    let left_cell = |x: i32, z: i32, d: Dir| -> (i32, i32) {
-        match d {
-            Dir::Right => (x, z - 1),
-            Dir::Down => (x, z),
-            Dir::Left => (x, z),   // wait - let me think about this more carefully
-            Dir::Up => (x - 1, z - 1),
-        }
-    };
-
-    // Actually, let's use a simpler formulation. After stepping in direction `dir`,
-    // we arrive at a new corner. We check whether to turn right, go straight, or
-    // turn left by examining the cells adjacent to our new position.
-    //
-    // At corner (cx, cz), the four adjacent cells are:
-    //   top-left:     (cx-1, cz-1)
-    //   top-right:    (cx,   cz-1)
-    //   bottom-left:  (cx-1, cz)
-    //   bottom-right: (cx,   cz)
-    //
-    // When facing `dir` at corner (cx, cz):
-    //   "ahead-right" cell determines if we can turn right
-    //   "ahead-left" cell determines if we should go straight
-    //
-    // For clockwise traversal (interior on right):
-    //   Facing Right: ahead-right = (cx, cz),   ahead-left = (cx, cz-1)
-    //   Facing Down:  ahead-right = (cx-1, cz),  ahead-left = (cx, cz)
-    //   Facing Left:  ahead-right = (cx-1, cz-1), ahead-left = (cx-1, cz)
-    //   Facing Up:    ahead-right = (cx, cz-1),  ahead-left = (cx-1, cz-1)
-
-    let ahead_right = |x: i32, z: i32, d: Dir| -> (i32, i32) {
-        match d {
-            Dir::Right => (x, z),
-            Dir::Down => (x - 1, z),
-            Dir::Left => (x - 1, z - 1),
-            Dir::Up => (x, z - 1),
-        }
-    };
-
-    let ahead_left = |x: i32, z: i32, d: Dir| -> (i32, i32) {
-        match d {
-            Dir::Right => (x, z - 1),
-            Dir::Down => (x, z),
-            Dir::Left => (x, z),   // Facing left: ahead-left is below-right = wait
-            Dir::Up => (x - 1, z - 1),
-        }
-    };
-
-    // Let me restart with a cleaner approach based on the standard contour tracing.
-    // Forget the above closures - let's just do it directly.
-
     loop {
         let (dx, dz) = dir.step();
         let next_cx = cx + dx;
@@ -520,16 +454,16 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
 
         for (name, class) in [
-            ("HOUSE", SizeClass::HOUSE),
-            ("HALL", SizeClass::HALL),
-            ("MANOR", SizeClass::MANOR),
+            ("HOUSE", SizeClass::House),
+            ("HALL", SizeClass::Hall),
+            ("MANOR", SizeClass::Manor),
         ] {
             println!("\n========== {} ==========", name);
             for seed in [1, 42, 77, 123, 256, 512] {
                 let mut rng = RNG::new(seed);
                 if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
                     let mut select_rng = rng.derive();
-                    if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side * class.min_side) {
+                    if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side() * class.min_side()) {
                         let score = score_layout(&winner, result.target_area, &result.candidate);
                         let footprint = merge_layout(&winner);
                         let rects = winner.rects();

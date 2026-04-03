@@ -198,9 +198,45 @@ This always produces a valid axis-aligned polygon. The grid is small
   a goal, not a guarantee.
 - **Extreme aspect ratio**: layouts with bounding box ratio > 2.5:1 are filtered out.
 
+## Interior Boundaries
+
+After footprint generation, adjacent rects need interior walls between them. The
+`RectBoundary` struct and `find_boundaries()` function handle this.
+
+```rust
+/// A boundary between two adjacent rects where an interior wall goes.
+struct RectBoundary {
+    rect_a: usize,
+    rect_b: usize,
+    /// Cell positions where wall blocks are placed.
+    wall_cells: Vec<Point2D>,
+}
+```
+
+`find_boundaries(rects)` scans all rect pairs for adjacency (shared edge with 1-block
+gap). The wall is placed on the **inside edge of the core rect** (index 0) so wings keep
+their full interior space. For wing-to-wing boundaries, the wall goes on the lower-indexed
+rect's edge.
+
+```
+  Core rect (idx 0)        Wing rect (idx 1)
+  ┌─────────────┬─────────────┐
+  │             │W│           │
+  │    core     │W│   wing    │
+  │             │W│           │
+  └─────────────┴─────────────┘
+                 ↑
+         wall_cells on core's
+         east edge (max x of core)
+```
+
+This is consumed by:
+- `walls::boundary_cell_set()` — prevents side doors from overlapping interior walls
+- `rooms::build_rooms()` — places interior wall blocks + archway doors at boundaries
+
 ## File Layout
 
-- `mod.rs` — `Plot`, `Footprint`, `SizeClass`, `generate_footprint()` entry point
+- `mod.rs` — `Plot`, `Footprint`, `SizeClass`, `RectBoundary`, `find_boundaries()`, `generate_footprint()` entry point
 - `maximal_rect.rs` — histogram-based largest rectangle algorithm (Step 1)
 - `generate.rs` — `Layout`, core/wing generation, scoring, selection (Steps 2-3)
 - `merge.rs` — rasterize + boundary walk to produce polygon (Step 4)

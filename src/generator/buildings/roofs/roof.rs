@@ -22,10 +22,6 @@ impl Loadable<'_, RoofSet, RoofSetId> for RoofSet {
         item.id.clone()
     }
 
-    fn post_load(_items: &mut std::collections::HashMap<RoofSetId, RoofSet>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn path() -> &'static str {
         "buildings/roofs/sets"
     }
@@ -62,10 +58,6 @@ pub enum HipRoofPart {
 impl Loadable<'_, RoofComponent, StructureId> for RoofComponent {
     fn get_key(item: &RoofComponent) -> StructureId {
         item.structure.id.clone()
-    }
-
-    fn post_load(_items: &mut std::collections::HashMap<StructureId, RoofComponent>) -> anyhow::Result<()> {
-        Ok(())
     }
 
     fn path() -> &'static str {

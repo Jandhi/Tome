@@ -1,0 +1,10 @@
+{
+  "name": "cauldron",
+  "unique": true,
+  "blocks": [
+    { "block": "minecraft:cauldron", "offset": [0, 0, 0], "layer": "ground" }
+  ],
+  "constraints": [
+    { "offset": [0, 0], "constraint": "accessible" }
+  ]
+}

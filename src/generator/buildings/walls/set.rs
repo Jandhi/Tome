@@ -17,10 +17,6 @@ impl Loadable<'_, WallSet, WallSetId> for WallSet {
         item.id.clone()
     }
 
-    fn post_load(_items: &mut std::collections::HashMap<WallSetId, WallSet>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn path() -> &'static str {
         "buildings/walls/sets"
     }

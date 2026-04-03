@@ -56,7 +56,7 @@ async fn build_foundations_in_world() {
     let mut plot = Plot::fully_usable(bounds);
 
     let mut rng = RNG::new(42);
-    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::HOUSE, 20);
+    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::House, 20);
     println!("Placed {} house footprints in 32x32 area", footprints.len());
 
     for (i, footprint) in footprints.iter().enumerate() {

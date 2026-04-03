@@ -109,10 +109,6 @@ impl Loadable<'_, Material, MaterialId> for Material {
     fn path() -> &'static str {
         "materials"
     }
-    
-    fn post_load(_items : &mut HashMap<MaterialId, Material>) -> anyhow::Result<()> {
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

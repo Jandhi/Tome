@@ -5,7 +5,7 @@ use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::foundation::place_foundation;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
 use crate::generator::buildings_v2::walls::{
-    build_segments, place_doors, place_frame, place_openings, place_wall_infill,
+    boundary_cell_set, build_segments, place_doors, place_frame, place_openings, place_wall_infill,
 };
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
@@ -340,7 +340,7 @@ async fn build_full_buildings_with_roofs() {
     let mut plot = Plot::fully_usable(bounds);
 
     let mut rng = RNG::new(123);
-    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::HALL, 50);
+    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 50);
     println!("Placed {} house footprints", footprints.len());
 
     let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
@@ -352,12 +352,13 @@ async fn build_full_buildings_with_roofs() {
             outline_from_rects(footprint.rects()),
             footprint.rects().to_vec(),
         );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::HALL, &mut rng);
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
 
         // Build segments and plan openings
         let mut wall_segs = build_segments(&frame);
         let footprint_area = footprint.filled_points().len() as i32;
-        place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
 
 
         // Roof — cycle through pitches
@@ -415,7 +416,7 @@ async fn compare_three_pitches() {
     let bounds = Rect2D::from_points(plot_min, plot_max);
     let mut plot = Plot::fully_usable(bounds);
     let mut rng = RNG::new(42);
-    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::HALL, 1);
+    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 1);
     let footprint = &footprints[0];
 
     let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
@@ -441,13 +442,14 @@ async fn compare_three_pitches() {
 
         let frame_footprint = Footprint::new(
             outline_from_rects(&shifted_rects),
-            shifted_rects,
+            shifted_rects.clone(),
         );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::HALL, &mut rng);
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
 
         let mut wall_segs = build_segments(&frame);
         let footprint_area = shifted_footprint.filled_points().len() as i32;
-        place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
+        let bc = boundary_cell_set(&shifted_rects);
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
 
 
         let has_attic = matches!(pitch, GablePitch::Double);

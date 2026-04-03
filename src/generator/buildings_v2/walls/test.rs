@@ -16,7 +16,8 @@ use crate::http_mod::GDMCHTTPProvider;
 use crate::minecraft::Block;
 use crate::noise::RNG;
 use crate::util::init_logger;
-use super::{build_segments, place_doors, place_frame, place_wall_infill, place_openings, segment_cells, WallSegment, OpeningKind, DoorStyle};
+use std::collections::HashSet;
+use super::{build_segments, boundary_cell_set, place_doors, place_windows, place_frame, place_wall_infill, place_openings, segment_cells, WallSegment, OpeningKind, DoorStyle};
 
 fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
     let vertices = outline_from_rects(&rects);
@@ -111,7 +112,7 @@ fn place_door_picks_nearest_plot_edge() {
     // Plot extends far to the north so north-facing wall is further from any edge.
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 4), Point2D::new(20, 25));
     let area = 8 * 6; // 48
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert_eq!(doors.len(), 1, "Small building should get 1 door");
@@ -130,7 +131,7 @@ fn place_door_large_building_gets_two() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 15));
     let area = 15 * 11; // 165, > 100
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert_eq!(doors.len(), 2, "Large building should get 2 doors");
@@ -150,7 +151,7 @@ fn place_door_double_style_for_huge_building() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 20));
     let area = 200; // > 150
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert!(!doors.is_empty());
@@ -166,7 +167,7 @@ fn windows_placed_on_segments() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-
+    place_windows(&mut wall_segs, &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(!windows.is_empty(), "Should place at least one window");
@@ -185,8 +186,8 @@ fn windows_avoid_doors() {
     let mut rng = RNG::new(1);
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 12));
-    place_doors(&mut wall_segs, &plot_bounds, 50, &mut rng);
-
+    place_doors(&mut wall_segs, &plot_bounds, 50, &HashSet::new(), &mut rng);
+    place_windows(&mut wall_segs, &mut rng);
 
     // Check no window overlaps a door on the same segment
     for seg in &wall_segs.segments {
@@ -217,7 +218,7 @@ fn short_segment_gets_no_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-
+    place_windows(&mut wall_segs, &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(windows.is_empty(), "Tiny segments should get no windows");
@@ -230,7 +231,7 @@ fn upper_floors_get_more_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-
+    place_windows(&mut wall_segs, &mut rng);
 
     let floor0_windows = wall_segs.segments.iter()
         .filter(|s| s.floor == 0)
@@ -313,7 +314,7 @@ fn ascii_visualize_simple_house() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 12));
     let area = 10 * 8;
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
 
 
     println!("\n=== Simple 10x8 house, 1 floor ===");
@@ -332,7 +333,7 @@ fn ascii_visualize_large_hall() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 20));
     let area = 15 * 11; // 165 > 150 so Double door, > 100 so 2 doors
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
 
 
     println!("\n=== Large 15x11 hall, 2 floors ===");
@@ -352,7 +353,8 @@ fn ascii_visualize_l_shape() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(16, 10));
     let area = 9 * 7 + 4 * 4; // 79
-    place_doors(&mut wall_segs, &plot_bounds, area, &mut rng);
+    let bc = boundary_cell_set(&[core, wing]);
+    place_doors(&mut wall_segs, &plot_bounds, area, &bc, &mut rng);
 
 
     println!("\n=== L-shape (9x7 core + 4x4 wing), core=2 floors, wing=1 ===");
@@ -481,7 +483,7 @@ async fn debug_single_manor_segments() {
     let mut plot = Plot::fully_usable(bounds);
 
     let mut rng = RNG::new(42);
-    let footprint = generate_footprint(&mut rng, &mut plot, &SizeClass::MANOR)
+    let footprint = generate_footprint(&mut rng, &mut plot, &SizeClass::Manor)
         .expect("Failed to generate manor footprint");
 
     let base_y = editor.world().get_ocean_floor_height_at(center);
@@ -489,7 +491,7 @@ async fn debug_single_manor_segments() {
         outline_from_rects(footprint.rects()),
         footprint.rects().to_vec(),
     );
-    let frame = generate_frame(frame_footprint, base_y, &SizeClass::MANOR, &mut rng);
+    let frame = generate_frame(frame_footprint, base_y, &SizeClass::Manor, &mut rng);
     let wall_segs = build_segments(&frame);
 
     println!("\n=== Manor debug: {} segments across {} floors ===", wall_segs.segments.len(), frame.max_floors());
@@ -538,7 +540,7 @@ async fn build_walls_in_world() {
     let mut plot = Plot::fully_usable(bounds);
 
     let mut rng = RNG::new(77);
-    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::HALL, 20);
+    let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 20);
     println!("Placed {} house footprints in 32x32 area", footprints.len());
 
     for (i, footprint) in footprints.iter().enumerate() {
@@ -548,13 +550,14 @@ async fn build_walls_in_world() {
             outline_from_rects(footprint.rects()),
             footprint.rects().to_vec(),
         );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::HALL, &mut rng);
+        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
 
         // Build segments and plan openings
         let mut wall_segs = build_segments(&frame);
         let footprint_area = footprint.filled_points().len() as i32;
-        place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
-    
+        let bc = boundary_cell_set(footprint.rects());
+        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
 
         // Upper floor slabs + stairs (Double pitch = attic)
         let floor_plan = place_floors(&editor, &frame, &wall_segs, true, &data, &palette, &mut rng).await;
@@ -604,10 +607,10 @@ async fn build_village() {
     let bounds = Rect2D::from_points(plot_min, plot_max);
 
     let size_classes: &[(&str, SizeClass)] = &[
-        ("Manor",   SizeClass::MANOR),
-        ("Hall",    SizeClass::HALL),
-        ("House",   SizeClass::HOUSE),
-        ("Cottage", SizeClass::COTTAGE),
+        ("Manor",   SizeClass::Manor),
+        ("Hall",    SizeClass::Hall),
+        ("House",   SizeClass::House),
+        ("Cottage", SizeClass::Cottage),
     ];
     let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
 
@@ -630,8 +633,9 @@ async fn build_village() {
 
             let mut wall_segs = build_segments(&frame);
             let footprint_area = footprint.filled_points().len() as i32;
-            place_doors(&mut wall_segs, &bounds, footprint_area, &mut rng);
-        
+            let bc = boundary_cell_set(footprint.rects());
+            place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
+
 
             let pitch = pitches[total % pitches.len()];
             let has_attic = matches!(pitch, GablePitch::Double);
@@ -647,7 +651,7 @@ async fn build_village() {
             }
 
             // Interior rooms
-            let room_plan = build_rooms(&editor, &frame, &wall_segs, &floor_plan, has_attic, &data, &palette, &mut rng).await;
+            let room_plan = build_rooms(&editor, &frame, &wall_segs, &floor_plan, has_attic, *size_class, &data, &palette, &mut rng).await;
 
             println!(
                 "  {} {}: floors={}, rects={}, pitch={:?}, doors={}, windows={}, rooms={}",

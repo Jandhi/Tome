@@ -163,6 +163,11 @@ impl Frame {
     fn floors(&self) -> impl Iterator<Item = u32> {
         0..self.max_floors()
     }
+
+    /// Clockwise outline polygon (dual-grid vertices) for active rects at a floor.
+    /// Uses the same merge algorithm as footprint — rasterize active rects onto a
+    /// grid and walk the boundary. This is the primary input for walls and floors.
+    fn outline_at_floor(&self, floor: u32) -> Vec<Point2D>;
 }
 ```
 

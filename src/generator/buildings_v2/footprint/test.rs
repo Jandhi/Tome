@@ -231,10 +231,10 @@ fn layout_gallery() {
     let plot = Plot::fully_usable(bounds);
 
     for (name, class) in [
-        ("COTTAGE", SizeClass::COTTAGE),
-        ("HOUSE", SizeClass::HOUSE),
-        ("HALL", SizeClass::HALL),
-        ("MANOR", SizeClass::MANOR),
+        ("COTTAGE", SizeClass::Cottage),
+        ("HOUSE", SizeClass::House),
+        ("HALL", SizeClass::Hall),
+        ("MANOR", SizeClass::Manor),
     ] {
         let mut rng = RNG::new(42);
         if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
@@ -250,8 +250,8 @@ fn layout_gallery_varied_seeds() {
     let plot = Plot::fully_usable(bounds);
 
     for (name, class) in [
-        ("HALL", SizeClass::HALL),
-        ("MANOR", SizeClass::MANOR),
+        ("HALL", SizeClass::Hall),
+        ("MANOR", SizeClass::Manor),
     ] {
         println!("\n========== {} - varied seeds ==========", name);
         let mut all_layouts = Vec::new();
@@ -273,9 +273,9 @@ fn select_layout_gallery() {
     let plot = Plot::fully_usable(bounds);
 
     for (name, class) in [
-        ("HOUSE", SizeClass::HOUSE),
-        ("HALL", SizeClass::HALL),
-        ("MANOR", SizeClass::MANOR),
+        ("HOUSE", SizeClass::House),
+        ("HALL", SizeClass::Hall),
+        ("MANOR", SizeClass::Manor),
     ] {
         println!("\n========== {} - selected winners ==========", name);
         let mut winners = Vec::new();
@@ -284,7 +284,7 @@ fn select_layout_gallery() {
             let mut rng = RNG::new(seed);
             if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
                 let mut select_rng = rng.derive();
-                if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side * class.min_side) {
+                if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side() * class.min_side()) {
                     let score = score_layout(&winner, result.target_area, &result.candidate);
                     winners.push(winner);
                     scores.push(score);
@@ -354,10 +354,10 @@ mod minecraft_tests {
 
         // 2x2 grid of 64x64 areas: NW=Hut, NE=House, SW=Townhouse, SE=Manor
         let quadrants: [(i32, i32, &str, SizeClass); 4] = [
-            (-64, -64, "Cottages",  SizeClass::COTTAGE),
-            (  0, -64, "Houses",   SizeClass::HOUSE),
-            (-64,   0, "Halls",    SizeClass::HALL),
-            (  0,   0, "Manors",   SizeClass::MANOR),
+            (-64, -64, "Cottages",  SizeClass::Cottage),
+            (  0, -64, "Houses",   SizeClass::House),
+            (-64,   0, "Halls",    SizeClass::Hall),
+            (  0,   0, "Manors",   SizeClass::Manor),
         ];
 
         let mut rng = RNG::new(777);

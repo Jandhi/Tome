@@ -1,0 +1,10 @@
+{
+  "name": "bookshelf",
+  "unique": false,
+  "blocks": [
+    { "block": "minecraft:bookshelf", "offset": [0, 0, 0], "layer": "ground" }
+  ],
+  "constraints": [
+    { "offset": [0, 0], "constraint": "wall" }
+  ]
+}

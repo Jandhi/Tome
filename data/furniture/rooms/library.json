@@ -1,0 +1,1 @@
+{ "room_type": "library", "required": ["bookshelf"], "optional": ["bookshelf", "lantern"] }
