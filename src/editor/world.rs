@@ -86,7 +86,7 @@ impl World {
         let motion_blocking_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ground_block_map = vec![vec![Block::new(Default::default(), None, None); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
-        let ground_biome_map = vec![vec![Biome::Unknown; size_z_usize]; size_x_usize];
+        let ground_biome_map = vec![vec![Biome::unknown(); size_z_usize]; size_x_usize];
 
         let mut world = World {
             build_area,
@@ -163,7 +163,23 @@ impl World {
 
     pub fn get_height_map(&self) -> &Vec<Vec<i32>> {
         &self.ground_height_map
-    }   
+    }
+
+    pub fn get_ground_block_map(&self) -> &Vec<Vec<Block>> {
+        &self.ground_block_map
+    }
+
+    pub fn get_ground_biome_map(&self) -> &Vec<Vec<Biome>> {
+        &self.ground_biome_map
+    }
+
+    pub fn get_ocean_floor_height_map(&self) -> &Vec<Vec<i32>> {
+        &self.ocean_floor_height_map
+    }
+
+    pub fn get_build_claim_map(&self) -> &Vec<Vec<BuildClaim>> {
+        &self.build_claim_map
+    }
 
     pub fn set_heights(&mut self, points : &HashSet<Point3D>) {
         for point in points {

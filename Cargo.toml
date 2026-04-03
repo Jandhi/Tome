@@ -25,3 +25,11 @@ simple_logger = "5.0.0"
 strum = "0.27.1"
 strum_macros = "0.27.1"
 tokio = {version = "1.44.2", features = ["full"]}
+
+# Optional visualizer dependencies
+axum = { version = "0.8", features = ["ws"], optional = true }
+tower-http = { version = "0.6", features = ["fs", "cors"], optional = true }
+chrono = "0.4.44"
+
+[features]
+visualizer = ["axum", "tower-http"]

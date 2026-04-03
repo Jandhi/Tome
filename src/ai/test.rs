@@ -12,7 +12,7 @@ mod tests {
 
         let system = "You are a helpful assistant.";
         let user = "Generate a town name that sounds japanese, as well as a description of the town. Make it a JSON string with keys 'name' and 'description'.";
-        let message = get_ai_message(system, user).await;
+        let message = get_ai_message(system, user).await.expect("AI call failed");
 
         println!("AI Response: {}", extract_json(&message).unwrap_or("No JSON found".to_string()));
     }

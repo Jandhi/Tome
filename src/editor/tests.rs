@@ -46,7 +46,7 @@ mod tests {
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
                 let biome = world.get_surface_biome_at(Point2D::new(x, z));
-                assert_ne!(biome, Biome::Unknown, "Biome should not be unknown");
+                assert!(!biome.is_unknown(), "Biome should not be unknown");
             }
         }
     }
