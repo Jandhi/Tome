@@ -15,6 +15,15 @@ pub struct RecipeDef {
     pub building: String,
 }
 
+/// The resource and gathering building assigned to a single district after selection.
+#[derive(Debug, Clone)]
+pub struct DistrictResourceAssignment {
+    /// The raw resource this district will produce (e.g. `"wood"`).
+    pub resource: String,
+    /// The gathering building required to produce it (e.g. `"logging_camp"`).
+    pub building: String,
+}
+
 /// Wrapper structs matching the top-level YAML keys.
 #[derive(Debug, Deserialize)]
 pub struct ResourcesFile {

@@ -23,6 +23,29 @@ pub struct DistrictAnalysis {
 
 
 impl DistrictAnalysis {
+    /// Construct a `DistrictAnalysis` from a biome distribution. All other fields
+    /// (roughness, water, etc.) are zeroed. Useful for testing and synthetic districts.
+    pub fn from_biome_count(biome_count: HashMap<Biome, u32>) -> Self {
+        let count = biome_count.values().sum::<u32>() as usize;
+        DistrictAnalysis {
+            count: count.max(1),
+            roughness: 0.0,
+            water_percentage: 0.0,
+            forested_percentage: 0.0,
+            surface_block_count: HashMap::new(),
+            biome_count,
+            gradient: 0.0,
+        }
+    }
+
+    /// Returns all biomes that make up at least 30% of this district.
+    pub fn major_biomes(&self) -> Vec<&Biome> {
+        self.biome_count.iter()
+            .filter(|(_, &count)| count as f32 / self.count as f32 >= 0.30)
+            .map(|(biome, _)| biome)
+            .collect()
+    }
+
     pub fn roughness(&self) -> f32 {
         self.roughness
     }

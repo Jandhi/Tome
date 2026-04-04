@@ -136,8 +136,11 @@ mod tests {
         let furniture_pos = goods.iter().position(|&g| g == "furniture").expect("furniture should be in plan");
         let arrows_pos = goods.iter().position(|&g| g == "arrows").expect("arrows should be in plan");
 
-        assert!(tools_pos < furniture_pos, "tools (depth 4) should rank above furniture (depth 2)");
-        assert!(furniture_pos < arrows_pos, "furniture (depth 2) should rank above arrows (depth 1)");
+        // tools: depth 5 (gather_wood, gather_iron_ore, wood_to_charcoal, iron_ore_charcoal_to_ingot, iron_ingot_to_tools)
+        // arrows: depth 3, 2 raw inputs (gather_flint, gather_feathers, flint_feather_to_arrows)
+        // furniture: depth 3, 1 raw input (gather_wood, wood_to_planks, planks_to_furniture)
+        assert!(tools_pos < arrows_pos, "tools (depth 5) should rank above arrows (depth 3)");
+        assert!(arrows_pos < furniture_pos, "arrows (depth 3, 2 raw inputs) should rank above furniture (depth 3, 1 raw input)");
     }
 
     #[test]
@@ -167,8 +170,8 @@ mod tests {
         let plan = registry.select_production(&available, &mut rng);
 
         let tools_chain = plan.chains.iter().find(|c| c.finished_good == "tools").expect("tools should be in plan");
-        // Recipes: wood_to_charcoal, iron_ore_charcoal_to_ingot, iron_ingot_to_tools
-        assert_eq!(tools_chain.depth, 3, "tools chain should have 3 recipes");
+        // Recipes: gather_wood, gather_iron_ore, wood_to_charcoal, iron_ore_charcoal_to_ingot, iron_ingot_to_tools
+        assert_eq!(tools_chain.depth, 5, "tools chain should have 5 recipes (including gather steps)");
         assert_eq!(tools_chain.raw_inputs.len(), 2, "tools chain uses wood and iron_ore");
     }
 
@@ -221,6 +224,165 @@ mod tests {
         let _ = std::process::Command::new("open").arg(&out_path).spawn();
         #[cfg(target_os = "linux")]
         let _ = std::process::Command::new("xdg-open").arg(&out_path).spawn();
+    }
+
+    #[test]
+    fn assign_district_resources_respects_constraints() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+
+        // District 0: only wheat (most constrained — 1 option)
+        // District 1: iron_ore or coal
+        // District 2: wood or feathers
+        let options: HashMap<u32, Vec<String>> = [
+            (0, vec!["wheat".into()]),
+            (1, vec!["iron_ore".into(), "coal".into()]),
+            (2, vec!["wood".into(), "feathers".into()]),
+        ].into();
+
+        let assignments = registry.assign_district_resources(&options, &mut rng);
+
+        assert_eq!(assignments.len(), 3, "all districts should be assigned");
+
+        // Sole-option district always gets wheat with the farm building
+        let a0 = assignments.get(&0).unwrap();
+        assert_eq!(a0.resource, "wheat");
+        assert_eq!(a0.building, "farm");
+
+        // All buildings must be non-empty
+        for a in assignments.values() {
+            assert!(!a.building.is_empty());
+        }
+    }
+
+    #[test]
+    fn assign_district_resources_prefers_diversity() {
+        let registry = make_registry();
+        let mut rng = RNG::new(0);
+
+        // Two districts that both could produce wood or iron_ore; they should pick different ones.
+        let options: HashMap<u32, Vec<String>> = [
+            (0, vec!["wood".into(), "iron_ore".into()]),
+            (1, vec!["wood".into(), "iron_ore".into()]),
+        ].into();
+
+        let assignments = registry.assign_district_resources(&options, &mut rng);
+
+        assert_eq!(assignments.len(), 2);
+        let r0 = &assignments[&0].resource;
+        let r1 = &assignments[&1].resource;
+        assert_ne!(r0, r1, "districts should pick different resources when possible");
+    }
+
+    #[test]
+    fn assign_district_resources_skips_unknown_gather_resources() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+
+        // gold_ore appears in biome_resources.yaml but has no gather recipe
+        let options: HashMap<u32, Vec<String>> = [
+            (0, vec!["gold_ore".into()]),
+            (1, vec!["wood".into()]),
+        ].into();
+
+        let assignments = registry.assign_district_resources(&options, &mut rng);
+
+        // District 0 has no valid candidates and is skipped
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[&1].resource, "wood");
+    }
+
+    /// Diagnostic test — passes a `HashMap<SuperDistrictID, DistrictAnalysis>` to
+    /// `resolve_for_districts` and prints the full settlement production report.
+    ///
+    /// Edit the `district_analysis` map below and run:
+    ///   cargo test district_production_report -- --nocapture
+    #[test]
+    fn district_production_report() {
+        use crate::generator::districts::{SuperDistrictID, DistrictAnalysis};
+        use crate::minecraft::Biome;
+
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+
+        // ====== Edit districts here ======
+        // `from_biome_count` takes biome → block count; biomes at ≥30% count as major.
+        let district_analysis: HashMap<SuperDistrictID, DistrictAnalysis> = [
+            (SuperDistrictID(0), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:forest"),    80), (Biome::from("minecraft:plains"), 20)].into())),
+            (SuperDistrictID(1), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:forest"),   100)].into())),
+            (SuperDistrictID(2), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
+            (SuperDistrictID(3), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:mountains"), 90), (Biome::from("minecraft:plains"), 10)].into())),
+            (SuperDistrictID(4), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:river"),    100)].into())),
+            (SuperDistrictID(5), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
+        ].into();
+        // =================================
+
+        let result = registry.resolve_for_districts(&district_analysis, &mut rng);
+
+        let mut district_ids: Vec<SuperDistrictID> = district_analysis.keys().cloned().collect();
+        district_ids.sort_by_key(|id| id.0);
+
+        // ── Report ──────────────────────────────────────────────────────────────
+        println!("\n╔══ District Production Report ═════════════════════╗");
+
+        println!("║ Districts:");
+        for id in &district_ids {
+            let analysis = &district_analysis[id];
+            let biome_names = {
+                let mut names: Vec<&str> = analysis.major_biomes().iter()
+                    .map(|b| b.as_str().strip_prefix("minecraft:").unwrap_or(b.as_str()))
+                    .collect();
+                names.sort();
+                names.join("+")
+            };
+            if let Some(a) = result.district_assignments.get(id) {
+                println!("║   District {:>2} ({:<18}) → {} x2 [{}]",
+                    id.0, biome_names, a.resource, a.building);
+            } else {
+                println!("║   District {:>2} ({:<18}) → (no valid resource)", id.0, biome_names);
+            }
+        }
+
+        println!("║");
+        println!("║ Resource Supply:");
+        let mut supply_sorted: Vec<(&String, &u32)> = result.supply.iter().collect();
+        supply_sorted.sort_by_key(|(r, _)| r.as_str());
+        for (resource, qty) in supply_sorted {
+            println!("║   {:<20} x{}", resource, qty);
+        }
+
+        println!("║");
+        println!("║ Goods Produced:");
+        if result.finished_goods.is_empty() && result.leftover_goods.is_empty() {
+            println!("║   (none)");
+        }
+        for (good, qty) in &result.finished_goods {
+            println!("║   {:<20} x{}", good, qty);
+        }
+        for (good, qty) in &result.leftover_goods {
+            println!("║   {:<20} x{}  (unused)", good, qty);
+        }
+
+        println!("║");
+        println!("║ Gathering Buildings:");
+        let mut gb_sorted: Vec<(&String, &u32)> = result.gather_buildings.iter().collect();
+        gb_sorted.sort_by_key(|(b, _)| b.as_str());
+        for (building, count) in gb_sorted {
+            println!("║   {:<20} x{}", building, count);
+        }
+
+        println!("║");
+        println!("║ Processing Buildings Required:");
+        if result.processing_buildings.is_empty() {
+            println!("║   (none)");
+        }
+        let mut pb_sorted: Vec<(&String, &u32)> = result.processing_buildings.iter().collect();
+        pb_sorted.sort_by(|(a, ac), (b, bc)| bc.cmp(ac).then(a.cmp(b)));
+        for (building, count) in pb_sorted {
+            println!("║   {:<20} x{}", building, count);
+        }
+
+        println!("╚═══════════════════════════════════════════════════╝\n");
     }
 
     /// Diagnostic test — prints a full production report for a given set of raw resources.

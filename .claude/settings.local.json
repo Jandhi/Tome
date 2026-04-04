@@ -6,7 +6,8 @@
       "Bash(cargo test:*)",
       "Bash(cargo build:*)",
       "WebFetch(domain:media.discordapp.net)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(xargs grep:*)"
     ]
   }
 }

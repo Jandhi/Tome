@@ -69,14 +69,6 @@ All resource chain data lives in `data/resource_chains/`.
 ### Phases 1–3 ✅
 Data files, loading, validation, resolution algorithm, and unit tests are complete.
 
-### Phase 4: District Integration
-- [ ] `DistrictAnalysis` gains `raw_resources: HashSet<String>`
-- [ ] Call `registry.resources_for_biome()` during `analyze_district` using dominant biome(s) - any biome above 33% coverage can be used
-- [ ] Districts will only produce 1 type of raw resource in quantity of 2, add functionality to registry so that given an option set, it will select which raw resources are best.
-- [ ] Populate `district.producible_goods` and `district.active_recipes` via `registry.resolve()`
-- [ ] Expose `district.near_misses` for chronicle/trade hooks
-
-### Phase 5: Building Placement Hooks
-- [ ] Map `building` field in recipes to `BuildingType` variants
-- [ ] Districts with active recipes request the corresponding building types
-- [ ] Building count scales with available raw resource yield
+### Phase 4: Resource chains from districts
+- [ ] Given a set of districts, populate in the registry a list of possible resources. Each District will only produce 1 type of raw resource in quantity of 2, add functionality to registry so that given an option set, it will select which raw resources are best during resource chain selection later.
+- [ ] Once reigstry.resolve() is called it needs to select which district produces which raw resources and each district is given that building it needs to build. Each district which produces a raw resource is given the building it requires to have to produce the raw resource.

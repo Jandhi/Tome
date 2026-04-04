@@ -191,3 +191,82 @@ recipes:
     outputs:
       arrows: 8
     building: fletcher
+
+  # --- Gathering (raw resource production) ---
+  gather_wood:
+    inputs: {}
+    outputs:
+      wood: 2
+    building: logging_camp
+
+  gather_wool:
+    inputs: {}
+    outputs:
+      wool: 2
+    building: ranch
+
+  gather_honey:
+    inputs: {}
+    outputs:
+      honey: 2
+    building: apiary
+
+  gather_wheat:
+    inputs: {}
+    outputs:
+      wheat: 2
+    building: farm
+
+  gather_sugar_cane:
+    inputs: {}
+    outputs:
+      sugar_cane: 2
+    building: plantation
+
+  gather_iron_ore:
+    inputs: {}
+    outputs:
+      iron_ore: 2
+    building: iron_mine
+
+  gather_coal:
+    inputs: {}
+    outputs:
+      coal: 2
+    building: coal_mine
+
+  gather_sand:
+    inputs: {}
+    outputs:
+      sand: 2
+    building: sand_pit
+
+  gather_clay:
+    inputs: {}
+    outputs:
+      clay: 2
+    building: clay_pit
+
+  gather_leather:
+    inputs: {}
+    outputs:
+      leather: 2
+    building: pasture
+
+  gather_feathers:
+    inputs: {}
+    outputs:
+      feathers: 2
+    building: coop
+
+  gather_flint:
+    inputs: {}
+    outputs:
+      flint: 2
+    building: quarry
+
+  gather_cocoa_beans:
+    inputs: {}
+    outputs:
+      cocoa_beans: 2
+    building: cocoa_plantation

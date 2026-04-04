@@ -3,5 +3,5 @@ mod registry;
 #[cfg(test)]
 mod tests;
 
-pub use types::{ResourceDef, RecipeDef};
-pub use registry::{ResourceRegistry, ResolvedChains, NearMiss, ChainSelection, ProductionPlan};
+pub use types::{ResourceDef, RecipeDef, DistrictResourceAssignment};
+pub use registry::{ResourceRegistry, ResolvedChains, NearMiss, ChainSelection, ProductionPlan, SettlementProductionResult};

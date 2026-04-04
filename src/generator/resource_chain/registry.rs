@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::env;
 use std::fs::File;
 use anyhow::{bail, Context};
 
+use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
-use super::types::{BiomeResourcesFile, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
+use super::types::{BiomeResourcesFile, DistrictResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
 
 pub struct ChainSelection {
     /// The tier-2 good at the end of this chain.
@@ -32,6 +34,22 @@ pub struct ProductionPlan {
     /// `building_run_cost` aggregated across all chains — useful for checking which building
     /// types the plan requires. Multiply by units produced and ceil to get physical buildings.
     pub building_run_cost: HashMap<String, f32>,
+}
+
+/// Full production result for a settlement derived from a set of districts.
+pub struct SettlementProductionResult {
+    /// The resource each district will gather and the building it needs to do so.
+    pub district_assignments: HashMap<SuperDistrictID, DistrictResourceAssignment>,
+    /// Total raw resource supply available (resource → quantity, 2 per producing district).
+    pub supply: HashMap<String, u32>,
+    /// Finished goods produced after allocating supply across chains, in priority order.
+    pub finished_goods: Vec<(String, u32)>,
+    /// Raw and intermediate goods left over after chain allocation.
+    pub leftover_goods: Vec<(String, u32)>,
+    /// Gathering buildings required across all districts (building type → count).
+    pub gather_buildings: HashMap<String, u32>,
+    /// Processing buildings required, scaled by units of finished goods produced.
+    pub processing_buildings: HashMap<String, u32>,
 }
 
 #[derive(Debug)]
@@ -111,6 +129,7 @@ impl ResourceRegistry {
         while changed {
             changed = false;
             for (recipe_id, recipe) in &self.recipes {
+                if recipe.inputs.is_empty() { continue; } // gather recipes don't propagate availability
                 let all_inputs = recipe.inputs.keys().all(|r| have.contains(r));
                 let any_new_output = recipe.outputs.keys().any(|r| !have.contains(r));
                 if all_inputs && any_new_output {
@@ -125,6 +144,7 @@ impl ResourceRegistry {
 
         let nearly_unlocked = self.recipes.iter()
             .filter(|(id, _)| !used_recipes.contains(id))
+            .filter(|(_, recipe)| !recipe.inputs.is_empty()) // gather recipes are never near-misses
             .filter_map(|(id, recipe)| {
                 let missing: Vec<String> = recipe.inputs.keys()
                     .filter(|r| !have.contains(*r))
@@ -257,6 +277,317 @@ impl ResourceRegistry {
         }
     }
 
+    /// Given a map of district analyses, resolves the full production picture for the settlement:
+    /// selects one raw resource per district (based on major biomes), allocates supply across
+    /// production chains, and returns per-district building assignments alongside the complete
+    /// building and goods summary.
+    pub fn resolve_for_districts(
+        &self,
+        district_analysis: &HashMap<SuperDistrictID, DistrictAnalysis>,
+        rng: &mut RNG,
+    ) -> SettlementProductionResult {
+        // caps to prevent extreme overproduction of certain goods that would skew the settlement's production profile
+        const RAW_SURPLUS_CAP: u32 = 5;
+        const INTERMEDIATE_CAP: u32 = 10;
+        const FINISHED_GOOD_CAP: u32 = 15;
+
+        // Build candidate resource lists from each district's major biomes (≥30%).
+        let base_options: HashMap<SuperDistrictID, Vec<String>> = district_analysis.iter()
+            .map(|(id, analysis)| {
+                let mut candidates: Vec<String> = analysis.major_biomes().iter()
+                    .flat_map(|biome| self.resources_for_biome(biome))
+                    .collect::<HashSet<_>>()
+                    .into_iter()
+                    .collect();
+                candidates.sort();
+                (*id, candidates)
+            })
+            .collect();
+
+        // Iteratively cap over-supplied resources: run a trial assignment, simulate the full
+        // production pipeline, and remove resources that would generate excess goods.
+        //   - raw resource surplus  ≥ RAW_SURPLUS_CAP  → cap that raw resource directly
+        //   - finished good output  ≥ FINISHED_GOOD_CAP → cap all raw inputs feeding that good
+        //   - intermediate leftover ≥ INTERMEDIATE_CAP  → cap all raw inputs feeding that good
+        // Repeat until stable (up to 10 iterations).
+        let mut capped: HashSet<String> = HashSet::new();
+        for _ in 0..10 {
+            let filtered: HashMap<SuperDistrictID, Vec<String>> = base_options.iter()
+                .map(|(id, candidates)| {
+                    let filtered: Vec<String> = candidates.iter()
+                        .filter(|r| !capped.contains(*r))
+                        .cloned()
+                        .collect();
+                    // Fall back to all candidates if filtering leaves nothing.
+                    let chosen = if filtered.is_empty() { candidates.clone() } else { filtered };
+                    (*id, chosen)
+                })
+                .collect();
+
+            let trial_assignments = self.assign_district_resources(&filtered, &mut rng.derive());
+
+            // Compute trial supply.
+            let mut trial_supply: HashMap<String, u32> = HashMap::new();
+            for (_, a) in &trial_assignments {
+                *trial_supply.entry(a.resource.clone()).or_insert(0) += 2;
+            }
+
+            // Run chain allocation on trial supply.
+            let trial_available: HashSet<String> = trial_supply.keys().cloned().collect();
+            let trial_resolved = self.resolve(&trial_available);
+            let trial_plan = self.select_production(&trial_available, &mut rng.derive());
+            let mut trial_remaining: HashMap<String, f32> = trial_supply.iter()
+                .map(|(k, &v)| (k.clone(), v as f32))
+                .collect();
+            let mut trial_finished: Vec<(String, u32)> = Vec::new();
+
+            for chain in &trial_plan.chains {
+                let cost = match self.raw_cost(&chain.finished_good) {
+                    Some(c) => c.clone(),
+                    None => continue,
+                };
+                let units = cost.iter()
+                    .map(|(raw, per)| (trial_remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
+                    .min()
+                    .unwrap_or(0);
+                if units == 0 { continue; }
+                for (raw, per) in &cost {
+                    *trial_remaining.entry(raw.clone()).or_insert(0.0) -= per * units as f32;
+                }
+                trial_finished.push((chain.finished_good.clone(), units));
+            }
+
+            // Compute intermediate leftovers producible from remaining raw supply.
+            let trial_intermediates: Vec<(String, u32)> = trial_resolved.producible.iter()
+                .filter(|id| self.resources.get(*id).map(|r| r.tier == 1).unwrap_or(false))
+                .filter_map(|id| {
+                    let cost = self.raw_cost(id)?;
+                    if cost.is_empty() { return None; }
+                    let units = cost.iter()
+                        .map(|(raw, per)| (trial_remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
+                        .min()
+                        .unwrap_or(0);
+                    if units == 0 { None } else { Some((id.clone(), units)) }
+                })
+                .collect();
+
+            let mut newly_capped: Vec<String> = Vec::new();
+
+            // Raw surplus ≥ RAW_SURPLUS_CAP → cap that raw resource directly.
+            for (r, &qty) in &trial_remaining {
+                if qty >= RAW_SURPLUS_CAP as f32 && !capped.contains(r) {
+                    newly_capped.push(r.clone());
+                }
+            }
+
+            // Finished good ≥ FINISHED_GOOD_CAP → cap all raw inputs feeding it.
+            for (good, units) in &trial_finished {
+                if *units >= FINISHED_GOOD_CAP {
+                    if let Some(cost) = self.raw_cost(good) {
+                        for raw in cost.keys() {
+                            if !capped.contains(raw) {
+                                newly_capped.push(raw.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Intermediate leftover ≥ INTERMEDIATE_CAP → cap all raw inputs feeding it.
+            for (intermediate, units) in &trial_intermediates {
+                if *units >= INTERMEDIATE_CAP {
+                    if let Some(cost) = self.raw_cost(intermediate) {
+                        for raw in cost.keys() {
+                            if !capped.contains(raw) {
+                                newly_capped.push(raw.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            newly_capped.sort();
+            newly_capped.dedup();
+
+            if newly_capped.is_empty() {
+                break;
+            }
+            capped.extend(newly_capped);
+        }
+
+        // Final filtered options and real assignment.
+        let options: HashMap<SuperDistrictID, Vec<String>> = base_options.iter()
+            .map(|(id, candidates)| {
+                let filtered: Vec<String> = candidates.iter()
+                    .filter(|r| !capped.contains(*r))
+                    .cloned()
+                    .collect();
+                let chosen = if filtered.is_empty() { candidates.clone() } else { filtered };
+                (*id, chosen)
+            })
+            .collect();
+
+        // Each super-district is assigned exactly one resource producing exactly 2 units —
+        // fixed regardless of how many constituent districts the super-district contains.
+        let district_assignments = self.assign_district_resources(&options, rng);
+
+        let mut supply: HashMap<String, u32> = HashMap::new();
+        let mut gather_buildings: HashMap<String, u32> = HashMap::new();
+        for (_, a) in &district_assignments {
+            *supply.entry(a.resource.clone()).or_insert(0) += 2;
+            *gather_buildings.entry(a.building.clone()).or_insert(0) += 1;
+        }
+
+        let available: HashSet<String> = supply.keys().cloned().collect();
+        let resolved = self.resolve(&available);
+        let plan = self.select_production(&available, rng);
+
+        // Allocate supply across chains (highest priority first).
+        let mut remaining: HashMap<String, f32> = supply.iter()
+            .map(|(k, &v)| (k.clone(), v as f32))
+            .collect();
+        let mut finished_goods: Vec<(String, u32)> = Vec::new();
+        let mut processing_buildings: HashMap<String, u32> = HashMap::new();
+
+        for chain in &plan.chains {
+            let cost = match self.raw_cost(&chain.finished_good) {
+                Some(c) => c.clone(),
+                None => continue,
+            };
+            let units = cost.iter()
+                .map(|(raw, per)| (remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
+                .min()
+                .unwrap_or(0);
+            if units == 0 { continue; }
+
+            for (raw, per) in &cost {
+                *remaining.entry(raw.clone()).or_insert(0.0) -= per * units as f32;
+            }
+            finished_goods.push((chain.finished_good.clone(), units));
+
+            for (building, runs_per_unit) in &chain.building_run_cost {
+                if gather_buildings.contains_key(building) { continue; }
+                let count = (runs_per_unit * units as f32).ceil() as u32;
+                *processing_buildings.entry(building.clone()).or_insert(0) += count;
+            }
+        }
+
+        // Leftover raw goods.
+        let mut leftover_goods: Vec<(String, u32)> = remaining.iter()
+            .filter(|(_, &qty)| qty > 0.001)
+            .map(|(r, &qty)| (r.clone(), qty as u32))
+            .collect();
+        leftover_goods.sort_by_key(|(r, _)| r.clone());
+
+        // Leftover intermediate goods producible from remaining raw supply.
+        let mut intermediate_leftovers: Vec<(String, u32)> = resolved.producible.iter()
+            .filter(|id| self.resources.get(*id).map(|r| r.tier == 1).unwrap_or(false))
+            .filter_map(|id| {
+                let cost = self.raw_cost(id)?;
+                if cost.is_empty() { return None; }
+                let units = cost.iter()
+                    .map(|(raw, per)| (remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
+                    .min()
+                    .unwrap_or(0);
+                if units == 0 { None } else { Some((id.clone(), units)) }
+            })
+            .collect();
+        intermediate_leftovers.sort_by_key(|(r, _)| r.clone());
+        leftover_goods.extend(intermediate_leftovers);
+
+        SettlementProductionResult {
+            district_assignments,
+            supply,
+            finished_goods,
+            leftover_goods,
+            gather_buildings,
+            processing_buildings,
+        }
+    }
+
+    /// For each entry in `options` (a district ID paired with its candidate raw resources from
+    /// its biome), selects exactly one raw resource per district and returns the corresponding
+    /// gathering building.
+    ///
+    /// **Selection strategy** — most-constrained districts (fewest valid candidates) are
+    /// resolved first. For each district, candidates are scored by:
+    ///   1. Novelty — +1000 if the resource has not yet been assigned to any other district,
+    ///      encouraging diversity across the settlement.
+    ///   2. Value — the number of tier-2 finished goods that require this resource somewhere
+    ///      in their production chain (higher = feeds more goods).
+    ///   3. Jitter — a small random nudge so repeated calls with the same biome mix produce
+    ///      varied towns.
+    ///
+    /// Districts whose candidates have no known gather recipe are skipped.
+    /// Input is a `HashMap` so each ID is structurally guaranteed to appear at most once,
+    /// ensuring every district receives exactly one resource assignment.
+    pub fn assign_district_resources<ID: Eq + Hash + Clone>(
+        &self,
+        options: &HashMap<ID, Vec<String>>,
+        rng: &mut RNG,
+    ) -> HashMap<ID, DistrictResourceAssignment> {
+        // Filter each district's candidates to those with a known gather building,
+        // then sort most-constrained first.
+        let mut districts: Vec<(ID, Vec<String>)> = options.iter()
+            .map(|(id, candidates)| {
+                let valid: Vec<String> = candidates.iter()
+                    .filter(|r| self.gather_building(r).is_some())
+                    .cloned()
+                    .collect();
+                (id.clone(), valid)
+            })
+            .collect();
+        districts.sort_by_key(|(_, candidates)| candidates.len());
+
+        let mut assigned_set: HashSet<String> = HashSet::new();
+        let mut result: HashMap<ID, DistrictResourceAssignment> = HashMap::new();
+
+        for (id, candidates) in districts {
+            if candidates.is_empty() {
+                continue;
+            }
+
+            // Pre-score all candidates so rng is called once per candidate.
+            let scored: Vec<(String, i64)> = candidates.iter()
+                .map(|r| {
+                    let value = self.resource_value_score(r) as i64;
+                    let novelty: i64 = if !assigned_set.contains(r) { 1000 } else { 0 };
+                    let jitter = rng.rand_i32(100) as i64;
+                    (r.clone(), novelty + value + jitter)
+                })
+                .collect();
+
+            let (resource, _) = scored.into_iter().max_by_key(|(_, s)| *s).unwrap();
+            let building = self.gather_building(&resource).unwrap().to_string();
+            assigned_set.insert(resource.clone());
+            result.insert(id, DistrictResourceAssignment { resource, building });
+        }
+
+        result
+    }
+
+    /// Returns the gathering building for a raw resource — the recipe that produces
+    /// it with no inputs. Returns `None` if no such recipe exists.
+    fn gather_building(&self, resource_id: &str) -> Option<&str> {
+        self.produced_by.get(resource_id)?
+            .iter()
+            .find(|recipe_id| self.recipes[*recipe_id].inputs.is_empty())
+            .map(|recipe_id| self.recipes[recipe_id].building.as_str())
+    }
+
+    /// Scores a raw resource by how many tier-2 finished goods require it anywhere
+    /// in their production chain. Higher = feeds more goods.
+    fn resource_value_score(&self, resource_id: &str) -> usize {
+        self.resources.iter()
+            .filter(|(_, def)| def.tier == 2)
+            .filter(|(good_id, _)| {
+                self.raw_cost.get(good_id.as_str())
+                    .map(|costs| costs.contains_key(resource_id))
+                    .unwrap_or(false)
+            })
+            .count()
+    }
+
     /// Generates a Mermaid flowchart string representing the full production graph.
     /// Resources are grouped by tier; recipe nodes show the required building.
     ///
@@ -340,9 +671,17 @@ impl ResourceRegistry {
                 raw_inputs.insert(resource_id.to_string());
             }
             Some(recipe_id) => {
-                if !recipe_ids.contains(recipe_id) {
+                let recipe = &self.recipes[recipe_id];
+                if recipe.inputs.is_empty() {
+                    // Gather recipe: resource is still a raw input, but record the recipe
+                    // so its building is included in chain costs.
+                    raw_inputs.insert(resource_id.to_string());
+                    if !recipe_ids.contains(recipe_id) {
+                        recipe_ids.push(recipe_id.clone());
+                    }
+                } else if !recipe_ids.contains(recipe_id) {
                     recipe_ids.push(recipe_id.clone());
-                    let inputs: Vec<String> = self.recipes[recipe_id].inputs.keys().cloned().collect();
+                    let inputs: Vec<String> = recipe.inputs.keys().cloned().collect();
                     for input in inputs {
                         self.trace_resource(&input, recipe_ids, raw_inputs);
                     }
@@ -492,16 +831,23 @@ fn compute_raw_cost_for(
         }
         Some(recipe_id) => {
             let recipe = &recipes[recipe_id];
-            let output_qty = recipe.outputs[resource_id] as f32;
-            let mut total: HashMap<String, f32> = HashMap::new();
-            for (input_id, &input_qty) in &recipe.inputs {
-                let input_cost = compute_raw_cost_for(input_id, produced_by, recipes, memo);
-                let scale = input_qty as f32 / output_qty;
-                for (raw_id, raw_qty) in input_cost {
-                    *total.entry(raw_id).or_insert(0.0) += raw_qty * scale;
+            if recipe.inputs.is_empty() {
+                // Gather recipe: the resource is its own raw cost
+                let mut m = HashMap::new();
+                m.insert(resource_id.to_string(), 1.0);
+                m
+            } else {
+                let output_qty = recipe.outputs[resource_id] as f32;
+                let mut total: HashMap<String, f32> = HashMap::new();
+                for (input_id, &input_qty) in &recipe.inputs {
+                    let input_cost = compute_raw_cost_for(input_id, produced_by, recipes, memo);
+                    let scale = input_qty as f32 / output_qty;
+                    for (raw_id, raw_qty) in input_cost {
+                        *total.entry(raw_id).or_insert(0.0) += raw_qty * scale;
+                    }
                 }
+                total
             }
-            total
         }
     };
 
