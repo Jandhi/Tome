@@ -595,23 +595,24 @@ impl ResourceRegistry {
     /// in tests to write a self-contained HTML file.
     pub fn to_mermaid_graph(&self) -> String {
         let mut lines: Vec<String> = vec![
-            "flowchart LR".into(),
+            "flowchart TB".into(),
             "  classDef raw          fill:#90EE90,stroke:#2d862d,color:#000".into(),
             "  classDef intermediate fill:#FFD700,stroke:#b8860b,color:#000".into(),
             "  classDef finished     fill:#87CEEB,stroke:#00008b,color:#000".into(),
-            "  classDef recipe       fill:#f5f5f5,stroke:#aaa,color:#333".into(),
+            "  classDef recipe       fill:#f5f5f5,stroke:#888,color:#333".into(),
             "".into(),
         ];
 
-        // Collect resources sorted by tier then id for deterministic output
+        // Collect resources sorted by category then id so related nodes cluster together
         let mut raw: Vec<_>          = self.resources.iter().filter(|(_, d)| d.tier == 0).collect();
         let mut intermediate: Vec<_> = self.resources.iter().filter(|(_, d)| d.tier == 1).collect();
         let mut finished: Vec<_>     = self.resources.iter().filter(|(_, d)| d.tier == 2).collect();
-        raw.sort_by_key(|(id, _)| id.as_str());
-        intermediate.sort_by_key(|(id, _)| id.as_str());
-        finished.sort_by_key(|(id, _)| id.as_str());
+        raw.sort_by(|(a_id, a_def), (b_id, b_def)| a_def.category.cmp(&b_def.category).then(a_id.cmp(b_id)));
+        intermediate.sort_by(|(a_id, a_def), (b_id, b_def)| a_def.category.cmp(&b_def.category).then(a_id.cmp(b_id)));
+        finished.sort_by(|(a_id, a_def), (b_id, b_def)| a_def.category.cmp(&b_def.category).then(a_id.cmp(b_id)));
 
         lines.push("  subgraph Raw [\"Raw Resources\"]".into());
+        lines.push("    direction LR".into());
         for (id, def) in &raw {
             lines.push(format!("    {}([{}]):::raw", id, def.name));
         }
@@ -619,6 +620,7 @@ impl ResourceRegistry {
         lines.push("".into());
 
         lines.push("  subgraph Intermediate [\"Intermediate Goods\"]".into());
+        lines.push("    direction LR".into());
         for (id, def) in &intermediate {
             lines.push(format!("    {}[{}]:::intermediate", id, def.name));
         }
@@ -626,35 +628,96 @@ impl ResourceRegistry {
         lines.push("".into());
 
         lines.push("  subgraph Finished [\"Finished Goods\"]".into());
+        lines.push("    direction LR".into());
         for (id, def) in &finished {
             lines.push(format!("    {}(({})):::finished", id, def.name));
         }
         lines.push("  end".into());
         lines.push("".into());
 
-        // Recipe nodes and edges, sorted for determinism
-        let mut recipes: Vec<_> = self.recipes.iter().collect();
+        // Recipe nodes and edges — skip gather recipes (empty inputs; raw resources shown already)
+        let mut recipes: Vec<_> = self.recipes.iter()
+            .filter(|(_, r)| !r.inputs.is_empty())
+            .collect();
         recipes.sort_by_key(|(id, _)| id.as_str());
 
         for (recipe_id, recipe) in &recipes {
             let node_id = format!("rec_{}", recipe_id);
             lines.push(format!("  {}{{{}}}:::recipe", node_id, recipe.building));
 
-            let mut inputs: Vec<_> = recipe.inputs.keys().collect();
-            inputs.sort();
-            for input in inputs {
-                lines.push(format!("  {} --> {}", input, node_id));
+            let mut inputs: Vec<_> = recipe.inputs.iter().collect();
+            inputs.sort_by_key(|(k, _)| k.as_str());
+            for (input, qty) in inputs {
+                lines.push(format!("  {} -->|{}| {}", input, qty, node_id));
             }
 
-            let mut outputs: Vec<_> = recipe.outputs.keys().collect();
-            outputs.sort();
-            for output in outputs {
-                lines.push(format!("  {} --> {}", node_id, output));
+            let mut outputs: Vec<_> = recipe.outputs.iter().collect();
+            outputs.sort_by_key(|(k, _)| k.as_str());
+            for (output, qty) in outputs {
+                lines.push(format!("  {} -->|{}| {}", node_id, qty, output));
             }
             lines.push("".into());
         }
 
         lines.join("\n")
+    }
+
+    /// Returns a JavaScript array of Cytoscape.js elements (nodes + edges).
+    /// Used by the `generate_production_graph` test to render an interactive graph.
+    pub fn to_cytoscape_elements(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+
+        // Resource nodes, sorted for determinism
+        let mut resources: Vec<_> = self.resources.iter().collect();
+        resources.sort_by_key(|(id, _)| id.as_str());
+        for (id, def) in &resources {
+            let node_type = match def.tier {
+                0 => "raw",
+                1 => "intermediate",
+                _ => "finished",
+            };
+            parts.push(format!(
+                r#"  {{"data":{{"id":"{id}","label":"{label}","type":"{node_type}"}}}}"#,
+                id = id, label = def.name, node_type = node_type,
+            ));
+        }
+
+        // Recipe nodes + edges — skip gather recipes (empty inputs)
+        let mut recipes: Vec<_> = self.recipes.iter()
+            .filter(|(_, r)| !r.inputs.is_empty())
+            .collect();
+        recipes.sort_by_key(|(id, _)| id.as_str());
+
+        let mut eid = 0u32;
+        for (recipe_id, recipe) in &recipes {
+            let nid = format!("rec_{}", recipe_id);
+            parts.push(format!(
+                r#"  {{"data":{{"id":"{nid}","label":"{label}","type":"recipe"}}}}"#,
+                nid = nid, label = recipe.building,
+            ));
+
+            let mut inputs: Vec<_> = recipe.inputs.iter().collect();
+            inputs.sort_by_key(|(k, _)| k.as_str());
+            for (src, qty) in inputs {
+                eid += 1;
+                parts.push(format!(
+                    r#"  {{"data":{{"id":"e{eid}","source":"{src}","target":"{tgt}","label":"{qty}"}}}}"#,
+                    eid = eid, src = src, tgt = nid, qty = qty,
+                ));
+            }
+
+            let mut outputs: Vec<_> = recipe.outputs.iter().collect();
+            outputs.sort_by_key(|(k, _)| k.as_str());
+            for (tgt, qty) in outputs {
+                eid += 1;
+                parts.push(format!(
+                    r#"  {{"data":{{"id":"e{eid}","source":"{src}","target":"{tgt}","label":"{qty}"}}}}"#,
+                    eid = eid, src = nid, tgt = tgt, qty = qty,
+                ));
+            }
+        }
+
+        format!("[\n{}\n]", parts.join(",\n"))
     }
 
     /// DFS walk backwards from a resource, accumulating recipe IDs (deduplicated)
