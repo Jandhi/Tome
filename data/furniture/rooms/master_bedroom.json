@@ -1,0 +1,1 @@
+{ "room_type": "master_bedroom", "required": ["bed"], "optional": ["chest", "bookshelf", "lantern"] }

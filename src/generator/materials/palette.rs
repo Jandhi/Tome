@@ -154,10 +154,6 @@ impl Loadable<'_, Palette, PaletteId>  for Palette {
         item.id.clone()
     }
 
-    fn post_load(_items : &mut HashMap<PaletteId, Palette>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn path() -> &'static str {
         "palettes"
     }

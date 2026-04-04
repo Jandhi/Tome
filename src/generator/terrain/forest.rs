@@ -51,8 +51,4 @@ impl Loadable<'_, Forest, ForestId> for Forest {
     fn path() -> &'static str {
         &"forests"
     }
-
-    fn post_load(_items : &mut HashMap<ForestId, Forest>) -> anyhow::Result<()> {
-        Ok(())
-    }
 }

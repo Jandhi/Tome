@@ -1,0 +1,1 @@
+{ "room_type": "dining", "required": ["lantern"], "optional": ["crafting_table", "chest"] }

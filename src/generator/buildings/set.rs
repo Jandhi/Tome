@@ -31,10 +31,6 @@ impl<'a> Loadable<'a, BuildingSet, BuildingSetID> for BuildingSet {
         item.id.clone()
     }
 
-    fn post_load(_items : &mut std::collections::HashMap<BuildingSetID, BuildingSet>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn path() -> &'static str {
         "buildings/sets"
     }

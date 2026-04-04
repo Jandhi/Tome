@@ -1,0 +1,1 @@
+{ "room_type": "studio", "required": ["loom"], "optional": ["crafting_table", "lantern"] }

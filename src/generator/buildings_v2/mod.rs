@@ -1,27 +1,67 @@
-mod footprint;
-mod frame;
-mod wall;
-mod placement;
-mod generate;
+pub mod floors;
+pub mod footprint;
+pub mod foundation;
+pub mod frame;
+pub mod furnish;
 pub mod roof;
-mod test;
+pub mod rooms;
+pub mod walls;
 
-pub use footprint::Footprint;
-pub use frame::Frame;
-pub use wall::{WallSegment, Opening, OpeningKind, DoorType, WindowType, WallError};
-pub use placement::{
-    place_corner_posts, place_wall_segment, place_wall_segment_with_materials, place_walls,
-    place_floor, place_floors, place_frame, place_frame_with_config,
-    place_door_opening, place_door_openings, place_doors,
-    place_window_opening, place_window_openings, place_windows,
-    place_wall_block, place_pillar_block, place_gable_wall_block,
-    WallMaterials, PlacementConfig,
-};
-pub use generate::{
-    DoorRules, DoorPlacements, generate_doors, apply_door_placements, add_doors_to_frame,
-    WindowRules, WindowPlacements, generate_windows, apply_window_placements, add_windows_to_frame,
-};
-pub use roof::{
-    RoofType, RoofPitch, RoofConfig, Roof, RoofRules, GableConfig, HipConfig, GableDecoration,
-    place_roof, place_hip_roof, place_gable_roof, place_gable_walls, place_gable_decorations, generate_roof,
-};
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildingType {
+    House,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoomType {
+    /// Single-room house: bed, furnace, crafting table, chest.
+    Common,
+    /// Ground floor main room in multi-room houses: living + kitchen.
+    Hearth,
+    /// Large living/dining area. Ground floor core in halls.
+    GreatRoom,
+    /// Sleeping quarters on upper floors.
+    Bedroom,
+    /// Upper core subdivided into hallway + smaller bedrooms.
+    MultiBedroom,
+    /// Larger private bedroom in a wing.
+    MasterBedroom,
+    /// Bookshelves, desk, enchanting table.
+    Study,
+    /// Chests, barrels — filler for extra rooms.
+    Storage,
+    /// Long table, chairs, candles. Ground floor.
+    Dining,
+    /// Cooking: furnaces, smoker, cauldron. Ground floor wing.
+    Kitchen,
+    /// Food storage: barrels, chests, hay bales. Ground floor wing.
+    Pantry,
+    /// Bookshelves lining walls, lectern, enchanting table. Upper floor, Manor+.
+    Library,
+    /// Loom, glazed terracotta, flower pots, colored wool. Upper floor, Manor+.
+    Studio,
+    /// Armor stands, item frames, anvil. Upper floor, Manor+.
+    Armory,
+}
+
+impl RoomType {
+    /// Short label for ASCII diagrams.
+    pub fn label(&self) -> &'static str {
+        match self {
+            RoomType::Common => "Com",
+            RoomType::Hearth => "Hrt",
+            RoomType::GreatRoom => "Grt",
+            RoomType::Bedroom => "Bed",
+            RoomType::MultiBedroom => "MBd",
+            RoomType::MasterBedroom => "Mst",
+            RoomType::Study => "Std",
+            RoomType::Storage => "Sto",
+            RoomType::Dining => "Din",
+            RoomType::Kitchen => "Kit",
+            RoomType::Pantry => "Pnt",
+            RoomType::Library => "Lib",
+            RoomType::Studio => "Art",
+            RoomType::Armory => "Arm",
+        }
+    }
+}

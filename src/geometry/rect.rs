@@ -15,12 +15,19 @@ impl Rect3D {
             y: point1.y.min(point2.y),
             z: point1.z.min(point2.z),
         };
-        let size = Point3D {
-            x: (point1.x - point2.x).abs(),
-            y: (point1.y - point2.y).abs(),
-            z: (point1.z - point2.z).abs(),
+        let far = Point3D {
+            x: point1.x.max(point2.x),
+            y: point1.y.max(point2.y),
+            z: point1.z.max(point2.z),
         };
-        Rect3D { origin, size }
+        Rect3D {
+            origin,
+            size: Point3D {
+                x: far.x - origin.x + 1,
+                y: far.y - origin.y + 1,
+                z: far.z - origin.z + 1,
+            },
+        }
     }
 
     pub fn contains(&self, point : Point3D) -> bool {
@@ -45,13 +52,6 @@ impl Rect3D {
         self.size.y
     }
 
-    pub fn far_point(&self) -> Point3D {
-        Point3D {
-            x: self.origin.x + self.size.x,
-            y: self.origin.y + self.size.y,
-            z: self.origin.z + self.size.z,
-        }
-    }
 
     pub fn drop_y(&self) -> Rect2D {
         Rect2D {
@@ -60,7 +60,11 @@ impl Rect3D {
         }
     }
 
-    pub fn last(&self) -> Point3D {
+    pub fn min(&self) -> Point3D {
+        self.origin
+    }
+
+    pub fn max(&self) -> Point3D {
         Point3D {
             x: self.origin.x + self.size.x - 1,
             y: self.origin.y + self.size.y - 1,
@@ -139,11 +143,17 @@ impl Rect2D {
             x: point1.x.min(point2.x),
             y: point1.y.min(point2.y),
         };
-        let size = Point2D {
-            x: (point1.x - point2.x).abs(),
-            y: (point1.y - point2.y).abs(),
+        let far = Point2D {
+            x: point1.x.max(point2.x),
+            y: point1.y.max(point2.y),
         };
-        Rect2D { origin, size }
+        Rect2D {
+            origin,
+            size: Point2D {
+                x: far.x - origin.x + 1,
+                y: far.y - origin.y + 1,
+            },
+        }
     }
 
     pub fn area(&self) -> i32 {
@@ -158,7 +168,11 @@ impl Rect2D {
         self.size.y
     }
 
-    pub fn last(&self) -> Point2D {
+    pub fn min(&self) -> Point2D {
+        self.origin
+    }
+
+    pub fn max(&self) -> Point2D {
         Point2D {
             x: self.origin.x + self.size.x - 1,
             y: self.origin.y + self.size.y - 1,
@@ -166,10 +180,10 @@ impl Rect2D {
     }
 
     pub fn on_edge(&self, point : Point2D) -> bool {
-        (point.x == self.origin.x || point.x == self.origin.x + self.size.x - 1) &&
-        (point.y >= self.origin.y && point.y < self.origin.y + self.size.y) ||
-        (point.y == self.origin.y || point.y == self.origin.y + self.size.y - 1) &&
-        (point.x >= self.origin.x && point.x < self.origin.x + self.size.x)
+        ((point.x == self.origin.x || point.x == self.origin.x + self.size.x - 1)
+            && (point.y >= self.origin.y && point.y < self.origin.y + self.size.y))
+        || ((point.y == self.origin.y || point.y == self.origin.y + self.size.y - 1)
+            && (point.x >= self.origin.x && point.x < self.origin.x + self.size.x))
     }
 
     pub fn contains(&self, point : Point2D) -> bool {
@@ -177,10 +191,27 @@ impl Rect2D {
         point.y >= self.origin.y && point.y < self.origin.y + self.size.y
     }
 
-    pub fn far_point(&self) -> Point2D {
-        Point2D {
-            x: self.origin.x + self.size.x,
-            y: self.origin.y + self.size.y,
+    pub fn contains_rect(&self, other: &Rect2D) -> bool {
+        self.contains(other.origin) && self.contains(other.max())
+    }
+
+    pub fn overlaps(&self, other: &Rect2D) -> bool {
+        self.origin.x < other.origin.x + other.size.x
+            && self.origin.x + self.size.x > other.origin.x
+            && self.origin.y < other.origin.y + other.size.y
+            && self.origin.y + self.size.y > other.origin.y
+    }
+
+    pub fn shrink(&self, amount: i32) -> Rect2D {
+        Rect2D {
+            origin: Point2D {
+                x: self.origin.x + amount,
+                y: self.origin.y + amount,
+            },
+            size: Point2D {
+                x: self.size.x - amount * 2,
+                y: self.size.y - amount * 2,
+            },
         }
     }
 

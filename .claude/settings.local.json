@@ -8,6 +8,27 @@
       "WebFetch(domain:media.discordapp.net)",
       "Bash(cat:*)",
       "Bash(xargs grep:*)"
+      "Bash(git:*)",
+      "Bash(xargs grep:*)",
+      "Bash(wc:*)",
+      "Bash(npm create:*)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(cargo run:*)",
+      "Bash(curl:*)",
+      "Bash(cargo add:*)",
+      "Bash(taskkill:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(cargo tree:*)",
+      "Bash(gh pr:*)",
+      "mcp__claude_ai_Gmail__gmail_search_messages",
+      "mcp__claude_ai_Gmail__gmail_read_message",
+      "WebFetch(domain:www.ontariocreates.ca)",
+      "mcp__claude_ai_Gmail__gmail_create_draft",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rustup show:*)"
     ]
   }
 }

@@ -175,10 +175,6 @@ impl Loadable<'_, WallComponent, StructureId> for WallComponent {
         item.structure.id.clone()
     }
 
-    fn post_load(_items: &mut std::collections::HashMap<StructureId, WallComponent>) -> anyhow::Result<()> {
-        Ok(())
-    }
-
     fn path() -> &'static str {
         "buildings/walls/components"
     }

@@ -23,4 +23,5 @@ pub use set::{
 };
 pub use placement::{
     place_buildings,
+    get_city_blocks_and_off_limits,
 };
