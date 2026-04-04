@@ -1,242 +1,151 @@
-mod hip;
-mod gable;
-mod x_decoration;
-mod overshoot;
+#[cfg(test)]
+mod test;
 
-use std::collections::HashMap;
+pub mod blocks;
+pub mod gable;
+pub mod heightmap;
+
+use std::collections::BTreeMap;
 
 use crate::editor::Editor;
-use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette};
-use crate::minecraft::{BlockForm, BlockID};
+use crate::generator::data::LoadedData;
+use crate::generator::materials::Palette;
+use crate::geometry::{Point2D, Rect2D};
 use crate::noise::RNG;
-
-use super::footprint::Footprint;
 use super::frame::Frame;
+use blocks::place_roof_blocks;
+use gable::{GablePitch, RidgeAxis, gable_heightmap, pick_ridge_axis, place_gable_walls};
+use heightmap::RoofHeightmap;
 
-pub use hip::place_hip_roof;
-pub use gable::{place_gable_roof, place_gable_walls, place_gable_decorations};
+/// Extend wing rects inward to the core's ridge line for roof heightmap generation.
+/// Only extends wings whose ridge axis is perpendicular to the core's ridge axis.
+fn extend_rects_for_roof(rects: &[Rect2D], axes: &[RidgeAxis]) -> Vec<Rect2D> {
+    if rects.len() <= 1 {
+        return rects.to_vec();
+    }
 
-/// Type of roof geometry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoofType {
-    /// Hip roof: slopes on all four sides, meeting at a peak or ridge.
-    Hip,
-    /// Gable roof: two slopes meeting at a ridge, with vertical gable walls on the ends.
-    Gable,
-}
+    let core = &rects[0];
+    let core_axis = axes[0];
 
-/// Roof pitch determines the slope steepness and block types used.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RoofPitch {
-    /// Shallow (1/2 block rise per run): uses slabs, alternating bottom/top placement.
-    Shallow,
-    /// Medium (1 block rise per run): uses stairs, +1 y per row.
-    Medium,
-    /// Steep (2 block rise per run): uses block + stair per row, +2 y per row.
-    Steep,
-}
+    let mut result = rects.to_vec();
 
-/// Decorative elements at gable ends.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum GableDecoration {
-    /// No decoration at gable ends.
-    #[default]
-    None,
-    /// X-shaped decoration at the peak (Viking longhouse style).
-    /// Uses slabs for even-width roofs, stairs for odd-width roofs.
-    X,
-    /// Overshooting element extending past the gable wall (inverted stair + stair).
-    Overshoot,
-}
+    for i in 1..rects.len() {
+        let wing = &rects[i];
+        let wing_axis = axes[i];
 
-/// Configuration for gable roofs.
-#[derive(Debug, Clone)]
-pub struct GableConfig {
-    /// Roof pitch determines slope steepness and block types.
-    pub pitch: RoofPitch,
-    /// Horizontal overhang beyond walls in blocks.
-    pub overhang: i32,
-    /// Optional decoration at gable ends.
-    pub decoration: GableDecoration,
-}
-
-impl Default for GableConfig {
-    fn default() -> Self {
-        Self {
-            pitch: RoofPitch::Medium,
-            overhang: 1,
-            decoration: GableDecoration::None,
+        // Only extend if perpendicular
+        if wing_axis == core_axis {
+            continue;
         }
-    }
-}
 
-/// Configuration for hip roofs.
-#[derive(Debug, Clone)]
-pub struct HipConfig {
-    /// Roof pitch determines slope steepness and block types.
-    pub pitch: RoofPitch,
-    /// Horizontal overhang beyond walls in blocks.
-    pub overhang: i32,
-}
+        let mut new_min = wing.min();
+        let mut new_max = wing.max();
 
-impl Default for HipConfig {
-    fn default() -> Self {
-        Self {
-            pitch: RoofPitch::Medium,
-            overhang: 1,
+        match core_axis {
+            RidgeAxis::X => {
+                // Core ridge along X, wing ridge along Z.
+                // Wing needs to extend in Z to reach core's Z centerline.
+                let core_mid_z = (core.min().y + core.max().y) / 2;
+
+                if wing.min().y > core.max().y {
+                    // Wing is south of core
+                    new_min = Point2D::new(new_min.x, core_mid_z);
+                } else if wing.max().y < core.min().y {
+                    // Wing is north of core
+                    new_max = Point2D::new(new_max.x, core_mid_z);
+                }
+            }
+            RidgeAxis::Z => {
+                // Core ridge along Z, wing ridge along X.
+                // Wing needs to extend in X to reach core's X centerline.
+                let core_mid_x = (core.min().x + core.max().x) / 2;
+
+                if wing.min().x > core.max().x {
+                    // Wing is east of core
+                    new_min = Point2D::new(core_mid_x, new_min.y);
+                } else if wing.max().x < core.min().x {
+                    // Wing is west of core
+                    new_max = Point2D::new(core_mid_x, new_max.y);
+                }
+            }
         }
-    }
-}
 
-/// Type-specific roof configuration.
-#[derive(Debug, Clone)]
-pub enum RoofConfig {
-    Gable(GableConfig),
-    Hip(HipConfig),
-}
-
-impl RoofConfig {
-    pub fn pitch(&self) -> RoofPitch {
-        match self {
-            RoofConfig::Gable(c) => c.pitch,
-            RoofConfig::Hip(c) => c.pitch,
-        }
+        result[i] = Rect2D::from_points(new_min, new_max);
     }
 
-    pub fn overhang(&self) -> i32 {
-        match self {
-            RoofConfig::Gable(c) => c.overhang,
-            RoofConfig::Hip(c) => c.overhang,
-        }
-    }
+    result
 }
 
-/// A complete roof with type and configuration.
-#[derive(Debug, Clone)]
-pub struct Roof {
-    pub base_y: i32,
-    pub config: RoofConfig,
-}
-
-impl Roof {
-    pub fn roof_type(&self) -> RoofType {
-        match &self.config {
-            RoofConfig::Gable(_) => RoofType::Gable,
-            RoofConfig::Hip(_) => RoofType::Hip,
-        }
-    }
-
-    pub fn hip(base_y: i32, config: HipConfig) -> Self {
-        Self {
-            base_y,
-            config: RoofConfig::Hip(config),
-        }
-    }
-
-    pub fn gable(base_y: i32, config: GableConfig) -> Self {
-        Self {
-            base_y,
-            config: RoofConfig::Gable(config),
-        }
-    }
-}
-
-/// Rules for automatic roof generation.
-#[derive(Debug, Clone)]
-pub struct RoofRules {
-    /// Preferred roof type for square-ish buildings.
-    pub preferred_type: RoofType,
-    /// Aspect ratio threshold: if width/depth ratio > this, use gable roof.
-    /// Default: 1.5 (buildings that are 1.5x longer than wide get gable roofs).
-    pub gable_threshold: f32,
-    /// Configuration for gable roofs.
-    pub gable: GableConfig,
-    /// Configuration for hip roofs.
-    pub hip: HipConfig,
-}
-
-impl Default for RoofRules {
-    fn default() -> Self {
-        Self {
-            preferred_type: RoofType::Hip,
-            gable_threshold: 1.5,
-            gable: GableConfig::default(),
-            hip: HipConfig::default(),
-        }
-    }
-}
-
-/// Generate a roof for a frame based on rules.
-pub fn generate_roof(frame: &Frame, rules: &RoofRules) -> Roof {
-    let (bounds_min, bounds_max) = frame.footprint.bounds().unwrap();
-    let width = (bounds_max.x - bounds_min.x + 1) as f32;
-    let depth = (bounds_max.y - bounds_min.y + 1) as f32; // Point2D.y is Z
-
-    let aspect_ratio = if width > depth {
-        width / depth
-    } else {
-        depth / width
-    };
-
-    // Long rectangular buildings always get gable roofs (ridge along longest axis)
-    // Square-ish buildings use the preferred type
-    let roof_type = if aspect_ratio > rules.gable_threshold {
-        RoofType::Gable
-    } else {
-        rules.preferred_type
-    };
-
-    let base_y = frame.roof_base_y() - 1;
-
-    match roof_type {
-        RoofType::Gable => Roof::gable(base_y, rules.gable.clone()),
-        RoofType::Hip => Roof::hip(base_y, rules.hip.clone()),
-    }
-}
-
-/// Place a roof based on its type.
-/// For gable roofs, call place_gable_walls BEFORE this function to ensure
-/// walls are placed first and roof tiles can cut into them.
+/// Place roofs on all rects of a building.
+/// Groups rects by roof_y, generates per-rect gable heightmaps, merges with max per group,
+/// then places blocks. Lower roofs skip positions inside higher-floor rects.
 pub async fn place_roof(
-    roof: &Roof,
-    footprint: &Footprint,
     editor: &Editor,
+    frame: &Frame,
+    pitch: GablePitch,
+    data: &LoadedData,
     palette: &Palette,
-    materials: &HashMap<MaterialId, Material>,
     rng: &mut RNG,
 ) {
-    match roof.roof_type() {
-        RoofType::Hip => place_hip_roof(roof, footprint, editor, palette, materials, rng).await,
-        RoofType::Gable => place_gable_roof(roof, footprint, editor, palette, materials, rng).await,
+    let rects = frame.footprint().rects();
+    let overhang = 1;
+
+    // Pick ridge axis per rect (store so we don't call RNG twice)
+    let rect_axes: Vec<RidgeAxis> = (0..rects.len())
+        .map(|i| pick_ridge_axis(&rects[i], rng))
+        .collect();
+
+    let roof_rects = extend_rects_for_roof(rects, &rect_axes);
+
+    // Group rects by roof_y (BTreeMap keeps keys sorted)
+    let mut groups: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
+    for i in 0..rects.len() {
+        groups.entry(frame.roof_y(i)).or_default().push(i);
     }
-}
 
-/// Helper to get roof material blocks from palette.
-pub(crate) struct RoofMaterials {
-    pub stairs: BlockID,
-    pub solid: BlockID,
-    pub slab: BlockID,
-}
+    for (&raw_roof_y, group_indices) in &groups {
+        let roof_y = match pitch {
+            GablePitch::Stairs => raw_roof_y - 1,
+            _ => raw_roof_y,
+        };
+        let group_rects: Vec<&Rect2D> = group_indices.iter().map(|&i| &rects[i]).collect();
 
-impl RoofMaterials {
-    pub fn from_palette(
-        palette: &Palette,
-        materials: &HashMap<MaterialId, Material>,
-        rng: &mut RNG,
-    ) -> Self {
-        let stairs = palette
-            .get_block(MaterialRole::PrimaryRoof, &BlockForm::Stairs, materials, rng)
-            .cloned()
-            .unwrap_or_else(|| BlockID::from("oak_stairs"));
-        let solid = palette
-            .get_block(MaterialRole::PrimaryRoof, &BlockForm::Block, materials, rng)
-            .cloned()
-            .unwrap_or_else(|| BlockID::from("oak_planks"));
-        let slab = palette
-            .get_block(MaterialRole::PrimaryRoof, &BlockForm::Slab, materials, rng)
-            .cloned()
-            .unwrap_or_else(|| BlockID::from("oak_slab"));
+        // Rects from higher groups (wall precedence)
+        let higher_rects: Vec<&Rect2D> = groups
+            .iter()
+            .filter(|(&ry, _)| ry > raw_roof_y)
+            .flat_map(|(_, indices)| indices.iter().map(|&i| &rects[i]))
+            .collect();
 
-        Self { stairs, solid, slab }
+        // Combined bounding box using extended rects for heightmap + overhang
+        let group_roof_rects: Vec<&Rect2D> = group_indices.iter().map(|&i| &roof_rects[i]).collect();
+        let combined_min_x = group_roof_rects.iter().map(|r| r.min().x).min().unwrap() - overhang;
+        let combined_min_z = group_roof_rects.iter().map(|r| r.min().y).min().unwrap() - overhang;
+        let combined_max_x = group_roof_rects.iter().map(|r| r.max().x).max().unwrap() + overhang;
+        let combined_max_z = group_roof_rects.iter().map(|r| r.max().y).max().unwrap() + overhang;
+        let width = (combined_max_x - combined_min_x + 1) as usize;
+        let depth = (combined_max_z - combined_min_z + 1) as usize;
+
+        let mut combined_hm = RoofHeightmap::new(combined_min_x, combined_min_z, width, depth);
+
+        // Use extended rects for heightmap generation
+        for &i in group_indices {
+            let sub_hm = gable_heightmap(&roof_rects[i], pitch, rect_axes[i]);
+            combined_hm.merge_max(&sub_hm);
+        }
+
+        // Place gable wall triangles using original rects
+        for &i in group_indices {
+            place_gable_walls(
+                editor, &rects[i], rect_axes[i], pitch, roof_y, &higher_rects,
+                data, palette, rng,
+            ).await;
+        }
+
+        // Place roof surface and fill (group_rects uses original rects for overhang detection)
+        place_roof_blocks(
+            editor, &combined_hm, roof_y, pitch, &group_rects, &higher_rects,
+            data, palette, rng,
+        ).await;
     }
 }

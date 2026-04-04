@@ -1,0 +1,10 @@
+{
+  "name": "chest",
+  "unique": false,
+  "blocks": [
+    { "block": "minecraft:chest", "offset": [0, 0, 0], "layer": "ground" }
+  ],
+  "constraints": [
+    { "offset": [0, 0], "constraint": "accessible", "facing": "away_from_wall" }
+  ]
+}

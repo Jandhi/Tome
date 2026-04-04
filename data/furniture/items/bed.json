@@ -1,0 +1,12 @@
+{
+  "name": "bed",
+  "unique": true,
+  "blocks": [
+    { "block": "minecraft:red_bed[part=head]", "offset": [0, 0, 0], "layer": "ground" },
+    { "block": "minecraft:red_bed[part=foot]", "offset": [0, 1, 0], "layer": "ground" }
+  ],
+  "constraints": [
+    { "offset": [0, 0], "constraint": "wall", "facing": "away_from_wall" },
+    { "offset": [0, 1], "constraint": "accessible", "facing": "away_from_wall" }
+  ]
+}

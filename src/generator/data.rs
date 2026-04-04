@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{data::Loadable, generator::{buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
+use crate::{data::Loadable, generator::{buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::{FurnitureItemDef, RoomFurnitureDef}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
 
 #[derive(Debug, Clone)]
 pub struct LoadedData {
@@ -12,6 +12,8 @@ pub struct LoadedData {
     pub roof_components : HashMap<StructureId, RoofComponent>,
     pub roof_sets : HashMap<RoofSetId, RoofSet>,
     pub building_sets : HashMap<BuildingSetID, BuildingSet>,
+    pub furniture_items : HashMap<String, FurnitureItemDef>,
+    pub room_furniture : HashMap<String, RoomFurnitureDef>,
 }
 
 impl LoadedData {
@@ -25,6 +27,8 @@ impl LoadedData {
             roof_components: RoofComponent::load()?,
             roof_sets: RoofSet::load()?,
             building_sets: BuildingSet::load()?,
+            furniture_items: FurnitureItemDef::load()?,
+            room_furniture: RoomFurnitureDef::load()?,
         })
     }
 }
