@@ -297,8 +297,9 @@ mod tests {
     /// `resolve_for_districts` and prints the full settlement production report.
     ///
     /// Edit the `district_analysis` map below and run:
-    ///   cargo test district_production_report -- --nocapture
+    ///   cargo test district_production_report -- --ignored --nocapture
     #[test]
+    #[ignore]
     fn district_production_report() {
         use crate::generator::districts::{SuperDistrictID, DistrictAnalysis};
         use crate::minecraft::Biome;
