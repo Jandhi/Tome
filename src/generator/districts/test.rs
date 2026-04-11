@@ -308,6 +308,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn district_resource_production_report() {
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_districts(seed, &mut editor).await;
+
+        let registry = crate::generator::resource_chain::ResourceRegistry::load()
+            .expect("Failed to load resource registry");
+
+        // Only Rural super-districts produce raw resources.
+        let rural_analysis: HashMap<_, _> = editor.world().super_district_analysis_data.iter()
+            .filter(|(id, _)| {
+                editor.world().super_districts.get(id)
+                    .map(|sd| sd.data.district_type == crate::generator::districts::DistrictType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+
+        let result = registry.resolve_for_districts(&rural_analysis, &mut rng);
+
+        // Sort producing super-district IDs for display.
+        let mut producing_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        producing_ids.sort_by_key(|id| id.0);
+
+        println!("\n╔══ District Resource Production Report ════════════╗");
+
+        println!("║ Producing Super-Districts ({} rural of {} total):", producing_ids.len(), editor.world().super_district_analysis_data.len());
+        for id in &producing_ids {
+            let analysis = &editor.world().super_district_analysis_data[id];
+            let biome_names = {
+                let mut names: Vec<&str> = analysis.major_biomes().iter()
+                    .map(|b| b.as_str().strip_prefix("minecraft:").unwrap_or(b.as_str()))
+                    .collect();
+                names.sort();
+                names.join("+")
+            };
+            let a = &result.district_assignments[id];
+            println!("║   Super-District {:>3} ({:<25}) → {} x2 [{}]",
+                id.0, biome_names, a.resource, a.building);
+        }
+
+        println!("║");
+        println!("║ Resource Supply:");
+        let mut supply_sorted: Vec<(&String, &u32)> = result.supply.iter().collect();
+        supply_sorted.sort_by_key(|(r, _)| r.as_str());
+        for (resource, qty) in supply_sorted {
+            println!("║   {:<20} x{}", resource, qty);
+        }
+
+        println!("║");
+        println!("║ Goods Produced:");
+        if result.finished_goods.is_empty() && result.leftover_goods.is_empty() {
+            println!("║   (none)");
+        }
+        for (good, qty) in &result.finished_goods {
+            println!("║   {:<20} x{}", good, qty);
+        }
+        for (good, qty) in &result.leftover_goods {
+            println!("║   {:<20} x{}  (unused)", good, qty);
+        }
+
+        println!("║");
+        println!("║ Gathering Buildings:");
+        let mut gb_sorted: Vec<(&String, &u32)> = result.gather_buildings.iter().collect();
+        gb_sorted.sort_by_key(|(b, _)| b.as_str());
+        for (building, count) in gb_sorted {
+            println!("║   {:<20} x{}", building, count);
+        }
+
+        println!("║");
+        println!("║ Processing Buildings Required:");
+        if result.processing_buildings.is_empty() {
+            println!("║   (none)");
+        }
+        let mut pb_sorted: Vec<(&String, &u32)> = result.processing_buildings.iter().collect();
+        pb_sorted.sort_by(|(a, ac), (b, bc)| bc.cmp(ac).then(a.cmp(b)));
+        for (building, count) in pb_sorted {
+            println!("║   {:<20} x{}", building, count);
+        }
+
+        println!("╚═══════════════════════════════════════════════════╝\n");
+    }
+
+    #[tokio::test]
     async fn district_replace_ground() {
         init_logger();
 
