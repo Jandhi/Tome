@@ -179,8 +179,9 @@ mod tests {
     /// production chains and opens it in the default browser.
     ///
     /// Run with:
-    ///   cargo test generate_production_graph -- --nocapture
+    ///   cargo test generate_production_graph -- --ignored --nocapture
     #[test]
+    #[ignore]
     fn generate_production_graph() {
         use std::fs;
         use std::io::Write;
