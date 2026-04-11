@@ -71,4 +71,4 @@ Data files, loading, validation, resolution algorithm, and unit tests are comple
 
 ### Phase 4: Resource chains from districts
 - [ ] Given a set of districts, populate in the registry a list of possible resources. Each District will only produce 1 type of raw resource in quantity of 2, add functionality to registry so that given an option set, it will select which raw resources are best during resource chain selection later.
-- [ ] Once reigstry.resolve() is called it needs to select which district produces which raw resources and each district is given that building it needs to build. Each district which produces a raw resource is given the building it requires to have to produce the raw resource.
+- [ ] Once registry.resolve() is called it needs to select which district produces which raw resources and each district is given that building it needs to build. Each district which produces a raw resource is given the building it requires to have to produce the raw resource.
