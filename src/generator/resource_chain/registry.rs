@@ -474,8 +474,8 @@ impl ResourceRegistry {
 
         // Leftover raw goods.
         let mut leftover_goods: Vec<(String, u32)> = remaining.iter()
-            .filter(|(_, &qty)| qty > 0.001)
-            .map(|(r, &qty)| (r.clone(), qty as u32))
+            .filter(|(_, &qty)| qty.floor() >= 1.0)
+            .map(|(r, &qty)| (r.clone(), qty.floor() as u32))
             .collect();
         leftover_goods.sort_by_key(|(r, _)| r.clone());
 
