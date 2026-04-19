@@ -7,9 +7,28 @@ Procedural Minecraft settlement generator in Rust. Talks to a Minecraft server v
 ```bash
 cargo build
 cargo check
-cargo test    # All tests need a live Minecraft server with GDMC mod
-cargo run     # Same requirement
+cargo test                                      # Most tests need a live Minecraft server
+cargo test build_furnished_houses_offline       # Dry-run pipeline — no server needed
+cargo test pipeline_invariants_property_test    # 240 buildings × invariant checks
+cargo run                                       # Needs live server
 ```
+
+### Offline / dry-run mode
+
+`World::synthetic(build_area, ground_y)` builds a flat world without any HTTP traffic, and `Editor::new_offline` (or `World::get_offline_editor`) produces an editor that short-circuits `flush_buffer` and `place_block_no_update`. Block placements still land in `block_cache` so reads stay consistent, but nothing reaches the server. Use this for iterating on buildings_v2 generator logic and blueprint output locally. `build_furnished_houses_offline` in `src/generator/buildings_v2/rooms/test.rs` is the canonical example.
+
+### Diagnostics
+
+- `render_ascii(&Blueprint)` in `src/generator/buildings_v2/blueprint.rs` produces a terminal-friendly per-floor ASCII dump with BR cells (`*`), stairs (arrows + `/`), doors, windows, and furniture (single-character codes). `build_furnished_houses_offline` writes both SVG and `.txt` ASCII per building under `output/`. Use the ASCII dump when diagnosing cell-level layout issues — it's much faster to read than SVG XML.
+- `check_building_invariants(&frame, &room_plan)` in `rooms/mod.rs` asserts that (a) every interior-edge cell has an actual wall block on its outside, and (b) every `BlockedReachable` cell has a walkable neighbor after furnishing. Called by `run_furnished_houses_pipeline` per building.
+- `pipeline_invariants_property_test` runs 12 buildings × 20 seeds through the offline pipeline with invariant checks — the canonical regression guard for furnish/rooms/walls changes. Runs in ~7 seconds.
+
+### CellState semantics
+
+- `Empty` — walkable, open for furniture placement.
+- `Blocked` — has a block, not walkable, not placeable (stair step blocks, furniture cells, walls).
+- `BlockedReachable` — not walkable, not placeable, must have a walkable neighbor (furniture approach cells like chest fronts). Check the invariant tests if you're introducing new BR state.
+- `UnblockedReachable` — walkable, not placeable (door entrances, stair landings/approaches, stair tops, attic ladder cells, window ceilings). Use this for cells the player walks *through* or *on*, not cells adjacent to furniture.
 
 ## Layout
 

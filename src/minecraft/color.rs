@@ -77,17 +77,16 @@ const SWAPPABLE_STRINGS: &[&str] = &[
 
 // Only colors a block if it was the old color
 pub fn recolor_block(block_id: &BlockID, old_color: Color, new_color: Color) -> BlockID {
-    let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
-    
+    let block_id_str = block_id.as_str();
+
     if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
-        return block_id.clone(); // No swappable strings found, return original block ID
+        return block_id.clone();
     }
 
-    
     let old_color_str: String = old_color.into();
     let new_color_str: String = new_color.into();
 
-    // Don't replace light colors with dark colors
+    // Don't replace light colors with dark colors (substring overlap)
     if old_color_str == "blue" && block_id_str.contains("light_blue") {
         return block_id.clone();
     }
@@ -95,29 +94,39 @@ pub fn recolor_block(block_id: &BlockID, old_color: Color, new_color: Color) -> 
         return block_id.clone();
     }
 
-    if block_id_str.contains(&old_color_str) {
-        return serde_json::from_str(&block_id_str.replace(&old_color_str, &new_color_str))
-            .expect("Failed to replace color in block ID");
+    // Match `<color>_` so e.g. `red_bed` matches but `cured_block` doesn't.
+    let pattern = format!("{}_", old_color_str);
+    if block_id_str.contains(&pattern) {
+        let replacement = format!("{}_", new_color_str);
+        return BlockID::from(block_id_str.replace(&pattern, &replacement).as_str());
     }
 
-    block_id.clone() // If no color match found, return original block ID
+    block_id.clone()
 }
 
 pub fn color_block(block_id: BlockID, new_color: Color) -> BlockID {
-    let block_id_str: String = serde_json::to_string(&block_id).expect("Failed to serialize block ID");
+    let block_id_str = block_id.as_str();
 
     if !SWAPPABLE_STRINGS.iter().any(|s| block_id_str.contains(s)) {
-        return block_id; // No swappable strings found, return original block ID
+        return block_id;
     }
 
-    for color in Color::iter() {
-        let color_in: String = serde_json::to_string(&color).expect("Failed to serialize color");
-        let color_out: String = new_color.into();
-        if block_id_str.contains(&color_in) {
-            return serde_json::from_str(&block_id_str.replace(&color_in, &color_out))
-                .expect("Failed to replace color in block ID");
+    let new_color_str: String = new_color.into();
+    // Iterate longest-first so `light_blue` / `light_gray` match before `blue` / `gray`.
+    let mut colors: Vec<Color> = Color::iter().collect();
+    colors.sort_by_key(|c| std::cmp::Reverse({
+        let s: String = (*c).into();
+        s.len()
+    }));
+
+    for color in colors {
+        let color_str: String = color.into();
+        let pattern = format!("{}_", color_str);
+        if block_id_str.contains(&pattern) {
+            let replacement = format!("{}_", new_color_str);
+            return BlockID::from(block_id_str.replace(&pattern, &replacement).as_str());
         }
     }
 
-    block_id // If no color match found, return original block ID
+    block_id
 }

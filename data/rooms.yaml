@@ -1,0 +1,87 @@
+armory:
+  required: [anvil]
+  optional: [chest, lantern]
+
+bedroom:
+  required: [bed, lantern]
+  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase]
+
+common:
+  required: [bed, crafting_table, furnace, chest]
+  optional: [lantern, table, chair]
+
+dining:
+  required: [lantern, table]
+  optional: [chair, chair, chair, chair, wall_banner, vase, chest]
+
+great_room:
+  required: [lantern]
+  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf]
+
+hearth:
+  required: [furnace, crafting_table]
+  optional: [chest, barrel, lantern]
+
+kitchen:
+  required: [furnace, smoker]
+  optional: [cauldron, barrel, lantern]
+
+library:
+  required: [bookshelf]
+  optional: [bookshelf, lantern]
+
+master_bedroom:
+  required: [bed, lantern]
+  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table]
+
+multi_bedroom:
+  required: [bed, lantern]
+  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table]
+
+pantry:
+  fill_threshold: 0.78
+  required: [lantern]
+  optional:
+    - barrel
+    - barrel_stack
+    - crate
+    - chest
+    - sack_pile
+    - barrel
+    - shelf
+    - hay_pile
+    - elevated_chest
+    - stacked_bookshelves
+    - barrel
+    - chest
+    - crate
+
+storage:
+  fill_threshold: 0.82
+  required: [lantern]
+  optional:
+    - crate
+    - barrel_stack
+    - hay_pile
+    - chest
+    - elevated_chest
+    - sack_pile
+    - stacked_bookshelves
+    - loaded_shelves
+    - barrel
+    - shelf
+    - crate
+    - barrel_stack
+    - hay_pile
+    - sack_pile
+    - elevated_chest
+    - chest
+    - shelf
+
+studio:
+  required: [loom]
+  optional: [crafting_table, lantern]
+
+study:
+  required: [bookshelf]
+  optional: [lantern, desk, chair, bookshelf, shelf]

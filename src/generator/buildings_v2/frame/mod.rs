@@ -15,6 +15,8 @@ pub struct Frame {
     floor_counts: Vec<u32>,
     /// Interior wall height in blocks of air, uniform across all floors and rects.
     wall_height: u32,
+    /// Pre-computed active rect indices per floor.
+    active_rects_cache: Vec<Vec<usize>>,
 }
 
 impl Frame {
@@ -30,7 +32,16 @@ impl Frame {
             floor_counts.iter().all(|&c| c >= 1),
             "all floor counts must be >= 1",
         );
-        Self { footprint, base_y, floor_counts, wall_height }
+        let max = *floor_counts.iter().max().unwrap_or(&0);
+        let active_rects_cache = (0..max)
+            .map(|floor| {
+                floor_counts.iter().enumerate()
+                    .filter(|(_, &count)| floor < count)
+                    .map(|(i, _)| i)
+                    .collect()
+            })
+            .collect();
+        Self { footprint, base_y, floor_counts, wall_height, active_rects_cache }
     }
 
     pub fn footprint(&self) -> &Footprint {
@@ -76,13 +87,10 @@ impl Frame {
 
     /// Which rects are active (have floors) at a given story.
     /// Returns indices into footprint.rects().
-    pub fn active_rects(&self, floor: u32) -> Vec<usize> {
-        self.floor_counts
-            .iter()
-            .enumerate()
-            .filter(|(_, &count)| floor < count)
-            .map(|(i, _)| i)
-            .collect()
+    pub fn active_rects(&self, floor: u32) -> &[usize] {
+        self.active_rects_cache.get(floor as usize)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// The 2D points that have a floor at a given story.
@@ -108,6 +116,7 @@ impl Frame {
             .iter()
             .map(|&i| all_rects[i])
             .collect();
+        if active.is_empty() { return Vec::new(); }
         outline_from_rects(&active)
     }
 
@@ -141,10 +150,5 @@ pub fn generate_frame(
         floor_counts.push(wing_floors);
     }
 
-    Frame {
-        footprint,
-        base_y,
-        floor_counts,
-        wall_height: 3,
-    }
+    Frame::new(footprint, base_y, floor_counts, 3)
 }

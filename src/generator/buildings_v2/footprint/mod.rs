@@ -42,6 +42,7 @@ impl Plot {
 }
 
 /// Determines the building's 2D shape and position within a plot.
+#[derive(Clone)]
 pub struct Footprint {
     /// Clockwise-ordered vertices in world coordinates.
     /// Every edge is axis-aligned.
@@ -143,6 +144,12 @@ impl SizeClass {
     }
     pub fn floor_range(&self) -> std::ops::RangeInclusive<u32> {
         self.min_floors()..=self.max_floors()
+    }
+    pub fn min_bedrooms(&self) -> u32 {
+        match self { Self::Cottage => 0, Self::House => 1, Self::Hall => 2, Self::Manor => 2 }
+    }
+    pub fn max_bedrooms(&self) -> u32 {
+        match self { Self::Cottage => 1, Self::House => 2, Self::Hall => 3, Self::Manor => 4 }
     }
 }
 

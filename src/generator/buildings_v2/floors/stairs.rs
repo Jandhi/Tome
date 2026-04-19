@@ -1,0 +1,574 @@
+//! Stair geometry, selection, and block rendering.
+//!
+//! Three stair kinds — Straight, Spiral (U-shaped, 2x2), LShaped — each with
+//! their own position generators, fit checks, and block-placement patterns.
+//! `select_stairwells` picks positions for inter-floor transitions + optional
+//! attic entry; `place_stair_blocks` renders the chosen stairwells.
+
+use std::collections::{HashMap, HashSet};
+
+use crate::editor::Editor;
+use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
+use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
+use crate::minecraft::BlockForm;
+use crate::noise::RNG;
+
+use super::super::frame::Frame;
+use super::super::pipeline::BuildCtx;
+use super::super::walls::{OpeningKind, WallSegments};
+use super::{StairKind, Stairwell};
+
+// ---------------------------------------------------------------------------
+// Geometry: position generators + fit checks per stair kind
+// ---------------------------------------------------------------------------
+
+/// Straight stair: position 0 is the corner landing, 1..=run are steps.
+fn stair_positions(start: Point2D, direction: Cardinal, run: i32) -> Vec<Point2D> {
+    let sv: Point2D = direction.into();
+    (0..=run).map(|i| start + sv * i).collect()
+}
+
+/// Corner candidates for a straight stair: 8 (corner, direction) pairs,
+/// 1 block inset from the rect edges.
+fn corner_candidates(rect: &Rect2D) -> Vec<(Point2D, Cardinal)> {
+    let min = rect.min();
+    let max = rect.max();
+    vec![
+        (Point2D::new(min.x + 1, max.y - 1), Cardinal::East),
+        (Point2D::new(min.x + 1, max.y - 1), Cardinal::North),
+        (Point2D::new(min.x + 1, min.y + 1), Cardinal::East),
+        (Point2D::new(min.x + 1, min.y + 1), Cardinal::South),
+        (Point2D::new(max.x - 1, min.y + 1), Cardinal::West),
+        (Point2D::new(max.x - 1, min.y + 1), Cardinal::South),
+        (Point2D::new(max.x - 1, max.y - 1), Cardinal::West),
+        (Point2D::new(max.x - 1, max.y - 1), Cardinal::North),
+    ]
+}
+
+fn stair_fits_in_rect(start: Point2D, direction: Cardinal, run: i32, rect: &Rect2D) -> bool {
+    let sv: Point2D = direction.into();
+    let min = rect.min();
+    let max = rect.max();
+    for i in 0..=run {
+        let p = start + sv * i;
+        if !rect.contains(p) {
+            return false;
+        }
+        if p.x <= min.x || p.x >= max.x || p.y <= min.y || p.y >= max.y {
+            return false;
+        }
+    }
+    true
+}
+
+/// U-stair positions: 2 steps toward the wall in `dir`, then 2 steps back
+/// on the adjacent column. Anchor is the min corner of the 2x2.
+fn spiral_positions(anchor: Point2D, dir: Cardinal) -> Vec<Point2D> {
+    let (ax, az) = (anchor.x, anchor.y);
+    match dir {
+        Cardinal::North => vec![
+            Point2D::new(ax, az + 1),
+            Point2D::new(ax, az),
+            Point2D::new(ax + 1, az),
+            Point2D::new(ax + 1, az + 1),
+        ],
+        Cardinal::South => vec![
+            Point2D::new(ax, az),
+            Point2D::new(ax, az + 1),
+            Point2D::new(ax + 1, az + 1),
+            Point2D::new(ax + 1, az),
+        ],
+        Cardinal::East => vec![
+            Point2D::new(ax, az),
+            Point2D::new(ax + 1, az),
+            Point2D::new(ax + 1, az + 1),
+            Point2D::new(ax, az + 1),
+        ],
+        Cardinal::West => vec![
+            Point2D::new(ax + 1, az),
+            Point2D::new(ax, az),
+            Point2D::new(ax, az + 1),
+            Point2D::new(ax + 1, az + 1),
+        ],
+    }
+}
+
+/// 2x2 U-stair candidates at each corner of a rect. Requires at least 4x4.
+fn spiral_anchors(rect: &Rect2D) -> Vec<(Point2D, Cardinal)> {
+    let min = rect.min();
+    let max = rect.max();
+    if max.x - min.x < 4 || max.y - min.y < 4 {
+        return vec![];
+    }
+    vec![
+        (Point2D::new(min.x + 1, min.y + 1), Cardinal::North),
+        (Point2D::new(max.x - 2, min.y + 1), Cardinal::North),
+        (Point2D::new(min.x + 1, max.y - 2), Cardinal::South),
+        (Point2D::new(max.x - 2, max.y - 2), Cardinal::South),
+    ]
+}
+
+/// Which two walls a spiral/L-stair anchor is nearest to in its rect.
+fn spiral_adjacent_walls(anchor: Point2D, rect: &Rect2D) -> [Cardinal; 2] {
+    let min = rect.min();
+    let max = rect.max();
+    let x_wall = if anchor.x - min.x <= max.x - 1 - anchor.x {
+        Cardinal::West
+    } else {
+        Cardinal::East
+    };
+    let z_wall = if anchor.y - min.y <= max.y - 1 - anchor.y {
+        Cardinal::North
+    } else {
+        Cardinal::South
+    };
+    [x_wall, z_wall]
+}
+
+/// L-stair: 2 steps in primary direction, then 2 steps turning 90°.
+fn l_stair_positions(start: Point2D, primary: Cardinal, turn: Cardinal) -> Vec<Point2D> {
+    let pd: Point2D = primary.into();
+    let td: Point2D = turn.into();
+    let corner = start + pd;
+    vec![
+        start,
+        corner,
+        corner + td,
+        corner + td * 2,
+    ]
+}
+
+fn l_stair_candidates(rect: &Rect2D) -> Vec<(Point2D, Cardinal, Cardinal)> {
+    let min = rect.min();
+    let max = rect.max();
+    vec![
+        // SW corner: walk West into corner, turn South away
+        (Point2D::new(min.x + 2, min.y + 1), Cardinal::West, Cardinal::South),
+        // SW corner: walk North into corner, turn East away
+        (Point2D::new(min.x + 1, min.y + 2), Cardinal::North, Cardinal::East),
+        // SE corner: walk East into corner, turn South away
+        (Point2D::new(max.x - 2, min.y + 1), Cardinal::East, Cardinal::South),
+        // SE corner: walk North into corner, turn West away
+        (Point2D::new(max.x - 1, min.y + 2), Cardinal::North, Cardinal::West),
+        // NW corner: walk West into corner, turn North away
+        (Point2D::new(min.x + 2, max.y - 1), Cardinal::West, Cardinal::North),
+        // NW corner: walk South into corner, turn East away
+        (Point2D::new(min.x + 1, max.y - 2), Cardinal::South, Cardinal::East),
+        // NE corner: walk East into corner, turn North away
+        (Point2D::new(max.x - 2, max.y - 1), Cardinal::East, Cardinal::North),
+        // NE corner: walk South into corner, turn West away
+        (Point2D::new(max.x - 1, max.y - 2), Cardinal::South, Cardinal::West),
+    ]
+}
+
+fn positions_fit_in_rect(positions: &[Point2D], rect: &Rect2D) -> bool {
+    let min = rect.min();
+    let max = rect.max();
+    positions.iter().all(|p| p.x > min.x && p.x < max.x && p.y > min.y && p.y < max.y)
+}
+
+// ---------------------------------------------------------------------------
+// Selection: pick stair positions for each floor transition + attic
+// ---------------------------------------------------------------------------
+
+/// Select stairwells for all floor transitions plus (optionally) an attic stair.
+/// Returns stairwells in ascending floor order, with no position overlaps.
+pub(super) fn select_stairwells(
+    frame: &Frame,
+    wall_segs: &WallSegments,
+    has_attic: bool,
+    rng: &mut RNG,
+) -> Vec<Stairwell> {
+    let mut stairwells = Vec::new();
+    let mut occupied: HashSet<(i32, i32)> = HashSet::new();
+
+    for floor in 0..frame.max_floors().saturating_sub(1) {
+        if let Some((kind, positions, direction)) = pick_stair_for_floor(
+            frame, floor, wall_segs, &occupied, rng,
+        ) {
+            for pos in &positions {
+                occupied.insert((pos.x, pos.y));
+            }
+            stairwells.push(Stairwell { positions, floor, direction, kind });
+        }
+    }
+
+    // Attic stairwell: from top regular floor up through the ceiling.
+    if has_attic && frame.max_floors() >= 1 {
+        let top_floor = frame.max_floors() - 1;
+        if let Some((kind, positions, direction)) = pick_attic_stair(frame, &occupied, rng) {
+            for pos in &positions {
+                occupied.insert((pos.x, pos.y));
+            }
+            stairwells.push(Stairwell { positions, floor: top_floor, direction, kind });
+        }
+    }
+
+    stairwells
+}
+
+/// Pick a stair position for a specific floor transition.
+/// Considers straight, spiral, and L-shaped candidates across the core rect only.
+/// Prefers exterior-wall positions over interior, avoids door-facing walls.
+fn pick_stair_for_floor(
+    frame: &Frame,
+    floor: u32,
+    wall_segs: &WallSegments,
+    occupied: &HashSet<(i32, i32)>,
+    rng: &mut RNG,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    let rects = frame.footprint().rects();
+    let run = (frame.wall_height() + 1) as i32;
+
+    // Stairs only in core rect — wings are too small and architecturally odd.
+    let candidate_rects: Vec<usize> = if frame.active_rects(floor).contains(&0)
+        && frame.active_rects(floor + 1).contains(&0)
+    {
+        vec![0]
+    } else {
+        vec![]
+    };
+
+    if candidate_rects.is_empty() {
+        return None;
+    }
+
+    let mut door_facings: HashSet<Cardinal> = HashSet::new();
+    for seg in wall_segs.segments_on_floor(floor) {
+        if seg.openings.iter().any(|o| matches!(o.kind, OpeningKind::Door(_))) {
+            door_facings.insert(seg.facing);
+        }
+    }
+
+    // Interior facings: sides of the core with adjacent wing rects.
+    let mut interior_facings: HashSet<Cardinal> = HashSet::new();
+    let core = &rects[0];
+    for i in 1..rects.len() {
+        if !frame.active_rects(floor).contains(&i) {
+            continue;
+        }
+        let wing = &rects[i];
+        if wing.min().x == core.max().x + 1 { interior_facings.insert(Cardinal::East); }
+        if wing.max().x + 1 == core.min().x { interior_facings.insert(Cardinal::West); }
+        if wing.min().y == core.max().y + 1 { interior_facings.insert(Cardinal::South); }
+        if wing.max().y + 1 == core.min().y { interior_facings.insert(Cardinal::North); }
+    }
+
+    let mut exterior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
+    let mut interior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
+
+    for &rect_idx in &candidate_rects {
+        let rect = &rects[rect_idx];
+        let min = rect.min();
+
+        // --- Straight stair candidates ---
+        for (start, dir) in corner_candidates(rect) {
+            if !stair_fits_in_rect(start, dir, run, rect) { continue; }
+            let positions = stair_positions(start, dir, run);
+            if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            let wall_facing = match dir {
+                Cardinal::East | Cardinal::West => {
+                    if start.y == min.y + 1 { Cardinal::North } else { Cardinal::South }
+                }
+                Cardinal::North | Cardinal::South => {
+                    if start.x == min.x + 1 { Cardinal::West } else { Cardinal::East }
+                }
+            };
+            if door_facings.contains(&wall_facing) { continue; }
+            let candidate = (StairKind::Straight, positions, dir);
+            if interior_facings.contains(&wall_facing) { interior.push(candidate); }
+            else { exterior.push(candidate); }
+        }
+
+        // --- U-stair (spiral) candidates ---
+        for (anchor, dir) in spiral_anchors(rect) {
+            let positions = spiral_positions(anchor, dir);
+            if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            let walls = spiral_adjacent_walls(anchor, rect);
+            if walls.iter().all(|w| door_facings.contains(w)) { continue; }
+            let candidate = (StairKind::Spiral, positions, dir);
+            if walls.iter().any(|w| interior_facings.contains(w)) { interior.push(candidate); }
+            else { exterior.push(candidate); }
+        }
+
+        // --- L-stair candidates ---
+        for (start, primary, turn) in l_stair_candidates(rect) {
+            let positions = l_stair_positions(start, primary, turn);
+            if !positions_fit_in_rect(&positions, rect) { continue; }
+            if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            let walls = spiral_adjacent_walls(start, rect);
+            if walls.iter().any(|w| door_facings.contains(w)) { continue; }
+            let candidate = (StairKind::LShaped, positions, primary);
+            if walls.iter().any(|w| interior_facings.contains(w)) { interior.push(candidate); }
+            else { exterior.push(candidate); }
+        }
+    }
+
+    let mut candidates = if !exterior.is_empty() { exterior } else { interior };
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let idx = rng.rand_i32_range(0, candidates.len() as i32) as usize;
+    Some(candidates.swap_remove(idx))
+}
+
+/// Attic stairs sit at a gable-end corner and run along an eave wall (perpendicular
+/// to the ridge). Straight-only since they fit naturally against the wall.
+fn pick_attic_stair(
+    frame: &Frame,
+    occupied: &HashSet<(i32, i32)>,
+    rng: &mut RNG,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    let rects = frame.footprint().rects();
+    let run = (frame.wall_height() + 1) as i32;
+    let rect = &rects[0];
+
+    let eave_dirs: &[Cardinal] = if rect.length() >= rect.width() {
+        &[Cardinal::North, Cardinal::South]
+    } else {
+        &[Cardinal::East, Cardinal::West]
+    };
+
+    let mut candidates: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
+
+    for (start, dir) in corner_candidates(rect) {
+        if !eave_dirs.contains(&dir) { continue; }
+        if !stair_fits_in_rect(start, dir, run, rect) { continue; }
+        let positions = stair_positions(start, dir, run);
+        if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+        candidates.push((StairKind::Straight, positions, dir));
+    }
+
+    if candidates.is_empty() {
+        return None;
+    }
+
+    let idx = rng.rand_i32_range(0, candidates.len() as i32) as usize;
+    Some(candidates.swap_remove(idx))
+}
+
+// ---------------------------------------------------------------------------
+// Rendering: place stair blocks per StairKind
+// ---------------------------------------------------------------------------
+
+/// Render stair blocks for every stairwell: Straight uses a flat landing + run;
+/// Spiral and LShaped fill below the ascending run with solid blocks and use
+/// upside-down stairs for the descending/turning run. Clears 2 blocks of
+/// headroom above each step.
+pub(super) async fn place_stair_blocks(
+    ctx: &mut BuildCtx<'_>,
+    stairwells: &[Stairwell],
+    frame: &Frame,
+) {
+    let editor: &Editor = &*ctx.editor;
+    let material_id = ctx.palette
+        .get_material(MaterialRole::PrimaryWood)
+        .expect("No primary wood material")
+        .clone();
+
+    let mut placer_rng = ctx.rng.derive();
+    let mut placer = MaterialPlacer::new(
+        Placer::new(&ctx.data.materials, &mut placer_rng),
+        material_id,
+    );
+
+    for sw in stairwells {
+        let base_y = frame.floor_y(sw.floor);
+        match sw.kind {
+            StairKind::Straight => place_straight_stair(editor, &mut placer, sw, base_y).await,
+            StairKind::Spiral   => place_spiral_stair(editor, &mut placer, sw, base_y).await,
+            StairKind::LShaped  => place_l_stair(editor, &mut placer, sw, base_y).await,
+        }
+    }
+}
+
+async fn place_straight_stair(
+    editor: &Editor,
+    placer: &mut MaterialPlacer<'_>,
+    sw: &Stairwell,
+    base_y: i32,
+) {
+    let facing_str = sw.direction.to_string();
+    let facing_away_str = (-sw.direction).to_string();
+
+    let stair_state = HashMap::from([
+        ("facing".to_string(), facing_str),
+    ]);
+    let underside_state = HashMap::from([
+        ("facing".to_string(), facing_away_str),
+        ("half".to_string(), "top".to_string()),
+    ]);
+
+    // Position 0 is the landing; positions 1..=run are the steps.
+    for (i, pos) in sw.positions.iter().enumerate() {
+        if i == 0 {
+            continue;
+        }
+        let step = (i - 1) as i32;
+        let y = base_y + step;
+
+        placer.place_block_forced(
+            editor,
+            Point3D::new(pos.x, y, pos.y),
+            BlockForm::Stairs,
+            Some(&stair_state),
+            None,
+        ).await;
+
+        if step > 0 {
+            placer.place_block(
+                editor,
+                Point3D::new(pos.x, y - 1, pos.y),
+                BlockForm::Stairs,
+                Some(&underside_state),
+                None,
+            ).await;
+        }
+
+        clear_headroom(editor, pos.x, y, pos.y).await;
+    }
+}
+
+async fn place_spiral_stair(
+    editor: &Editor,
+    placer: &mut MaterialPlacer<'_>,
+    sw: &Stairwell,
+    base_y: i32,
+) {
+    // U-stair: steps 0,1 ascend toward wall; steps 2,3 return on the adjacent column.
+    let forward = sw.direction;
+    let back = -sw.direction;
+
+    for (i, pos) in sw.positions.iter().enumerate() {
+        let y = base_y + i as i32;
+        let facing = match i {
+            0 | 1 => forward,
+            2 => {
+                // Face away from the forward run.
+                let toward = &sw.positions[1];
+                match (toward.x - pos.x, toward.y - pos.y) {
+                    (1, 0) => Cardinal::West,
+                    (-1, 0) => Cardinal::East,
+                    (0, 1) => Cardinal::North,
+                    (0, -1) => Cardinal::South,
+                    _ => back,
+                }
+            }
+            _ => back,
+        };
+
+        let stair_state = HashMap::from([
+            ("facing".to_string(), facing.to_string()),
+        ]);
+
+        placer.place_block_forced(
+            editor,
+            Point3D::new(pos.x, y, pos.y),
+            BlockForm::Stairs,
+            Some(&stair_state),
+            None,
+        ).await;
+
+        if i < 2 {
+            // Forward run: fill solid below.
+            for fill_y in base_y..y {
+                placer.place_block(
+                    editor,
+                    Point3D::new(pos.x, fill_y, pos.y),
+                    BlockForm::Block,
+                    None,
+                    None,
+                ).await;
+            }
+        } else if y > base_y {
+            // Return run: upside-down stairs facing the forward run.
+            let underside_state = HashMap::from([
+                ("facing".to_string(), forward.to_string()),
+                ("half".to_string(), "top".to_string()),
+            ]);
+            placer.place_block(
+                editor,
+                Point3D::new(pos.x, y - 1, pos.y),
+                BlockForm::Stairs,
+                Some(&underside_state),
+                None,
+            ).await;
+        }
+
+        clear_headroom(editor, pos.x, y, pos.y).await;
+    }
+}
+
+async fn place_l_stair(
+    editor: &Editor,
+    placer: &mut MaterialPlacer<'_>,
+    sw: &Stairwell,
+    base_y: i32,
+) {
+    // L-stair: steps 0,1 primary direction; steps 2,3 turning 90°.
+    let primary = sw.direction;
+    let turn_dir = match (sw.positions[2].x - sw.positions[1].x,
+                          sw.positions[2].y - sw.positions[1].y) {
+        (1, 0) => Cardinal::East,
+        (-1, 0) => Cardinal::West,
+        (0, 1) => Cardinal::South,
+        (0, -1) => Cardinal::North,
+        _ => primary,
+    };
+
+    for (i, pos) in sw.positions.iter().enumerate() {
+        let y = base_y + i as i32;
+        let facing = if i < 2 { primary } else { turn_dir };
+
+        let stair_state = HashMap::from([
+            ("facing".to_string(), facing.to_string()),
+        ]);
+
+        placer.place_block_forced(
+            editor,
+            Point3D::new(pos.x, y, pos.y),
+            BlockForm::Stairs,
+            Some(&stair_state),
+            None,
+        ).await;
+
+        if i < 2 {
+            // First run: fill solid below.
+            for fill_y in base_y..y {
+                placer.place_block(
+                    editor,
+                    Point3D::new(pos.x, fill_y, pos.y),
+                    BlockForm::Block,
+                    None,
+                    None,
+                ).await;
+            }
+        } else if y > base_y {
+            // Second run: upside-down stairs facing opposite the turn.
+            let underside_state = HashMap::from([
+                ("facing".to_string(), (-turn_dir).to_string()),
+                ("half".to_string(), "top".to_string()),
+            ]);
+            placer.place_block(
+                editor,
+                Point3D::new(pos.x, y - 1, pos.y),
+                BlockForm::Stairs,
+                Some(&underside_state),
+                None,
+            ).await;
+        }
+
+        clear_headroom(editor, pos.x, y, pos.y).await;
+    }
+}
+
+/// Clear 2 blocks of air above a stair step so the player has headroom.
+async fn clear_headroom(editor: &Editor, x: i32, y: i32, z: i32) {
+    for clear_y in (y + 1)..=(y + 2) {
+        editor.place_block_forced(
+            &"air".into(),
+            Point3D::new(x, clear_y, z),
+        ).await;
+    }
+}

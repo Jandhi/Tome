@@ -1,1 +1,0 @@
-{ "room_type": "hearth", "required": ["furnace", "crafting_table"], "optional": ["chest", "barrel", "lantern"] }

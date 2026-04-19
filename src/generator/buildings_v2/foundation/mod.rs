@@ -3,41 +3,31 @@ mod test;
 
 use std::collections::{HashMap, HashSet};
 
-use strum::IntoEnumIterator;
-
 use crate::editor::{Editor, World};
 use crate::generator::buildings_v2::footprint::Footprint;
+use crate::generator::buildings_v2::pipeline::BuildCtx;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Palette, Placer};
-use crate::geometry::{Cardinal, Point2D, Point3D};
+use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, BlockForm, BlockID};
 use crate::noise::RNG;
 
 /// Full foundation pipeline: analyze terrain, fill/cut, place foundation course,
 /// update heightmap. Returns `base_y` so downstream modules know where the building starts.
-pub async fn place_foundation(
-    editor: &mut Editor,
-    footprint: &Footprint,
-    data: &LoadedData,
-    palette: &Palette,
-    rng: &mut RNG,
-) -> i32 {
-    let profile = analyze_terrain(footprint, editor.world());
+pub async fn place_foundation(ctx: &mut BuildCtx<'_>, footprint: &Footprint) -> i32 {
+    let profile = analyze_terrain(footprint, ctx.editor.world());
 
-    // Fill and cut
     let columns = classify_columns(&profile);
-    execute_columns(editor, &profile, &columns, data, palette, rng).await;
+    execute_columns(ctx.editor, &profile, &columns, ctx.data, ctx.palette, ctx.rng).await;
 
-    // Foundation course
-    place_foundation_course(editor, footprint, profile.base_y, data, palette, rng).await;
+    place_foundation_course(ctx.editor, footprint, profile.base_y, ctx.data, ctx.palette, ctx.rng).await;
 
-    // Update heightmap so later modules see leveled ground
     let height_points: HashSet<Point3D> = footprint
         .filled_points()
         .iter()
         .map(|&p| Point3D::new(p.x, profile.base_y, p.y))
         .collect();
-    editor.world_mut().set_heights(&height_points);
+    ctx.editor.world_mut().set_heights(&height_points);
 
     profile.base_y
 }

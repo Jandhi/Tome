@@ -1,14 +1,8 @@
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
-use crate::editor::Editor;
-use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
-use crate::generator::buildings_v2::foundation::place_foundation;
 use crate::generator::buildings_v2::roof::gable::GablePitch;
-use crate::generator::buildings_v2::roof::place_roof;
-use crate::generator::buildings_v2::rooms::build_rooms;
-use crate::generator::buildings_v2::floors::FloorPlan;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
 use crate::editor::World;
@@ -17,7 +11,7 @@ use crate::minecraft::Block;
 use crate::noise::RNG;
 use crate::util::init_logger;
 use std::collections::HashSet;
-use super::{build_segments, boundary_cell_set, place_doors, place_windows, place_frame, place_wall_infill, place_openings, segment_cells, WallSegment, OpeningKind, DoorStyle};
+use super::{build_segments, boundary_cell_set, place_doors, place_windows, segment_cells, OpeningKind, DoorStyle};
 
 fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
     let vertices = outline_from_rects(&rects);
@@ -167,7 +161,7 @@ fn windows_placed_on_segments() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &mut rng);
+    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(!windows.is_empty(), "Should place at least one window");
@@ -187,7 +181,7 @@ fn windows_avoid_doors() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 12));
     place_doors(&mut wall_segs, &plot_bounds, 50, &HashSet::new(), &mut rng);
-    place_windows(&mut wall_segs, &mut rng);
+    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
 
     // Check no window overlaps a door on the same segment
     for seg in &wall_segs.segments {
@@ -218,7 +212,7 @@ fn short_segment_gets_no_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &mut rng);
+    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(windows.is_empty(), "Tiny segments should get no windows");
@@ -231,7 +225,7 @@ fn upper_floors_get_more_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &mut rng);
+    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
 
     let floor0_windows = wall_segs.segments.iter()
         .filter(|s| s.floor == 0)
@@ -520,6 +514,8 @@ async fn debug_single_manor_segments() {
 
 #[tokio::test]
 async fn build_walls_in_world() {
+    use crate::generator::buildings_v2::{BuildCtx, build_house};
+
     init_logger();
 
     let provider = GDMCHTTPProvider::new();
@@ -533,7 +529,6 @@ async fn build_walls_in_world() {
     let world_rect = editor.world().world_rect_2d();
     let center = world_rect.midpoint();
 
-    // Central 32x32 area
     let plot_min = Point2D::new(center.x - 16, center.y - 16);
     let plot_max = Point2D::new(center.x + 15, center.y + 15);
     let bounds = Rect2D::from_points(plot_min, plot_max);
@@ -541,54 +536,31 @@ async fn build_walls_in_world() {
 
     let mut rng = RNG::new(77);
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 20);
-    println!("Placed {} house footprints in 32x32 area", footprints.len());
+    let n = footprints.len();
+    println!("Placed {} house footprints in 32x32 area", n);
 
-    for (i, footprint) in footprints.iter().enumerate() {
-        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
-
-        let frame_footprint = Footprint::new(
-            outline_from_rects(footprint.rects()),
-            footprint.rects().to_vec(),
-        );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
-
-        // Build segments and plan openings
-        let mut wall_segs = build_segments(&frame);
-        let footprint_area = footprint.filled_points().len() as i32;
-        let bc = boundary_cell_set(footprint.rects());
-        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
-
-
-        // Upper floor slabs + stairs (Double pitch = attic)
-        let floor_plan = place_floors(&editor, &frame, &wall_segs, true, &data, &palette, &mut rng).await;
-
-        // Wall infill first (gets overwritten by frame at corners/beams)
-        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
-
-        // Timber frame (posts + crossbeams override infill)
-        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
-
-        // Opening blocks (doors/windows override infill)
-        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
-
-        // Roof + re-clear attic stair headroom
-        place_roof(&editor, &frame, GablePitch::Double, &data, &palette, &mut rng).await;
-        clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, footprint) in footprints.into_iter().enumerate() {
+        let house = build_house(&mut ctx, footprint, SizeClass::Hall, GablePitch::Double, bounds)
+            .await
+            .expect("build_house failed");
 
         println!(
-            "  Building {}: base_y={}, floors={}, doors={}, windows={}",
-            i, base_y, frame.max_floors(),
-            wall_segs.doors().count(),
-            wall_segs.windows().count(),
+            "  Building {}: floors={}, doors={}, windows={}",
+            i, house.frame.max_floors(),
+            house.wall_segs.doors().count(),
+            house.wall_segs.windows().count(),
         );
     }
 
     editor.flush_buffer().await;
-    println!("Done — {} buildings placed", footprints.len());
+    println!("Done — {} buildings placed", n);
 }
 
 #[tokio::test]
 async fn build_village() {
+    use crate::generator::buildings_v2::{BuildCtx, build_house};
+
     init_logger();
 
     let provider = GDMCHTTPProvider::new();
@@ -618,46 +590,21 @@ async fn build_village() {
     let mut total = 0;
     let mut plot = Plot::fully_usable(bounds);
 
-    // Place largest buildings first so they get space, then fill gaps with smaller ones
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (name, size_class) in size_classes {
-        let footprints = fill_plot(&mut rng, &mut plot, size_class, 50);
+        let footprints = fill_plot(ctx.rng, &mut plot, size_class, 50);
 
-        for (i, footprint) in footprints.iter().enumerate() {
-            let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
-
-            let frame_footprint = Footprint::new(
-                outline_from_rects(footprint.rects()),
-                footprint.rects().to_vec(),
-            );
-            let frame = generate_frame(frame_footprint, base_y, size_class, &mut rng);
-
-            let mut wall_segs = build_segments(&frame);
-            let footprint_area = footprint.filled_points().len() as i32;
-            let bc = boundary_cell_set(footprint.rects());
-            place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
-
-
+        for (i, footprint) in footprints.into_iter().enumerate() {
             let pitch = pitches[total % pitches.len()];
-            let has_attic = matches!(pitch, GablePitch::Double);
-
-            let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
-            place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
-            place_frame(&editor, &frame, &data, &palette, &mut rng).await;
-            place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
-
-            place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
-            if has_attic {
-                clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
-            }
-
-            // Interior rooms
-            let room_plan = build_rooms(&editor, &frame, &wall_segs, &floor_plan, has_attic, *size_class, &data, &palette, &mut rng).await;
+            let house = build_house(&mut ctx, footprint, *size_class, pitch, bounds)
+                .await
+                .expect("build_house failed");
 
             println!(
                 "  {} {}: floors={}, rects={}, pitch={:?}, doors={}, windows={}, rooms={}",
-                name, i, frame.max_floors(), footprint.rects().len(), pitch,
-                wall_segs.doors().count(), wall_segs.windows().count(),
-                room_plan.rooms.len(),
+                name, i, house.frame.max_floors(), house.footprint.rects().len(), pitch,
+                house.wall_segs.doors().count(), house.wall_segs.windows().count(),
+                house.room_plan.rooms.len(),
             );
             total += 1;
         }
