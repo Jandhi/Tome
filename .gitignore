@@ -1,3 +1,13 @@
 /target
 .env
 .claude/settings.local.json
+
+# Local / tooling artifacts
+.agents/
+skills-lock.json
+
+# Generated test output (SVG / ASCII blueprints from offline runs)
+output/
+
+# Windows / msys crash dumps
+*.stackdump
