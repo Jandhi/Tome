@@ -1,0 +1,244 @@
+barrel:
+  blocks:
+    - block: "minecraft:barrel[facing=up]"
+      offset: [0, 0, 0]
+      layer: ground
+      loot: storage
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+    - offset: [0, 1]
+      constraint: blocked_reachable
+
+single_bed:
+  unique: true
+  tags: [bed]
+  # Single beds disappear from very large rooms — they'd look dwarfed there.
+  max_room_area: 49
+  blocks:
+    # Only the foot is placed explicitly — BedBlock.setPlacedBy runs on
+    # block update and creates the head at foot + facing. With facing set
+    # to toward_wall (via the [0,0] constraint), the head lands on slot.cell,
+    # which the wall constraint already claims.
+    - block: "minecraft:red_bed[part=foot]"
+      offset: [0, 0, 1]
+      layer: ground
+      swap: color
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: toward_wall
+    - offset: [0, 1]
+      constraint: blocked_reachable
+
+double_bed:
+  unique: true
+  tags: [bed]
+  min_room_area: 25
+  blocks:
+    # Two red beds side-by-side against the same wall. Each foot spawns its
+    # head via setPlacedBy at foot + facing (toward_wall), just like single_bed.
+    - block: "minecraft:red_bed[part=foot]"
+      offset: [0, 0, 1]
+      layer: ground
+      swap: color
+    - block: "minecraft:red_bed[part=foot]"
+      offset: [1, 0, 1]
+      layer: ground
+      swap: color
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: toward_wall
+    - offset: [1, 0]
+      constraint: wall
+      facing: toward_wall
+    - offset: [0, 1]
+      constraint: blocked_reachable
+    - offset: [1, 1]
+      constraint: blocked_reachable
+
+canopy_bed:
+  unique: true
+  tags: [bed]
+  # Wall-anchored 4×4: bed heads against the wall, plank pedestals at each
+  # corner with fence posts on top, half-slabs filling the remaining ground
+  # cells (walkable), and a wool canopy at y=2. Only fits in large rooms.
+  min_room_area: 50
+  blocks:
+    # Two bed feet side-by-side, one cell in from the wall. setPlacedBy
+    # spawns each head at foot + facing (toward_wall) onto the wall cell.
+    - block: "minecraft:red_bed[part=foot]"
+      offset: [1, 0, 1]
+      layer: ground
+      swap: color
+    - block: "minecraft:red_bed[part=foot]"
+      offset: [2, 0, 1]
+      layer: ground
+      swap: color
+    # Corner pedestals: full plank block at y=0, fence post at y=1.
+    - block: "minecraft:oak_planks"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_fence"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_planks"
+      offset: [3, 0, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_fence"
+      offset: [3, 1, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_planks"
+      offset: [0, 0, 3]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_fence"
+      offset: [0, 1, 3]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_planks"
+      offset: [3, 0, 3]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_fence"
+      offset: [3, 1, 3]
+      layer: ground
+      swap: wood
+    # Bottom slabs around the bed — walkable half-height bed frame.
+    # Sides (along=0,3 at away=1,2), approach (along=1,2 at away=2),
+    # entry (along=1,2 at away=3).
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [0, 0, 1]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [0, 0, 2]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [3, 0, 1]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [3, 0, 2]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [1, 0, 2]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [2, 0, 2]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [1, 0, 3]
+      layer: ground
+      swap: wood
+      walkable: true
+    - block: "minecraft:oak_slab[type=bottom]"
+      offset: [2, 0, 3]
+      layer: ground
+      swap: wood
+      walkable: true
+    # Wool canopy at y=2 across the full 4×4. Layer: ceiling so the cells
+    # mark as ceiling-occupied (keeps a hanging lantern from colliding) and
+    # so the wool doesn't register as a floor-cell blocker.
+    - block: "minecraft:red_wool"
+      offset: [0, 2, 0]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [1, 2, 0]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [2, 2, 0]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [3, 2, 0]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [0, 2, 1]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [1, 2, 1]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [2, 2, 1]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [3, 2, 1]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [0, 2, 2]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [1, 2, 2]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [2, 2, 2]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [3, 2, 2]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [0, 2, 3]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [1, 2, 3]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [2, 2, 3]
+      layer: ceiling
+      swap: color
+    - block: "minecraft:red_wool"
+      offset: [3, 2, 3]
+      layer: ceiling
+      swap: color
+  constraints:
+    # Four wall cells along the top edge. [1,0] and [2,0] carry facing
+    # toward_wall — the finder attaches this to the bed foot blocks
+    # (which have (along, y) matching those offsets), so setPlacedBy
+    # spawns the heads onto the wall cells.
+    - offset: [0, 0]
+      constraint: wall
+    - offset: [1, 0]
+      constraint: wall
+      facing: toward_wall
+    - offset: [2, 0]
+      constraint: wall
+      facing: toward_wall
+    - offset: [3, 0]
+      constraint: wall
+    # Bed foot cells — marked reachable so connectivity verifies a
+    # walkable neighbor (the approach slab at away=2).
+    - offset: [1, 1]
+      constraint: blocked_reachable
+    - offset: [2, 1]
+      constraint: blocked_reachable
+

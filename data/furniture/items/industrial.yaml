@@ -1,0 +1,57 @@
+anvil:
+  unique: true
+  blocks:
+    - block: "minecraft:anvil"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: perpendicular
+
+cauldron:
+  unique: true
+  blocks:
+    - block: "minecraft:cauldron"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+furnace:
+  unique: true
+  blocks:
+    - block: "minecraft:furnace"
+      offset: [0, 0, 0]
+      layer: ground
+      loot: furnace
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+    - offset: [0, 1]
+      constraint: blocked_reachable
+
+loom:
+  unique: true
+  blocks:
+    - block: "minecraft:loom"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+smoker:
+  unique: true
+  blocks:
+    - block: "minecraft:smoker"
+      offset: [0, 0, 0]
+      layer: ground
+      loot: smoker
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
