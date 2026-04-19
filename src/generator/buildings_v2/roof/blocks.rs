@@ -36,7 +36,7 @@ fn stair_facing(hm: &RoofHeightmap, x: i32, z: i32) -> Cardinal {
 }
 
 /// Check if a position is at the ridge (no neighbor is strictly higher).
-fn is_ridge(hm: &RoofHeightmap, x: i32, z: i32) -> bool {
+pub fn is_ridge(hm: &RoofHeightmap, x: i32, z: i32) -> bool {
     let h = hm.get(x, z);
     if h == f32::NEG_INFINITY {
         return false;

@@ -1,6 +1,7 @@
 use crate::editor::World;
 use crate::generator::buildings_v2::footprint::{generate_footprint, Footprint, Plot, SizeClass};
 use crate::generator::buildings_v2::foundation::place_foundation;
+use crate::generator::buildings_v2::BuildCtx;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
 use crate::geometry::{Point2D, Rect2D};
@@ -59,8 +60,9 @@ async fn build_foundations_in_world() {
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::House, 20);
     println!("Placed {} house footprints in 32x32 area", footprints.len());
 
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (i, footprint) in footprints.iter().enumerate() {
-        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
+        let base_y = place_foundation(&mut ctx, footprint).await;
         let area = footprint.filled_points().len();
         println!("  Foundation {}: base_y={}, area={}", i, base_y, area);
     }

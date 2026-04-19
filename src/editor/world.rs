@@ -125,6 +125,54 @@ impl World {
         Editor::new(self.build_area, self)
     }
 
+    /// Build a synthetic World for offline / dry-run use. No HTTP calls.
+    /// Ground is flat at `ground_y` (absolute world Y). Biome = Plains, surface
+    /// block = grass. Chunks are empty — `get_block` will return None for any
+    /// point, so callers must either guard against missing blocks or use the
+    /// editor's block cache.
+    pub fn synthetic(build_area: Rect3D, ground_y: i32) -> Self {
+        let size_x_usize = build_area.size.x as usize;
+        let size_z_usize = build_area.size.z as usize;
+
+        // Heightmaps are stored relative to build_area.origin.y (see World::new).
+        let y_local = ground_y - build_area.origin.y;
+
+        let ground_height_map = vec![vec![y_local; size_z_usize]; size_x_usize];
+        let ocean_floor_height_map = vec![vec![y_local; size_z_usize]; size_x_usize];
+        let motion_blocking_height_map = vec![vec![y_local; size_z_usize]; size_x_usize];
+        let ground_block_map = vec![vec![Block::new("minecraft:grass_block".into(), None, None); size_z_usize]; size_x_usize];
+        let ground_biome_map = vec![vec![Biome::Plains; size_z_usize]; size_x_usize];
+        let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
+        let district_map = vec![vec![None; size_z_usize]; size_x_usize];
+        let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
+
+        World {
+            build_area,
+            districts: HashMap::new(),
+            district_analysis_data: HashMap::new(),
+            super_districts: HashMap::new(),
+            super_district_analysis_data: HashMap::new(),
+            district_map,
+            super_district_map,
+            buildings: Vec::new(),
+            gate_locations: Vec::new(),
+            ground_height_map,
+            ground_block_map,
+            ocean_floor_height_map,
+            ground_biome_map,
+            motion_blocking_height_map,
+            build_claim_map,
+            chunks: HashMap::new(),
+        }
+    }
+
+    /// Build an offline editor from a synthetic world. Skips all HTTP traffic —
+    /// blocks are written to the editor's in-memory cache only. See
+    /// `Editor::new_offline` for the editor-side behavior.
+    pub fn get_offline_editor(self) -> Editor {
+        Editor::new_offline(self.build_area, self)
+    }
+
     pub fn origin(&self) -> Point3D {
         self.build_area.origin
     }

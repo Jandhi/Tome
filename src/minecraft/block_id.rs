@@ -10,6 +10,10 @@ impl From<&str> for BlockID {
 }
 
 impl BlockID {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
     pub fn is_water(&self) -> bool {
         let id_string = &self.0;
         matches!(

@@ -1,11 +1,15 @@
+pub mod blueprint;
 pub mod floors;
 pub mod footprint;
 pub mod foundation;
 pub mod frame;
 pub mod furnish;
+pub mod pipeline;
 pub mod roof;
 pub mod rooms;
 pub mod walls;
+
+pub use pipeline::{BuildCtx, HouseOutput, build_house};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildingType {
@@ -45,23 +49,31 @@ pub enum RoomType {
 }
 
 impl RoomType {
-    /// Short label for ASCII diagrams.
-    pub fn label(&self) -> &'static str {
+    /// Returns (display name, short label, furniture data key).
+    fn metadata(&self) -> (&'static str, &'static str, &'static str) {
         match self {
-            RoomType::Common => "Com",
-            RoomType::Hearth => "Hrt",
-            RoomType::GreatRoom => "Grt",
-            RoomType::Bedroom => "Bed",
-            RoomType::MultiBedroom => "MBd",
-            RoomType::MasterBedroom => "Mst",
-            RoomType::Study => "Std",
-            RoomType::Storage => "Sto",
-            RoomType::Dining => "Din",
-            RoomType::Kitchen => "Kit",
-            RoomType::Pantry => "Pnt",
-            RoomType::Library => "Lib",
-            RoomType::Studio => "Art",
-            RoomType::Armory => "Arm",
+            RoomType::Common        => ("Common",     "Com", "common"),
+            RoomType::Hearth        => ("Hearth",     "Hrt", "hearth"),
+            RoomType::GreatRoom     => ("Great Room", "Grt", "great_room"),
+            RoomType::Bedroom       => ("Bedroom",    "Bed", "bedroom"),
+            RoomType::MultiBedroom  => ("Bedrooms",   "MBd", "multi_bedroom"),
+            RoomType::MasterBedroom => ("Master Bed", "Mst", "master_bedroom"),
+            RoomType::Study         => ("Study",      "Std", "study"),
+            RoomType::Storage       => ("Storage",    "Sto", "storage"),
+            RoomType::Dining        => ("Dining",     "Din", "dining"),
+            RoomType::Kitchen       => ("Kitchen",    "Kit", "kitchen"),
+            RoomType::Pantry        => ("Pantry",     "Pnt", "pantry"),
+            RoomType::Library       => ("Library",    "Lib", "library"),
+            RoomType::Studio        => ("Studio",     "Art", "studio"),
+            RoomType::Armory        => ("Armory",     "Arm", "armory"),
         }
     }
+
+    pub fn name(&self) -> &'static str { self.metadata().0 }
+
+    /// Short label for ASCII diagrams.
+    pub fn label(&self) -> &'static str { self.metadata().1 }
+
+    /// Key for looking up furniture data.
+    pub fn furniture_key(&self) -> &'static str { self.metadata().2 }
 }
