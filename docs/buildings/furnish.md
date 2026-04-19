@@ -1,159 +1,161 @@
 # Furnish Module
 
-Places furniture in rooms based on room type. Uses connectivity-aware placement
-to ensure all doors and interactable items remain reachable.
+Places furniture in rooms based on room type. Reads YAML data files for furniture
+piece definitions and per-room item lists, then runs connectivity-aware placement
+that keeps doors and interactable items reachable.
 
 ## Input
-- `RoomPlan` (mutable — floor maps are updated as furniture is placed)
-- `Frame` (floor_y and ceiling_y for block placement heights)
-- `RNG`
+- `RoomPlan` (mutable — each `Room.constraints` and `Room.furniture` updated as items are placed)
+- `Frame` (`floor_y`, `ceiling_y`, and `roof_y` for attic ceilings)
+- `BuildCtx` (provides editor, palette, materials, RNG, and loaded `FurnitureData`)
 
 ## Output
-- `()` (modifies world via Editor, updates RoomPlan floor maps in place)
+- `()` — places blocks via the editor and mutates each room's `ConstraintMap` + `furniture` list
 
-## Furniture System
+## Data Model
 
-### FurnitureItem
+All furniture and room lists are loaded once at startup via
+`FurnitureData::load()`:
 
-Each piece of furniture is defined by its block, how it occupies space, and how
-its facing relates to the wall:
+- `data/furniture/*.yaml` — every YAML file in the directory contributes
+  furniture items (currently `house.yaml`, `industrial.yaml`, `storage.yaml`).
+  Item keys must be unique across files.
+- `data/rooms.yaml` — per-room-type required + optional item lists.
 
-```rust
-struct FurnitureItem {
-    block_id: &'static str,       // e.g. "minecraft:chest"
-    placement: PlacementKind,
-    facing: FacingMode,
-}
+### Furniture (`data/furniture/*.yaml`)
 
-enum PlacementKind {
-    Bed,         // 2-block: head against wall (Blocked), foot inward (ReachableBlocked)
-    WallSingle,  // 1-block against a wall (ReachableBlocked)
-    Ceiling,     // hangs from ceiling center — no floor impact
-}
-
-enum FacingMode {
-    None,            // no facing state (barrel, bookshelf, crafting table)
-    AwayFromWall,    // faces inward (chest, furnace, smoker, loom)
-    Perpendicular,   // faces along wall (anvil)
-}
+```yaml
+chest:
+  unique: false             # if true, only one instance per room
+  blocks:
+    - block: "minecraft:chest"
+      offset: [0, 0, 0]     # [along, y, away] in wall-relative space
+      layer: ground         # ground | ceiling
+      swap: none            # none | wood | color (palette substitution)
+  constraints:
+    - offset: [0, 0]        # [along, away]
+      constraint: blocked_reachable   # wall | blocked_reachable | none
+      facing: away_from_wall          # none | away_from_wall | toward_wall | perpendicular
 ```
 
-### FurnitureRequest
+- **Offsets** are wall-relative: `along` follows the wall (right when looking
+  away from it), `away` points into the room. They get rotated into world
+  coordinates per slot via `resolve_offset`.
+- **`layer`** decides what grid the block claims. `ceiling` blocks land at
+  `ceiling_y - 1 + dy` and only mark the ceiling grid; `ground` blocks land at
+  `floor_y + dy` and mark the ground grid `Blocked`.
+- **`swap`** runs after block parsing. `wood` looks up the palette's
+  `PrimaryWood` material for the block's inferred form (stairs, trapdoor, sign,
+  …); `color` recolors via `palette.primary_color` (bed, carpet, banner, …).
+- **`constraints`** describe what the surrounding cells must look like at the
+  anchor. They are evaluated before any block is placed and applied to the
+  `ConstraintMap` after the placement check passes.
 
-```rust
-struct FurnitureRequest {
-    item: FurnitureItem,
-    required: bool,   // required items placed first; optional fill remaining space
-}
+Cell-state mapping (see `rooms/constraints.rs`):
+
+| YAML constraint      | CellState produced    | Used by                       |
+|----------------------|-----------------------|-------------------------------|
+| `wall`               | `Blocked` on a wall edge | bed head, bookshelves, banner |
+| `blocked_reachable`  | `BlockedReachable`    | chest fronts, table tops      |
+| `none`               | (no change)           | placeholder/anchor only       |
+
+Facing modes (resolved against the chosen wall direction):
+
+| FacingMode        | Result              | Example       |
+|-------------------|---------------------|---------------|
+| `none`            | no facing state     | barrel, bookshelf |
+| `away_from_wall`  | `-wall_dir`         | chest, furnace, smoker |
+| `toward_wall`     | `wall_dir`          | bed (foot points away from head wall) |
+| `perpendicular`   | `wall_dir.rotate_right()` | anvil along a wall |
+
+### Rooms (`data/rooms.yaml`)
+
+```yaml
+bedroom:
+  required: [bed, lantern]
+  optional: [chest, nightstand, bookshelf, ...]
+
+storage:
+  fill_threshold: 0.82      # cap on ground-cell fill ratio
+  required: [lantern]
+  optional: [crate, barrel_stack, ...]
 ```
 
-**Fill threshold**: stops placing optional items once room is 40% occupied.
+The `required` list is processed once in order. The `optional` list is
+processed in order until the fill threshold is hit. If `fill_threshold` is set
+explicitly (storage, pantry), the optional list is replayed in passes until a
+full pass places nothing — packing the room as densely as the data allows.
+Default threshold is `DEFAULT_FILL_THRESHOLD = 0.75`.
 
-### Furniture Lists by RoomType
-
-```
-  Common:     BED* CRAFT* FURNACE* CHEST* lantern
-  Hearth:     FURNACE* CRAFT* chest barrel lantern
-  GreatRoom:  LANTERN* chest bookshelf
-  Bedroom:    BED* chest lantern
-  MasterBed:  BED* chest chest bookshelf lantern
-  Storage:    barrel barrel chest chest barrel
-  Kitchen:    FURNACE* SMOKER* cauldron barrel lantern
-  Pantry:     barrel barrel chest barrel
-  Dining:     LANTERN* crafting_table chest
-  Study:      BOOKSHELF* BOOKSHELF* lantern bookshelf crafting_table
-  Library:    BOOKSHELF*3 bookshelf×2 lantern
-  Studio:     LOOM* crafting_table lantern
-  Armory:     ANVIL* chest lantern
-  MultiBed:   lantern
-
-  * = required, lowercase = optional
-```
+`RoomType::furniture_key()` maps a room type onto a key in this file; rooms
+without a matching key are skipped.
 
 ## Placement Algorithm
 
-### Wall Slots
+Per-room flow (`furnish_room` in `furnish/mod.rs`):
 
-Wall-adjacent positions are found from the interior rect (room rect shrunk by 1).
-Cells on the edge of the interior rect are adjacent to a wall. **Corner cells
-appear twice** — once for each adjacent wall direction.
+1. Build `interior_rect` (room rect shrunk by walls) and a shuffled list of
+   `WallSlot { cell, wall_dir }` covering the interior edge. Corner cells
+   appear twice — once per adjacent wall.
+2. Build a shuffled list of all interior cells for freestanding placement.
+3. Place required items in order, then loop the optional list under the
+   `fill_threshold` cap.
+4. Each `try_place_item` call dispatches by item shape:
+   - **Ceiling-only** (`is_ceiling_item`) — anchored at the interior midpoint
+     via `try_place_ceiling`.
+   - **Wall-bound** (`needs_wall`: any `wall` constraint or non-`none` facing)
+     — try each wall slot until one fits, via `try_place_at_wall_slot`.
+   - **Freestanding** — try every interior cell × 4 rotations, via
+     `try_place_freestanding`. Block facings are rotated through `rotate_block`
+     so e.g. stair tables retain their relative orientation.
+5. On success, the resulting `ResolvedBlock`s get palette-swapped, written to
+   the editor, and the constraint map is updated. The placed item is recorded
+   on `Room.furniture` as `PlacedFurniture { name, cells }` so the blueprint
+   dump can render it.
 
-Slots are **shuffled** with RNG so furniture arrangement varies between rooms.
+### Connectivity
 
-```
-  Interior rect with wall slots:
+Reserved cells (`BlockedReachable`) and explicit ground-block cells must not
+strand any other reserved cell. `placement_keeps_connectivity`:
 
-  W W W W W W W W     W = wall-adjacent (has slot)
-  W . . . . . . W     . = interior (no slot)
-  W . . . . . . W
-  W W W W W W W W
-```
+1. Saves the current state of every cell about to change.
+2. Applies the proposed `Blocked`, `BlockedReachable`, and ground-block-cell
+   updates in place. Block cells are applied last so they override any
+   `BlockedReachable` on the same cell (the bed foot has both a BR constraint
+   and an explicit block).
+3. `check_connectivity` flood-fills from a walkable neighbor of any reserved
+   cell and confirms every reserved cell has at least one walkable neighbor in
+   the reached set.
+4. Restores the saved states regardless of outcome — the caller mutates only
+   if the check passes.
 
-### Connectivity Checking
+### Bed special-case
 
-Before placing any furniture, the algorithm verifies the placement won't break
-room connectivity using BFS flood-fill:
+Beds use `unique: true` and a single `[part=foot]` block with
+`facing: toward_wall`. Minecraft's `BedBlock.setPlacedBy` runs on the next
+block update and creates the head block on the cell the foot points at — which
+is the anchor cell that the wall constraint already claims. The `wall`
+constraint cell isn't in the explicit block list, so `try_place_item` adds it
+to the returned `cells` after placement so blueprints render the full bed.
 
-1. **Tentative change**: apply the proposed cell state changes to a cloned FloorMap
-2. **Flood fill** from the first `ReachableOpen` cell through walkable
-   (Open + ReachableOpen) cells
-3. **Validate**:
-   - All `ReachableOpen` cells must be in the reached set
-   - All `ReachableBlocked` cells must be adjacent to at least one reached cell
-4. If validation fails, skip this placement and try the next slot
+### Attic exceptions
 
-This prevents furniture from:
-- Blocking a doorway
-- Cutting off part of the room from the entrance
-- Making interactable items unreachable
+Rooms with `RoomRole::Attic` use `frame.roof_y(rect_index)` as their ceiling
+and skip ceiling-only items entirely — the roof module handles attic lanterns
++ chains itself.
 
-### Bed Placement (2 blocks)
-
-```
-  Wall slot found:
-
-  ████████████████        Head goes against wall (Blocked)
-    [HEAD][FOOT]          Foot extends inward (ReachableBlocked)
-                          Player interacts from adjacent to foot
-```
-
-1. Find a wall slot where the cell is `Open`
-2. Compute foot position: 1 block away from wall (into room)
-3. Foot must be inside interior rect and `Open`
-4. Check connectivity with changes: head→Blocked, foot→ReachableBlocked
-5. Place head block (`part=head, facing=wall_dir`) and foot block (`part=foot`)
-   at `floor_y`
-
-### WallSingle Placement (1 block)
-
-1. Find a wall slot where the cell is `Open`
-2. Check connectivity with change: cell→ReachableBlocked
-3. Place block with facing derived from wall direction:
-   - `AwayFromWall`: facing = opposite of wall_dir (chest opens toward room)
-   - `Perpendicular`: facing = wall_dir rotated 90° right (anvil along wall)
-   - `None`: no facing state
-
-### Ceiling Placement
-
-1. Compute room center from interior rect midpoint
-2. Place block at `(center.x, ceiling_y - 1, center.y)` with `hanging=true`
-3. No floor map impact (ceiling items don't occupy floor space)
-
-## Block Construction
-
-`FurnitureItem` provides helper methods:
-- `make_block(wall_dir)` → `Block` with appropriate facing states
-- `make_bed_blocks(facing)` → `(head_block, foot_block)` with part + facing states
-
-All blocks are placed via `editor.place_block()` at `floor_y` (floor level).
-
-## File Structure
+## File Layout
 
 ```
 src/generator/buildings_v2/furnish/
-    mod.rs   — FurnitureItem, PlacementKind, FacingMode, FurnitureRequest,
-               wall_slots(), connectivity (flood_fill, check_connectivity),
-               find_bed_placement(), find_single_placement(),
-               furnish_room(), furnish_rooms()
+    mod.rs   — placement algorithm, connectivity, room loop
+    data.rs  — YAML structs (FurnitureData, Furniture, RoomFurnitureList) and PaletteSwap
     test.rs  — placement and connectivity tests
+
+data/
+    furniture/
+        house.yaml       — domestic items (bed, chest, table, carpets, decor, …)
+        industrial.yaml  — workstation items (anvil, furnace, smoker, loom, cauldron)
+        storage.yaml     — bulk-storage stacks (crate, barrel_stack, hay_pile, …)
+    rooms.yaml           — per-room required + optional lists
 ```
