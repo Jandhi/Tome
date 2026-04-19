@@ -374,7 +374,7 @@ fn placement_block_cells_block_walking() {
         ((1, 0), CellState::Empty),
         ((2, 0), CellState::BlockedReachable),
     ]);
-    assert!(!placement_keeps_connectivity(&[], &[], &[(1, 0)], &mut cm));
+    assert!(!placement_keeps_connectivity(&[], &[], &[((1, 0), false)], &mut cm));
 }
 
 // ---------------------------------------------------------------------------
