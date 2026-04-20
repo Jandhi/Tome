@@ -47,6 +47,12 @@ pub struct FloorPlan {
     pub stair_bottoms: HashSet<(u32, i32, i32)>,
     /// Top-of-stair cells: (floor+1, x, z) for the last position of each stairwell.
     pub stair_tops: HashSet<(u32, i32, i32)>,
+    /// All (floor+1, x, z) cells in the air column directly above any stair
+    /// position. Even though stair blocks live on `floor`, the player ascends
+    /// THROUGH the air at floor+1 — furniture placed at any of these cells on
+    /// floor+1 would land in the player's head clearance during ascent.
+    /// Includes stair_tops; non-top entries are mid-stair cells.
+    pub stair_air_above: HashSet<(u32, i32, i32)>,
 }
 
 impl FloorPlan {
@@ -66,7 +72,10 @@ impl FloorPlan {
         let stair_tops: HashSet<(u32, i32, i32)> = stairwells.iter()
             .filter_map(|sw| sw.positions.last().map(|p| (sw.floor + 1, p.x, p.y)))
             .collect();
-        Self { stairwells, stair_bottoms, stair_tops }
+        let stair_air_above: HashSet<(u32, i32, i32)> = stairwells.iter()
+            .flat_map(|sw| sw.positions.iter().map(move |p| (sw.floor + 1, p.x, p.y)))
+            .collect();
+        Self { stairwells, stair_bottoms, stair_tops, stair_air_above }
     }
 
     pub fn stairwells_on_floor(&self, floor: u32) -> Vec<&Stairwell> {
