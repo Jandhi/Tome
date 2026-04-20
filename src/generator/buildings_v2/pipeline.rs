@@ -118,7 +118,7 @@ pub async fn build_house(
 
     furnish_rooms(ctx, &mut room_plan, &frame).await;
 
-    check_building_invariants(&frame, &room_plan)?;
+    check_building_invariants(&frame, &room_plan, &floor_plan)?;
 
     Ok(HouseOutput {
         footprint,
