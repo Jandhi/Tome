@@ -650,6 +650,10 @@ pub async fn build_rooms(
             // includes both straight-stair flat landings and the approach
             // cells in front of spiral/L-shaped stairs, so it's checked
             // independently of the stair footprint.
+            //
+            // stair_air_above reserves the air-column cells on the floor
+            // directly above each stair so furniture can't land in the
+            // player's head-clearance during ascent.
             let this_floor_stair_cells = stair_cells_by_floor
                 .entry(floor)
                 .or_insert_with(|| floor_plan.stair_cells_on_floor(floor));
@@ -661,6 +665,9 @@ pub async fn build_rooms(
                     constraints.set_ceiling(xz);
                 } else if this_floor_stair_cells.contains(&xz) {
                     constraints.set(xz, CellState::Blocked);
+                    constraints.set_ceiling(xz);
+                } else if floor_plan.stair_air_above.contains(&key) {
+                    constraints.set(xz, CellState::UnblockedReachable);
                     constraints.set_ceiling(xz);
                 }
             }
@@ -1017,18 +1024,20 @@ pub fn check_building_invariants(
             }
         }
 
-        // Invariant 3: no furniture cell may coincide with a stair cell.
-        // Stair cells on this floor come from stair_cells_on_floor(floor) —
-        // physical stair blocks (Blocked) and their landings (UnblockedReachable).
-        // The top cell of a stair below this floor (stair_tops) is also reserved.
+        // Invariant 3: no furniture cell may coincide with a stair cell or
+        // the air column directly above a stair (head-clearance for ascent).
+        // - stair_cells_on_floor: physical stair blocks (Blocked) + landings
+        //   (UR) on this floor.
+        // - stair_air_above (filtered to this floor): cells one floor above any
+        //   stair below; furniture there would head-collide during ascent.
         let this_floor_stair_cells = floor_plan.stair_cells_on_floor(room.floor);
-        let this_floor_tops: HashSet<(i32, i32)> = floor_plan.stair_tops.iter()
+        let this_floor_air_above: HashSet<(i32, i32)> = floor_plan.stair_air_above.iter()
             .filter(|(f, _, _)| *f == room.floor)
             .map(|(_, x, z)| (*x, *z))
             .collect();
         for furn in &room.furniture {
             for &(fx, fz) in &furn.cells {
-                if this_floor_stair_cells.contains(&(fx, fz)) || this_floor_tops.contains(&(fx, fz)) {
+                if this_floor_stair_cells.contains(&(fx, fz)) || this_floor_air_above.contains(&(fx, fz)) {
                     return Err(format!(
                         "invariant (c): room {:?} floor {} furniture '{}' overlaps stair cell ({},{})",
                         room.room_type, room.floor, furn.name, fx, fz,
