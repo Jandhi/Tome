@@ -973,6 +973,7 @@ fn wall_cells_on_floor(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
 pub fn check_building_invariants(
     frame: &Frame,
     room_plan: &RoomPlan,
+    floor_plan: &FloorPlan,
 ) -> Result<(), String> {
     const NEIGHBORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
@@ -1012,6 +1013,26 @@ pub fn check_building_invariants(
                             side_name, adj.0, adj.1,
                         ));
                     }
+                }
+            }
+        }
+
+        // Invariant 3: no furniture cell may coincide with a stair cell.
+        // Stair cells on this floor come from stair_cells_on_floor(floor) —
+        // physical stair blocks (Blocked) and their landings (UnblockedReachable).
+        // The top cell of a stair below this floor (stair_tops) is also reserved.
+        let this_floor_stair_cells = floor_plan.stair_cells_on_floor(room.floor);
+        let this_floor_tops: HashSet<(i32, i32)> = floor_plan.stair_tops.iter()
+            .filter(|(f, _, _)| *f == room.floor)
+            .map(|(_, x, z)| (*x, *z))
+            .collect();
+        for furn in &room.furniture {
+            for &(fx, fz) in &furn.cells {
+                if this_floor_stair_cells.contains(&(fx, fz)) || this_floor_tops.contains(&(fx, fz)) {
+                    return Err(format!(
+                        "invariant (c): room {:?} floor {} furniture '{}' overlaps stair cell ({},{})",
+                        room.room_type, room.floor, furn.name, fx, fz,
+                    ));
                 }
             }
         }
