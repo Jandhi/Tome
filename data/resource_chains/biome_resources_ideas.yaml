@@ -2,135 +2,179 @@ biome_resources:
   # Temperate
   minecraft:plains:
     - wheat
+    - wool
+    - leather
+    - feathers
   minecraft:sunflower_plains:
     - wheat
+    - wool
+    - leather
   minecraft:forest:
     - wood
+    - feathers
   minecraft:flower_forest:
     - wood
+    - honey
+    - feathers
   minecraft:birch_forest:
     - wood
+    - feathers
   minecraft:old_growth_birch_forest:
     - wood
+    - feathers
   minecraft:dark_forest:
     - wood
+    - feathers
   minecraft:swamp:
-    - wood
+    - clay
+    - sugar_cane
+    - leather
   minecraft:mangrove_swamp:
     - wood
+    - clay
+    - sugar_cane
   minecraft:pale_garden:
     - wood
 
   # Warm / Tropical
   minecraft:jungle:
     - wood
-    - wheat
+    - cocoa_beans
+    - honey
   minecraft:sparse_jungle:
     - wood
-    - wheat
+    - cocoa_beans
   minecraft:bamboo_jungle:
     - wood
-    - wheat
+    - sugar_cane
   minecraft:savanna:
     - wood
     - wheat
+    - leather
   minecraft:savanna_plateau:
     - wood
-    - iron_ore
+    - wheat
+    - leather
   minecraft:windswept_savanna:
     - wood
-    - wheat
+    - flint
   minecraft:desert:
-    - iron_ore
+    - sand
+    - clay
   minecraft:badlands:
-    - iron_ore
+    - gold_ore
+    - clay
   minecraft:wooded_badlands:
     - wood
-    - iron_ore
+    - gold_ore
+    - clay
   minecraft:eroded_badlands:
-    - iron_ore
+    - gold_ore
+    - clay
 
   # Cold
   minecraft:taiga:
     - wood
+    - feathers
   minecraft:old_growth_pine_taiga:
     - wood
+    - feathers
   minecraft:old_growth_spruce_taiga:
     - wood
+    - feathers
   minecraft:windswept_hills:
     - iron_ore
+    - flint
   minecraft:windswept_gravelly_hills:
+    - flint
     - iron_ore
   minecraft:windswept_forest:
     - wood
+    - flint
     - iron_ore
 
   # Snowy / Frozen
   minecraft:snowy_plains:
-    - iron_ore
-    - wheat
+    - wool
+    - leather
   minecraft:ice_spikes:
-    - iron_ore
+    - wool
+    - leather
   minecraft:snowy_taiga:
     - wood
+    - leather
   minecraft:snowy_slopes:
-    - iron_ore
+    - wool
+    - flint
   minecraft:grove:
     - wood
-    - iron_ore
+    - wool
   minecraft:frozen_peaks:
     - iron_ore
+    - flint
   minecraft:jagged_peaks:
     - iron_ore
-
+    - flint
 
   # Mountain
   minecraft:stony_peaks:
     - iron_ore
+    - coal
+    - flint
   minecraft:meadow:
-    - iron_ore
     - wheat
+    - honey
+    - wool
   minecraft:cherry_grove:
     - wood
-    - iron_ore
+    - honey
   minecraft:mountains:
     - iron_ore
-
+    - coal
+    - flint
 
   # Ocean
   minecraft:ocean:
-
+    - clay
   minecraft:deep_ocean:
-
+    - clay
   minecraft:lukewarm_ocean:
-
+    - sand
+    - clay
   minecraft:deep_lukewarm_ocean:
-
+    - clay
   minecraft:warm_ocean:
-
+    - sand
+    - clay
   minecraft:cold_ocean:
-
+    - clay
   minecraft:deep_cold_ocean:
-
+    - clay
   minecraft:frozen_ocean:
-
+    - clay
   minecraft:deep_frozen_ocean:
-
+    - clay
 
   # Beach / Shore
   minecraft:beach:
-
+    - sand
+    - flint
   minecraft:snowy_beach:
-  
+    - sand
+    - flint
   minecraft:stony_shore:
-
+    - flint
+    - iron_ore
 
   # River
   minecraft:river:
-
+    - clay
+    - sugar_cane
   minecraft:frozen_river:
-
+    - clay
+    - sugar_cane
 
   # Special
   minecraft:mushroom_fields:
-    - wheat # Eventually Replace
+    - leather
+    - wool

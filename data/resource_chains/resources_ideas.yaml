@@ -1,0 +1,146 @@
+resources:
+  # --- Raw (tier 0) ---
+  wood:
+    name: Wood
+    category: forest
+    tier: 0
+  wool:
+    name: Wool
+    category: animal
+    tier: 0
+  honey:
+    name: Honey
+    category: animal
+    tier: 0
+  wheat:
+    name: Wheat
+    category: crop
+    tier: 0
+  sugar_cane:
+    name: Sugar Cane
+    category: crop
+    tier: 0
+  iron_ore:
+    name: Iron Ore
+    category: mineral
+    tier: 0
+  coal:
+    name: Coal
+    category: mineral
+    tier: 0
+  sand:
+    name: Sand
+    category: mineral
+    tier: 0
+  clay:
+    name: Clay
+    category: mineral
+    tier: 0
+  leather:
+    name: Leather
+    category: animal
+    tier: 0
+  feathers:
+    name: Feathers
+    category: animal
+    tier: 0
+  flint:
+    name: Flint
+    category: mineral
+    tier: 0
+  cocoa_beans:
+    name: Cocoa Beans
+    category: crop
+    tier: 0
+
+  # --- Intermediate (tier 1) ---
+  planks:
+    name: Planks
+    category: forest
+    tier: 1
+  charcoal:
+    name: Charcoal
+    category: forest
+    tier: 1
+  cloth:
+    name: Cloth
+    category: fiber
+    tier: 1
+  flour:
+    name: Flour
+    category: food
+    tier: 1
+  sugar:
+    name: Sugar
+    category: food
+    tier: 1
+  iron_ingot:
+    name: Iron Ingot
+    category: metal
+    tier: 1
+  glass:
+    name: Glass
+    category: mineral
+    tier: 1
+  bricks:
+    name: Bricks
+    category: mineral
+    tier: 1
+  paper:
+    name: Paper
+    category: forest
+    tier: 1
+  wax:
+    name: Wax
+    category: animal
+    tier: 1
+
+  # --- Finished goods (tier 2) ---
+  furniture:
+    name: Furniture
+    category: forest
+    tier: 2
+  ale:
+    name: Ale
+    category: food
+    tier: 2
+  bread:
+    name: Bread
+    category: food
+    tier: 2
+  clothing:
+    name: Clothing
+    category: fiber
+    tier: 2
+  tools:
+    name: Tools
+    category: metal
+    tier: 2
+  glass_panes:
+    name: Glass Panes
+    category: mineral
+    tier: 2
+  pottery:
+    name: Pottery
+    category: mineral
+    tier: 2
+  books:
+    name: Books
+    category: knowledge
+    tier: 2
+  candles:
+    name: Candles
+    category: animal
+    tier: 2
+  arrows:
+    name: Arrows
+    category: military
+    tier: 2
+  mead:
+    name: Mead
+    category: food
+    tier: 2
+  chocolate:
+    name: Chocolate
+    category: food
+    tier: 2
