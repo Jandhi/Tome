@@ -13,7 +13,8 @@ use super::{
     CellConstraint, FacingMode, BlockLayer,
     PlacementResult, DEFAULT_FILL_THRESHOLD,
 };
-use super::data::{Furniture, FurnitureBlock, FurnitureConstraint, FurnitureData, PaletteSwap, RoomFurnitureList};
+use super::data::{Furniture, FurnitureBlock, FurnitureConstraint, FurnitureData, FixedSlot, LootItem, LootTable, PaletteSwap, RoomFurnitureList};
+use super::roll_loot_snbt;
 
 fn make_room(rect: Rect2D, constraints: ConstraintMap) -> Room {
     Room {
@@ -61,7 +62,7 @@ fn test_bed() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:red_bed[part=foot]".into(),
                 offset: [0, 0, 1],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![
@@ -79,7 +80,7 @@ fn test_chest() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:chest".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![
@@ -96,7 +97,7 @@ fn test_lantern() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:lantern[hanging=true]".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![],
@@ -111,7 +112,7 @@ fn test_bookshelf() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![
@@ -498,12 +499,12 @@ fn test_stacked_crate() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:hay_block".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
             FurnitureBlock {
                 block: "minecraft:hay_block".into(),
                 offset: [0, 1, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![
@@ -525,12 +526,12 @@ fn test_stacked_bookshelves() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 1, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
             },
         ],
         constraints: vec![
@@ -549,10 +550,10 @@ fn test_loaded_shelves() -> Furniture {
     Furniture {
         unique: false,
         blocks: vec![
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
         ],
         constraints: vec![
             FurnitureConstraint { offset: [0, 0], constraint: CellConstraint::Wall, facing: FacingMode::None },
@@ -697,6 +698,7 @@ fn aggressive_fill_packs_storage_interior() {
             Some(placement) => {
                 for &c in &placement.new_blocked { cm.set(c, CellState::Blocked); }
                 for &c in &placement.new_reserved { cm.set(c, CellState::BlockedReachable); }
+                for &c in &placement.new_empty_reachable { cm.set(c, CellState::UnblockedReachable); }
                 for rb in &placement.blocks {
                     cm.set(rb.cell, CellState::Blocked);
                 }
@@ -790,7 +792,7 @@ fn resolve_furniture_from_data() {
         blocks: vec![FurnitureBlock {
             block: "minecraft:red_bed[part=head]".into(),
             offset: [0, 0, 0],
-            layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false,
+            layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
         }],
         constraints: vec![FurnitureConstraint {
             offset: [0, 0],
@@ -804,7 +806,7 @@ fn resolve_furniture_from_data() {
         blocks: vec![FurnitureBlock {
             block: "minecraft:lantern[hanging=true]".into(),
             offset: [0, 0, 0],
-            layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false,
+            layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, loot: None,
         }],
         constraints: vec![],
         ..Default::default()
@@ -817,7 +819,7 @@ fn resolve_furniture_from_data() {
         fill_threshold: None,
     });
 
-    let data = FurnitureData { items, rooms };
+    let data = FurnitureData { items, rooms, loot: HashMap::new() };
     let room_list = data.rooms.get("bedroom").unwrap();
     assert_eq!(room_list.required.len(), 1);
     assert_eq!(room_list.required[0], "bed");
@@ -829,7 +831,7 @@ fn resolve_furniture_from_data() {
 
 #[test]
 fn resolve_missing_room_returns_none() {
-    let data = FurnitureData { items: HashMap::new(), rooms: HashMap::new() };
+    let data = FurnitureData { items: HashMap::new(), rooms: HashMap::new(), loot: HashMap::new() };
     assert!(data.rooms.get("nonexistent").is_none());
 }
 
@@ -841,7 +843,7 @@ fn resolve_skips_unknown_items() {
         optional: vec![],
         fill_threshold: None,
     });
-    let data = FurnitureData { items: HashMap::new(), rooms };
+    let data = FurnitureData { items: HashMap::new(), rooms, loot: HashMap::new() };
     let room_list = data.rooms.get("test").unwrap();
     assert!(data.items.get(&room_list.required[0]).is_none());
 }
@@ -870,11 +872,14 @@ fn every_room_type_has_key() {
 // ---------------------------------------------------------------------------
 
 const GREEN: &str = "\x1b[32m";
+const CYAN: &str = "\x1b[36m";
 const RESET: &str = "\x1b[0m";
 
 /// Render a room as ASCII art.
 /// Wall: #, Door in wall: D, Furniture: first letter of name,
-/// Ceiling items: lowercase. Reserved cells are green.
+/// Ceiling items: lowercase. BlockedReachable cells are green;
+/// UnblockedReachable cells (doors, stair landings, ladders, stair
+/// air-columns) are cyan.
 fn render_room(
     room_rect: &Rect2D,
     cm: &ConstraintMap,
@@ -897,16 +902,22 @@ fn render_room(
         for x in min.x..=max.x {
             let cell = (x, z);
             let on_wall = x == min.x || x == max.x || z == min.y || z == max.y;
-            let is_reserved = !on_wall && matches!(cm.get(cell), Some(CellState::BlockedReachable));
+            let state = if on_wall { None } else { cm.get(cell) };
 
             if on_wall {
                 row.push(if doors.contains(&cell) { 'D' } else { '#' });
             } else {
-                let ch = if let Some(&c) = labels.get(&cell) { c } else { '.' };
-                if is_reserved {
-                    row.push_str(&format!("{GREEN}{ch}{RESET}"));
-                } else {
-                    row.push(ch);
+                let labeled = labels.get(&cell).copied();
+                let ch = labeled.unwrap_or('.');
+                match state {
+                    Some(CellState::BlockedReachable) => {
+                        row.push_str(&format!("{GREEN}{ch}{RESET}"));
+                    }
+                    Some(CellState::UnblockedReachable) => {
+                        let show = labeled.unwrap_or('·');
+                        row.push_str(&format!("{CYAN}{show}{RESET}"));
+                    }
+                    _ => row.push(ch),
                 }
             }
         }
@@ -970,6 +981,7 @@ impl DiagramRoom {
         if let Some(placement) = result {
             for &cell in &placement.new_blocked { self.cm.set(cell, CellState::Blocked); }
             for &cell in &placement.new_reserved { self.cm.set(cell, CellState::BlockedReachable); }
+            for &cell in &placement.new_empty_reachable { self.cm.set(cell, CellState::UnblockedReachable); }
 
             let ch = match name {
                 "bed" | "single_bed" | "double_bed" | "canopy_bed" => 'B',
@@ -1043,12 +1055,12 @@ fn diagram_bedroom_furnishing() {
     r.place("bookshelf", &test_bookshelf());
     r.place("chest", &test_chest());
     r.place("barrel", &Furniture {
-        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false }],
+        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..test_chest() // unique: false
     });
     r.place("crafting_table", &Furniture {
-        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false }],
+        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         unique: true,
         ..Default::default()
@@ -1072,19 +1084,19 @@ fn diagram_hearth_furnishing() {
 
     let furnace = Furniture {
         unique: true,
-        blocks: vec![FurnitureBlock { block: "minecraft:furnace".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false }],
+        blocks: vec![FurnitureBlock { block: "minecraft:furnace".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::AwayFromWall }],
         ..Default::default()
     };
     let crafting = Furniture {
         unique: true,
-        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false }],
+        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..Default::default()
     };
     let barrel = Furniture {
         unique: false,
-        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false }],
+        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..Default::default()
     };
@@ -1157,14 +1169,19 @@ fn diagram_narrow_corridor_connectivity() {
 async fn place_room_sizes_in_world() {
     use crate::data::Loadable;
     use crate::editor::World;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::frame::Frame;
     use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette, PaletteId};
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::{Block, Color};
-    use super::{WallSlot, swap_block_for_palette};
+    use super::furnish_room;
 
     const ROOM_KEY: &str = "bedroom";
     const SEED: i64 = 42;
+    // Wall height in air blocks between floor and ceiling. Frame::ceiling_y(0)
+    // returns base_y + WALL_HEIGHT; furnish_room uses that for ceiling items.
+    const WALL_HEIGHT: u32 = 4;
 
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.expect("get world from server");
@@ -1178,15 +1195,18 @@ async fn place_room_sizes_in_world() {
     // Per-room palette: secondary wood drives furniture color (PaletteSwap::Wood
     // resolves SecondaryWood with PrimaryWood fallback); primary color drives
     // bed / banner / etc via PaletteSwap::Color.
-    let make_palette = |id: &str, primary_wood: &str, secondary_wood: &str, color: Color| -> Palette {
+    let make_palette = |id: &str, primary_wood: &str, secondary_wood: &str,
+                        primary: Color, secondary: Color| -> Palette {
         let mut mats = HashMap::new();
         mats.insert(MaterialRole::PrimaryWood, MaterialId::from(primary_wood));
         mats.insert(MaterialRole::SecondaryWood, MaterialId::from(secondary_wood));
         Palette {
             id: PaletteId::from(id),
             materials: mats,
-            primary_color: Some(color),
-            secondary_color: None,
+            primary_color: Some(primary),
+            // Drives PaletteSwap::SecondaryColor — accent color for patterned
+            // carpets and any future two-tone items.
+            secondary_color: Some(secondary),
             tags: None,
         }
     };
@@ -1198,18 +1218,17 @@ async fn place_room_sizes_in_world() {
     let base_z = 8i32;
     let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z));
     let floor_y = ground_local + 1;
-    let ceiling_y = floor_y + 4;
 
     // (rect_size, interior-door, wall-door (opening), label, world offset, palette)
     let cases: Vec<(Point2D, (i32, i32), (i32, i32), &str, (i32, i32), Palette)> = vec![
         (Point2D::new(5, 5),   (2, 1), (2, 0), "5x5 cherry",   (0, 0),
-            make_palette("cherry_room", "oak_planks", "cherry_planks", Color::Pink)),
+            make_palette("cherry_room", "oak_planks", "cherry_planks", Color::Pink, Color::White)),
         (Point2D::new(7, 6),   (3, 1), (3, 0), "7x6 warped",   (12, 0),
-            make_palette("warped_room", "oak_planks", "warped_planks", Color::Cyan)),
+            make_palette("warped_room", "oak_planks", "warped_planks", Color::Cyan, Color::Yellow)),
         (Point2D::new(9, 8),   (4, 1), (4, 0), "9x8 spruce",   (0, 14),
-            make_palette("spruce_room", "oak_planks", "spruce_planks", Color::Brown)),
+            make_palette("spruce_room", "oak_planks", "spruce_planks", Color::Brown, Color::Orange)),
         (Point2D::new(11, 10), (5, 1), (5, 0), "11x10 birch",  (14, 14),
-            make_palette("birch_room", "oak_planks", "birch_planks", Color::Yellow)),
+            make_palette("birch_room", "oak_planks", "birch_planks", Color::Yellow, Color::Red)),
     ];
 
     let floor_block = Block::from_id("minecraft:oak_planks".into());
@@ -1235,7 +1254,7 @@ async fn place_room_sizes_in_world() {
         for p in rect.iter() {
             editor.place_block(&floor_block, Point3D::new(p.x, floor_y - 1, p.y)).await;
         }
-        // Spruce plank walls on the rect perimeter, 3 high (floor_y..floor_y+2).
+        // Wood walls on the rect perimeter, 3 high (floor_y..floor_y+2).
         // Carve out the door with air at the wall opening.
         for p in rect.iter() {
             if !rect.on_edge(p) { continue; }
@@ -1252,80 +1271,391 @@ async fn place_room_sizes_in_world() {
             }
         }
 
-        // Run furnishing.
-        let mut cm = constraints_with_doors(&interior, &[world_idoor]);
-        let mut rng = RNG::new(SEED);
-        let mut slots = wall_slots(&interior);
-        shuffle(&mut slots, &mut rng);
-        let mut open: Vec<(i32, i32)> = interior.iter().map(|p| (p.x, p.y)).collect();
-        shuffle(&mut open, &mut rng);
+        // Construct a single-rect Frame so floor/ceiling Y resolve from base_y.
+        // Vertices clockwise around the rect; furnish_room only reads floor_y /
+        // ceiling_y / roof_y from the frame, not the polygon outline.
+        let v = vec![
+            Point2D::new(rect.min().x, rect.min().y),
+            Point2D::new(rect.max().x, rect.min().y),
+            Point2D::new(rect.max().x, rect.max().y),
+            Point2D::new(rect.min().x, rect.max().y),
+        ];
+        let footprint = Footprint::new(v, vec![rect]);
+        let frame = Frame::new(footprint, floor_y, vec![1], WALL_HEIGHT);
 
-        let room_area = interior.area();
-        let mut placed_tags: HashSet<String> = HashSet::new();
-        let mut attempt_rng = RNG::new(SEED);
-
-        let mut try_entry = |entry: &str, cm: &mut ConstraintMap,
-                             slots: &[WallSlot], open: &[(i32, i32)],
-                             placed_tags: &mut HashSet<String>,
-                             attempt_rng: &mut RNG|
-            -> Option<(String, PlacementResult)> {
-            let candidates = resolve_candidates(entry, &data.items, room_area, false, placed_tags, attempt_rng);
-            for (name, item) in candidates {
-                let result = if is_ceiling_item(item) {
-                    try_place_ceiling(item, &interior, cm, ceiling_y)
-                } else if needs_wall(item) {
-                    let mut found = None;
-                    for s in slots {
-                        if let Some(r) = try_place_at_wall_slot(item, s, &interior, cm, floor_y) {
-                            found = Some(r); break;
-                        }
-                    }
-                    found
-                } else {
-                    try_place_freestanding(item, &interior, cm, floor_y, open)
-                };
-                if let Some(r) = result {
-                    for &c in &r.new_blocked { cm.set(c, CellState::Blocked); }
-                    for &c in &r.new_reserved { cm.set(c, CellState::BlockedReachable); }
-                    for rb in &r.blocks {
-                        if rb.layer.occupies_ceiling() { cm.set_ceiling(rb.cell); }
-                        if rb.layer.occupies_ground() { cm.set(rb.cell, CellState::Blocked); }
-                    }
-                    if item.unique {
-                        placed_tags.insert(name.clone());
-                        for tag in &item.tags { placed_tags.insert(tag.clone()); }
-                    }
-                    return Some((name.clone(), r));
-                }
-            }
-            None
+        // Build the room with its door already marked so furnish_room respects
+        // the entry point during connectivity checks.
+        let mut room = Room {
+            rect,
+            rect_index: 0,
+            floor: 0,
+            role: RoomRole::Upper,
+            room_type: RoomType::Bedroom,
+            interior,
+            constraints: constraints_with_doors(&interior, &[world_idoor]),
+            furniture: Vec::new(),
         };
 
-        let mut to_write: Vec<(String, PlacementResult)> = Vec::new();
-        for entry in &room_list.required {
-            if let Some(p) = try_entry(entry, &mut cm, &slots, &open, &mut placed_tags, &mut attempt_rng) {
-                to_write.push(p);
-            }
-        }
-        for entry in &room_list.optional {
-            if let Some(p) = try_entry(entry, &mut cm, &slots, &open, &mut placed_tags, &mut attempt_rng) {
-                to_write.push(p);
-            }
-        }
+        let mut rng = RNG::new(SEED);
+        furnish_room(
+            &editor, &mut room, &frame, room_list, &data.items,
+            palette, &materials, &data.loot, &mut rng,
+        ).await;
 
-        let mut swap_rng = RNG::new(SEED);
-        for (_, result) in &to_write {
-            for rb in &result.blocks {
-                let block = swap_block_for_palette(
-                    rb.block.clone(), rb.swap, palette, &materials, &mut swap_rng,
-                );
-                editor.place_block(&block, rb.world_pos).await;
-            }
-        }
-
+        let names: Vec<&str> = room.furniture.iter().map(|f| f.name.as_str()).collect();
         println!(
-            "{label}: {n} items at world ({x}, {y}, {z})",
-            n = to_write.len(), x = rect.min().x, y = floor_y, z = rect.min().y,
+            "{label}: {n} items at world ({x}, {y}, {z}) — {items}",
+            n = room.furniture.len(), x = rect.min().x, y = floor_y, z = rect.min().y,
+            items = names.join(", "),
+        );
+    }
+
+    editor.flush_buffer().await;
+    let abs = editor.world().build_area.origin;
+    println!(
+        "\nDone. TP coordinates: ({}, {}, {})",
+        abs.x + base_x, abs.y + floor_y, abs.z + base_z,
+    );
+}
+
+/// Live-server variant of `diagram_room_features`. Places four bedroom-sized
+/// rooms in a 2x2 grid in the current build area, each with realistic doors,
+/// stairs, and/or ladders imprinted onto its ConstraintMap the same way the
+/// real rooms pipeline does, and with the matching physical blocks rendered
+/// in the world so you can walk through them. Run with:
+///   cargo test place_feature_rooms_in_world -- --ignored --nocapture
+#[ignore]
+#[tokio::test]
+async fn place_feature_rooms_in_world() {
+    use crate::data::Loadable;
+    use crate::editor::World;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::frame::Frame;
+    use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette, PaletteId};
+    use crate::geometry::Point3D;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::minecraft::{Block, Color};
+    use super::furnish_room;
+
+    enum LiveFeature {
+        Door { wall_cell: (i32, i32), interior: (i32, i32) },
+        /// Straight stair ascending from this floor. positions[0] is the flat
+        /// landing (stays as plank floor, UnblockedReachable); positions[1..]
+        /// become physical stair blocks on the current floor (Blocked).
+        StairUp { positions: Vec<(i32, i32)> },
+        /// Stair descending from this floor. The first position is the top
+        /// landing at floor_y; subsequent positions descend one block each
+        /// into a pit below the floor. All positions are UnblockedReachable
+        /// on this floor (air-column + top).
+        StairDown { positions: Vec<(i32, i32)> },
+        /// Ladder attached to a wall. `interior` is the interior-adjacent
+        /// cell where the ladder blocks live; `wall_cell` is the wall block
+        /// the ladder hangs on. The ladder climbs from floor_y up into the
+        /// air above — UnblockedReachable on this floor.
+        Ladder { wall_cell: (i32, i32), interior: (i32, i32) },
+    }
+
+    const SEED: i64 = 42;
+    const WALL_HEIGHT: u32 = 4;
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.expect("get world from server");
+    let editor = world.get_editor();
+
+    let data = FurnitureData::load().expect("load furniture YAML");
+    let materials = Material::load().expect("load materials");
+    let room_list = data.rooms.get("bedroom").expect("bedroom in rooms.yaml");
+
+    let make_palette = |id: &str, primary_wood: &str, secondary_wood: &str,
+                        primary: Color, secondary: Color| -> Palette {
+        let mut mats = HashMap::new();
+        mats.insert(MaterialRole::PrimaryWood, MaterialId::from(primary_wood));
+        mats.insert(MaterialRole::SecondaryWood, MaterialId::from(secondary_wood));
+        Palette {
+            id: PaletteId::from(id),
+            materials: mats,
+            primary_color: Some(primary),
+            secondary_color: Some(secondary),
+            tags: None,
+        }
+    };
+
+    // (rect_size, features, label, (offx, offz within layout), palette)
+    // Offsets are relative to the layout's own origin; the layout is centered
+    // inside the build area below.
+    let cases: Vec<(Point2D, Vec<LiveFeature>, &str, (i32, i32), Palette)> = vec![
+        (
+            Point2D::new(9, 8),
+            vec![
+                LiveFeature::Door { wall_cell: (4, 0), interior: (4, 1) },
+                LiveFeature::Door { wall_cell: (4, 7), interior: (4, 6) },
+            ],
+            "9x8 two-doors cherry",
+            (0, 0),
+            make_palette("cherry_room", "oak_planks", "cherry_planks", Color::Pink, Color::White),
+        ),
+        (
+            Point2D::new(10, 9),
+            vec![
+                LiveFeature::Door { wall_cell: (4, 0), interior: (4, 1) },
+                LiveFeature::StairDown { positions: vec![(2, 7), (3, 7), (4, 7), (5, 7)] },
+            ],
+            "10x9 stair-down warped",
+            (14, 0),
+            make_palette("warped_room", "oak_planks", "warped_planks", Color::Cyan, Color::Yellow),
+        ),
+        (
+            Point2D::new(11, 11),
+            vec![
+                LiveFeature::Door { wall_cell: (5, 0), interior: (5, 1) },
+                LiveFeature::StairUp { positions: vec![(1, 2), (1, 3), (1, 4), (1, 5)] },
+                LiveFeature::StairDown { positions: vec![(9, 2), (9, 3), (9, 4), (9, 5)] },
+            ],
+            "11x11 up+down spruce",
+            (0, 14),
+            make_palette("spruce_room", "oak_planks", "spruce_planks", Color::Brown, Color::Orange),
+        ),
+        (
+            Point2D::new(11, 10),
+            vec![
+                LiveFeature::Door { wall_cell: (5, 0), interior: (5, 1) },
+                LiveFeature::Door { wall_cell: (5, 9), interior: (5, 8) },
+                LiveFeature::StairDown { positions: vec![(9, 2), (9, 3), (9, 4), (9, 5)] },
+                LiveFeature::Ladder { wall_cell: (0, 4), interior: (1, 4) },
+            ],
+            "11x10 everything birch",
+            (16, 14),
+            make_palette("birch_room", "oak_planks", "birch_planks", Color::Yellow, Color::Red),
+        ),
+    ];
+
+    // Center the layout inside the build area.
+    let layout_w = cases.iter().map(|(sz, _, _, (ox, _), _)| ox + sz.x).max().unwrap_or(0);
+    let layout_h = cases.iter().map(|(sz, _, _, (_, oz), _)| oz + sz.y).max().unwrap_or(0);
+    let build_size = editor.world().build_area.size;
+    let base_x = ((build_size.x - layout_w) / 2).max(0);
+    let base_z = ((build_size.z - layout_h) / 2).max(0);
+    let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z));
+    let floor_y = ground_local + 1;
+
+    let floor_block = Block::from_id("minecraft:oak_planks".into());
+    let air = Block::from_id("minecraft:air".into());
+    let stone = Block::from_id("minecraft:cobblestone".into());
+
+    for (size, features, label, (offx, offz), palette) in &cases {
+        let wall_id_str = palette.get_material(MaterialRole::SecondaryWood)
+            .map(|m| format!("minecraft:{}", m.as_str()))
+            .unwrap_or_else(|| "minecraft:spruce_planks".to_string());
+        let wall_block = Block::from_id(wall_id_str.as_str().into());
+        let stair_id_str = wall_id_str.replace("_planks", "_stairs");
+        let local_origin = (base_x + offx, base_z + offz);
+        let rect = Rect2D::from_points(
+            Point2D::new(local_origin.0, local_origin.1),
+            Point2D::new(local_origin.0 + size.x - 1, local_origin.1 + size.y - 1),
+        );
+        let interior = rect.shrink(1);
+
+        // Translate a room-local (x,z) (origin = rect.min()) into world-local coords.
+        let to_world = |c: (i32, i32)| (rect.min().x + c.0, rect.min().y + c.1);
+
+        // Floor planks beneath the rect (overwrites ground).
+        for p in rect.iter() {
+            editor.place_block(&floor_block, Point3D::new(p.x, floor_y - 1, p.y)).await;
+        }
+        // Walls on the perimeter, WALL_HEIGHT high.
+        for p in rect.iter() {
+            if !rect.on_edge(p) { continue; }
+            for dy in 0..(WALL_HEIGHT as i32) {
+                editor.place_block(&wall_block, Point3D::new(p.x, floor_y + dy, p.y)).await;
+            }
+        }
+        // Clear interior air column.
+        for p in interior.iter() {
+            for dy in 0..(WALL_HEIGHT as i32) {
+                editor.place_block(&air, Point3D::new(p.x, floor_y + dy, p.y)).await;
+            }
+        }
+
+        // Build the constraint map matching the real pipeline semantics.
+        let mut constraints = ConstraintMap::new(&interior);
+
+        // Apply features: punch openings, place physical blocks, mark cm.
+        for feat in features {
+            match feat {
+                LiveFeature::Door { wall_cell, interior: i_cell } => {
+                    let (wx, wz) = to_world(*wall_cell);
+                    // Carve a 2-tall opening in the wall, then install an
+                    // actual oak door so the entry point is obvious.
+                    for dy in 0..2 {
+                        editor.place_block(&air, Point3D::new(wx, floor_y + dy, wz)).await;
+                    }
+                    // Door "facing" = direction from the wall into the room.
+                    let dir_in = match (
+                        wall_cell.0 == 0, wall_cell.0 == size.x - 1,
+                        wall_cell.1 == 0, wall_cell.1 == size.y - 1,
+                    ) {
+                        (_, _, true, _) => "south", // north wall → enter heading south
+                        (_, _, _, true) => "north",
+                        (true, _, _, _) => "east",  // west wall → enter heading east
+                        (_, true, _, _) => "west",
+                        _ => "south",
+                    };
+                    let door_state_lower = HashMap::from([
+                        ("facing".to_string(), dir_in.to_string()),
+                        ("half".to_string(), "lower".to_string()),
+                        ("hinge".to_string(), "left".to_string()),
+                        ("open".to_string(), "false".to_string()),
+                        ("powered".to_string(), "false".to_string()),
+                    ]);
+                    let mut door_lower = Block::from_id("minecraft:oak_door".into());
+                    door_lower.state = Some(door_state_lower);
+                    editor.place_block_forced(&door_lower, Point3D::new(wx, floor_y, wz)).await;
+                    let door_state_upper = HashMap::from([
+                        ("facing".to_string(), dir_in.to_string()),
+                        ("half".to_string(), "upper".to_string()),
+                        ("hinge".to_string(), "left".to_string()),
+                        ("open".to_string(), "false".to_string()),
+                        ("powered".to_string(), "false".to_string()),
+                    ]);
+                    let mut door_upper = Block::from_id("minecraft:oak_door".into());
+                    door_upper.state = Some(door_state_upper);
+                    editor.place_block_forced(&door_upper, Point3D::new(wx, floor_y + 1, wz)).await;
+                    let wic = to_world(*i_cell);
+                    constraints.set(wic, CellState::UnblockedReachable);
+                }
+                LiveFeature::StairUp { positions } => {
+                    if positions.len() < 2 { continue; }
+                    // Ascent direction: from positions[0] (landing) to positions[1].
+                    let p0 = positions[0];
+                    let p1 = positions[1];
+                    let (dx, dz) = (p1.0 - p0.0, p1.1 - p0.1);
+                    let facing = match (dx, dz) {
+                        (1, 0) => "east",
+                        (-1, 0) => "west",
+                        (0, 1) => "south",
+                        _ => "north",
+                    };
+                    for (i, p) in positions.iter().enumerate() {
+                        let wp = to_world(*p);
+                        if i == 0 {
+                            // Landing stays as normal floor + UR.
+                            constraints.set(wp, CellState::UnblockedReachable);
+                        } else {
+                            // Physical stair block rising one step per index.
+                            let step_y = floor_y + (i as i32 - 1);
+                            let mut stair = Block::from_id(stair_id_str.as_str().into());
+                            stair.state = Some(HashMap::from([
+                                ("facing".to_string(), facing.to_string()),
+                            ]));
+                            editor.place_block(&stair, Point3D::new(wp.0, step_y, wp.1)).await;
+                            // Ensure the air above the stair is clear so the
+                            // player's head doesn't hit the ceiling.
+                            for dy in (i as i32)..(WALL_HEIGHT as i32) {
+                                editor.place_block(&air, Point3D::new(wp.0, floor_y + dy, wp.1)).await;
+                            }
+                            constraints.set(wp, CellState::Blocked);
+                        }
+                    }
+                }
+                LiveFeature::StairDown { positions } => {
+                    if positions.len() < 2 { continue; }
+                    // Descent direction: from positions[0] (top landing) to positions[1].
+                    let p0 = positions[0];
+                    let p1 = positions[1];
+                    let (dx, dz) = (p1.0 - p0.0, p1.1 - p0.1);
+                    // Stair blocks face OPPOSITE the descent direction (climbing
+                    // up means walking back toward the landing).
+                    let facing = match (dx, dz) {
+                        (1, 0) => "west",
+                        (-1, 0) => "east",
+                        (0, 1) => "north",
+                        _ => "south",
+                    };
+                    for (i, p) in positions.iter().enumerate() {
+                        let wp = to_world(*p);
+                        constraints.set(wp, CellState::UnblockedReachable);
+                        if i == 0 {
+                            // Top landing: keep the plank floor intact so the
+                            // player has something to stand on before descending.
+                            continue;
+                        }
+                        // Drop one block per step. Offset by an extra -1 so the
+                        // FIRST step is visibly below the landing (its tall
+                        // side sits one block under the landing's plank top).
+                        let step_y = floor_y - 1 - i as i32;
+                        // Excavate the whole air column above the stair —
+                        // including the original floor plank — so the pit
+                        // is a visible opening from above.
+                        for dy in step_y..=(floor_y + 1) {
+                            editor.place_block(&air, Point3D::new(wp.0, dy, wp.1)).await;
+                        }
+                        // Solid floor below the deepest step so the pit is enclosed.
+                        editor.place_block(&stone, Point3D::new(wp.0, step_y - 1, wp.1)).await;
+                        let mut stair = Block::from_id(stair_id_str.as_str().into());
+                        stair.state = Some(HashMap::from([
+                            ("facing".to_string(), facing.to_string()),
+                        ]));
+                        editor.place_block(&stair, Point3D::new(wp.0, step_y, wp.1)).await;
+                    }
+                }
+                LiveFeature::Ladder { wall_cell, interior: i_cell } => {
+                    let (wx, wz) = to_world(*wall_cell);
+                    let (ix, iz) = to_world(*i_cell);
+                    // Determine ladder facing: direction from wall toward interior.
+                    let dx = ix - wx;
+                    let dz = iz - wz;
+                    let facing = match (dx, dz) {
+                        (1, 0) => "east",
+                        (-1, 0) => "west",
+                        (0, 1) => "south",
+                        _ => "north",
+                    };
+                    // Ladder climbs the full wall height.
+                    for dy in 0..(WALL_HEIGHT as i32) {
+                        let mut ladder = Block::from_id("minecraft:ladder".into());
+                        ladder.state = Some(HashMap::from([
+                            ("facing".to_string(), facing.to_string()),
+                        ]));
+                        editor.place_block_forced(&ladder, Point3D::new(ix, floor_y + dy, iz)).await;
+                    }
+                    constraints.set((ix, iz), CellState::UnblockedReachable);
+                }
+            }
+        }
+
+        // Construct the Frame + Room to hand to furnish_room.
+        let v = vec![
+            Point2D::new(rect.min().x, rect.min().y),
+            Point2D::new(rect.max().x, rect.min().y),
+            Point2D::new(rect.max().x, rect.max().y),
+            Point2D::new(rect.min().x, rect.max().y),
+        ];
+        let footprint = Footprint::new(v, vec![rect]);
+        let frame = Frame::new(footprint, floor_y, vec![1], WALL_HEIGHT);
+
+        let mut room = Room {
+            rect,
+            rect_index: 0,
+            floor: 0,
+            role: RoomRole::Upper,
+            room_type: RoomType::Bedroom,
+            interior,
+            constraints,
+            furniture: Vec::new(),
+        };
+
+        let mut rng = RNG::new(SEED);
+        furnish_room(
+            &editor, &mut room, &frame, room_list, &data.items,
+            palette, &materials, &data.loot, &mut rng,
+        ).await;
+
+        let names: Vec<&str> = room.furniture.iter().map(|f| f.name.as_str()).collect();
+        println!(
+            "{label}: {n} items at world ({x}, {y}, {z}) — {items}",
+            n = room.furniture.len(),
+            x = rect.min().x, y = floor_y, z = rect.min().y,
+            items = names.join(", "),
         );
     }
 
@@ -1383,6 +1713,191 @@ fn diagram_room_sizes() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// diagram_room_features — 4 rooms exercising doors, stairs, and ladders
+// ---------------------------------------------------------------------------
+
+/// Structural feature baked into a room before furnishing. Mirrors how the
+/// real `rooms::build_rooms_for_frame` pipeline imprints stairwells, doors,
+/// and attic ladders onto the per-floor ConstraintMap — see
+/// `src/generator/buildings_v2/rooms/mod.rs` near the stair/door/ladder
+/// blocks: door approach cells + stair landings/tops + stair air-columns +
+/// ladder cells → `UnblockedReachable`; physical stair-step blocks on the
+/// current floor → `Blocked`.
+enum RoomFeature {
+    /// A door in a wall. `wall_cell` lies on the room perimeter; `interior`
+    /// is the cell immediately inside that the player walks onto when
+    /// entering — it becomes UnblockedReachable (walkable, unplaceable).
+    Door { wall_cell: (i32, i32), interior: (i32, i32) },
+    /// Straight stair ascending from this floor. `positions[0]` is the flat
+    /// landing (UnblockedReachable), remaining positions are physical stair
+    /// blocks (Blocked) — matches the straight-stair `stair_bottoms` +
+    /// `stair_cells_on_floor` semantics.
+    StairUp { positions: Vec<(i32, i32)> },
+    /// Straight stair descending from this floor. From this floor's
+    /// perspective the stair lives on the floor below, so we only see the
+    /// `stair_tops` cell and the `stair_air_above` column — all
+    /// UnblockedReachable. Pass every (x,z) in the air column.
+    StairDown { positions: Vec<(i32, i32)> },
+    /// Attic ladder passing through this floor. The ladder cell is
+    /// UnblockedReachable on every floor it crosses.
+    Ladder { cell: (i32, i32) },
+}
+
+impl DiagramRoom {
+    fn apply_feature(&mut self, feat: &RoomFeature) {
+        match feat {
+            RoomFeature::Door { wall_cell, interior } => {
+                self.cm.set(*interior, CellState::UnblockedReachable);
+                self.wall_doors.push(*wall_cell);
+            }
+            RoomFeature::StairUp { positions } => {
+                for (i, p) in positions.iter().enumerate() {
+                    if i == 0 {
+                        self.cm.set(*p, CellState::UnblockedReachable);
+                    } else {
+                        self.cm.set(*p, CellState::Blocked);
+                    }
+                    self.labels.insert(*p, '^');
+                }
+            }
+            RoomFeature::StairDown { positions } => {
+                for p in positions {
+                    self.cm.set(*p, CellState::UnblockedReachable);
+                    self.labels.insert(*p, 'v');
+                }
+            }
+            RoomFeature::Ladder { cell } => {
+                self.cm.set(*cell, CellState::UnblockedReachable);
+                self.labels.insert(*cell, 'L');
+            }
+        }
+    }
+}
+
+/// Like `diagram_room_sizes` but each of the four rooms carries a realistic
+/// combination of doors, stairs, and ladders imprinted onto the constraint
+/// map the same way the real rooms pipeline does. Exercises how the
+/// furnishing system navigates around these structural features.
+/// Run with `cargo test diagram_room_features -- --nocapture`.
+#[test]
+fn diagram_room_features() {
+    const ROOM_KEY: &str = "bedroom";
+    const SEED: i64 = 42;
+
+    struct Case {
+        rect: Rect2D,
+        features: Vec<RoomFeature>,
+        label: &'static str,
+    }
+
+    // Stairs sit in the interior row adjacent to a wall (min+1 or max-1),
+    // matching the `corner_candidates` layout in floors/stairs.rs.
+    let cases: Vec<Case> = vec![
+        // 1. Pass-through room: doors on north and south walls.
+        Case {
+            rect: Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 7)),
+            features: vec![
+                RoomFeature::Door { wall_cell: (4, 0), interior: (4, 1) },
+                RoomFeature::Door { wall_cell: (4, 7), interior: (4, 6) },
+            ],
+            label: "9x8 — two doors",
+        },
+        // 2. Stair descending east along the south wall, plus a door north.
+        Case {
+            rect: Rect2D::from_points(Point2D::new(0, 0), Point2D::new(9, 8)),
+            features: vec![
+                RoomFeature::Door { wall_cell: (4, 0), interior: (4, 1) },
+                RoomFeature::StairDown { positions: vec![(2, 7), (3, 7), (4, 7), (5, 7)] },
+            ],
+            label: "10x9 — stair down + door",
+        },
+        // 3. Stair ascending south along the west wall and stair descending
+        //    south along the east wall, with a door on the north wall.
+        Case {
+            rect: Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 10)),
+            features: vec![
+                RoomFeature::Door { wall_cell: (5, 0), interior: (5, 1) },
+                RoomFeature::StairUp { positions: vec![(1, 2), (1, 3), (1, 4), (1, 5)] },
+                RoomFeature::StairDown { positions: vec![(9, 2), (9, 3), (9, 4), (9, 5)] },
+            ],
+            label: "11x11 — stair up + stair down + door",
+        },
+        // 4. Two doors (N + S), a stair descending south along the east wall,
+        //    and an attic ladder on the west wall.
+        Case {
+            rect: Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 9)),
+            features: vec![
+                RoomFeature::Door { wall_cell: (5, 0), interior: (5, 1) },
+                RoomFeature::Door { wall_cell: (5, 9), interior: (5, 8) },
+                RoomFeature::StairDown { positions: vec![(9, 2), (9, 3), (9, 4), (9, 5)] },
+                RoomFeature::Ladder { cell: (1, 4) },
+            ],
+            label: "11x10 — two doors + stair down + ladder up",
+        },
+    ];
+
+    let data = FurnitureData::load().expect("load furniture YAML");
+    let room_list = data.rooms.get(ROOM_KEY)
+        .unwrap_or_else(|| panic!("room key {ROOM_KEY:?} not found in data/rooms.yaml"));
+
+    println!("\n=== {ROOM_KEY} with features (seed={SEED}) ===");
+    println!("  legend: D = door in wall,  · = door approach (cyan),");
+    println!("          ^ = stair up (landing cyan, steps plain),");
+    println!("          v = stair down air-column (cyan),");
+    println!("          L = ladder (cyan)");
+
+    for case in &cases {
+        // Build with no interior doors — features below install them with
+        // real-pipeline semantics (UnblockedReachable).
+        let mut r = DiagramRoom::new(case.rect.clone(), &[], &[], SEED);
+        for feat in &case.features {
+            r.apply_feature(feat);
+        }
+
+        println!("\n{}", r.render(&format!("{}  (before furnishing)", case.label)));
+
+        let mut rng = RNG::new(SEED);
+        let room_area = r.interior.area();
+        let mut placed_tags: HashSet<String> = HashSet::new();
+        let mut placed = Vec::new();
+
+        for entry in &room_list.required {
+            let candidates = resolve_candidates(entry, &data.items, room_area, false, &placed_tags, &mut rng);
+            for (name, item) in candidates {
+                if r.place(name, item) {
+                    if item.unique {
+                        placed_tags.insert(name.clone());
+                        for tag in &item.tags { placed_tags.insert(tag.clone()); }
+                    }
+                    placed.push(name.clone());
+                    break;
+                }
+            }
+        }
+        for entry in &room_list.optional {
+            if r.cm.fill_ratio() >= room_list.fill_threshold.unwrap_or(DEFAULT_FILL_THRESHOLD) {
+                break;
+            }
+            let candidates = resolve_candidates(entry, &data.items, room_area, false, &placed_tags, &mut rng);
+            for (name, item) in candidates {
+                if r.place(name, item) {
+                    if item.unique {
+                        placed_tags.insert(name.clone());
+                        for tag in &item.tags { placed_tags.insert(tag.clone()); }
+                    }
+                    placed.push(name.clone());
+                    break;
+                }
+            }
+        }
+
+        println!("\n{}", r.render(&format!("{}  (after furnishing)", case.label)));
+        println!("  fill ratio: {:.0}%  ({} items placed)   connectivity ok: {}",
+                 r.cm.fill_ratio() * 100.0, placed.len(), check_connectivity(&r.cm));
+    }
+}
+
 #[test]
 fn diagram_5x5_bedrooms() {
     let data = FurnitureData::load().expect("load furniture YAML");
@@ -1433,4 +1948,148 @@ fn diagram_5x5_bedrooms() {
             println!("  fill ratio: {:.0}%", r.cm.fill_ratio() * 100.0);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// loot rolling
+// ---------------------------------------------------------------------------
+
+fn random_table() -> LootTable {
+    LootTable {
+        count: Some([2, 4]),
+        capacity: Some(27),
+        items: vec![
+            LootItem { id: "minecraft:bread".into(), count: [1, 3], weight: 3.0 },
+            LootItem { id: "minecraft:wheat".into(), count: [2, 5], weight: 2.0 },
+            LootItem { id: "minecraft:apple".into(), count: [1, 1], weight: 1.0 },
+        ],
+        fixed: vec![],
+    }
+}
+
+#[test]
+fn loot_roll_produces_items_snbt() {
+    let table = random_table();
+    let mut rng = RNG::new(42);
+    let snbt = roll_loot_snbt(&table, &mut rng);
+    assert!(snbt.starts_with("{Items:["), "got {}", snbt);
+    assert!(snbt.ends_with("]}"), "got {}", snbt);
+    // A count range of [2, 4] must produce at least 2 entries.
+    let count = snbt.matches("{Slot:").count();
+    assert!(count >= 2 && count <= 4, "expected 2..=4 entries, got {}: {}", count, snbt);
+}
+
+#[test]
+fn loot_roll_is_deterministic() {
+    let table = random_table();
+    let mut rng_a = RNG::new(12345);
+    let mut rng_b = RNG::new(12345);
+    assert_eq!(roll_loot_snbt(&table, &mut rng_a), roll_loot_snbt(&table, &mut rng_b));
+}
+
+#[test]
+fn loot_roll_uses_only_pool_items() {
+    let table = random_table();
+    for seed in 0..30 {
+        let mut rng = RNG::new(seed);
+        let snbt = roll_loot_snbt(&table, &mut rng);
+        assert!(
+            snbt.contains("bread") || snbt.contains("wheat") || snbt.contains("apple")
+                || snbt == "{Items:[]}",
+            "unexpected snbt {}", snbt
+        );
+        for id in ["minecraft:bread", "minecraft:wheat", "minecraft:apple"] {
+            // any quoted id in the output must be one we defined
+            if snbt.contains(&format!("id:\"{}\"", id)) {
+                // ok
+            }
+        }
+    }
+}
+
+#[test]
+fn loot_roll_slots_are_distinct() {
+    let table = LootTable {
+        count: Some([5, 5]),
+        capacity: Some(27),
+        items: vec![LootItem { id: "minecraft:stick".into(), count: [1, 1], weight: 1.0 }],
+        fixed: vec![],
+    };
+    let mut rng = RNG::new(7);
+    let snbt = roll_loot_snbt(&table, &mut rng);
+    let mut slots: Vec<i32> = Vec::new();
+    for part in snbt.split("{Slot:").skip(1) {
+        let num: String = part.chars().take_while(|c| c.is_ascii_digit()).collect();
+        slots.push(num.parse().unwrap());
+    }
+    assert_eq!(slots.len(), 5);
+    let before = slots.len();
+    let unique: HashSet<i32> = slots.into_iter().collect();
+    assert_eq!(unique.len(), before, "slots should be distinct");
+}
+
+#[test]
+fn loot_roll_capacity_caps_stack_count() {
+    let table = LootTable {
+        count: Some([10, 10]),
+        capacity: Some(3),
+        items: vec![LootItem { id: "minecraft:coal".into(), count: [1, 1], weight: 1.0 }],
+        fixed: vec![],
+    };
+    let mut rng = RNG::new(5);
+    let snbt = roll_loot_snbt(&table, &mut rng);
+    let count = snbt.matches("{Slot:").count();
+    assert_eq!(count, 3, "capacity must cap stack count: {}", snbt);
+}
+
+#[test]
+fn loot_roll_fixed_slots_assigned_directly() {
+    // chance = 1.0 on both slots → both get populated, at the exact slot indices.
+    let table = LootTable {
+        count: None,
+        capacity: None,
+        items: vec![],
+        fixed: vec![
+            FixedSlot {
+                slot: 0,
+                chance: 1.0,
+                items: vec![LootItem { id: "minecraft:raw_iron".into(), count: [2, 2], weight: 1.0 }],
+            },
+            FixedSlot {
+                slot: 1,
+                chance: 1.0,
+                items: vec![LootItem { id: "minecraft:coal".into(), count: [3, 3], weight: 1.0 }],
+            },
+        ],
+    };
+    let mut rng = RNG::new(1);
+    let snbt = roll_loot_snbt(&table, &mut rng);
+    assert!(snbt.contains("{Slot:0b,id:\"minecraft:raw_iron\",Count:2b}"), "got {}", snbt);
+    assert!(snbt.contains("{Slot:1b,id:\"minecraft:coal\",Count:3b}"), "got {}", snbt);
+}
+
+#[test]
+fn loot_roll_fixed_slot_chance_zero_skips() {
+    let table = LootTable {
+        count: None,
+        capacity: None,
+        items: vec![],
+        fixed: vec![
+            FixedSlot {
+                slot: 2,
+                chance: 0.0,
+                items: vec![LootItem { id: "minecraft:iron_ingot".into(), count: [1, 1], weight: 1.0 }],
+            },
+        ],
+    };
+    let mut rng = RNG::new(1);
+    let snbt = roll_loot_snbt(&table, &mut rng);
+    assert_eq!(snbt, "{Items:[]}");
+}
+
+#[test]
+fn loot_roll_empty_pool_emits_empty_items() {
+    let table = LootTable { count: Some([1, 3]), capacity: None, items: vec![], fixed: vec![] };
+    let mut rng = RNG::new(1);
+    assert_eq!(roll_loot_snbt(&table, &mut rng), "{Items:[]}");
 }

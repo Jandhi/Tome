@@ -1,4 +1,5 @@
 pub mod blueprint;
+pub mod door_ramp;
 pub mod floors;
 pub mod footprint;
 pub mod foundation;

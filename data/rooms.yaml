@@ -4,7 +4,7 @@ armory:
 
 bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase]
+  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase, carpet, carpet, reading_nook, dressing_screen]
 
 common:
   required: [bed, crafting_table, furnace, chest]
@@ -12,11 +12,11 @@ common:
 
 dining:
   required: [lantern, table]
-  optional: [chair, chair, chair, chair, wall_banner, vase, chest]
+  optional: [chair, chair, chair, chair, wall_banner, vase, chest, carpet, carpet]
 
 great_room:
   required: [lantern]
-  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf]
+  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf, carpet, carpet]
 
 hearth:
   required: [furnace, crafting_table]
@@ -32,11 +32,11 @@ library:
 
 master_bedroom:
   required: [bed, lantern]
-  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table]
+  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table, carpet, carpet, reading_nook, dressing_screen]
 
 multi_bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table]
+  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen]
 
 pantry:
   fill_threshold: 0.78
@@ -84,4 +84,4 @@ studio:
 
 study:
   required: [bookshelf]
-  optional: [lantern, desk, chair, bookshelf, shelf]
+  optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet]
