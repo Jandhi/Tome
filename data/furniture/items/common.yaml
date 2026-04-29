@@ -1,0 +1,539 @@
+# Common furniture items referenced from rooms.yaml but not yet defined
+# elsewhere. Minimal stubs — each places a single block with sensible
+# constraints. Flesh out with multi-block variants as needed.
+
+chest:
+  blocks:
+    - block: "minecraft:chest"
+      offset: [0, 0, 0]
+      layer: ground
+      loot: storage
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+lantern:
+  unique: true
+  blocks:
+    - block: "minecraft:lantern[hanging=true]"
+      offset: [0, 0, 0]
+      layer: ceiling
+
+bookshelf:
+  blocks:
+    - block: "minecraft:bookshelf"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+# ---------------------------------------------------------------------------
+# Carpets — walkable floor decor. All tagged `carpet`; rooms list `carpet`
+# twice in `optional` to cap placement at 2 per room. Multi-cell carpets
+# have no constraints (freestanding tries 4 rotations at every open cell;
+# walkable cells preserve connectivity).
+#
+# Color convention: literal `white_carpet` is recolored at placement time
+# by `PaletteSwap`. `swap: color` → palette primary (body); `swap: secondary_color`
+# → palette secondary (accent), falling back to primary if no secondary set.
+# Patterns degrade gracefully to solid color in palettes without a secondary.
+# ---------------------------------------------------------------------------
+
+# 1×1 / 1×2: no patterns — too small to be meaningful.
+
+carpet_1x1:
+  tags: [carpet]
+  weight: 1
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color, walkable: true }
+
+carpet_1x2:
+  tags: [carpet]
+  weight: 2
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color, walkable: true }
+
+# 2×2: only checker variant.
+# A B
+# B A
+checker_2x2:
+  tags: [carpet]
+  weight: 4
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+
+# 2×3 patterns.
+
+# Bands of accent at top and bottom, body strip in the middle.
+# A A
+# B B
+# A A
+striped_2x3:
+  tags: [carpet]
+  weight: 6
+  min_room_area: 16
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+
+# A B
+# B A
+# A B
+checker_2x3:
+  tags: [carpet]
+  weight: 6
+  min_room_area: 16
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+
+# Body field with one accent strip at the far end (reads as a runner with a fringe).
+# B B
+# B B
+# A A
+fringed_2x3:
+  tags: [carpet]
+  weight: 6
+  min_room_area: 16
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+
+# 2×4 patterns.
+
+# A A
+# B B
+# A A
+# B B
+striped_2x4:
+  tags: [carpet]
+  weight: 8
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: color,           walkable: true }
+
+# Accent caps at both ends, body in the middle (reads as a runner with fringes).
+# A A
+# B B
+# B B
+# A A
+ends_2x4:
+  tags: [carpet]
+  weight: 8
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+
+# A B
+# B A
+# A B
+# B A
+checker_2x4:
+  tags: [carpet]
+  weight: 8
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+
+# 3×3 patterns.
+
+# Accent border, single body cell in the middle.
+# A A A
+# A B A
+# A A A
+bordered_3x3:
+  tags: [carpet]
+  weight: 9
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+
+# Plus shape of accent on body field.
+# B A B
+# A A A
+# B A B
+cross_3x3:
+  tags: [carpet]
+  weight: 9
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: color,           walkable: true }
+
+# A B A
+# B A B
+# A B A
+checker_3x3:
+  tags: [carpet]
+  weight: 9
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+
+# Accent corners over body field.
+# A B A
+# B B B
+# A B A
+corners_3x3:
+  tags: [carpet]
+  weight: 9
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+
+# Body field with a single accent center.
+# B B B
+# B A B
+# B B B
+center_3x3:
+  tags: [carpet]
+  weight: 9
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: color,           walkable: true }
+
+# 4×4 patterns.
+
+# Accent border, 2×2 body inner.
+# A A A A
+# A B B A
+# A B B A
+# A A A A
+bordered_4x4:
+  tags: [carpet]
+  weight: 16
+  min_room_area: 36
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+
+# Body corners removed (reads as an octagon-ish shape).
+# B A A B
+# A A A A
+# A A A A
+# B A A B
+corners_4x4:
+  tags: [carpet]
+  weight: 16
+  min_room_area: 36
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 3], layer: ground, swap: color,           walkable: true }
+
+# A A A A
+# B B B B
+# A A A A
+# B B B B
+striped_4x4:
+  tags: [carpet]
+  weight: 16
+  min_room_area: 36
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 3], layer: ground, swap: color,           walkable: true }
+
+# 2×2 blocks alternating — checkerboard at quarter resolution.
+# A A B B
+# A A B B
+# B B A A
+# B B A A
+quartered_4x4:
+  tags: [carpet]
+  weight: 16
+  min_room_area: 36
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+
+# A B A B
+# B A B A
+# A B A B
+# B A B A
+checker_4x4:
+  tags: [carpet]
+  weight: 16
+  min_room_area: 36
+  blocks:
+    - { block: "minecraft:white_carpet", offset: [0, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 0], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 0], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 1], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 1], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 2], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 2], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [1, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+    - { block: "minecraft:white_carpet", offset: [2, 0, 3], layer: ground, swap: color,           walkable: true }
+    - { block: "minecraft:white_carpet", offset: [3, 0, 3], layer: ground, swap: secondary_color, walkable: true }
+
+# ---------------------------------------------------------------------------
+# Nooks — multi-piece furniture groupings for larger rooms.
+# ---------------------------------------------------------------------------
+
+# Wall-anchored 3×2: row of 3 bookshelves with a stair-chair facing the room
+# in front of the middle shelf. Wall signs flank the chair as armrests
+# (same pattern as plain chair). No lantern — kept low-key.
+#   wall: B B B
+#   row1: s C s
+# C = chair, s = wall sign in empty cell, attached to the chair's side face.
+reading_nook:
+  min_room_area: 25
+  blocks:
+    - { block: "minecraft:bookshelf", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:bookshelf", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:bookshelf", offset: [2, 0, 0], layer: ground }
+    - { block: "minecraft:oak_stairs[half=bottom,facing=north]", offset: [1, 0, 1], layer: ground, swap: wood }
+    - { block: "minecraft:oak_wall_sign[facing=east]",  offset: [2, 0, 1], layer: ground, swap: wood }
+    - { block: "minecraft:oak_wall_sign[facing=west]",  offset: [0, 0, 1], layer: ground, swap: wood }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [1, 1], constraint: blocked_reachable, facing: away_from_wall }
+    # Cell directly behind the chair must stay clear so the player can walk
+    # up and sit. empty_reachable keeps it walkable and unplaceable.
+    - { offset: [1, 2], constraint: empty_reachable }
+
+# 1 wide × 2 deep, 2 high. Vertical trapdoors stacked into a privacy screen
+# extending out from the wall, faces perpendicular to the wall axis (the
+# screen's flat sides show along the wall direction).
+dressing_screen:
+  min_room_area: 12
+  blocks:
+    # `open=true` swings the trapdoor vertical onto the cell's east face;
+    # `facing=east` puts the hinge on the east side. With wall_dir=north,
+    # east is along the wall — perpendicular to the away axis.
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=true,facing=east]", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=true,facing=east]", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=true,facing=east]", offset: [0, 0, 1], layer: ground, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=true,facing=east]", offset: [0, 1, 1], layer: ground, swap: wood }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [0, 1], constraint: blocked_reachable }
+
+crafting_table:
+  unique: true
+  blocks:
+    - block: "minecraft:crafting_table"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+# Single block against a wall. Fletching_table reads as a small writing
+# surface — palette-neutral and period-appropriate.
+desk:
+  blocks:
+    - block: "minecraft:fletching_table"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# Wooden stairs as a chair, facing into the room.
+chair:
+  blocks:
+    - block: "minecraft:oak_stairs"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: wood
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+# Single-block low shelf against a wall. Smithing_table reads as a tall
+# narrow shelving unit.
+shelf:
+  blocks:
+    - block: "minecraft:smithing_table"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+wall_banner:
+  blocks:
+    # Hangs on the wall itself (away=0), one block up (y=1). Offset order
+    # is [along, y, away], so the banner sits in the interior-edge cell
+    # adjacent to the wall, with its top flush against the wall block above.
+    # Literal facing=south is the north-wall case: banner faces south (into the
+    # room) when the wall is to the north. rotate_block rotates the facing
+    # state by slot.wall_dir, which gives the correct "away from wall" facing
+    # for each of the four wall orientations.
+    - block: "minecraft:white_wall_banner[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: color
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# A 1x1 table: an oak_fence leg with a pressure plate laid on top.
+# Reads as a small low table. Freestanding in the interior.
+table:
+  blocks:
+    - block: "minecraft:oak_fence"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_pressure_plate"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+vase:
+  blocks:
+    - block: "minecraft:decorated_pot"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable

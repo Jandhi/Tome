@@ -14,6 +14,7 @@ use crate::generator::materials::Palette;
 use crate::geometry::Rect2D;
 use crate::noise::RNG;
 
+use super::door_ramp::{DoorRamp, place_door_ramps, plan_door_ramps_from_world};
 use super::floors::{FloorPlan, clear_attic_stair_headroom, place_floors};
 use super::footprint::{Footprint, SizeClass, find_boundaries};
 use super::foundation::place_foundation;
@@ -59,6 +60,7 @@ pub struct HouseOutput {
     pub wall_segs: WallSegments,
     pub floor_plan: FloorPlan,
     pub room_plan: RoomPlan,
+    pub door_ramps: Vec<DoorRamp>,
     pub has_attic: bool,
     pub pitch: GablePitch,
     pub size_class: SizeClass,
@@ -116,6 +118,11 @@ pub async fn build_house(
     mark_windows(&mut room_plan, &wall_segs);
     place_openings(ctx, &wall_segs).await;
 
+    // Reconcile doors with terrain: run parallel stair ramps along the wall
+    // for doors where `base_y` doesn't match outside-terrain.
+    let door_ramps = plan_door_ramps_from_world(&wall_segs, &footprint, ctx.editor.world());
+    place_door_ramps(ctx, &door_ramps).await;
+
     furnish_rooms(ctx, &mut room_plan, &frame).await;
 
     check_building_invariants(&frame, &room_plan, &floor_plan)?;
@@ -126,6 +133,7 @@ pub async fn build_house(
         wall_segs,
         floor_plan,
         room_plan,
+        door_ramps,
         has_attic,
         pitch,
         size_class,

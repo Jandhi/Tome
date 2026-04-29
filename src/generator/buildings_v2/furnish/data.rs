@@ -20,6 +20,10 @@ pub enum PaletteSwap {
     Wood,
     /// Recolor via palette's primary_color (bed, carpet, banner, …).
     Color,
+    /// Recolor via palette's secondary_color, falling back to primary_color
+    /// when the palette has none. Use for accent blocks in patterned items
+    /// (e.g. carpet borders, checker squares).
+    SecondaryColor,
 }
 
 // ---------------------------------------------------------------------------
@@ -31,13 +35,16 @@ pub enum PaletteSwap {
 pub struct FurnitureData {
     pub items: HashMap<String, Furniture>,
     pub rooms: HashMap<String, RoomFurnitureList>,
+    #[serde(default)]
+    pub loot: HashMap<String, LootTable>,
 }
 
 impl FurnitureData {
     pub fn load() -> anyhow::Result<Self> {
         let data = Self {
-            items: load_yaml_dir("furniture")?,
+            items: load_yaml_dir("furniture/items")?,
             rooms: load_yaml("rooms.yaml")?,
+            loot: load_yaml("furniture/loot.yaml")?,
         };
         data.validate()?;
         Ok(data)
@@ -45,7 +52,8 @@ impl FurnitureData {
 
     /// Every name referenced by a room's required/optional list must resolve
     /// to at least one item — either by name or by being present in some
-    /// item's `tags` list. Catches typos and dangling references at load time.
+    /// item's `tags` list. Every `loot:` tag on a furniture block must
+    /// resolve to a known loot table. Catches typos at load time.
     fn validate(&self) -> anyhow::Result<()> {
         for (room_key, list) in &self.rooms {
             for entry in list.required.iter().chain(list.optional.iter()) {
@@ -60,12 +68,24 @@ impl FurnitureData {
                 }
             }
         }
+        for (name, item) in &self.items {
+            for block in &item.blocks {
+                if let Some(loot) = &block.loot {
+                    if !self.loot.contains_key(loot) {
+                        anyhow::bail!(
+                            "furniture '{}': block references loot table '{}' which is not defined in furniture/loot.yaml",
+                            name, loot,
+                        );
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }
 
 /// A furniture piece definition.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Furniture {
     #[serde(default)]
     pub unique: bool,
@@ -82,13 +102,32 @@ pub struct Furniture {
     /// capped so big bedrooms always get a double or canopy bed).
     #[serde(default)]
     pub max_room_area: Option<i32>,
+    /// Selection weight when multiple candidates match the same rooms.yaml
+    /// entry (e.g. all `carpet`-tagged items). Higher = more likely to be
+    /// tried first. Defaults to 1.0.
+    #[serde(default = "default_weight")]
+    pub weight: f32,
     pub blocks: Vec<FurnitureBlock>,
     #[serde(default)]
     pub constraints: Vec<FurnitureConstraint>,
 }
 
+impl Default for Furniture {
+    fn default() -> Self {
+        Self {
+            unique: false,
+            tags: Vec::new(),
+            min_room_area: None,
+            max_room_area: None,
+            weight: 1.0,
+            blocks: Vec::new(),
+            constraints: Vec::new(),
+        }
+    }
+}
+
 /// A block within a furniture piece.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct FurnitureBlock {
     pub block: String,
     pub offset: [i32; 3],
@@ -102,6 +141,12 @@ pub struct FurnitureBlock {
     /// Minecraft lets the player walk on top of.
     #[serde(default)]
     pub walkable: bool,
+    /// Name of a loot table in `data/furniture/loot.yaml`. When set, the
+    /// furnisher rolls items from that table and writes them as the
+    /// block entity's `Items` SNBT. Intended for chests, barrels,
+    /// furnaces, and smokers.
+    #[serde(default)]
+    pub loot: Option<String>,
 }
 
 /// A floor cell constraint within a furniture piece.
@@ -127,3 +172,54 @@ pub struct RoomFurnitureList {
     #[serde(default)]
     pub fill_threshold: Option<f32>,
 }
+
+// ---------------------------------------------------------------------------
+// Loot tables
+// ---------------------------------------------------------------------------
+
+/// A randomized container's contents. Two mutually-exclusive modes:
+///   - `items` + `count` + `capacity` → roll N stacks into random slot indices
+///     (chests, barrels).
+///   - `fixed` → assign specific slots directly (furnaces: slot 0 input,
+///     slot 1 fuel, slot 2 output).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct LootTable {
+    /// How many stacks to roll (inclusive range, e.g. [2, 6]). Only used
+    /// with the random-slot strategy.
+    #[serde(default)]
+    pub count: Option<[i32; 2]>,
+    /// Total slot count of the container — defaults to 27 (chest/barrel).
+    /// Override to 3 for furnaces/smokers if using random strategy (unusual).
+    #[serde(default)]
+    pub capacity: Option<i32>,
+    /// Weighted pool drawn from by the random-slot strategy.
+    #[serde(default)]
+    pub items: Vec<LootItem>,
+    /// Fixed-slot entries. When non-empty, this table uses the fixed strategy
+    /// and `count` / `items` are ignored.
+    #[serde(default)]
+    pub fixed: Vec<FixedSlot>,
+}
+
+/// One item in a weighted pool.
+#[derive(Debug, Clone, Deserialize)]
+pub struct LootItem {
+    pub id: String,
+    /// Stack size range (inclusive, e.g. [1, 6]).
+    pub count: [i32; 2],
+    #[serde(default = "default_weight")]
+    pub weight: f32,
+}
+
+/// A fixed slot assignment (furnace-style).
+#[derive(Debug, Clone, Deserialize)]
+pub struct FixedSlot {
+    pub slot: i32,
+    /// Probability (0..=1) that this slot is populated at all.
+    #[serde(default = "default_chance")]
+    pub chance: f32,
+    pub items: Vec<LootItem>,
+}
+
+fn default_weight() -> f32 { 1.0 }
+fn default_chance() -> f32 { 1.0 }

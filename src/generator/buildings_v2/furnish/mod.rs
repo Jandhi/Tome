@@ -14,7 +14,7 @@ use crate::noise::RNG;
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
 use super::rooms::{CellState, ConstraintMap, PlacedFurniture, Room, RoomPlan};
-use data::{Furniture, PaletteSwap, RoomFurnitureList};
+use data::{Furniture, LootTable, PaletteSwap, RoomFurnitureList};
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -26,6 +26,10 @@ use data::{Furniture, PaletteSwap, RoomFurnitureList};
 pub enum CellConstraint {
     Wall,
     BlockedReachable,
+    /// Cell must be Empty before placement, kept walkable + unplaceable after.
+    /// Used to reserve approach / clearance space without blocking foot traffic
+    /// (e.g. the cell behind the reading_nook chair so the player can sit).
+    EmptyReachable,
     None,
 }
 
@@ -44,9 +48,10 @@ pub enum FacingMode {
 /// `Both` is for blocks that should reserve both layer slots — e.g. a wall
 /// banner that wants to keep a hanging lantern from being placed directly
 /// above it, even when the banner itself only places a single block.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BlockLayer {
+    #[default]
     Ground,
     Ceiling,
     Both,
@@ -90,12 +95,19 @@ fn resolve_facing(mode: FacingMode, wall_dir: Cardinal) -> Option<String> {
     }
 }
 
-/// Clone a block and merge a facing state into it.
+/// Clone a block and merge a facing state into it. Only updates `facing`
+/// when the block already declares a `facing` property in its literal —
+/// otherwise blocks that have no facing state (slabs, wool, planks, …)
+/// would receive an invalid state like `oak_slab[type=bottom,facing=north]`
+/// that the server rejects silently.
 fn apply_facing(block: &Block, facing: Option<String>) -> Block {
     let mut result = block.clone();
     if let Some(f) = facing {
-        let state = result.state.get_or_insert_with(HashMap::new);
-        state.insert("facing".into(), f);
+        if let Some(state) = result.state.as_mut() {
+            if state.contains_key("facing") {
+                state.insert("facing".into(), f);
+            }
+        }
     }
     result
 }
@@ -135,7 +147,85 @@ pub(crate) fn swap_block_for_palette(
                 block
             }
         }
+        PaletteSwap::SecondaryColor => {
+            // Falls back to primary so patterned items degrade to solid
+            // primary-color when no secondary is defined.
+            let color = palette.secondary_color.or(palette.primary_color);
+            if let Some(color) = color {
+                Block::new(color_block(block.id, color), block.state, block.data)
+            } else {
+                block
+            }
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Loot rolling
+// ---------------------------------------------------------------------------
+
+/// Default container slot capacity (chest, barrel). Overridable per-table.
+const DEFAULT_LOOT_CAPACITY: i32 = 27;
+
+/// Roll a weighted pick from a list of loot items.
+fn pick_weighted_item<'a>(items: &'a [data::LootItem], rng: &mut RNG) -> Option<&'a data::LootItem> {
+    if items.is_empty() { return None; }
+    let total: f32 = items.iter().map(|i| i.weight.max(0.0)).sum();
+    if total <= 0.0 { return None; }
+    let mut r = (rng.rand_i32(100_000) as f32 / 100_000.0) * total;
+    for it in items {
+        let w = it.weight.max(0.0);
+        if r < w { return Some(it); }
+        r -= w;
+    }
+    items.last()
+}
+
+/// Roll an inclusive [min, max] range safely when min == max.
+fn roll_range_inclusive(range: [i32; 2], rng: &mut RNG) -> i32 {
+    let (lo, hi) = (range[0].min(range[1]), range[0].max(range[1]));
+    if lo == hi { lo } else { rng.rand_i32_range(lo, hi + 1) }
+}
+
+/// Roll an SNBT `{Items:[...]}` payload for a container from a loot table.
+fn roll_loot_snbt(table: &LootTable, rng: &mut RNG) -> String {
+    let mut entries: Vec<(i32, String, i32)> = Vec::new();
+
+    if !table.fixed.is_empty() {
+        // Fixed strategy: furnace/smoker style, each slot rolled independently.
+        for fs in &table.fixed {
+            let chance = fs.chance.clamp(0.0, 1.0);
+            if chance < 1.0 {
+                let roll = rng.rand_i32(100_000) as f32 / 100_000.0;
+                if roll >= chance { continue; }
+            }
+            if let Some(item) = pick_weighted_item(&fs.items, rng) {
+                let count = roll_range_inclusive(item.count, rng).max(1);
+                entries.push((fs.slot, item.id.clone(), count));
+            }
+        }
+    } else if !table.items.is_empty() {
+        // Random strategy: roll N stacks into distinct random slot indices.
+        let count_range = table.count.unwrap_or([1, 3]);
+        let n = roll_range_inclusive(count_range, rng).max(0) as usize;
+        let capacity = table.capacity.unwrap_or(DEFAULT_LOOT_CAPACITY).max(1);
+        let mut slot_pool: Vec<i32> = (0..capacity).collect();
+        let take = n.min(slot_pool.len());
+        for _ in 0..take {
+            let idx = rng.rand_i32(slot_pool.len() as i32) as usize;
+            let slot = slot_pool.swap_remove(idx);
+            if let Some(item) = pick_weighted_item(&table.items, rng) {
+                let count = roll_range_inclusive(item.count, rng).max(1);
+                entries.push((slot, item.id.clone(), count));
+            }
+        }
+    }
+
+    let parts: Vec<String> = entries
+        .iter()
+        .map(|(slot, id, count)| format!("{{Slot:{}b,id:\"{}\",Count:{}b}}", slot, id, count))
+        .collect();
+    format!("{{Items:[{}]}}", parts.join(","))
 }
 
 /// Rotate any existing `facing` state in a block.
@@ -317,12 +407,15 @@ struct ResolvedBlock {
     layer: BlockLayer,
     swap: PaletteSwap,
     walkable: bool,
+    loot: Option<String>,
 }
 
 struct PlacementResult {
     blocks: Vec<ResolvedBlock>,
     new_blocked: Vec<(i32, i32)>,
     new_reserved: Vec<(i32, i32)>,
+    /// EmptyReachable constraint cells: kept walkable, unplaceable.
+    new_empty_reachable: Vec<(i32, i32)>,
 }
 
 /// Try to place a furniture item anchored at a wall slot.
@@ -336,6 +429,7 @@ fn try_place_at_wall_slot(
     let mut blocks = Vec::new();
     let mut new_blocked = Vec::new();
     let mut new_reserved = Vec::new();
+    let mut new_empty_reachable = Vec::new();
 
     // Validate constraints and collect changes
     for pc in &item.constraints {
@@ -351,6 +445,10 @@ fn try_place_at_wall_slot(
             CellConstraint::BlockedReachable => {
                 if !constraints.is_open(cell) { return Option::None; }
                 new_reserved.push(cell);
+            }
+            CellConstraint::EmptyReachable => {
+                if !constraints.is_open(cell) { return Option::None; }
+                new_empty_reachable.push(cell);
             }
             CellConstraint::None => {}
         }
@@ -380,7 +478,7 @@ fn try_place_at_wall_slot(
         }
 
         let facing = item.constraints.iter()
-            .find(|c| c.offset == [pb.offset[0], pb.offset[1]])
+            .find(|c| c.offset == [pb.offset[0], pb.offset[2]])
             .and_then(|c| resolve_facing(c.facing, slot.wall_dir));
 
         blocks.push(ResolvedBlock {
@@ -394,10 +492,11 @@ fn try_place_at_wall_slot(
             layer: pb.layer,
             swap: pb.swap,
             walkable: pb.walkable,
+            loot: pb.loot.clone(),
         });
     }
 
-    Some(PlacementResult { blocks, new_blocked, new_reserved })
+    Some(PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable })
 }
 
 /// Try to place a freestanding item at any open cell in the interior.
@@ -416,6 +515,7 @@ fn try_place_freestanding(
             let mut blocks = Vec::new();
             let mut new_blocked = Vec::new();
             let mut new_reserved = Vec::new();
+            let mut new_empty_reachable = Vec::new();
             let mut ok = true;
 
             for pc in &item.constraints {
@@ -430,6 +530,10 @@ fn try_place_freestanding(
                     CellConstraint::BlockedReachable => {
                         if !constraints.is_open(cell) { ok = false; break; }
                         new_reserved.push(cell);
+                    }
+                    CellConstraint::EmptyReachable => {
+                        if !constraints.is_open(cell) { ok = false; break; }
+                        new_empty_reachable.push(cell);
                     }
                     CellConstraint::None => {}
                 }
@@ -460,7 +564,7 @@ fn try_place_freestanding(
                 }
 
                 let facing = item.constraints.iter()
-                    .find(|c| c.offset == [pb.offset[0], pb.offset[1]])
+                    .find(|c| c.offset == [pb.offset[0], pb.offset[2]])
                     .and_then(|c| resolve_facing(c.facing, dir));
 
                 blocks.push(ResolvedBlock {
@@ -470,11 +574,12 @@ fn try_place_freestanding(
                     layer: pb.layer,
                     swap: pb.swap,
                     walkable: pb.walkable,
+                    loot: pb.loot.clone(),
                 });
             }
             if !ok { continue; }
 
-            return Some(PlacementResult { blocks, new_blocked, new_reserved });
+            return Some(PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable });
         }
     }
     None
@@ -501,10 +606,11 @@ fn try_place_ceiling(
             layer: pb.layer,
             swap: pb.swap,
             walkable: pb.walkable,
+            loot: pb.loot.clone(),
         });
     }
 
-    Some(PlacementResult { blocks, new_blocked: vec![], new_reserved: vec![] })
+    Some(PlacementResult { blocks, new_blocked: vec![], new_reserved: vec![], new_empty_reachable: vec![] })
 }
 
 // ---------------------------------------------------------------------------
@@ -523,6 +629,7 @@ async fn try_place_item(
     ceiling_y: i32,
     palette: &Palette,
     materials: &HashMap<MaterialId, Material>,
+    loot_tables: &HashMap<String, LootTable>,
     rng: &mut RNG,
 ) -> Option<Vec<(i32, i32)>> {
     let result = if is_ceiling_item(item) {
@@ -544,8 +651,14 @@ async fn try_place_item(
         let mut cells = Vec::new();
         for &cell in &placement.new_blocked { constraints.set(cell, CellState::Blocked); }
         for &cell in &placement.new_reserved { constraints.set(cell, CellState::BlockedReachable); }
+        for &cell in &placement.new_empty_reachable { constraints.set(cell, CellState::UnblockedReachable); }
         for rb in &placement.blocks {
-            let block = swap_block_for_palette(rb.block.clone(), rb.swap, palette, materials, rng);
+            let mut block = swap_block_for_palette(rb.block.clone(), rb.swap, palette, materials, rng);
+            if let Some(loot_name) = &rb.loot {
+                if let Some(table) = loot_tables.get(loot_name) {
+                    block.data = Some(roll_loot_snbt(table, rng));
+                }
+            }
             editor.place_block(&block, rb.world_pos).await;
             if rb.layer.occupies_ceiling() {
                 constraints.set_ceiling(rb.cell);
@@ -605,12 +718,12 @@ fn resolve_candidates<'a>(
     // HashMap iteration order is non-deterministic — sort before shuffling
     // so the RNG draw is the only source of randomness.
     out.sort_by(|a, b| a.0.cmp(b.0));
-    shuffle(&mut out, rng);
+    weighted_shuffle(&mut out, rng, |(_, item)| item.weight);
     out
 }
 
 /// Place furniture in a single room.
-async fn furnish_room(
+pub(super) async fn furnish_room(
     editor: &Editor,
     room: &mut Room,
     frame: &Frame,
@@ -618,6 +731,7 @@ async fn furnish_room(
     items: &HashMap<String, Furniture>,
     palette: &Palette,
     materials: &HashMap<MaterialId, Material>,
+    loot_tables: &HashMap<String, LootTable>,
     rng: &mut RNG,
 ) {
     let interior = match interior_rect(room) {
@@ -647,7 +761,7 @@ async fn furnish_room(
             if let Some(cells) = try_place_item(
                 editor, item, &interior, &mut room.constraints,
                 &slots, &open_cells, floor_y, ceiling_y,
-                palette, materials, rng,
+                palette, materials, loot_tables, rng,
             ).await {
                 if item.unique {
                     for tag in item_tags(name, item) {
@@ -678,7 +792,7 @@ async fn furnish_room(
                 if let Some(cells) = try_place_item(
                     editor, item, &interior, &mut room.constraints,
                     &slots, &open_cells, floor_y, ceiling_y,
-                    palette, materials, rng,
+                    palette, materials, loot_tables, rng,
                 ).await {
                     if item.unique {
                         for tag in item_tags(name, item) {
@@ -716,7 +830,10 @@ pub async fn furnish_rooms(
             None => continue,
         };
         let mut room_rng = rng.derive();
-        furnish_room(editor, room, frame, room_list, &furniture_data.items, palette, materials, &mut room_rng).await;
+        furnish_room(
+            editor, room, frame, room_list, &furniture_data.items,
+            palette, materials, &furniture_data.loot, &mut room_rng,
+        ).await;
     }
 }
 
@@ -724,5 +841,35 @@ fn shuffle<T>(items: &mut [T], rng: &mut RNG) {
     for i in (1..items.len()).rev() {
         let j = rng.rand_i32_range(0, (i + 1) as i32) as usize;
         items.swap(i, j);
+    }
+}
+
+/// Weighted shuffle (Efraimidis-Spirakis): assign each item a key
+/// `-ln(u) / weight` and sort ascending. Higher weights → more likely
+/// to land near the front. Items with weight ≤ 0 always sort to the end.
+fn weighted_shuffle<T, F>(items: &mut [T], rng: &mut RNG, weight_of: F)
+where
+    F: Fn(&T) -> f32,
+{
+    let mut keys: Vec<f32> = (0..items.len())
+        .map(|i| {
+            let w = weight_of(&items[i]).max(0.0);
+            if w <= 0.0 {
+                f32::INFINITY
+            } else {
+                let u = ((rng.rand_i32(1_000_000) as f32 + 1.0) / 1_000_001.0).min(1.0);
+                -u.ln() / w
+            }
+        })
+        .collect();
+    // In-place sort of items by paired keys: insertion sort is fine since
+    // candidate lists are tiny (typically <10 entries).
+    for i in 1..items.len() {
+        let mut j = i;
+        while j > 0 && keys[j - 1] > keys[j] {
+            items.swap(j - 1, j);
+            keys.swap(j - 1, j);
+            j -= 1;
+        }
     }
 }

@@ -1,0 +1,160 @@
+# Loot tables for container furniture. Referenced by `loot:` on a
+# FurnitureBlock. Two strategies:
+#   - items + count (+ capacity): roll N weighted stacks into distinct
+#     random slot indices. Default capacity=27 (chest, barrel).
+#   - fixed: assign specific slot indices with independent probabilities.
+#     Used for furnaces (slot 0 input, 1 fuel, 2 output) and smokers.
+#
+# `count`: [min, max] stacks (inclusive).
+# `weight`: relative probability in the pool (defaults to 1).
+# `count` on an item: [min, max] stack size (inclusive).
+# `chance` on a fixed slot: 0..=1 probability of populating at all.
+
+# Generic small-chest/barrel contents — a bit of everything.
+storage:
+  count: [3, 8]
+  items:
+    - { id: "minecraft:stick",        count: [2, 16], weight: 4 }
+    - { id: "minecraft:string",       count: [1, 8],  weight: 3 }
+    - { id: "minecraft:leather",      count: [1, 4],  weight: 2 }
+    - { id: "minecraft:iron_ingot",   count: [1, 4],  weight: 2 }
+    - { id: "minecraft:flint",        count: [1, 6],  weight: 2 }
+    - { id: "minecraft:gunpowder",    count: [1, 2],  weight: 1 }
+    - { id: "minecraft:bone",         count: [1, 4],  weight: 2 }
+    - { id: "minecraft:coal",         count: [1, 8],  weight: 3 }
+    - { id: "minecraft:clay_ball",    count: [1, 6],  weight: 2 }
+    - { id: "minecraft:brick",        count: [1, 6],  weight: 1 }
+    - { id: "minecraft:paper",        count: [1, 6],  weight: 2 }
+    - { id: "minecraft:torch",        count: [1, 8],  weight: 3 }
+
+# Kitchen barrels/chests — food and cooking ingredients.
+kitchen:
+  count: [3, 7]
+  items:
+    - { id: "minecraft:bread",        count: [1, 6],  weight: 5 }
+    - { id: "minecraft:wheat",        count: [1, 16], weight: 5 }
+    - { id: "minecraft:carrot",       count: [1, 8],  weight: 4 }
+    - { id: "minecraft:potato",       count: [1, 8],  weight: 4 }
+    - { id: "minecraft:beetroot",     count: [1, 6],  weight: 3 }
+    - { id: "minecraft:apple",        count: [1, 4],  weight: 3 }
+    - { id: "minecraft:sweet_berries", count: [1, 6], weight: 2 }
+    - { id: "minecraft:egg",          count: [1, 6],  weight: 2 }
+    - { id: "minecraft:sugar",        count: [1, 4],  weight: 1 }
+    - { id: "minecraft:milk_bucket",  count: [1, 1],  weight: 1 }
+    - { id: "minecraft:honey_bottle", count: [1, 2],  weight: 1 }
+    - { id: "minecraft:cookie",       count: [1, 4],  weight: 1 }
+
+# Pantry — heavier on preserved foods and bulk staples.
+pantry:
+  count: [4, 9]
+  items:
+    - { id: "minecraft:wheat",        count: [4, 32], weight: 6 }
+    - { id: "minecraft:bread",        count: [2, 6],  weight: 4 }
+    - { id: "minecraft:carrot",       count: [2, 16], weight: 4 }
+    - { id: "minecraft:potato",       count: [2, 16], weight: 4 }
+    - { id: "minecraft:beetroot",     count: [2, 16], weight: 3 }
+    - { id: "minecraft:dried_kelp",   count: [2, 16], weight: 2 }
+    - { id: "minecraft:pumpkin_pie",  count: [1, 3],  weight: 2 }
+    - { id: "minecraft:cooked_beef",  count: [1, 4],  weight: 2 }
+    - { id: "minecraft:cooked_porkchop", count: [1, 4], weight: 2 }
+    - { id: "minecraft:cooked_chicken", count: [1, 4], weight: 2 }
+    - { id: "minecraft:cooked_cod",   count: [1, 4],  weight: 1 }
+    - { id: "minecraft:apple",        count: [1, 6],  weight: 2 }
+
+# Bedroom — personal effects, clothing-adjacent, keepsakes.
+bedroom:
+  count: [2, 5]
+  items:
+    - { id: "minecraft:white_wool",   count: [1, 6],  weight: 3 }
+    - { id: "minecraft:leather",      count: [1, 4],  weight: 3 }
+    - { id: "minecraft:string",       count: [1, 6],  weight: 2 }
+    - { id: "minecraft:feather",      count: [1, 4],  weight: 2 }
+    - { id: "minecraft:book",         count: [1, 3],  weight: 2 }
+    - { id: "minecraft:paper",        count: [1, 4],  weight: 2 }
+    - { id: "minecraft:apple",        count: [1, 2],  weight: 1 }
+    - { id: "minecraft:candle",       count: [1, 3],  weight: 2 }
+    - { id: "minecraft:flower_pot",   count: [1, 1],  weight: 1 }
+    - { id: "minecraft:emerald",      count: [1, 2],  weight: 1 }
+
+# Study — books, writing materials, maps.
+study:
+  count: [3, 7]
+  items:
+    - { id: "minecraft:book",         count: [1, 3],  weight: 5 }
+    - { id: "minecraft:paper",        count: [1, 8],  weight: 5 }
+    - { id: "minecraft:writable_book", count: [1, 1], weight: 3 }
+    - { id: "minecraft:ink_sac",      count: [1, 3],  weight: 3 }
+    - { id: "minecraft:feather",      count: [1, 4],  weight: 3 }
+    - { id: "minecraft:map",          count: [1, 2],  weight: 2 }
+    - { id: "minecraft:compass",      count: [1, 1],  weight: 1 }
+    - { id: "minecraft:bookshelf",    count: [1, 2],  weight: 1 }
+
+# Armory — weapons, armor, ammunition. Goes in the armory room.
+armory:
+  count: [2, 5]
+  items:
+    - { id: "minecraft:iron_sword",   count: [1, 1],  weight: 3 }
+    - { id: "minecraft:iron_axe",     count: [1, 1],  weight: 2 }
+    - { id: "minecraft:iron_helmet",  count: [1, 1],  weight: 2 }
+    - { id: "minecraft:iron_chestplate", count: [1, 1], weight: 2 }
+    - { id: "minecraft:iron_leggings", count: [1, 1], weight: 2 }
+    - { id: "minecraft:iron_boots",   count: [1, 1],  weight: 2 }
+    - { id: "minecraft:shield",       count: [1, 1],  weight: 2 }
+    - { id: "minecraft:bow",          count: [1, 1],  weight: 2 }
+    - { id: "minecraft:arrow",        count: [4, 32], weight: 4 }
+    - { id: "minecraft:leather_helmet", count: [1, 1], weight: 2 }
+    - { id: "minecraft:leather_chestplate", count: [1, 1], weight: 2 }
+
+# Furnace contents — slot 0 is input (raw), slot 1 is fuel, slot 2 is output.
+# Each slot rolls independently. A finished smelt would have only slot 2;
+# an idle furnace typically has fuel loaded and maybe a raw item queued.
+furnace:
+  fixed:
+    - slot: 0
+      chance: 0.55
+      items:
+        - { id: "minecraft:raw_iron",   count: [1, 4], weight: 3 }
+        - { id: "minecraft:cobblestone", count: [1, 8], weight: 3 }
+        - { id: "minecraft:sand",       count: [1, 8], weight: 2 }
+        - { id: "minecraft:clay_ball",  count: [1, 6], weight: 1 }
+    - slot: 1
+      chance: 0.8
+      items:
+        - { id: "minecraft:coal",       count: [1, 8], weight: 4 }
+        - { id: "minecraft:charcoal",   count: [1, 8], weight: 3 }
+        - { id: "minecraft:oak_log",    count: [1, 4], weight: 2 }
+    - slot: 2
+      chance: 0.35
+      items:
+        - { id: "minecraft:iron_ingot", count: [1, 4], weight: 3 }
+        - { id: "minecraft:stone",      count: [1, 8], weight: 3 }
+        - { id: "minecraft:glass",      count: [1, 8], weight: 2 }
+        - { id: "minecraft:brick",      count: [1, 6], weight: 2 }
+
+# Smoker contents — cooked food. Slots mirror furnace.
+smoker:
+  fixed:
+    - slot: 0
+      chance: 0.55
+      items:
+        - { id: "minecraft:beef",       count: [1, 4], weight: 3 }
+        - { id: "minecraft:porkchop",   count: [1, 4], weight: 3 }
+        - { id: "minecraft:chicken",    count: [1, 4], weight: 3 }
+        - { id: "minecraft:mutton",     count: [1, 4], weight: 2 }
+        - { id: "minecraft:cod",        count: [1, 4], weight: 2 }
+        - { id: "minecraft:potato",     count: [1, 6], weight: 2 }
+    - slot: 1
+      chance: 0.8
+      items:
+        - { id: "minecraft:coal",       count: [1, 8], weight: 3 }
+        - { id: "minecraft:charcoal",   count: [1, 8], weight: 3 }
+        - { id: "minecraft:oak_log",    count: [1, 4], weight: 2 }
+    - slot: 2
+      chance: 0.45
+      items:
+        - { id: "minecraft:cooked_beef",     count: [1, 4], weight: 3 }
+        - { id: "minecraft:cooked_porkchop", count: [1, 4], weight: 3 }
+        - { id: "minecraft:cooked_chicken",  count: [1, 4], weight: 3 }
+        - { id: "minecraft:cooked_mutton",   count: [1, 4], weight: 2 }
+        - { id: "minecraft:cooked_cod",      count: [1, 4], weight: 2 }
+        - { id: "minecraft:baked_potato",    count: [1, 6], weight: 2 }
