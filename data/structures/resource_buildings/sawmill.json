@@ -1,0 +1,9 @@
+{
+    "id" : "sawmill",
+    "path" : "data/structures/resource_buildings/sawmill.nbt",
+    "origin" : {
+        "x" : 3,
+        "y" : 0,
+        "z" : 4
+    }
+}

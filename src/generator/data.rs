@@ -19,16 +19,20 @@ pub struct LoadedData {
 
 impl LoadedData {
     pub fn load() -> anyhow::Result<Self> {
+        let structures = Structure::load()?;
+        let resource_registry = ResourceRegistry::load()?;
+        resource_registry.validate_buildings(&structures)?;
+
         Ok(Self {
             palettes: Palette::load()?,
             materials: Material::load()?,
-            structures: Structure::load()?,
+            structures,
             wall_components: WallComponent::load()?,
             wall_sets: WallSet::load()?,
             roof_components: RoofComponent::load()?,
             roof_sets: RoofSet::load()?,
             building_sets: BuildingSet::load()?,
-            resource_registry: ResourceRegistry::load()?,
+            resource_registry,
             furniture_items: FurnitureItemDef::load()?,
             room_furniture: RoomFurnitureDef::load()?,
         })

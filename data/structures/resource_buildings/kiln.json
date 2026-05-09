@@ -1,0 +1,9 @@
+{
+    "id": "kiln",
+    "path": "data/structures/resource_buildings/kiln.nbt",
+    "origin": {
+        "x": 2,
+        "y": 0,
+        "z": 2
+    }
+}

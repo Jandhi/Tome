@@ -1,0 +1,9 @@
+{
+    "id": "farm",
+    "path": "data/structures/resource_buildings/farm.nbt",
+    "origin": {
+        "x": 4,
+        "y": 0,
+        "z": 4
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "id" : "carpenter",
+    "path" : "data/structures/resource_buildings/carpenter.nbt",
+    "origin" : {
+        "x" : 3,
+        "y" : 0,
+        "z" : 3
+    }
+}

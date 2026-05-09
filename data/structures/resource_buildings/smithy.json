@@ -1,0 +1,9 @@
+{
+    "id": "smithy",
+    "path": "data/structures/resource_buildings/smithy.nbt",
+    "origin": {
+        "x": 3,
+        "y": 0,
+        "z": 3
+    }
+}

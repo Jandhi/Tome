@@ -5,6 +5,7 @@ use std::fs::File;
 use anyhow::{bail, Context};
 
 use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
+use crate::generator::nbts::{Structure, StructureId};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
@@ -180,6 +181,50 @@ impl ResourceRegistry {
 
     pub fn recipes(&self) -> &HashMap<String, RecipeDef> {
         &self.recipes
+    }
+
+    /// Verifies that every `recipe.building` value resolves to a loaded
+    /// `Structure` whose NBT lives under `data/structures/resource_buildings/`.
+    /// Surfaces all missing or misplaced entries in a single error so the
+    /// operator can fix them in one pass rather than rerunning per fix.
+    pub fn validate_buildings(&self, structures: &HashMap<StructureId, Structure>) -> anyhow::Result<()> {
+        let mut missing: Vec<String> = Vec::new();
+        let mut misplaced: Vec<(String, String)> = Vec::new();
+
+        let mut seen: HashSet<&str> = HashSet::new();
+        for recipe in self.recipes.values() {
+            if !seen.insert(recipe.building.as_str()) {
+                continue;
+            }
+            let key = StructureId(recipe.building.clone());
+            match structures.get(&key) {
+                None => missing.push(recipe.building.clone()),
+                Some(structure) => {
+                    if !structure.meta.path.contains("resource_buildings") {
+                        misplaced.push((recipe.building.clone(), structure.meta.path.clone()));
+                    }
+                }
+            }
+        }
+
+        if missing.is_empty() && misplaced.is_empty() {
+            return Ok(());
+        }
+
+        let mut msg = String::from("Resource chain building validation failed:");
+        if !missing.is_empty() {
+            missing.sort();
+            msg.push_str("\n  Missing structures (no .json under data/structures/resource_buildings/): ");
+            msg.push_str(&missing.join(", "));
+        }
+        if !misplaced.is_empty() {
+            misplaced.sort();
+            msg.push_str("\n  Misplaced structures (not under resource_buildings/):");
+            for (id, path) in &misplaced {
+                msg.push_str(&format!("\n    - {} -> {}", id, path));
+            }
+        }
+        bail!(msg)
     }
 
     /// Given available raw resources, returns a ranked production plan:

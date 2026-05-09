@@ -1,0 +1,9 @@
+{
+    "id": "bakery",
+    "path": "data/structures/resource_buildings/bakery.nbt",
+    "origin": {
+        "x": 2,
+        "y": 0,
+        "z": 2
+    }
+}

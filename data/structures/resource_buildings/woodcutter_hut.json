@@ -1,0 +1,9 @@
+{
+    "id" : "woodcutter_hut",
+    "path" : "data/structures/resource_buildings/woodcutter_hut.nbt",
+    "origin" : {
+        "x" : 2,
+        "y" : 0,
+        "z" : 2
+    }
+}

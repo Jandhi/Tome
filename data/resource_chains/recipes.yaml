@@ -12,7 +12,7 @@ recipes:
       planks: 2
     outputs:
       furniture: 1
-    building: carpentry
+    building: carpenter
 
   wood_to_charcoal:
     inputs:
@@ -58,7 +58,7 @@ recipes:
     inputs: {}
     outputs:
       wood: 2
-    building: logging_camp
+    building: woodcutter_hut
 
   gather_wheat:
     inputs: {}

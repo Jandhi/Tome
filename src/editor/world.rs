@@ -322,7 +322,7 @@ impl World {
 
     pub fn get_claim(&self, point : Point2D) -> Option<BuildClaim> {
         if self.is_in_bounds_2d(point) {
-            Some(self.build_claim_map[point.x as usize][point.y as usize])
+            Some(self.build_claim_map[point.x as usize][point.y as usize].clone())
         } else {
             None
         }

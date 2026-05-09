@@ -117,17 +117,19 @@ mod tests {
         to_writer(file, &nbt_structure).expect("Failed to write NBT structure to file");
 
         let wall = WallComponent {
-            structure: Structure { 
-                id: name.into(), 
-                meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") }, 
-                facing: Cardinal::East, 
-                origin: Point3D { x: -6, y: 1, z: 0 }, 
-                palette: Some("medieval_spruce".into()), 
-                tags: None, 
-                mirror_x: false, 
+            structure: Structure {
+                id: name.into(),
+                meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") },
+                facing: Cardinal::East,
+                origin: Point3D { x: -6, y: 1, z: 0 },
+                palette: Some("medieval_spruce".into()),
+                tags: None,
+                mirror_x: false,
                 mirror_z: false,
                 style: Some(Style::Medieval),
                 weight: 1.0,
+                size_xz: (0, 0),
+                has_subgrade: false,
             },
             wall_type: Some(WallType::Support),
             vertical_position: Some(VerticalWallPosition::Bottom),
@@ -195,6 +197,8 @@ mod tests {
                 mirror_z: false,
                 style: Some(Style::Desert),
                 weight: 1.0,
+                size_xz: (0, 0),
+                has_subgrade: false,
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),
         };
