@@ -99,7 +99,7 @@ pub fn footprint_rect(structure: &Structure, candidate: Candidate) -> Rect2D {
 /// Operates at the super-district level to match the resource chain's assignment
 /// granularity (`SettlementProductionResult::district_assignments` is keyed by
 /// `SuperDistrictID`).
-pub async fn place_resource_building(
+pub async fn place_rural_building(
     super_district: &SuperDistrict,
     structure: &Structure,
     rng: &mut RNG,
@@ -169,8 +169,8 @@ pub async fn place_resource_building(
 /// no fixed mapping of building type to a specific urban super-district, so we treat
 /// the whole area as one candidate pool. Picks 10 random interior centres × 4 cardinals,
 /// scores by flatness + water/edge proximity + road proximity (same scorer as
-/// `place_resource_building`), then places the best.
-pub async fn place_urban_resource_building(
+/// `place_rural_building`), then places the best.
+pub async fn place_urban_building(
     urban_super_districts: &[&SuperDistrict],
     structure: &Structure,
     rng: &mut RNG,
@@ -236,7 +236,7 @@ pub async fn place_urban_resource_building(
 /// Places every processing building in `building_counts` (building id -> count) into
 /// the urban region. Buildings are visited one-by-one in a random order — each placement
 /// claims its footprint, so subsequent placements steer around what's already been built.
-pub async fn place_urban_resource_buildings(
+pub async fn place_urban_buildings(
     urban_super_districts: &[&SuperDistrict],
     building_counts: &std::collections::HashMap<String, u32>,
     rng: &mut RNG,
@@ -262,7 +262,7 @@ pub async fn place_urban_resource_buildings(
         };
 
         if let Err(e) =
-            place_urban_resource_building(urban_super_districts, &structure, rng, editor, data).await
+            place_urban_building(urban_super_districts, &structure, rng, editor, data).await
         {
             warn!("Urban placement failed for '{}': {}", building, e);
         }

@@ -238,7 +238,7 @@ The visualizer/snapshot code (`src/visualizer/snapshot.rs`) needs to handle the 
 New module: `src/generator/placement/placement.rs`.
 
 ```rust
-pub async fn place_resource_building(
+pub async fn place_rural_building(
     district: &District,
     structure: &Structure,
     rng: &mut RNG,
@@ -247,7 +247,7 @@ pub async fn place_resource_building(
 ) -> anyhow::Result<()>
 ```
 
-Called from Phase 4 of the resource chain pipeline: after `registry.resolve()` assigns a recipe (and therefore a `building` id) to each rural district, look up the corresponding `Structure` in `data.structures` by `StructureId(building.clone())` and pass it into `place_resource_building`.
+Called from Phase 4 of the resource chain pipeline: after `registry.resolve()` assigns a recipe (and therefore a `building` id) to each rural district, look up the corresponding `Structure` in `data.structures` by `StructureId(building.clone())` and pass it into `place_rural_building`.
 
 The placement system is **not** responsible for choosing which building goes where — `registry.resolve()` does that based on the district's biome and raw resource. Placement just receives `(district, structure)` pairs and finds a good spot.
 
@@ -280,7 +280,7 @@ Cover the deterministic, world-free pieces. Live in `src/generator/placement/tes
 
 Live in `src/generator/placement/test.rs` gated on the same `#[tokio::test]` pattern other modules use.
 
-- **Happy path**: synthesize a small flat district, run `place_resource_building` with the `sawmill` structure, assert: footprint cells are flat (all heights equal `target_y`), no trees on the footprint, footprint cells are claimed, and one block on the footprint matches a non-air block from the NBT.
+- **Happy path**: synthesize a small flat district, run `place_rural_building` with the `sawmill` structure, assert: footprint cells are flat (all heights equal `target_y`), no trees on the footprint, footprint cells are claimed, and one block on the footprint matches a non-air block from the NBT.
 - **Sloped terrain blend**: district with a 6-block ramp through it. Assert the blend ring's heights monotonically transition from `target_y` toward natural ground over `BLEND_RADIUS` cells.
 - **Water rejection**: district with a pond covering most of its area. Assert the function returns gracefully (no panic, no placement) and logs the skip.
 - **Determinism**: run twice with the same seed and district, assert identical placement (same offset and direction).

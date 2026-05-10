@@ -3,9 +3,9 @@ mod placement;
 mod test;
 
 pub use placement::{
-    place_resource_building,
-    place_urban_resource_building,
-    place_urban_resource_buildings,
+    place_rural_building,
+    place_urban_building,
+    place_urban_buildings,
     footprint_dims_for_rotation,
     anchor_offset_for_rotation,
     score_candidate,

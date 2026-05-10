@@ -11,7 +11,7 @@ mod tests {
             nbts::{Rotation, StructureId},
             placement::{
                 anchor_offset_for_rotation, footprint_dims_for_rotation,
-                place_resource_building, place_urban_resource_buildings,
+                place_rural_building, place_urban_buildings,
             },
         },
         geometry::{Point2D, Point3D},
@@ -139,7 +139,7 @@ mod tests {
                 super_district.data.points_2d.len(),
             );
 
-            match place_resource_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => placed_count += 1,
                 Err(e) => log::warn!(
                     "Failed to place '{}' in super-district {:?}: {}",
@@ -173,7 +173,7 @@ mod tests {
             result.processing_buildings.values().sum::<u32>(),
             urban_refs.len(),
         );
-        if let Err(e) = place_urban_resource_buildings(
+        if let Err(e) = place_urban_buildings(
             &urban_refs,
             &result.processing_buildings,
             &mut rng,
@@ -341,7 +341,7 @@ mod tests {
                 continue;
             };
 
-            match place_resource_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => placed_count += 1,
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", assignment.building, e),
             }
@@ -367,7 +367,7 @@ mod tests {
             result.processing_buildings.values().sum::<u32>(),
             urban_refs.len(),
         );
-        if let Err(e) = place_urban_resource_buildings(
+        if let Err(e) = place_urban_buildings(
             &urban_refs,
             &result.processing_buildings,
             &mut rng,
