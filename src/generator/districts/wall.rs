@@ -246,6 +246,10 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
     }
 
     flatten_walkway(&walkway_points, &mut walkway_heights, editor, material_placer, material_id).await;
+    // Claim every walkway cell as wall — building placement must steer around them.
+    for p in &walkway_points {
+        editor.world_mut().claim(*p, BuildClaim::Wall);
+    }
     //add gates
     build_wall_gate(&wall_points_with_height, editor, rng, material_placer, true, false, None, None, structures, 6).await
 
@@ -377,6 +381,14 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
     }
 
     flatten_walkway(&walkway_points, &mut walkway_heights, editor, material_placer, material_id).await;
+    // Claim every walkway and inner-wall cell as wall so building placement won't
+    // overlap the wider wall structure (the core ring is already claimed by `get_wall_points`).
+    for p in &walkway_points {
+        editor.world_mut().claim(*p, BuildClaim::Wall);
+    }
+    for p in &inner_wall_points {
+        editor.world_mut().claim(p.drop_y(), BuildClaim::Wall);
+    }
     //add towers
     build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng).await;
     //add gates
@@ -621,12 +633,16 @@ pub async fn build_wall_towers(
                     })
                     .collect::<Vec<Point2D>>();
                 let point_height = walkway_heights.get(point).expect("Should have height for walkway point"); // Default height if not found
-                for neighbour in neighbours {
+                for neighbour in &neighbours {
                     for height in point_height-1..=point_height+5 {
-                        if height == point_height + 5 || !walkway_set.contains(&neighbour) {
+                        if height == point_height + 5 || !walkway_set.contains(neighbour) {
                             material_placer.place_block(editor, neighbour.add_y(height), material_id, BlockForm::Block, None, None).await;
                         }
                     }
+                }
+                // Claim the tower's 5x5 base so building placement keeps clear of it.
+                for neighbour in &neighbours {
+                    editor.world_mut().claim(*neighbour, BuildClaim::Wall);
                 }
                 info!("Placing tower at: {:?}", point.add_y(point_height+6));
                 place_structure(editor, None, &tower, point.add_y(point_height+6), Cardinal::North, None, None, false, false).await.expect("Failed to place tower");
