@@ -127,7 +127,7 @@ impl Default for Furniture {
 }
 
 /// A block within a furniture piece.
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FurnitureBlock {
     pub block: String,
     pub offset: [i32; 3],
@@ -141,12 +141,34 @@ pub struct FurnitureBlock {
     /// Minecraft lets the player walk on top of.
     #[serde(default)]
     pub walkable: bool,
+    /// If false, the block is NOT written to the world but still claims its
+    /// cell (the cell must be open and ends up Blocked / UR per `walkable`).
+    /// Use for cells that will be filled by Minecraft side-effects — e.g. a
+    /// bed head auto-spawned by setPlacedBy when the foot is placed — so the
+    /// constraint map reflects the real post-placement world without us
+    /// double-placing the block.
+    #[serde(default = "default_place")]
+    pub place: bool,
     /// Name of a loot table in `data/furniture/loot.yaml`. When set, the
     /// furnisher rolls items from that table and writes them as the
     /// block entity's `Items` SNBT. Intended for chests, barrels,
     /// furnaces, and smokers.
     #[serde(default)]
     pub loot: Option<String>,
+}
+
+impl Default for FurnitureBlock {
+    fn default() -> Self {
+        Self {
+            block: String::new(),
+            offset: [0, 0, 0],
+            layer: BlockLayer::default(),
+            swap: PaletteSwap::default(),
+            walkable: false,
+            place: true,
+            loot: None,
+        }
+    }
 }
 
 /// A floor cell constraint within a furniture piece.
@@ -223,3 +245,4 @@ pub struct FixedSlot {
 
 fn default_weight() -> f32 { 1.0 }
 fn default_chance() -> f32 { 1.0 }
+fn default_place() -> bool { true }

@@ -62,7 +62,7 @@ fn test_bed() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:red_bed[part=foot]".into(),
                 offset: [0, 0, 1],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![
@@ -80,7 +80,7 @@ fn test_chest() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:chest".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![
@@ -97,7 +97,7 @@ fn test_lantern() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:lantern[hanging=true]".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![],
@@ -112,7 +112,7 @@ fn test_bookshelf() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![
@@ -392,7 +392,7 @@ fn bed_placement_basic() {
     let item = test_bed();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -410,7 +410,7 @@ fn bed_impossible_in_1x1_interior() {
     let item = test_bed();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -427,7 +427,7 @@ fn bed_avoids_disconnecting_doors() {
     let item = test_bed();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -446,7 +446,7 @@ fn chest_placement_basic() {
     let item = test_chest();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -462,7 +462,7 @@ fn placement_skips_blocked_cell() {
     let item = test_chest();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -480,7 +480,7 @@ fn chest_blocked_by_existing_accessible() {
     let item = test_chest();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -499,12 +499,12 @@ fn test_stacked_crate() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:hay_block".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
             FurnitureBlock {
                 block: "minecraft:hay_block".into(),
                 offset: [0, 1, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![
@@ -526,12 +526,12 @@ fn test_stacked_bookshelves() -> Furniture {
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 0, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
             FurnitureBlock {
                 block: "minecraft:bookshelf".into(),
                 offset: [0, 1, 0],
-                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+                layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
             },
         ],
         constraints: vec![
@@ -550,10 +550,10 @@ fn test_loaded_shelves() -> Furniture {
     Furniture {
         unique: false,
         blocks: vec![
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
-            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 0, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [0, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None },
+            FurnitureBlock { block: "minecraft:bookshelf".into(), offset: [1, 1, 0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None },
         ],
         constraints: vec![
             FurnitureConstraint { offset: [0, 0], constraint: CellConstraint::Wall, facing: FacingMode::None },
@@ -569,7 +569,7 @@ fn stacked_crate_produces_two_blocks_same_cell() {
     let mut cm = open_constraints(&interior);
     let cells: Vec<_> = interior.iter().map(|p| (p.x, p.y)).collect();
 
-    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells)
+    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells, None)
         .expect("crate should fit in a 5x5 open interior");
 
     assert_eq!(result.blocks.len(), 2, "crate should place two stacked blocks");
@@ -591,7 +591,7 @@ fn stacked_bookshelves_place_against_wall() {
     let item = test_stacked_bookshelves();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -615,7 +615,7 @@ fn loaded_shelves_place_4_blocks_on_wall() {
     let item = test_loaded_shelves();
     let mut result = None;
     for slot in &slots {
-        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64) {
+        if let Some(r) = try_place_at_wall_slot(&item, slot, &interior, &mut cm, 64, None) {
             result = Some(r); break;
         }
     }
@@ -646,7 +646,7 @@ fn stacked_crate_connectivity_respects_doors() {
     let mut cm = constraints_with_doors(&interior, &[(1, 1), (3, 1)]);
     let cells = vec![(2, 1)];
 
-    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells);
+    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells, None);
     assert!(result.is_none(),
         "stacked crate must not be placeable where it disconnects required cells");
 }
@@ -658,14 +658,14 @@ fn stacked_crate_cannot_overlap_existing_furniture() {
     let cells: Vec<_> = interior.iter().map(|p| (p.x, p.y)).collect();
 
     // Place one crate first.
-    try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells)
+    try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &cells, None)
         .expect("first crate fits");
     // Simulate post-placement bookkeeping: mark the cell Blocked.
     // Find which cell got used by looking for the first Empty remaining — flip it.
     // Simpler: mark (2,2) Blocked and confirm nothing places there.
     cm.set((2, 2), CellState::Blocked);
     let only = vec![(2, 2)];
-    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &only);
+    let result = try_place_freestanding(&test_stacked_crate(), &interior, &mut cm, 64, &only, None);
     assert!(result.is_none(), "cannot re-use a Blocked cell");
 }
 
@@ -693,7 +693,7 @@ fn aggressive_fill_packs_storage_interior() {
             .collect();
         if open.is_empty() { break; }
 
-        let result = try_place_freestanding(&item, &interior, &mut cm, 64, &open);
+        let result = try_place_freestanding(&item, &interior, &mut cm, 64, &open, None);
         match result {
             Some(placement) => {
                 for &c in &placement.new_blocked { cm.set(c, CellState::Blocked); }
@@ -792,7 +792,7 @@ fn resolve_furniture_from_data() {
         blocks: vec![FurnitureBlock {
             block: "minecraft:red_bed[part=head]".into(),
             offset: [0, 0, 0],
-            layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None,
+            layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
         }],
         constraints: vec![FurnitureConstraint {
             offset: [0, 0],
@@ -806,7 +806,7 @@ fn resolve_furniture_from_data() {
         blocks: vec![FurnitureBlock {
             block: "minecraft:lantern[hanging=true]".into(),
             offset: [0, 0, 0],
-            layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, loot: None,
+            layer: BlockLayer::Ceiling, swap: PaletteSwap::None, walkable: false, place: true, loot: None,
         }],
         constraints: vec![],
         ..Default::default()
@@ -969,13 +969,13 @@ impl DiagramRoom {
         } else if needs_wall(item) {
             let mut found = None;
             for slot in &self.slots {
-                if let Some(r) = try_place_at_wall_slot(item, slot, &self.interior, &mut self.cm, 64) {
+                if let Some(r) = try_place_at_wall_slot(item, slot, &self.interior, &mut self.cm, 64, None) {
                     found = Some(r); break;
                 }
             }
             found
         } else {
-            try_place_freestanding(item, &self.interior, &mut self.cm, 64, &self.open_cells)
+            try_place_freestanding(item, &self.interior, &mut self.cm, 64, &self.open_cells, None)
         };
 
         if let Some(placement) = result {
@@ -1055,12 +1055,12 @@ fn diagram_bedroom_furnishing() {
     r.place("bookshelf", &test_bookshelf());
     r.place("chest", &test_chest());
     r.place("barrel", &Furniture {
-        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
+        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..test_chest() // unique: false
     });
     r.place("crafting_table", &Furniture {
-        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
+        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         unique: true,
         ..Default::default()
@@ -1084,19 +1084,19 @@ fn diagram_hearth_furnishing() {
 
     let furnace = Furniture {
         unique: true,
-        blocks: vec![FurnitureBlock { block: "minecraft:furnace".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
+        blocks: vec![FurnitureBlock { block: "minecraft:furnace".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::AwayFromWall }],
         ..Default::default()
     };
     let crafting = Furniture {
         unique: true,
-        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
+        blocks: vec![FurnitureBlock { block: "minecraft:crafting_table".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..Default::default()
     };
     let barrel = Furniture {
         unique: false,
-        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, loot: None }],
+        blocks: vec![FurnitureBlock { block: "minecraft:barrel".into(), offset: [0,0,0], layer: BlockLayer::Ground, swap: PaletteSwap::None, walkable: false, place: true, loot: None }],
         constraints: vec![FurnitureConstraint { offset: [0,0], constraint: CellConstraint::BlockedReachable, facing: FacingMode::None }],
         ..Default::default()
     };
@@ -1299,6 +1299,7 @@ async fn place_room_sizes_in_world() {
         let mut rng = RNG::new(SEED);
         furnish_room(
             &editor, &mut room, &frame, room_list, &data.items,
+            None,
             palette, &materials, &data.loot, &mut rng,
         ).await;
 
@@ -1441,6 +1442,7 @@ async fn place_feature_rooms_in_world() {
     let floor_block = Block::from_id("minecraft:oak_planks".into());
     let air = Block::from_id("minecraft:air".into());
     let stone = Block::from_id("minecraft:cobblestone".into());
+    let glass = Block::from_id("minecraft:glass".into());
 
     for (size, features, label, (offx, offz), palette) in &cases {
         let wall_id_str = palette.get_material(MaterialRole::SecondaryWood)
@@ -1579,15 +1581,15 @@ async fn place_feature_rooms_in_world() {
                             // player has something to stand on before descending.
                             continue;
                         }
-                        // Drop one block per step. Offset by an extra -1 so the
-                        // FIRST step is visibly below the landing (its tall
-                        // side sits one block under the landing's plank top).
-                        let step_y = floor_y - 1 - i as i32;
+                        // Drop one block per step. The first stair sits with
+                        // its high side flush with the landing top.
+                        let step_y = floor_y - i as i32;
                         // Excavate the whole air column above the stair —
                         // including the original floor plank — so the pit
-                        // is a visible opening from above.
+                        // is a visible opening from above. Forced so air
+                        // overrides the denser floor block already placed.
                         for dy in step_y..=(floor_y + 1) {
-                            editor.place_block(&air, Point3D::new(wp.0, dy, wp.1)).await;
+                            editor.place_block_forced(&air, Point3D::new(wp.0, dy, wp.1)).await;
                         }
                         // Solid floor below the deepest step so the pit is enclosed.
                         editor.place_block(&stone, Point3D::new(wp.0, step_y - 1, wp.1)).await;
@@ -1596,7 +1598,29 @@ async fn place_feature_rooms_in_world() {
                             ("facing".to_string(), facing.to_string()),
                         ]));
                         editor.place_block(&stair, Point3D::new(wp.0, step_y, wp.1)).await;
+                        // Glass marker a few blocks above the stair so the
+                        // descent is visible from across the room without
+                        // blocking sightlines into the pit.
+                        editor.place_block_forced(&glass, Point3D::new(wp.0, floor_y + 2, wp.1)).await;
                     }
+                    // Append one extra step at the next cell in the descent
+                    // direction, one block lower than the deepest current
+                    // step, so the staircase fully reaches the pit floor.
+                    let last = positions[positions.len() - 1];
+                    let extra = (last.0 + dx, last.1 + dz);
+                    let wp = to_world(extra);
+                    constraints.set(wp, CellState::UnblockedReachable);
+                    let extra_step_y = floor_y - positions.len() as i32;
+                    for dy in extra_step_y..=(floor_y + 1) {
+                        editor.place_block_forced(&air, Point3D::new(wp.0, dy, wp.1)).await;
+                    }
+                    editor.place_block(&stone, Point3D::new(wp.0, extra_step_y - 1, wp.1)).await;
+                    let mut extra_stair = Block::from_id(stair_id_str.as_str().into());
+                    extra_stair.state = Some(HashMap::from([
+                        ("facing".to_string(), facing.to_string()),
+                    ]));
+                    editor.place_block(&extra_stair, Point3D::new(wp.0, extra_step_y, wp.1)).await;
+                    editor.place_block_forced(&glass, Point3D::new(wp.0, floor_y + 2, wp.1)).await;
                 }
                 LiveFeature::Ladder { wall_cell, interior: i_cell } => {
                     let (wx, wz) = to_world(*wall_cell);
@@ -1647,6 +1671,7 @@ async fn place_feature_rooms_in_world() {
         let mut rng = RNG::new(SEED);
         furnish_room(
             &editor, &mut room, &frame, room_list, &data.items,
+            None,
             palette, &materials, &data.loot, &mut rng,
         ).await;
 
@@ -1657,6 +1682,25 @@ async fn place_feature_rooms_in_world() {
             x = rect.min().x, y = floor_y, z = rect.min().y,
             items = names.join(", "),
         );
+
+        // Stained-glass debug map of the post-furnish ConstraintMap, hovering
+        // a few blocks above the room: lime = Empty, green = UnblockedReachable,
+        // blue = BlockedReachable, red = Blocked.
+        let map_y = floor_y + WALL_HEIGHT as i32 + 2;
+        let red = Block::from_id("minecraft:red_stained_glass".into());
+        let blue = Block::from_id("minecraft:blue_stained_glass".into());
+        let lime = Block::from_id("minecraft:lime_stained_glass".into());
+        let green = Block::from_id("minecraft:green_stained_glass".into());
+        for p in room.interior.iter() {
+            let block = match room.constraints.get((p.x, p.y)) {
+                Some(CellState::Empty) => &lime,
+                Some(CellState::UnblockedReachable) => &green,
+                Some(CellState::BlockedReachable) => &blue,
+                Some(CellState::Blocked) => &red,
+                None => continue,
+            };
+            editor.place_block_forced(block, Point3D::new(p.x, map_y, p.y)).await;
+        }
     }
 
     editor.flush_buffer().await;
