@@ -632,6 +632,11 @@ pub async fn place_frame(
         .expect("No wood pillar or primary wood material")
         .clone();
 
+    // Non-pillar blocks (e.g. cut_sandstone) don't accept an `axis` blockstate,
+    // and Minecraft will reject placements that specify one. Skip the axis state
+    // unless the material is a pillar-style block.
+    let supports_axis = material_supports_axis(material_id.as_str());
+
     let mut placer_rng = rng.derive();
     let mut placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut placer_rng),
@@ -646,6 +651,7 @@ pub async fn place_frame(
     for seg in &wall_segs.segments {
         let cells = segment_cells(seg);
         let beam_axis = axis_state(seg.facing);
+        let beam_state = if supports_axis { Some(&beam_axis) } else { None };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
 
@@ -661,14 +667,14 @@ pub async fn place_frame(
                 editor,
                 Point3D::new(cell.x, floor_y - 1, cell.y),
                 BlockForm::Block,
-                Some(&beam_axis),
+                beam_state,
                 None,
             ).await;
             placer.place_block(
                 editor,
                 Point3D::new(cell.x, ceiling_y, cell.y),
                 BlockForm::Block,
-                Some(&beam_axis),
+                beam_state,
                 None,
             ).await;
         }
@@ -677,6 +683,7 @@ pub async fn place_frame(
     // Vertical corner posts (placed last to override crossbeams at intersections)
     let y_axis: HashMap<String, String> =
         HashMap::from([("axis".to_string(), "y".to_string())]);
+    let post_state = if supports_axis { Some(&y_axis) } else { None };
 
     for (&(vx, vz), &max_floor) in &corner_max_floor {
         let top_y = frame.floor_y(max_floor) + frame.wall_height() as i32;
@@ -685,9 +692,37 @@ pub async fn place_frame(
                 editor,
                 Point3D::new(vx, y, vz),
                 BlockForm::Block,
-                Some(&y_axis),
+                post_state,
                 None,
             ).await;
         }
     }
+}
+
+/// Returns true if a Minecraft block of the given material id accepts an
+/// `axis` blockstate. This covers logs, stripped logs, pillars, stems,
+/// hyphae, and a handful of axis-rotatable stone blocks.
+fn material_supports_axis(id: &str) -> bool {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    if id.ends_with("_log")
+        || id.ends_with("_wood")
+        || id.ends_with("_stem")
+        || id.ends_with("_hyphae")
+        || id.ends_with("_pillar")
+    {
+        return true;
+    }
+    matches!(
+        id,
+        "basalt"
+            | "polished_basalt"
+            | "deepslate"
+            | "bone_block"
+            | "bamboo_block"
+            | "stripped_bamboo_block"
+            | "muddy_mangrove_roots"
+            | "ochre_froglight"
+            | "verdant_froglight"
+            | "pearlescent_froglight"
+    )
 }

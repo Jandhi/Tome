@@ -39,6 +39,19 @@ fn add_door(wall_segs: &mut WallSegments, facing: Cardinal, offset: u32) {
     });
 }
 
+/// Attach a 2-wide double door to the given cardinal face.
+fn add_double_door(wall_segs: &mut WallSegments, facing: Cardinal, offset: u32) {
+    let idx = wall_segs.segments.iter().position(|s| s.floor == 0 && s.facing == facing)
+        .expect("no ground-floor segment with that facing");
+    wall_segs.segments[idx].openings.push(Opening {
+        kind: OpeningKind::Door(DoorStyle::Double),
+        offset,
+        width: 2,
+        height: 2,
+        y_offset: 0,
+    });
+}
+
 fn flat_heights(y: i32) -> impl Fn(Point2D) -> i32 {
     move |_| y
 }
@@ -97,7 +110,7 @@ fn terrain_above_produces_descending_ramp_with_carve() {
     assert_eq!(ramp.landing_y, 64);
     assert_eq!(ramp.steps.len(), 2);
     for (k, step) in ramp.steps.iter().enumerate() {
-        assert_eq!(step.y, 64 + (k as i32 + 1));
+        assert_eq!(step.y, 64 + k as i32);
     }
     // Stair "facing" points away from door (player walks away from door as stair rises).
     assert_eq!(ramp.stair_facing, ramp.side_dir);

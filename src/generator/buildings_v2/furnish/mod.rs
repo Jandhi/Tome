@@ -13,6 +13,7 @@ use crate::minecraft::{Block, BlockForm, color_block, string_to_block};
 use crate::noise::RNG;
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
+use super::roof::heightmap::RoofHeightmap;
 use super::rooms::{CellState, ConstraintMap, PlacedFurniture, Room, RoomPlan};
 use data::{Furniture, LootTable, PaletteSwap, RoomFurnitureList};
 
@@ -322,24 +323,27 @@ fn flood_fill(start: (i32, i32), constraints: &ConstraintMap) -> HashSet<(i32, i
 /// Reserved cells aren't walkable themselves, so we verify each one
 /// is adjacent to at least one cell in the walkable flood-fill region.
 fn check_connectivity(constraints: &ConstraintMap) -> bool {
+    let walkable: Vec<(i32, i32)> = constraints.iter_ground()
+        .filter(|(_, s)| matches!(s, CellState::Empty | CellState::UnblockedReachable))
+        .map(|(k, _)| k)
+        .collect();
     let reserved: Vec<(i32, i32)> = constraints.iter_ground()
         .filter(|(_, s)| *s == CellState::BlockedReachable)
         .map(|(k, _)| k)
         .collect();
 
-    if reserved.is_empty() { return true; }
+    if walkable.is_empty() {
+        // No walkable cells anywhere — only OK if there are no BR cells either.
+        return reserved.is_empty();
+    }
 
-    // Start flood fill from a walkable cell adjacent to any BlockedReachable cell
-    let start = reserved.iter()
-        .flat_map(|&(x, z)| NEIGHBORS.iter().map(move |&(dx, dz)| (x + dx, z + dz)))
-        .find(|&cell| constraints.is_walkable(cell));
+    // All walkable cells must form a single connected component.
+    let reached = flood_fill(walkable[0], constraints);
+    if !walkable.iter().all(|c| reached.contains(c)) {
+        return false;
+    }
 
-    let reached = match start {
-        Some(s) => flood_fill(s, constraints),
-        None => HashSet::new(),
-    };
-
-    // Every BlockedReachable cell must be adjacent to the reached walkable region
+    // Every BlockedReachable cell must touch that walkable component.
     reserved.iter().all(|&(x, z)| {
         NEIGHBORS.iter().any(|&(dx, dz)| reached.contains(&(x + dx, z + dz)))
     })
@@ -382,6 +386,18 @@ fn placement_keeps_connectivity(
 
 /// Compute the ground-block cells a furniture item will occupy at a given
 /// anchor, paired with each block's `walkable` flag.
+/// True if the item has a y=0 (floor-level) block at the given 2D
+/// (along, away) offset — used to decide whether a `Wall`-constrained
+/// cell is physically occupied at the floor or just hosts something
+/// hanging above (e.g. a wall banner).
+fn has_floor_block_at(item: &Furniture, offset_2d: [i32; 2]) -> bool {
+    item.blocks.iter().any(|pb| {
+        pb.offset[1] == 0
+            && pb.offset[0] == offset_2d[0]
+            && pb.offset[2] == offset_2d[1]
+    })
+}
+
 fn ground_block_cells(
     item: &Furniture,
     anchor: Point2D,
@@ -397,6 +413,41 @@ fn ground_block_cells(
 }
 
 // ---------------------------------------------------------------------------
+// Attic roof clearance
+// ---------------------------------------------------------------------------
+
+/// Per-cell roof-block y for an attic room. Used to reject furniture cells
+/// that would poke into (or against) the sloped roof.
+pub(crate) struct RoofClearance<'a> {
+    hm: &'a RoofHeightmap,
+    /// Wall-top y for this rect (= roof_y from Frame). The lowest roof block
+    /// at (x, z) sits at `roof_y + heightmap.get(x, z).floor()`.
+    roof_y: i32,
+}
+
+impl RoofClearance<'_> {
+    /// Y of the lowest roof block at (x, z), or None if outside the heightmap.
+    fn roof_block_y(&self, cell: (i32, i32)) -> Option<i32> {
+        let h = self.hm.get(cell.0, cell.1);
+        if h == f32::NEG_INFINITY { None } else { Some(self.roof_y + h.floor() as i32) }
+    }
+
+    /// True if a furniture block at (cell, world_y) leaves at least one air
+    /// cell of headroom above it (block at y, air at y+1, roof block at ≥y+2).
+    fn allows_block(&self, cell: (i32, i32), world_y: i32) -> bool {
+        match self.roof_block_y(cell) {
+            Some(rb_y) => world_y + 1 < rb_y,
+            None => false,
+        }
+    }
+}
+
+/// Reject a placement if any of its blocks fails the attic roof-clearance test.
+fn placement_fits_under_roof(placement: &PlacementResult, clearance: &RoofClearance) -> bool {
+    placement.blocks.iter().all(|rb| clearance.allows_block(rb.cell, rb.world_pos.y))
+}
+
+// ---------------------------------------------------------------------------
 // Placement algorithm
 // ---------------------------------------------------------------------------
 
@@ -407,6 +458,7 @@ struct ResolvedBlock {
     layer: BlockLayer,
     swap: PaletteSwap,
     walkable: bool,
+    place: bool,
     loot: Option<String>,
 }
 
@@ -425,6 +477,7 @@ fn try_place_at_wall_slot(
     interior: &Rect2D,
     constraints: &mut ConstraintMap,
     floor_y: i32,
+    roof_clearance: Option<&RoofClearance>,
 ) -> Option<PlacementResult> {
     let mut blocks = Vec::new();
     let mut new_blocked = Vec::new();
@@ -440,7 +493,11 @@ fn try_place_at_wall_slot(
             CellConstraint::Wall => {
                 if !constraints.is_open(cell) { return Option::None; }
                 if !interior.on_edge(Point2D::new(cell.0, cell.1)) { return Option::None; }
-                new_blocked.push(cell);
+                if has_floor_block_at(item, pc.offset) {
+                    new_blocked.push(cell);
+                } else {
+                    new_empty_reachable.push(cell);
+                }
             }
             CellConstraint::BlockedReachable => {
                 if !constraints.is_open(cell) { return Option::None; }
@@ -492,11 +549,16 @@ fn try_place_at_wall_slot(
             layer: pb.layer,
             swap: pb.swap,
             walkable: pb.walkable,
+            place: pb.place,
             loot: pb.loot.clone(),
         });
     }
 
-    Some(PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable })
+    let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable };
+    if let Some(rc) = roof_clearance {
+        if !placement_fits_under_roof(&placement, rc) { return Option::None; }
+    }
+    Some(placement)
 }
 
 /// Try to place a freestanding item at any open cell in the interior.
@@ -507,6 +569,7 @@ fn try_place_freestanding(
     constraints: &mut ConstraintMap,
     floor_y: i32,
     open_cells: &[(i32, i32)],
+    roof_clearance: Option<&RoofClearance>,
 ) -> Option<PlacementResult> {
     let rotations = [Cardinal::North, Cardinal::East, Cardinal::South, Cardinal::West];
 
@@ -525,7 +588,11 @@ fn try_place_freestanding(
                     CellConstraint::Wall => {
                         if !constraints.is_open(cell) { ok = false; break; }
                         if !interior.on_edge(Point2D::new(cell.0, cell.1)) { ok = false; break; }
-                        new_blocked.push(cell);
+                        if has_floor_block_at(item, pc.offset) {
+                            new_blocked.push(cell);
+                        } else {
+                            new_empty_reachable.push(cell);
+                        }
                     }
                     CellConstraint::BlockedReachable => {
                         if !constraints.is_open(cell) { ok = false; break; }
@@ -574,12 +641,17 @@ fn try_place_freestanding(
                     layer: pb.layer,
                     swap: pb.swap,
                     walkable: pb.walkable,
+                    place: pb.place,
                     loot: pb.loot.clone(),
                 });
             }
             if !ok { continue; }
 
-            return Some(PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable });
+            let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable };
+            if let Some(rc) = roof_clearance {
+                if !placement_fits_under_roof(&placement, rc) { continue; }
+            }
+            return Some(placement);
         }
     }
     None
@@ -606,6 +678,7 @@ fn try_place_ceiling(
             layer: pb.layer,
             swap: pb.swap,
             walkable: pb.walkable,
+            place: pb.place,
             loot: pb.loot.clone(),
         });
     }
@@ -627,6 +700,7 @@ async fn try_place_item(
     open_cells: &[(i32, i32)],
     floor_y: i32,
     ceiling_y: i32,
+    roof_clearance: Option<&RoofClearance<'_>>,
     palette: &Palette,
     materials: &HashMap<MaterialId, Material>,
     loot_tables: &HashMap<String, LootTable>,
@@ -637,14 +711,14 @@ async fn try_place_item(
     } else if needs_wall(item) {
         let mut found = None;
         for slot in slots {
-            if let Some(r) = try_place_at_wall_slot(item, slot, interior, constraints, floor_y) {
+            if let Some(r) = try_place_at_wall_slot(item, slot, interior, constraints, floor_y, roof_clearance) {
                 found = Some(r);
                 break;
             }
         }
         found
     } else {
-        try_place_freestanding(item, interior, constraints, floor_y, open_cells)
+        try_place_freestanding(item, interior, constraints, floor_y, open_cells, roof_clearance)
     };
 
     if let Some(placement) = result {
@@ -653,13 +727,15 @@ async fn try_place_item(
         for &cell in &placement.new_reserved { constraints.set(cell, CellState::BlockedReachable); }
         for &cell in &placement.new_empty_reachable { constraints.set(cell, CellState::UnblockedReachable); }
         for rb in &placement.blocks {
-            let mut block = swap_block_for_palette(rb.block.clone(), rb.swap, palette, materials, rng);
-            if let Some(loot_name) = &rb.loot {
-                if let Some(table) = loot_tables.get(loot_name) {
-                    block.data = Some(roll_loot_snbt(table, rng));
+            if rb.place {
+                let mut block = swap_block_for_palette(rb.block.clone(), rb.swap, palette, materials, rng);
+                if let Some(loot_name) = &rb.loot {
+                    if let Some(table) = loot_tables.get(loot_name) {
+                        block.data = Some(roll_loot_snbt(table, rng));
+                    }
                 }
+                editor.place_block(&block, rb.world_pos).await;
             }
-            editor.place_block(&block, rb.world_pos).await;
             if rb.layer.occupies_ceiling() {
                 constraints.set_ceiling(rb.cell);
             }
@@ -729,6 +805,7 @@ pub(super) async fn furnish_room(
     frame: &Frame,
     room_list: &RoomFurnitureList,
     items: &HashMap<String, Furniture>,
+    roof_heightmap: Option<&RoofHeightmap>,
     palette: &Palette,
     materials: &HashMap<MaterialId, Material>,
     loot_tables: &HashMap<String, LootTable>,
@@ -753,6 +830,13 @@ pub(super) async fn furnish_room(
 
     let room_area = interior.area();
     let is_attic = room.role == super::rooms::RoomRole::Attic;
+    // Only attics have a sloped roof above the room — flat-ceiling rooms get
+    // None and skip the per-cell clearance check entirely.
+    let roof_clearance: Option<RoofClearance> = if is_attic {
+        roof_heightmap.map(|hm| RoofClearance { hm, roof_y: frame.roof_y(room.rect_index) })
+    } else {
+        None
+    };
     let mut placed_tags: HashSet<String> = HashSet::new();
 
     for entry in &room_list.required {
@@ -761,6 +845,7 @@ pub(super) async fn furnish_room(
             if let Some(cells) = try_place_item(
                 editor, item, &interior, &mut room.constraints,
                 &slots, &open_cells, floor_y, ceiling_y,
+                roof_clearance.as_ref(),
                 palette, materials, loot_tables, rng,
             ).await {
                 if item.unique {
@@ -792,6 +877,7 @@ pub(super) async fn furnish_room(
                 if let Some(cells) = try_place_item(
                     editor, item, &interior, &mut room.constraints,
                     &slots, &open_cells, floor_y, ceiling_y,
+                    roof_clearance.as_ref(),
                     palette, materials, loot_tables, rng,
                 ).await {
                     if item.unique {
@@ -812,10 +898,13 @@ pub(super) async fn furnish_room(
 }
 
 /// Furnish all rooms in a building using loaded furniture data.
+/// `roof_heightmaps` is indexed by rect — used only by attic rooms to clamp
+/// furniture against the sloped roof above the attic floor.
 pub async fn furnish_rooms(
     ctx: &mut BuildCtx<'_>,
     room_plan: &mut RoomPlan,
     frame: &Frame,
+    roof_heightmaps: &[RoofHeightmap],
 ) {
     let editor: &Editor = &*ctx.editor;
     let palette = ctx.palette;
@@ -830,8 +919,10 @@ pub async fn furnish_rooms(
             None => continue,
         };
         let mut room_rng = rng.derive();
+        let roof_hm = roof_heightmaps.get(room.rect_index);
         furnish_room(
             editor, room, frame, room_list, &furniture_data.items,
+            roof_hm,
             palette, materials, &furniture_data.loot, &mut room_rng,
         ).await;
     }

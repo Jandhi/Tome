@@ -134,11 +134,16 @@ fn gable_adjacency(
 /// Place roofs on all rects of a building.
 /// Groups rects by roof_y, generates per-rect gable heightmaps, merges with max per group,
 /// then places blocks. Lower roofs skip positions inside higher-floor rects.
+///
+/// Returns gable doorways and per-rect heightmaps. Heightmap `i` is the gable
+/// heightmap of `rects[i]` using the extended-roof bounds, suitable for asking
+/// "what's the roof block y at this (x, z)?" for furnish-time clearance checks
+/// inside attics.
 pub async fn place_roof(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
     pitch: GablePitch,
-) -> Vec<Point2D> {
+) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
     let editor: &Editor = &*ctx.editor;
     let data = ctx.data;
     let palette = ctx.palette;
@@ -161,6 +166,11 @@ pub async fn place_roof(
     // Suppress gable overhang only where a same-height perpendicular-ridge rect is adjacent
     let gable_suppress: Vec<(bool, bool)> = (0..rects.len())
         .map(|i| gable_adjacency(i, rects, &rect_axes, &roof_ys))
+        .collect();
+
+    // Per-rect heightmaps for downstream consumers (chimney, lantern, furnish).
+    let per_rect_heightmaps: Vec<RoofHeightmap> = (0..rects.len())
+        .map(|i| gable_heightmap(&roof_rects[i], pitch, rect_axes[i], gable_suppress[i]))
         .collect();
 
     // Group rects by roof_y (BTreeMap keeps keys sorted)
@@ -225,8 +235,7 @@ pub async fn place_roof(
             let roof_y_val = frame.roof_y(i);
             let attic_floor = frame.floor_counts()[i];
             let attic_floor_y = frame.floor_y(attic_floor);
-            let hm = gable_heightmap(&roof_rects[i], pitch, rect_axes[i], gable_suppress[i]);
-            place_attic_lantern(editor, &rects[i], &hm, roof_y_val, attic_floor_y).await;
+            place_attic_lantern(editor, &rects[i], &per_rect_heightmaps[i], roof_y_val, attic_floor_y).await;
         }
     }
 
@@ -239,11 +248,10 @@ pub async fn place_roof(
         // Pick a tallest rect
         let rect_idx = tallest_indices[rng.rand_i32_range(0, tallest_indices.len() as i32) as usize];
         let rect = &rects[rect_idx];
-        let hm = gable_heightmap(&roof_rects[rect_idx], pitch, rect_axes[rect_idx], gable_suppress[rect_idx]);
-        place_chimney(editor, rect, &hm, roof_y, pitch, data, palette, rng).await;
+        place_chimney(editor, rect, &per_rect_heightmaps[rect_idx], roof_y, pitch, data, palette, rng).await;
     }
 
-    gable_doorways
+    (gable_doorways, per_rect_heightmaps)
 }
 
 /// Place a hanging lantern with chains in the center of an attic rect.

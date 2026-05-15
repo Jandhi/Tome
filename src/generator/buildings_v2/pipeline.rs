@@ -94,7 +94,7 @@ pub async fn build_house(
     let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic).await;
     place_wall_infill(ctx, &wall_segs, &WallInfill::StoneBase, &WallInfill::Solid).await;
     place_frame(ctx, &frame).await;
-    let gable_doorways = place_roof(ctx, &frame, pitch).await;
+    let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, pitch).await;
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
     }
@@ -123,7 +123,7 @@ pub async fn build_house(
     let door_ramps = plan_door_ramps_from_world(&wall_segs, &footprint, ctx.editor.world());
     place_door_ramps(ctx, &door_ramps).await;
 
-    furnish_rooms(ctx, &mut room_plan, &frame).await;
+    furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
 
     check_building_invariants(&frame, &room_plan, &floor_plan)?;
 

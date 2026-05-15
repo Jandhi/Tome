@@ -688,6 +688,7 @@ async fn run_furnished_houses_pipeline(
     bounds: Rect2D,
     seed: i64,
     write_blueprints: bool,
+    palette_id: &str,
 ) -> usize {
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
@@ -696,7 +697,7 @@ async fn run_furnished_houses_pipeline(
     use crate::generator::buildings_v2::{BuildCtx, build_house};
 
     let data = LoadedData::load().expect("Failed to load data");
-    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette_id: PaletteId = palette_id.into();
     let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
 
     let mut rng = RNG::new(seed);
@@ -791,8 +792,33 @@ async fn build_furnished_houses() {
         Point2D::new(center.x + 63, center.y + 63),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true).await;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "medieval_spruce").await;
     println!("Done — {} furnished buildings placed", count);
+}
+
+/// Online desert variant: places desert_sandstone houses in a live Minecraft
+/// world. Requires a live Minecraft server with the GDMC HTTP mod.
+#[tokio::test]
+async fn build_furnished_desert_houses() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "desert_sandstone").await;
+    println!("Done — {} furnished desert buildings placed", count);
 }
 
 /// Offline / dry-run variant: runs the same buildings_v2 pipeline against a
@@ -822,8 +848,35 @@ async fn build_furnished_houses_offline() {
         Point2D::new(191, 191),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true).await;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "medieval_spruce").await;
     println!("Done — {} furnished buildings placed (offline)", count);
+}
+
+/// Offline desert variant: same as `build_furnished_houses_offline` but uses the
+/// `desert_sandstone` palette — smooth_sandstone walls and cut_sandstone framing
+/// instead of wool walls and spruce-log frames.
+#[tokio::test]
+async fn build_furnished_desert_houses_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(
+        Point3D::new(0, 0, 0),
+        Point3D::new(255, 127, 255),
+    );
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let bounds = Rect2D::from_points(
+        Point2D::new(64, 64),
+        Point2D::new(191, 191),
+    );
+
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "desert_sandstone").await;
+    println!("Done — {} furnished desert buildings placed (offline)", count);
 }
 
 /// Property test: run the offline pipeline across many seeds and assert that
@@ -861,7 +914,7 @@ async fn pipeline_invariants_property_test() {
         // claims from one seed don't contaminate the next.
         let world = World::synthetic(build_area, 64);
         let mut editor = world.get_offline_editor();
-        total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false).await;
+        total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false, "medieval_spruce").await;
     }
 
     println!("Property test: {} buildings across {} seeds, all invariants hold",
