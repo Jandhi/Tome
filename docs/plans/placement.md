@@ -82,18 +82,15 @@ Implemented in two free functions for unit testing:
 
 ### Foundation embedding
 
-`Structure.size_xz` and `Structure.has_subgrade` are cached at load time by `Structure::post_load` (in `nbts/structure.rs`). `has_subgrade` is `true` if any block in the NBT has `pos.y < origin.y` — i.e. there are foundation blocks below the floor.
+`Structure.size_xz` and `Structure.y_offset` are read straight from the JSON sidecar (in `nbts/structure.rs`). `y_offset` is the depth of subgrade — how many blocks the NBT extends below `origin.y`. Zero means no foundation; `1`, `2`, … indicate progressively deeper foundations/cellars. The maintenance test `migrate_resource_building_metadata` (in `nbts/test.rs`) recomputes these from the NBT and patches the JSON; run it whenever an NBT is replaced.
 
 In `execute_placement`:
 
 ```rust
-let mut anchor_y = target_y + 1;
-if !structure.has_subgrade {
-    anchor_y -= 1;
-}
+let anchor_y = target_y + structure.y_offset;
 ```
 
-Without subgrade we drop the anchor by one so the bottom row embeds in the ground; with subgrade we don't, because the NBT already contains its own foundation.
+Adding `y_offset` to the target ground height lifts the anchor so the lowest block of the structure embeds at ground level. With `y_offset = 0` the floor sits on the ground; with `y_offset = 1` the floor is one block up and the foundation row fills ground level, and so on.
 
 ---
 
@@ -202,7 +199,7 @@ place_urban_buildings
 
 ## Caller contract
 
-- The structure passed in must have a valid `size_xz` (set by `Structure::post_load`). Loaders that fail to parse an NBT leave `size_xz = (0, 0)`; placement detects this and skips with a warning rather than dividing by zero downstream.
+- The structure passed in must have a valid `size_xz` declared in its JSON sidecar. JSONs that omit it default to `(0, 0)`; placement detects this and skips with a warning rather than dividing by zero downstream.
 - The build-claim map must already contain whatever non-building features should constrain placement. In particular: build the city wall **before** placing urban buildings, so the wall's claims (and the 1-cell buffer) keep buildings off the perimeter.
 - The resource registry validates at load time that every recipe's `building` resolves to a `Structure` under `data/structures/resource_buildings/` — see `ResourceRegistry::validate_buildings`. Placement assumes that contract holds; if a structure is missing it logs a warning per affected super-district and skips.
 

@@ -1,9 +1,14 @@
 {
-    "id": "farm",
-    "path": "data/structures/resource_buildings/farm.nbt",
-    "origin": {
-        "x": 4,
-        "y": 0,
-        "z": 4
-    }
+  "id": "farm",
+  "origin": {
+    "x": 4,
+    "y": 0,
+    "z": 4
+  },
+  "path": "data/structures/resource_buildings/farm.nbt",
+  "size_xz": [
+    9,
+    9
+  ],
+  "y_offset": 0
 }

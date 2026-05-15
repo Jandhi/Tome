@@ -8,7 +8,7 @@ mod tests {
             data::LoadedData,
             districts::{build_wall, generate_districts, DistrictType, WallType},
             materials::{MaterialId, Placer},
-            nbts::{Rotation, StructureId},
+            nbts::{Rotation, StructureType},
             placement::{
                 anchor_offset_for_rotation, footprint_dims_for_rotation,
                 place_rural_building, place_urban_buildings,
@@ -120,8 +120,8 @@ mod tests {
                 continue;
             };
 
-            let structure_id = StructureId(assignment.building.clone());
-            let Some(structure) = data.structures.get(&structure_id).cloned() else {
+            let structure_type = StructureType(assignment.building.clone());
+            let Some(structure) = data.structures.get(&structure_type).cloned() else {
                 log::warn!(
                     "No structure found for building '{}' assigned to super-district {:?}",
                     assignment.building,
@@ -335,8 +335,8 @@ mod tests {
             let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
                 continue;
             };
-            let structure_id = StructureId(assignment.building.clone());
-            let Some(structure) = data.structures.get(&structure_id).cloned() else {
+            let structure_type = StructureType(assignment.building.clone());
+            let Some(structure) = data.structures.get(&structure_type).cloned() else {
                 log::warn!("No structure for building '{}'", assignment.building);
                 continue;
             };

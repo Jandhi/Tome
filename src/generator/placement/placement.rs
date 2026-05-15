@@ -10,7 +10,7 @@ use crate::{
         BuildClaim,
         data::LoadedData,
         districts::SuperDistrict,
-        nbts::{Rotation, Structure, place_structure},
+        nbts::{Rotation, Structure, StructureID, place_structure},
         terrain::{force_height, log_trees},
     },
     geometry::{Cardinal, Point2D, Point3D, Rect2D},
@@ -255,8 +255,8 @@ pub async fn place_urban_buildings(
     }
 
     while let Some(building) = rng.pop(&mut queue) {
-        let structure_id = crate::generator::nbts::StructureId(building.clone());
-        let Some(structure) = data.structures.get(&structure_id).cloned() else {
+        let structure_type = crate::generator::nbts::StructureType(building.clone());
+        let Some(structure) = data.structures.get(&structure_type).cloned() else {
             warn!("No structure found for processing building '{}'", building);
             continue;
         };
@@ -343,10 +343,7 @@ async fn execute_placement(
     }
 
     // Step 5 — place the NBT.
-    let mut anchor_y = target_y + 1;
-    if !structure.has_subgrade {
-        anchor_y -= 1;
-    }
+    let anchor_y = target_y + structure.y_offset;
     let offset = Point3D::new(candidate.centre.x, anchor_y, candidate.centre.y);
     place_structure(
         editor,
@@ -361,8 +358,15 @@ async fn execute_placement(
     )
     .await?;
 
-    // Step 6 — claim the footprint cells (blend ring is intentionally not claimed).
-    let claim = BuildClaim::Structure(structure.id.clone());
+    // Step 6 — mint a unique instance id, record it on the world, and claim
+    // the footprint cells. The blend ring is intentionally not claimed.
+    let instance_id = StructureID {
+        id: editor.world().structures.len() as u32,
+        structure_type: structure.id.clone(),
+    };
+    editor.world_mut().structures.push(instance_id.clone());
+
+    let claim = BuildClaim::Structure(instance_id);
     for cell in &footprint_cells {
         editor.world_mut().claim(*cell, claim.clone());
     }

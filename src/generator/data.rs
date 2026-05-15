@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
-use crate::{data::Loadable, generator::{resource_chain::ResourceRegistry,buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::{FurnitureItemDef, RoomFurnitureDef}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureId}}};
+use crate::{data::Loadable, generator::{resource_chain::ResourceRegistry,buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::{FurnitureItemDef, RoomFurnitureDef}, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
 
 #[derive(Debug)]
 pub struct LoadedData {
     pub palettes : HashMap<PaletteId, Palette>,
     pub materials : HashMap<MaterialId, Material>,
-    pub structures : HashMap<StructureId, Structure>,
-    pub wall_components : HashMap<StructureId, WallComponent>,
+    pub structures : HashMap<StructureType, Structure>,
+    pub wall_components : HashMap<StructureType, WallComponent>,
     pub wall_sets : HashMap<WallSetId, WallSet>,
-    pub roof_components : HashMap<StructureId, RoofComponent>,
+    pub roof_components : HashMap<StructureType, RoofComponent>,
     pub roof_sets : HashMap<RoofSetId, RoofSet>,
     pub building_sets : HashMap<BuildingSetID, BuildingSet>,
     pub resource_registry : ResourceRegistry,

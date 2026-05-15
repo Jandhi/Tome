@@ -1,6 +1,6 @@
 use std::{collections::{HashMap, HashSet}, env, hash::Hash};
 use log::info;
-use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureId}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
+use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 
@@ -116,7 +116,7 @@ pub fn order_wall_points(
     list_of_ordered_vec
 }
 
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, wall_type: WallType) {
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, wall_type: WallType) {
     let wall_points = get_wall_points(urban_points, editor);
     println!("[Wall] Found {} wall points", wall_points.len());
     let ordered_wall_points = order_wall_points(&wall_points);
@@ -132,7 +132,7 @@ pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rn
     }
 }
 
-pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>) {
+pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>) {
     let wall_points_with_height = wall_points.iter()
         .map(|&point| {
             let height = rng.rand_i32_range(4, 7);
@@ -177,7 +177,7 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 }
 
-pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
+pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
 
@@ -256,7 +256,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
 }
 
 
-pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureId, Structure>, urban_points: &HashSet<Point2D>) {
+pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
 
@@ -613,7 +613,7 @@ pub async fn build_wall_towers(
     editor: &mut Editor,
     material_placer: &mut Placer<'_>,
     material_id: &MaterialId,
-    structures: & HashMap<StructureId, Structure>,
+    structures: & HashMap<StructureType, Structure>,
     rng: &mut RNG,
 ) {
     let distance_to_next_tower = 80;

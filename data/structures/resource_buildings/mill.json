@@ -1,9 +1,14 @@
 {
-    "id": "mill",
-    "path": "data/structures/resource_buildings/mill.nbt",
-    "origin": {
-        "x": 2,
-        "y": 0,
-        "z": 2
-    }
+  "id": "mill",
+  "origin": {
+    "x": 2,
+    "y": 0,
+    "z": 2
+  },
+  "path": "data/structures/resource_buildings/mill.nbt",
+  "size_xz": [
+    5,
+    5
+  ],
+  "y_offset": 0
 }

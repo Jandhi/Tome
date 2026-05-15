@@ -1,4 +1,4 @@
-use crate::generator::{buildings::BuildingID, nbts::StructureId, paths::PathType};
+use crate::generator::{buildings::BuildingID, nbts::StructureID, paths::PathType};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BuildClaim {
@@ -7,6 +7,6 @@ pub enum BuildClaim {
     Gate,
     Path(PathType),
     Building(BuildingID),
-    Structure(StructureId),
+    Structure(StructureID),
     None,
 }

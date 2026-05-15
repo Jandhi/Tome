@@ -5,7 +5,7 @@ use std::fs::File;
 use anyhow::{bail, Context};
 
 use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
-use crate::generator::nbts::{Structure, StructureId};
+use crate::generator::nbts::{Structure, StructureType};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
@@ -187,7 +187,7 @@ impl ResourceRegistry {
     /// `Structure` whose NBT lives under `data/structures/resource_buildings/`.
     /// Surfaces all missing or misplaced entries in a single error so the
     /// operator can fix them in one pass rather than rerunning per fix.
-    pub fn validate_buildings(&self, structures: &HashMap<StructureId, Structure>) -> anyhow::Result<()> {
+    pub fn validate_buildings(&self, structures: &HashMap<StructureType, Structure>) -> anyhow::Result<()> {
         let mut missing: Vec<String> = Vec::new();
         let mut misplaced: Vec<(String, String)> = Vec::new();
 
@@ -196,7 +196,7 @@ impl ResourceRegistry {
             if !seen.insert(recipe.building.as_str()) {
                 continue;
             }
-            let key = StructureId(recipe.building.clone());
+            let key = StructureType(recipe.building.clone());
             match structures.get(&key) {
                 None => missing.push(recipe.building.clone()),
                 Some(structure) => {

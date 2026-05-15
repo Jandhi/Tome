@@ -1,9 +1,14 @@
 {
-    "id" : "sawmill",
-    "path" : "data/structures/resource_buildings/sawmill.nbt",
-    "origin" : {
-        "x" : 3,
-        "y" : 0,
-        "z" : 4
-    }
+  "id": "sawmill",
+  "origin": {
+    "x": 3,
+    "y": 0,
+    "z": 4
+  },
+  "path": "data/structures/resource_buildings/sawmill.nbt",
+  "size_xz": [
+    7,
+    10
+  ],
+  "y_offset": 0
 }
