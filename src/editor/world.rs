@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
 
 use super::Editor;
 
@@ -20,6 +20,7 @@ pub struct World {
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
     pub buildings : Vec<BuildingData>,
+    pub structures : Vec<StructureID>,
     pub gate_locations : Vec<(Point3D, Cardinal)>,
 
     ground_height_map : Vec<Vec<i32>>,
@@ -95,6 +96,7 @@ impl World {
             district_map,
             super_district_map,
             buildings: Vec::new(),
+            structures: Vec::new(),
             gate_locations: Vec::new(),
             ground_height_map,
             ocean_floor_height_map,
@@ -322,7 +324,7 @@ impl World {
 
     pub fn get_claim(&self, point : Point2D) -> Option<BuildClaim> {
         if self.is_in_bounds_2d(point) {
-            Some(self.build_claim_map[point.x as usize][point.y as usize])
+            Some(self.build_claim_map[point.x as usize][point.y as usize].clone())
         } else {
             None
         }

@@ -1,6 +1,6 @@
 Use these to set your build are around your character
-/setbuildarea ~-500 -60 ~-500 ~500 200 ~500
-/setbuildarea ~-256 -60 ~-256 ~256 200 ~256
-/setbuildarea ~-128 -60 ~-128 ~128 200 ~128
-/setbuildarea ~-64 -60 ~-64 ~64 200 ~64
-/setbuildarea ~-32 -60 ~-32 ~32 200 ~32
+/buildarea set ~-500 -60 ~-500 ~500 200 ~500
+/buildarea set ~-256 -60 ~-256 ~256 200 ~256
+/buildarea set ~-128 -60 ~-128 ~128 200 ~128
+/buildarea set ~-64 -60 ~-64 ~64 200 ~64
+/buildarea set ~-32 -60 ~-32 ~32 200 ~32

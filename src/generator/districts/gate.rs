@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use crate::editor::Editor;
 use crate::generator::materials::Placer;
-use crate::generator::nbts::{place_structure, Structure, StructureId};
+use crate::generator::nbts::{place_structure, Structure, StructureType};
 use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardinal};
 use crate::noise::RNG;
 use crate::generator::BuildClaim;
@@ -19,7 +19,7 @@ pub async fn build_wall_gate(
     is_palisade: bool,
     enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,
     inner_wall_set: Option<&HashSet<Point3D>>,
-    structures: & HashMap<StructureId, Structure>,
+    structures: & HashMap<StructureType, Structure>,
     gate_height: i32,
 ) {
     let distance_to_next_gate = 60;

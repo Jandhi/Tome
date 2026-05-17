@@ -187,30 +187,102 @@ mod tests {
         use std::io::Write;
 
         let registry = make_registry();
-        let mermaid = registry.to_mermaid_graph();
+        let elements_json = registry.to_cytoscape_elements();
 
         let html = format!(r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>Production Chains</title>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape/dist/cytoscape.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dagre/dist/dagre.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/cytoscape-dagre/cytoscape-dagre.js"></script>
   <style>
-    body {{ margin: 0; background: #1a1a2e; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; }}
-    h1   {{ color: #eee; margin: 1rem 0 0.25rem; }}
-    p    {{ color: #aaa; margin: 0 0 1rem; font-size: 0.85rem; }}
-    .mermaid {{ background: #fff; border-radius: 8px; padding: 1.5rem; max-width: 98vw; overflow: auto; }}
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ background: #1a1a2e; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; }}
+    #header {{ text-align: center; padding: 0.5rem 1rem 0.4rem; flex-shrink: 0; }}
+    h1 {{ color: #eee; font-size: 1.3rem; margin-bottom: 0.2rem; }}
+    p  {{ color: #aaa; font-size: 0.8rem; }}
+    #cy {{ flex: 1; background: #f8f8f8; }}
   </style>
 </head>
 <body>
-  <h1>Production Chains</h1>
-  <p>Green = raw &nbsp;·&nbsp; Yellow = intermediate &nbsp;·&nbsp; Blue = finished &nbsp;·&nbsp; Diamonds = buildings</p>
-  <div class="mermaid">
-{}
+  <div id="header">
+    <h1>Production Chains</h1>
+    <p>Green = raw &nbsp;·&nbsp; Yellow = intermediate &nbsp;·&nbsp; Blue = finished &nbsp;·&nbsp; Diamond = building &nbsp;·&nbsp; Edge labels = quantities</p>
   </div>
-  <script>mermaid.initialize({{ startOnLoad: true, theme: 'default', flowchart: {{ rankSpacing: 80, nodeSpacing: 30 }} }});</script>
+  <div id="cy"></div>
+  <script>
+    var cy = cytoscape({{
+      container: document.getElementById('cy'),
+      elements: {elements_json},
+      style: [
+        {{
+          selector: 'node[type = "raw"]',
+          style: {{
+            shape: 'ellipse', width: 90, height: 90,
+            'background-color': '#90EE90', 'border-color': '#2d862d', 'border-width': 2,
+            label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
+            'font-size': 15, 'font-weight': 'bold', color: '#1a4a1a',
+            'text-wrap': 'wrap', 'text-max-width': 78,
+          }}
+        }},
+        {{
+          selector: 'node[type = "intermediate"]',
+          style: {{
+            shape: 'round-rectangle', width: 115, height: 55,
+            'background-color': '#FFD700', 'border-color': '#b8860b', 'border-width': 2,
+            label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
+            'font-size': 15, 'font-weight': 'bold', color: '#3d2a00',
+            'text-wrap': 'wrap', 'text-max-width': 105,
+          }}
+        }},
+        {{
+          selector: 'node[type = "finished"]',
+          style: {{
+            shape: 'ellipse', width: 100, height: 100,
+            'background-color': '#87CEEB', 'border-color': '#00008b', 'border-width': 2,
+            label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
+            'font-size': 15, 'font-weight': 'bold', color: '#00005a',
+            'text-wrap': 'wrap', 'text-max-width': 88,
+          }}
+        }},
+        {{
+          selector: 'node[type = "recipe"]',
+          style: {{
+            shape: 'diamond', width: 95, height: 95,
+            'background-color': '#f0f0f0', 'border-color': '#888', 'border-width': 1.5,
+            label: 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
+            'font-size': 13, color: '#333',
+            'text-wrap': 'wrap', 'text-max-width': 65,
+          }}
+        }},
+        {{
+          selector: 'edge',
+          style: {{
+            width: 1.5, 'line-color': '#999',
+            'target-arrow-color': '#999', 'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier',
+            label: 'data(label)', 'font-size': 12, color: '#555',
+            'text-background-color': '#f8f8f8', 'text-background-opacity': 1,
+            'text-background-padding': '2px',
+          }}
+        }}
+      ],
+      layout: {{
+        name: 'dagre',
+        rankDir: 'TB',
+        ranker: 'network-simplex',
+        rankSep: 90,
+        nodeSep: 45,
+        edgeSep: 15,
+        padding: 40,
+        animate: false,
+      }}
+    }});
+  </script>
 </body>
-</html>"#, mermaid);
+</html>"#, elements_json = elements_json);
 
         let out_path = env::current_dir().unwrap().join("target").join("production_chains.html");
         let mut file = fs::File::create(&out_path).expect("could not create output file");

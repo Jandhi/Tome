@@ -1,0 +1,14 @@
+{
+  "id": "carpenter",
+  "origin": {
+    "x": 3,
+    "y": 0,
+    "z": 3
+  },
+  "path": "data/structures/resource_buildings/carpenter.nbt",
+  "size_xz": [
+    7,
+    7
+  ],
+  "y_offset": 0
+}

@@ -12,7 +12,7 @@ recipes:
       planks: 2
     outputs:
       furniture: 1
-    building: carpentry
+    building: carpenter
 
   wood_to_charcoal:
     inputs:
@@ -20,21 +20,6 @@ recipes:
     outputs:
       charcoal: 2
     building: kiln
-
-  sugar_cane_to_paper:
-    inputs:
-      sugar_cane: 2
-    outputs:
-      paper: 3
-    building: paper_mill
-
-  paper_leather_to_books:
-    inputs:
-      paper: 1
-      leather: 1
-    outputs:
-      books: 1
-    building: scriptorium
 
   # --- Food / Agriculture ---
   wheat_to_flour:
@@ -51,67 +36,6 @@ recipes:
       bread: 2
     building: bakery
 
-  sugar_cane_to_sugar:
-    inputs:
-      sugar_cane: 1
-    outputs:
-      sugar: 1
-    building: mill
-
-  sugar_cocoa_to_chocolate:
-    inputs:
-      sugar: 1
-      cocoa_beans: 1
-    outputs:
-      chocolate: 2
-    building: confectionery
-
-  flour_wheat_to_ale: # does this make sense?
-    inputs:
-      flour: 1
-      wheat: 1
-    outputs:
-      ale: 2
-    building: brewery
-
-  # --- Honey / Bees ---
-  honey_wheat_to_mead:
-    inputs:
-      honey: 2
-      wheat: 1
-    outputs:
-      mead: 2
-    building: brewery
-
-  honey_to_wax:
-    inputs:
-      honey: 2
-    outputs:
-      wax: 2
-    building: apiary # do we want to have the wax be intermediate or have honey and beeswax be produced by the apiary?
-
-  wax_to_candles:
-    inputs:
-      wax: 2
-    outputs:
-      candles: 4
-    building: chandlery
-
-  # --- Fiber / Textile ---
-  wool_to_cloth:
-    inputs:
-      wool: 2
-    outputs:
-      cloth: 1
-    building: loom
-
-  cloth_to_clothing:
-    inputs:
-      cloth: 1
-    outputs:
-      clothing: 1
-    building: tailor
-
   # --- Metal / Mining ---
   iron_ore_charcoal_to_ingot:
     inputs:
@@ -121,95 +45,20 @@ recipes:
       iron_ingot: 2
     building: smelter
 
-  iron_ore_coal_to_ingot:
-    inputs:
-      iron_ore: 2
-      coal: 1
-    outputs:
-      iron_ingot: 2
-    building: smelter
-
   iron_ingot_to_tools:
     inputs:
       iron_ingot: 1
+      charcoal: 1
     outputs:
       tools: 1
     building: smithy
-
-  # --- Stone / Earth ---
-  sand_charcoal_to_glass:
-    inputs:
-      sand: 2
-      charcoal: 1
-    outputs:
-      glass: 2
-    building: glassworks
-
-  sand_coal_to_glass:
-    inputs:
-      sand: 2
-      coal: 1
-    outputs:
-      glass: 2
-    building: glassworks
-
-  glass_to_panes:
-    inputs:
-      glass: 2
-    outputs:
-      glass_panes: 2
-    building: glassworks
-
-  clay_charcoal_to_bricks:
-    inputs:
-      clay: 2
-      charcoal: 1
-    outputs:
-      bricks: 4
-    building: kiln
-
-  clay_coal_to_bricks:
-    inputs:
-      clay: 2
-      coal: 1
-    outputs:
-      bricks: 4
-    building: kiln
-
-  bricks_to_pottery:
-    inputs:
-      bricks: 1
-    outputs:
-      pottery: 1
-    building: pottery_works
-
-  # --- Military ---
-  flint_feather_to_arrows:
-    inputs:
-      flint: 1
-      feathers: 2
-    outputs:
-      arrows: 8
-    building: fletcher
 
   # --- Gathering (raw resource production) ---
   gather_wood:
     inputs: {}
     outputs:
       wood: 2
-    building: logging_camp
-
-  gather_wool:
-    inputs: {}
-    outputs:
-      wool: 2
-    building: ranch
-
-  gather_honey:
-    inputs: {}
-    outputs:
-      honey: 2
-    building: apiary
+    building: woodcutter_hut
 
   gather_wheat:
     inputs: {}
@@ -217,56 +66,8 @@ recipes:
       wheat: 2
     building: farm
 
-  gather_sugar_cane:
-    inputs: {}
-    outputs:
-      sugar_cane: 2
-    building: plantation
-
   gather_iron_ore:
     inputs: {}
     outputs:
       iron_ore: 2
     building: iron_mine
-
-  gather_coal:
-    inputs: {}
-    outputs:
-      coal: 2
-    building: coal_mine
-
-  gather_sand:
-    inputs: {}
-    outputs:
-      sand: 2
-    building: sand_pit
-
-  gather_clay:
-    inputs: {}
-    outputs:
-      clay: 2
-    building: clay_pit
-
-  gather_leather:
-    inputs: {}
-    outputs:
-      leather: 2
-    building: pasture
-
-  gather_feathers:
-    inputs: {}
-    outputs:
-      feathers: 2
-    building: coop
-
-  gather_flint:
-    inputs: {}
-    outputs:
-      flint: 2
-    building: quarry
-
-  gather_cocoa_beans:
-    inputs: {}
-    outputs:
-      cocoa_beans: 2
-    building: cocoa_plantation

@@ -5,7 +5,7 @@ use log::error;
 use serde_derive::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::{shape::WallPlacement, walls::WallSetId, BuildingData}, data::LoadedData, materials::Placer, nbts::{Structure, StructureId}}, geometry::{Cardinal, DOWN, UP}, noise::RNG};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::{shape::WallPlacement, walls::WallSetId, BuildingData}, data::LoadedData, materials::Placer, nbts::{Structure, StructureType}}, geometry::{Cardinal, DOWN, UP}, noise::RNG};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WallComponent {
@@ -170,8 +170,8 @@ pub async fn build_walls(editor: &Editor, wall_set: &WallSetId, building: &mut B
     Ok(())
 }
 
-impl Loadable<'_, WallComponent, StructureId> for WallComponent {
-    fn get_key(item: &WallComponent) -> StructureId {
+impl Loadable<'_, WallComponent, StructureType> for WallComponent {
+    fn get_key(item: &WallComponent) -> StructureType {
         item.structure.id.clone()
     }
 
