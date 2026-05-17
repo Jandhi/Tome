@@ -19,7 +19,7 @@ recipes:
       wood: 2
     outputs:
       charcoal: 2
-    building: kiln
+    building: charcoal_burner
 
   # --- Food / Agriculture ---
   wheat_to_flour:

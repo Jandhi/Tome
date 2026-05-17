@@ -19,7 +19,7 @@ recipes:
       wood: 2
     outputs:
       charcoal: 2
-    building: kiln
+    building: charcoal_burner
 
   sugar_cane_to_paper:
     inputs:
@@ -166,7 +166,7 @@ recipes:
       charcoal: 1
     outputs:
       bricks: 4
-    building: kiln
+    building: charcoal_burner
 
   clay_coal_to_bricks:
     inputs:
@@ -174,7 +174,7 @@ recipes:
       coal: 1
     outputs:
       bricks: 4
-    building: kiln
+    building: charcoal_burner
 
   bricks_to_pottery:
     inputs:

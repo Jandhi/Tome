@@ -28,7 +28,8 @@
       "Bash(grep:*)",
       "Bash(rustup show:*)",
       "Bash(pip install:*)",
-      "Bash(python3 -c ':*)"
+      "Bash(python3 -c ':*)",
+      "Bash(python3 *)"
     ]
   }
 }

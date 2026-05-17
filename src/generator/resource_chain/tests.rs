@@ -154,10 +154,10 @@ mod tests {
         // Furniture chain requires sawmill (planks) and carpentry (furniture)
         assert!(plan.building_run_cost.contains_key("sawmill"), "sawmill needed for planks");
         assert!(plan.building_run_cost.contains_key("carpentry"), "carpentry needed for furniture");
-        // Charcoal chain requires kiln — but charcoal is tier 1, not tier 2,
+        // Charcoal chain requires charcoal_burner — but charcoal is tier 1, not tier 2,
         // so it only appears if it feeds a tier-2 chain. With only wood, no tier-2 chain
-        // needs charcoal, so kiln should NOT appear.
-        assert!(!plan.building_run_cost.contains_key("kiln"), "kiln not needed without a charcoal consumer");
+        // needs charcoal, so charcoal_burner should NOT appear.
+        assert!(!plan.building_run_cost.contains_key("charcoal_burner"), "charcoal_burner not needed without a charcoal consumer");
     }
 
     #[test]
