@@ -31,7 +31,8 @@
       "Bash(python3 -c ':*)",
       "Bash(python3 *)",
       "Bash(python scripts/gen_nbt_json.py data/structures/resource_buildings/*.nbt)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Read(//c/Users/timdo/.cargo/registry/src/**)"
     ]
   }
 }
