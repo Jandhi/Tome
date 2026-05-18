@@ -6,9 +6,17 @@ use serde_derive::{Serialize, Deserialize};
 use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
 
 /// Parse a block's SNBT `data` string into an NBT value for storage in a
-/// structure. Absent or unparseable SNBT yields `None`.
+/// structure. Returns `None` when there is no data; logs and drops the data
+/// when the SNBT fails to parse, rather than failing silently.
 fn snbt_to_value(data : Option<String>) -> Option<Value> {
-    data.and_then(|snbt| fastsnbt::from_str::<Value>(&snbt).ok())
+    let snbt = data?;
+    match fastsnbt::from_str::<Value>(&snbt) {
+        Ok(value) => Some(value),
+        Err(e) => {
+            log::warn!("Dropping unparseable block SNBT data ({e}): {snbt}");
+            None
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
