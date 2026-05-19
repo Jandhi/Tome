@@ -49,7 +49,7 @@ All resource chain data lives in `data/resource_chains/`.
 
 | Chain | Raw Inputs | Finished Good | Buildings |
 |-------|-----------|---------------|-----------|
-| Wood → Planks → Furniture | wood | furniture | sawmill, carpentry |
+| Wood → Planks → Furniture | wood | furniture | sawmill, carpenter |
 | Wood → Charcoal → (+ Iron) → Steel → Tools | wood, iron_ore | tools | charcoal_burner, smelter, forge, smithy |
 | Wheat → Flour → Bread | wheat | bread | mill, bakery |
 | Wheat + Flour → Ale | wheat | ale | mill, brewery |

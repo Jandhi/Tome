@@ -12,7 +12,7 @@ recipes:
       planks: 2
     outputs:
       furniture: 1
-    building: carpentry
+    building: carpenter
 
   wood_to_charcoal:
     inputs:
