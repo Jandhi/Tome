@@ -9,6 +9,7 @@ use crate::http_mod::GDMCHTTPProvider;
 use crate::noise::RNG;
 use crate::util::init_logger;
 use super::gable::{GablePitch, RidgeAxis, gable_heightmap};
+use super::RoofStyle;
 use super::heightmap::RoofHeightmap;
 
 fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
@@ -340,12 +341,14 @@ async fn build_full_buildings_with_roofs() {
     let n = footprints.len();
     println!("Placed {} house footprints", n);
 
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let styles = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
 
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (i, footprint) in footprints.into_iter().enumerate() {
-        let pitch = pitches[i % pitches.len()];
-        let house = build_house(&mut ctx, footprint, SizeClass::Hall, pitch, bounds)
+        let pitch = styles[i % styles.len()];
+        let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, pitch);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .expect("build_house failed");
 
@@ -361,7 +364,7 @@ async fn build_full_buildings_with_roofs() {
 
 #[tokio::test]
 async fn compare_three_pitches() {
-    use crate::generator::buildings_v2::{BuildCtx, build_house};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
 
     init_logger();
 
@@ -384,10 +387,10 @@ async fn compare_three_pitches() {
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 1);
     let footprint = &footprints[0];
 
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let styles = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
     let offsets = [0, 20, 40];
 
-    for (pitch, x_offset) in pitches.iter().zip(offsets.iter()) {
+    for (style, x_offset) in styles.iter().zip(offsets.iter()) {
         let shifted_rects: Vec<Rect2D> = footprint.rects().iter().map(|r| {
             Rect2D::from_points(
                 Point2D::new(r.min().x + x_offset, r.min().y),
@@ -398,11 +401,12 @@ async fn compare_three_pitches() {
 
         let mut pitch_rng = RNG::new(42);
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut pitch_rng);
-        build_house(&mut ctx, shifted_footprint, SizeClass::Hall, *pitch, bounds)
+        let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, *style);
+        build_house(&mut ctx, shifted_footprint, &bctx, bounds)
             .await
             .expect("build_house failed");
 
-        println!("  {:?} pitch at x_offset={}", pitch, x_offset);
+        println!("  {:?} at x_offset={}", style, x_offset);
     }
 
     editor.flush_buffer().await;

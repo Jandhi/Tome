@@ -11,10 +11,81 @@ pub mod rooms;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
+pub use self::walls::WindowFill;
+
+use crate::generator::materials::PaletteId;
+use footprint::SizeClass;
+use roof::RoofStyle;
+use roof::gable::GablePitch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildingType {
     House,
+}
+
+/// Cultural style that drives palette selection, roof/window/floor defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Culture {
+    Medieval,
+    Desert,
+    Japanese,
+}
+
+impl Culture {
+    /// Default palette ID for this culture.
+    pub fn palette_id(&self) -> PaletteId {
+        match self {
+            Culture::Medieval => "medieval_spruce".into(),
+            Culture::Desert => "desert_sandstone".into(),
+            Culture::Japanese => "japanese_dark_blackstone".into(),
+        }
+    }
+
+    /// Roof styles to pick from for this culture.
+    pub fn roof_styles(&self) -> Vec<RoofStyle> {
+        match self {
+            Culture::Medieval => vec![
+                RoofStyle::Gable(GablePitch::Slab),
+                RoofStyle::Gable(GablePitch::Stairs),
+                RoofStyle::Gable(GablePitch::Double),
+            ],
+            Culture::Desert => vec![RoofStyle::Flat],
+            Culture::Japanese => vec![
+                RoofStyle::Gable(GablePitch::Stairs),
+                RoofStyle::Gable(GablePitch::Double),
+            ],
+        }
+    }
+
+    /// Window fill style for this culture.
+    pub fn window_fill(&self) -> WindowFill {
+        match self {
+            Culture::Desert => WindowFill::Open,
+            _ => WindowFill::Glass,
+        }
+    }
+}
+
+/// Per-building context threaded through the pipeline. Bundles culture, size,
+/// and any per-building overrides so downstream code can make style decisions
+/// without a growing parameter list.
+pub struct BuildingContext {
+    pub culture: Culture,
+    pub size_class: SizeClass,
+    pub roof_style: RoofStyle,
+    pub window_fill: WindowFill,
+}
+
+impl BuildingContext {
+    /// Create a context with culture defaults for roof and window style.
+    pub fn new(culture: Culture, size_class: SizeClass, roof_style: RoofStyle) -> Self {
+        Self {
+            culture,
+            size_class,
+            roof_style,
+            window_fill: culture.window_fill(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +118,15 @@ pub enum RoomType {
     Studio,
     /// Armor stands, item frames, anvil. Upper floor, Manor+.
     Armory,
+}
+
+/// Optional custom floor style for a room, overriding the default palette floor.
+/// The actual blocks placed depend on biome/palette context at placement time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FloorType {
+    /// Kitchen floor — resolved per biome (e.g. glazed terracotta in desert,
+    /// stone bricks in temperate climates).
+    Kitchen,
 }
 
 impl RoomType {

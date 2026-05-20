@@ -143,7 +143,7 @@ impl World {
         let ocean_floor_height_map = vec![vec![y_local; size_z_usize]; size_x_usize];
         let motion_blocking_height_map = vec![vec![y_local; size_z_usize]; size_x_usize];
         let ground_block_map = vec![vec![Block::new("minecraft:grass_block".into(), None, None); size_z_usize]; size_x_usize];
-        let ground_biome_map = vec![vec![Biome::Plains; size_z_usize]; size_x_usize];
+        let ground_biome_map = vec![vec![Biome::unknown(); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
         let district_map = vec![vec![None; size_z_usize]; size_x_usize];
         let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
@@ -157,6 +157,7 @@ impl World {
             district_map,
             super_district_map,
             buildings: Vec::new(),
+            structures: Vec::new(),
             gate_locations: Vec::new(),
             ground_height_map,
             ground_block_map,
@@ -240,11 +241,15 @@ impl World {
 
     // Get height without counting water
     pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
-        self.ocean_floor_height_map[point.x as usize][point.y as usize]
+        let x = (point.x as usize).min(self.ocean_floor_height_map.len() - 1);
+        let z = (point.y as usize).min(self.ocean_floor_height_map[0].len() - 1);
+        self.ocean_floor_height_map[x][z]
     }
 
     pub fn get_motion_blocking_height_at(&self, point : Point2D) -> i32 {
-        self.motion_blocking_height_map[point.x as usize][point.y as usize]
+        let x = (point.x as usize).min(self.motion_blocking_height_map.len() - 1);
+        let z = (point.y as usize).min(self.motion_blocking_height_map[0].len() - 1);
+        self.motion_blocking_height_map[x][z]
     }
 
     pub fn get_surface_biome_at(&self, point : Point2D) -> Biome {
@@ -348,6 +353,10 @@ impl World {
         let block_index = (long >> (bit_index * bits)) & ((1 << bits) - 1);
 
         Some(block_index as usize)
+    }
+
+    pub fn get_ground_block(&self, point: Point2D) -> &Block {
+        &self.ground_block_map[point.x as usize][point.y as usize]
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {

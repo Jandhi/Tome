@@ -1,3 +1,4 @@
+pub mod terraform;
 #[cfg(test)]
 mod test;
 
@@ -19,6 +20,7 @@ pub async fn place_foundation(ctx: &mut BuildCtx<'_>, footprint: &Footprint) -> 
 
     let columns = classify_columns(&profile);
     execute_columns(ctx.editor, &profile, &columns, ctx.data, ctx.palette, ctx.rng).await;
+    clear_snow(ctx.editor, footprint, profile.base_y).await;
 
     place_foundation_course(ctx.editor, footprint, profile.base_y, ctx.data, ctx.palette, ctx.rng).await;
 
@@ -28,6 +30,9 @@ pub async fn place_foundation(ctx: &mut BuildCtx<'_>, footprint: &Footprint) -> 
         .map(|&p| Point3D::new(p.x, profile.base_y, p.y))
         .collect();
     ctx.editor.world_mut().set_heights(&height_points);
+
+    // Blend surrounding terrain upward to meet the building.
+    terraform::blend_terrain(ctx, footprint, profile.base_y).await;
 
     profile.base_y
 }
@@ -142,6 +147,24 @@ async fn execute_columns(
                     stone_placer
                         .place_block(editor, point.add_y(y), BlockForm::Block, None, None)
                         .await;
+                }
+            }
+        }
+    }
+}
+
+/// Clear snow layers above the footprint. The cut pass uses ocean-floor
+/// heights which exclude snow, so snow sitting on top of terrain inside the
+/// footprint survives. This pass removes it before walls/floors go in.
+async fn clear_snow(editor: &Editor, footprint: &Footprint, base_y: i32) {
+    let air = Block::new(BlockID::default(), None, None);
+    for point in footprint.filled_points() {
+        // Check a few blocks above base_y for snow layers.
+        for y in base_y..(base_y + 4) {
+            let pos = point.add_y(y);
+            if let Some(block) = editor.try_get_block(pos) {
+                if block.id.as_str().contains("snow") {
+                    editor.place_block_forced(&air, pos).await;
                 }
             }
         }

@@ -2,6 +2,7 @@ use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
+use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::generator::buildings_v2::roof::gable::GablePitch;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
@@ -539,9 +540,11 @@ async fn build_walls_in_world() {
     let n = footprints.len();
     println!("Placed {} house footprints in 32x32 area", n);
 
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (i, footprint) in footprints.into_iter().enumerate() {
-        let house = build_house(&mut ctx, footprint, SizeClass::Hall, GablePitch::Double, bounds)
+        let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, RoofStyle::Gable(GablePitch::Double));
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .expect("build_house failed");
 
@@ -584,7 +587,7 @@ async fn build_village() {
         ("House",   SizeClass::House),
         ("Cottage", SizeClass::Cottage),
     ];
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let styles = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
 
     let mut rng = RNG::new(42);
     let mut total = 0;
@@ -595,8 +598,10 @@ async fn build_village() {
         let footprints = fill_plot(ctx.rng, &mut plot, size_class, 50);
 
         for (i, footprint) in footprints.into_iter().enumerate() {
-            let pitch = pitches[total % pitches.len()];
-            let house = build_house(&mut ctx, footprint, *size_class, pitch, bounds)
+            let pitch = styles[total % styles.len()];
+            let bctx = crate::generator::buildings_v2::BuildingContext::new(
+                crate::generator::buildings_v2::Culture::Medieval, *size_class, pitch);
+            let house = build_house(&mut ctx, footprint, &bctx, bounds)
                 .await
                 .expect("build_house failed");
 

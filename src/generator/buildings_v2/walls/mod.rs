@@ -13,6 +13,17 @@ use super::footprint::merge::walk_edge_cells;
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
 
+/// What fills a window opening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFill {
+    /// Glass panes.
+    Glass,
+    /// Trapdoor shutters (uses PrimaryWood material).
+    Trapdoor,
+    /// Empty — just an open hole in the wall.
+    Open,
+}
+
 /// A single straight run of wall between two outline vertices, at one floor level.
 #[derive(Debug, Clone)]
 pub struct WallSegment {
@@ -67,9 +78,11 @@ pub enum DoorStyle {
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowStyle {
-    Small, // 1 wide, 1 tall
-    Tall,  // 1 wide, 2 tall
-    Wide,  // 2 wide, 2 tall
+    Small,     // 1 wide, 1 tall
+    Tall,      // 1 wide, 2 tall
+    Wide,      // 2 wide, 2 tall
+    Decorated, // 1 wide, 2 tall — upside-down stair on top, air/fill below
+    Arched,    // 2 wide, 2 tall — inward-facing upside-down stairs on top, air/fill below
 }
 
 /// Collection of all wall segments for a building.
@@ -316,6 +329,78 @@ pub fn boundary_cell_set(rects: &[Rect2D]) -> HashSet<Point2D> {
         .collect()
 }
 
+/// Place doors from upper floors onto the flat roof of a shorter adjacent rect.
+/// For each boundary between rects with different floor counts, the shorter
+/// rect's roof aligns with a floor of the taller rect. A door is placed in the
+/// taller rect's wall at that floor, giving access to the rooftop terrace.
+///
+/// Returns the 2D positions of the door cells on the roof surface (for parapet
+/// exclusion and room/cell-state marking).
+pub fn place_terrace_doors(
+    wall_segs: &mut WallSegments,
+    frame: &Frame,
+) -> Vec<Point2D> {
+    use super::footprint::find_boundaries;
+    let rects = frame.footprint().rects();
+    let boundaries = find_boundaries(rects);
+    let mut terrace_door_cells = Vec::new();
+
+    for boundary in &boundaries {
+        let fc_a = frame.floor_counts()[boundary.rect_a];
+        let fc_b = frame.floor_counts()[boundary.rect_b];
+        if fc_a == fc_b { continue; }
+
+        // The shorter rect's roof is accessed from the taller rect's floor
+        // at index == shorter's floor count.
+        let (short_fc, _tall_fc) = if fc_a < fc_b { (fc_a, fc_b) } else { (fc_b, fc_a) };
+        let door_floor = short_fc; // floor index on the taller rect
+
+        // Find wall segments on that floor whose cells overlap with boundary cells
+        let boundary_set: HashSet<Point2D> = boundary.wall_cells.iter().copied().collect();
+
+        for seg_idx in 0..wall_segs.segments.len() {
+            let seg = &wall_segs.segments[seg_idx];
+            if seg.floor != door_floor { continue; }
+
+            let cells = segment_cells(seg);
+            // Find which cell indices overlap with the boundary
+            let overlapping: Vec<usize> = cells.iter().enumerate()
+                .filter(|(_, c)| boundary_set.contains(c))
+                .map(|(i, _)| i)
+                .collect();
+
+            if overlapping.is_empty() { continue; }
+
+            // Place a single door centered on the overlap
+            let mid_idx = overlapping[overlapping.len() / 2];
+            let offset = mid_idx as u32;
+
+            // Check segment is long enough and door doesn't overlap existing openings
+            if offset == 0 || offset >= seg.length as u32 - 1 { continue; }
+
+            let overlaps_existing = seg.openings.iter().any(|o| {
+                let o_start = o.offset.saturating_sub(1);
+                let o_end = o.offset + o.width + 1;
+                offset + 1 > o_start && offset < o_end
+            });
+            if overlaps_existing { continue; }
+
+            wall_segs.segments[seg_idx].openings.push(Opening {
+                kind: OpeningKind::Door(DoorStyle::Single),
+                offset,
+                width: 1,
+                height: 2,
+                y_offset: 0,
+            });
+
+            // The door cell on the roof surface
+            terrace_door_cells.push(cells[mid_idx]);
+        }
+    }
+
+    terrace_door_cells
+}
+
 /// Place windows on all wall segments. Even spacing, denser on upper floors.
 /// Skips positions that overlap with existing doors.
 pub fn place_windows(
@@ -337,13 +422,16 @@ pub fn place_windows(
         let available = seg_len - corner_margin * 2;
 
         // Window style based on segment length
-        let (style, win_width, win_height) = if available < 5 {
-            (WindowStyle::Small, 1u32, 1u32)
+        let (style, win_width, win_height) = if available >= 8 {
+            (WindowStyle::Arched, 2u32, 2u32)
+        } else if available >= 5 {
+            (WindowStyle::Decorated, 1, 2)
         } else {
-            (WindowStyle::Tall, 1, 2)
+            (WindowStyle::Small, 1u32, 1u32)
         };
 
-        let spacing = 3u32;
+        // Wider spacing for arched windows so they don't sit adjacent
+        let spacing = if matches!(style, WindowStyle::Arched) { 5u32 } else { 3u32 };
         let count = available / spacing;
         if count == 0 {
             continue;
@@ -524,21 +612,31 @@ pub async fn place_wall_infill(
 pub async fn place_openings(
     ctx: &mut BuildCtx<'_>,
     wall_segs: &WallSegments,
+    window_fill: WindowFill,
 ) {
     let editor: &Editor = &*ctx.editor;
     let data = ctx.data;
     let palette = ctx.palette;
     let rng = &mut *ctx.rng;
 
-    let material_id = palette
+    let wood_material = palette
         .get_material(MaterialRole::PrimaryWood)
         .expect("No primary wood material")
+        .clone();
+    let wall_material = palette
+        .get_material(MaterialRole::PrimaryWall)
+        .unwrap_or_else(|| palette.get_material(MaterialRole::PrimaryStone).expect("No wall or stone material"))
         .clone();
 
     let mut placer_rng = rng.derive();
     let mut placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut placer_rng),
-        material_id,
+        wood_material,
+    );
+    let mut wall_placer_rng = rng.derive();
+    let mut wall_placer = MaterialPlacer::new(
+        Placer::new(&data.materials, &mut wall_placer_rng),
+        wall_material,
     );
 
     for seg in &wall_segs.segments {
@@ -546,7 +644,7 @@ pub async fn place_openings(
 
         for opening in &seg.openings {
             match &opening.kind {
-                OpeningKind::Door(style) => {
+                OpeningKind::Door(_style) => {
                     let facing_str = seg.facing.to_string();
                     for dx in 0..opening.width {
                         let idx = (opening.offset + dx) as usize;
@@ -585,17 +683,74 @@ pub async fn place_openings(
                         ).await;
                     }
                 }
-                OpeningKind::Window(_style) => {
+                OpeningKind::Window(style) => {
+                    let is_arched = matches!(style, WindowStyle::Decorated | WindowStyle::Arched);
+                    let top_dy = opening.height.saturating_sub(1);
+
                     for dx in 0..opening.width {
                         let idx = (opening.offset + dx) as usize;
                         if idx >= cells.len() { continue; }
                         let cell = cells[idx];
                         for dy in 0..opening.height {
                             let y = seg.base_y + opening.y_offset as i32 + dy as i32;
-                            editor.place_block_forced(
-                                &Block::from_id("minecraft:glass_pane".into()),
-                                Point3D::new(cell.x, y, cell.y),
-                            ).await;
+                            let pos = Point3D::new(cell.x, y, cell.y);
+
+                            // Top row of arched windows gets upside-down stairs
+                            if is_arched && dy == top_dy {
+                                let stair_facing = match style {
+                                    WindowStyle::Arched => {
+                                        // Walk direction along the segment (start → end)
+                                        let walk_dir = match seg.facing {
+                                            Cardinal::South => Cardinal::East,
+                                            Cardinal::North => Cardinal::West,
+                                            Cardinal::East => Cardinal::North,
+                                            Cardinal::West => Cardinal::South,
+                                        };
+                                        // dx=0 is at the start side, dx=1 at the end side
+                                        // Both stairs face outward from arch center
+                                        if dx == 0 { -walk_dir } else { walk_dir }
+                                    }
+                                    // Decorated: stair faces outward (same as wall facing)
+                                    _ => seg.facing,
+                                };
+                                let state = HashMap::from([
+                                    ("facing".to_string(), stair_facing.to_string()),
+                                    ("half".to_string(), "top".to_string()),
+                                ]);
+                                wall_placer.place_block_forced(
+                                    editor, pos, BlockForm::Stairs,
+                                    Some(&state), None,
+                                ).await;
+                                continue;
+                            }
+
+                            // Normal fill for non-stair cells
+                            match window_fill {
+                                WindowFill::Glass => {
+                                    editor.place_block_forced(
+                                        &Block::from_id("minecraft:glass_pane".into()),
+                                        pos,
+                                    ).await;
+                                }
+                                WindowFill::Trapdoor => {
+                                    let facing_str = (-seg.facing).to_string();
+                                    let state = HashMap::from([
+                                        ("facing".to_string(), facing_str),
+                                        ("open".to_string(), "true".to_string()),
+                                        ("half".to_string(), "bottom".to_string()),
+                                    ]);
+                                    placer.place_block_forced(
+                                        editor, pos, BlockForm::Trapdoor,
+                                        Some(&state), None,
+                                    ).await;
+                                }
+                                WindowFill::Open => {
+                                    editor.place_block_forced(
+                                        &"air".into(),
+                                        pos,
+                                    ).await;
+                                }
+                            }
                         }
                     }
                 }
