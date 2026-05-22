@@ -22,7 +22,7 @@ pub async fn place_foundation(ctx: &mut BuildCtx<'_>, footprint: &Footprint) -> 
     execute_columns(ctx.editor, &profile, &columns, ctx.data, ctx.palette, ctx.rng).await;
     clear_snow(ctx.editor, footprint, profile.base_y).await;
 
-    place_foundation_course(ctx.editor, footprint, profile.base_y, ctx.data, ctx.palette, ctx.rng).await;
+    place_foundation_course(ctx.editor, footprint, &profile, ctx.data, ctx.palette, ctx.rng).await;
 
     let height_points: HashSet<Point3D> = footprint
         .filled_points()
@@ -100,10 +100,20 @@ fn classify_columns(profile: &TerrainProfile) -> HashMap<Point2D, ColumnAction> 
         .collect()
 }
 
+/// Returns true if `id` is a vanilla stone-family block (stone, granite,
+/// andesite, diorite, deepslate, tuff). Variants like cobblestone, polished,
+/// and sandstone are excluded — only the natural-mountain stones qualify so
+/// foundations on stone terrain blend visually with the rock they sit on.
+fn is_vanilla_stone(id: &str) -> bool {
+    let bare = id.strip_prefix("minecraft:").unwrap_or(id);
+    matches!(bare, "stone" | "granite" | "andesite" | "diorite" | "deepslate" | "tuff")
+}
+
 /// Executes fill and cut operations for all columns.
 ///
 /// - **Cut:** places air from `base_y` to `terrain_y`, copies the surface block to `base_y - 1`.
-/// - **Fill:** fills solid from `terrain_y` to `base_y - 1` using palette stone.
+/// - **Fill:** fills solid from `terrain_y` to `base_y - 1`. Uses the native
+///   terrain block if it's vanilla stone, otherwise palette PrimaryStone.
 ///
 async fn execute_columns(
     editor: &Editor,
@@ -142,13 +152,29 @@ async fn execute_columns(
                 }
             }
             ColumnAction::Fill { terrain_y } => {
+                let native = native_stone_at(editor, point, terrain_y);
                 for y in terrain_y..profile.base_y {
-                    stone_placer
-                        .place_block(editor, point.add_y(y), BlockForm::Block, None, None)
-                        .await;
+                    if let Some(ref block) = native {
+                        editor.place_block_forced(block, point.add_y(y)).await;
+                    } else {
+                        stone_placer
+                            .place_block(editor, point.add_y(y), BlockForm::Block, None, None)
+                            .await;
+                    }
                 }
             }
         }
+    }
+}
+
+/// If the surface block at `(point, terrain_y - 1)` is vanilla stone, return
+/// it. Otherwise None — callers should fall back to palette stone.
+fn native_stone_at(editor: &Editor, point: Point2D, terrain_y: i32) -> Option<Block> {
+    let surface = editor.world().get_block(point.add_y(terrain_y - 1))?;
+    if is_vanilla_stone(surface.id.as_str()) {
+        Some(surface)
+    } else {
+        None
     }
 }
 
@@ -170,11 +196,13 @@ async fn clear_snow(editor: &Editor, footprint: &Footprint, base_y: i32) {
     }
 }
 
-/// Places a full stone layer at `base_y - 1` under the entire footprint.
+/// Places a full stone layer at `base_y - 1` under the entire footprint. Per
+/// column, if the original terrain surface is vanilla stone, the foundation
+/// uses that same block so the building blends with the rock beneath.
 async fn place_foundation_course(
     editor: &Editor,
     footprint: &Footprint,
-    base_y: i32,
+    profile: &TerrainProfile,
     data: &LoadedData,
     palette: &Palette,
     rng: &mut RNG,
@@ -188,10 +216,18 @@ async fn place_foundation_course(
             .clone(),
     );
 
+    let base_y = profile.base_y;
     for point in footprint.filled_points() {
-        stone_placer
-            .place_block_forced(editor, point.add_y(base_y - 1), BlockForm::Block, None, None)
-            .await;
+        let terrain_y = profile.heights.get(&point).copied().unwrap_or(base_y);
+        let native = native_stone_at(editor, point, terrain_y);
+        let pos = point.add_y(base_y - 1);
+        if let Some(ref block) = native {
+            editor.place_block_forced(block, pos).await;
+        } else {
+            stone_placer
+                .place_block_forced(editor, pos, BlockForm::Block, None, None)
+                .await;
+        }
     }
 }
 

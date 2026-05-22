@@ -511,7 +511,7 @@ pub async fn place_roof_ladder(
     let interior_set: std::collections::HashSet<Point2D> = tallest_rect.iter()
         .filter(|p| !parapet_set.contains(p))
         .collect();
-    let candidates: Vec<(Point2D, Point2D, &str)> = interior_set.iter()
+    let mut candidates: Vec<(Point2D, Point2D, &str)> = interior_set.iter()
         .filter(|p| !stair_avoid.contains(&(p.x, p.y)))
         .filter_map(|&p| {
             if parapet_set.contains(&Point2D::new(p.x + 1, p.y)) { Some((p, Point2D::new(p.x + 1, p.y), "west")) }
@@ -521,6 +521,22 @@ pub async fn place_roof_ladder(
             else { None }
         })
         .collect();
+
+    // Prefer ladder positions away from the building's corners so the ladder
+    // hugs the middle of an exterior wall instead of cutting in at a far edge.
+    let corners = [
+        tallest_rect.min(),
+        Point2D::new(tallest_rect.max().x, tallest_rect.min().y),
+        Point2D::new(tallest_rect.min().x, tallest_rect.max().y),
+        tallest_rect.max(),
+    ];
+    candidates.sort_by_key(|(pos, _, _)| {
+        let min_corner_dist = corners.iter()
+            .map(|c| (pos.x - c.x).abs() + (pos.y - c.y).abs())
+            .min()
+            .unwrap_or(0);
+        std::cmp::Reverse(min_corner_dist)
+    });
 
     let (ladder_pos, wall_pos, facing) = if let Some(&(pos, wall, facing)) = candidates.first() {
         (pos, wall, facing)
