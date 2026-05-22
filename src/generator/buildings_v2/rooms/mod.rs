@@ -15,7 +15,7 @@ use super::frame::Frame;
 use super::floors::FloorPlan;
 use super::pipeline::BuildCtx;
 use super::walls::{self, WallSegments};
-use super::RoomType;
+use super::{RoomType, FloorType};
 
 pub use constraints::{CellState, ConstraintMap, PlacedFurniture};
 
@@ -58,6 +58,7 @@ pub struct Room {
     pub constraints: ConstraintMap,
     /// Furniture placed in this room (populated by furnish_rooms).
     pub furniture: Vec<PlacedFurniture>,
+    pub floor_type: Option<FloorType>,
 }
 
 /// Compute the interior rect for a room. A side is shrunk by 1 iff this rect
@@ -344,6 +345,16 @@ pub fn assign_types_to_rooms(
     }
 
     assign_attic_types(room_plan, size_class, rng);
+}
+
+/// Assign custom floor types to rooms based on their room type.
+pub fn assign_room_floors(room_plan: &mut RoomPlan) {
+    for room in &mut room_plan.rooms {
+        room.floor_type = match room.room_type {
+            RoomType::Kitchen => Some(FloorType::Kitchen),
+            _ => None,
+        };
+    }
 }
 
 /// Clamp a point to the nearest cell inside a (non-empty) interior rect.
@@ -716,6 +727,7 @@ pub async fn build_rooms(
             interior,
             constraints,
             furniture: Vec::new(),
+            floor_type: None,
         });
     }
 

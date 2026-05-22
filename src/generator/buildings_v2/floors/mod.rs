@@ -69,9 +69,14 @@ impl FloorPlan {
                 stair_bottoms.insert((sw.floor, approach.x, approach.y));
             }
         }
-        let stair_tops: HashSet<(u32, i32, i32)> = stairwells.iter()
+        let mut stair_tops: HashSet<(u32, i32, i32)> = stairwells.iter()
             .filter_map(|sw| sw.positions.last().map(|p| (sw.floor + 1, p.x, p.y)))
             .collect();
+        for sw in &stairwells {
+            if let Some(approach) = sw.top_approach() {
+                stair_tops.insert((sw.floor + 1, approach.x, approach.y));
+            }
+        }
         let stair_air_above: HashSet<(u32, i32, i32)> = stairwells.iter()
             .flat_map(|sw| sw.positions.iter().map(move |p| (sw.floor + 1, p.x, p.y)))
             .collect();
@@ -114,6 +119,15 @@ impl Stairwell {
         let back: Point2D = (-self.direction).into();
         Some(p0 + back)
     }
+
+    pub fn top_approach(&self) -> Option<Point2D> {
+        let len = self.positions.len();
+        if len < 2 { return None; }
+        let prev = self.positions[len - 2];
+        let last = self.positions[len - 1];
+        let exit_dir = last - prev;
+        Some(last + exit_dir)
+    }
 }
 
 /// Compute the set of perimeter (exterior wall) cells for a given floor.
@@ -143,6 +157,7 @@ pub async fn place_floors(
     frame: &Frame,
     wall_segs: &WallSegments,
     has_attic: bool,
+    skip_ceilings: bool,
 ) -> FloorPlan {
     let stairwells = select_stairwells(frame, wall_segs, has_attic, ctx.rng);
 
@@ -157,7 +172,9 @@ pub async fn place_floors(
     }
 
     place_floor_slabs(ctx, frame, &openings).await;
-    place_ceilings(ctx, frame).await;
+    if !skip_ceilings {
+        place_ceilings(ctx, frame).await;
+    }
     place_stair_blocks(ctx, &stairwells, frame).await;
 
     FloorPlan::new(stairwells)
@@ -172,21 +189,32 @@ async fn place_floor_slabs(
     openings: &HashSet<(i32, i32, i32)>,
 ) {
     let editor: &Editor = &*ctx.editor;
-    let material_id = ctx.palette
-        .get_material(MaterialRole::PrimaryWood)
-        .expect("No primary wood material")
+
+    let ground_material = ctx.palette
+        .get_material(MaterialRole::GroundFloor)
+        .expect("No floor material (GroundFloor → PrimaryWood fallback missing)")
+        .clone();
+    let upper_material = ctx.palette
+        .get_material(MaterialRole::UpperFloor)
+        .expect("No floor material (UpperFloor → GroundFloor → PrimaryWood fallback missing)")
         .clone();
 
-    let mut placer_rng = ctx.rng.derive();
-    let mut placer = MaterialPlacer::new(
-        Placer::new(&ctx.data.materials, &mut placer_rng),
-        material_id,
+    let mut ground_rng = ctx.rng.derive();
+    let mut ground_placer = MaterialPlacer::new(
+        Placer::new(&ctx.data.materials, &mut ground_rng),
+        ground_material,
+    );
+    let mut upper_rng = ctx.rng.derive();
+    let mut upper_placer = MaterialPlacer::new(
+        Placer::new(&ctx.data.materials, &mut upper_rng),
+        upper_material,
     );
 
     for floor in frame.floors() {
         let perimeter = perimeter_cells(frame, floor);
         let y = frame.floor_y(floor) - 1;
         let points = frame.filled_points_at_floor(floor);
+        let placer = if floor == 0 { &mut ground_placer } else { &mut upper_placer };
 
         for point in &points {
             if openings.contains(&(point.x, y, point.y)) { continue; }
@@ -290,5 +318,79 @@ pub async fn clear_attic_stair_headroom(
             }
         }
 
+    }
+}
+
+/// Place custom room floors (e.g. glazed terracotta) for rooms that have a
+/// `floor_type` set. Runs after room type assignment and before furnishing.
+pub async fn place_room_floors(
+    ctx: &mut BuildCtx<'_>,
+    frame: &Frame,
+    room_plan: &super::rooms::RoomPlan,
+    bctx: &super::BuildingContext,
+) {
+    use crate::minecraft::{Block, Color};
+    use super::{Culture, FloorType};
+    use std::collections::HashMap;
+
+    let editor: &Editor = &*ctx.editor;
+    let palette = ctx.palette;
+
+    for room in &room_plan.rooms {
+        let floor_type = match room.floor_type {
+            Some(ft) => ft,
+            None => continue,
+        };
+
+        let interior = room.interior;
+        if interior.size.x <= 0 || interior.size.y <= 0 { continue; }
+
+        let y = frame.floor_y(room.floor) - 1;
+
+        match floor_type {
+            FloorType::Kitchen => {
+                match bctx.culture {
+                    Culture::Desert => {
+                        // Glazed terracotta with 2x2 rotating pattern
+                        let color: Color = palette.primary_color
+                            .unwrap_or(Color::White);
+                        let color_str: String = color.into();
+                        let block_id_str = format!("minecraft:{}_glazed_terracotta", color_str);
+                        let block_id: crate::minecraft::BlockID = block_id_str.as_str().into();
+
+                        // 2x2 clockwise rotation pattern:
+                        //   x=0,z=0 → north    x=1,z=0 → east
+                        //   x=0,z=1 → west     x=1,z=1 → south
+                        let pattern: [[&str; 2]; 2] = [
+                            ["north", "west"],   // x=0: z=0, z=1
+                            ["east",  "south"],  // x=1: z=0, z=1
+                        ];
+
+                        for point in interior.iter() {
+                            let qx = point.x.rem_euclid(2) as usize;
+                            let qz = point.y.rem_euclid(2) as usize;
+                            let facing = pattern[qx][qz];
+
+                            let state = HashMap::from([
+                                ("facing".to_string(), facing.to_string()),
+                            ]);
+                            let block = Block::new(
+                                block_id.clone(),
+                                Some(state),
+                                None,
+                            );
+                            editor.place_block_forced(&block, Point3D::new(point.x, y, point.y)).await;
+                        }
+                    }
+                    _ => {
+                        // Stone bricks for temperate kitchens
+                        let block = Block::from_id("minecraft:stone_bricks".into());
+                        for point in interior.iter() {
+                            editor.place_block_forced(&block, Point3D::new(point.x, y, point.y)).await;
+                        }
+                    }
+                }
+            }
+        }
     }
 }

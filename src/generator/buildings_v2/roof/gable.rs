@@ -6,7 +6,7 @@ use crate::minecraft::{Block, BlockForm};
 use crate::noise::RNG;
 use super::heightmap::RoofHeightmap;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GablePitch {
     Slab,   // 0.5 rise per horizontal block
     Stairs, // 1.0 rise per horizontal block

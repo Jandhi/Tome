@@ -1,0 +1,46 @@
+resources:
+  # --- Raw (tier 0) ---
+  wood:
+    name: Wood
+    category: forest
+    tier: 0
+  wheat:
+    name: Wheat
+    category: crop
+    tier: 0
+  iron_ore:
+    name: Iron Ore
+    category: mineral
+    tier: 0
+
+  # --- Intermediate (tier 1) ---
+  planks:
+    name: Planks
+    category: forest
+    tier: 1
+  charcoal:
+    name: Charcoal
+    category: forest
+    tier: 1
+  flour:
+    name: Flour
+    category: food
+    tier: 1
+  iron_ingot:
+    name: Iron Ingot
+    category: metal
+    tier: 1
+
+  # --- Finished goods (tier 2) ---
+  bread:
+    name: Bread
+    category: food
+    tier: 2
+  tools:
+    name: Tools
+    category: metal
+    tier: 2
+  furniture:
+    name: Furniture
+    category: forest
+    tier: 2

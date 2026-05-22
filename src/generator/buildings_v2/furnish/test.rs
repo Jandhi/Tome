@@ -26,6 +26,7 @@ fn make_room(rect: Rect2D, constraints: ConstraintMap) -> Room {
         interior: rect.shrink(1),
         constraints,
         furniture: Vec::new(),
+        floor_type: None,
     }
 }
 
@@ -1294,6 +1295,7 @@ async fn place_room_sizes_in_world() {
             interior,
             constraints: constraints_with_doors(&interior, &[world_idoor]),
             furniture: Vec::new(),
+            floor_type: None,
         };
 
         let mut rng = RNG::new(SEED);
@@ -1666,6 +1668,7 @@ async fn place_feature_rooms_in_world() {
             interior,
             constraints,
             furniture: Vec::new(),
+            floor_type: None,
         };
 
         let mut rng = RNG::new(SEED);

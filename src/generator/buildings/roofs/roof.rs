@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_derive::{Serialize, Deserialize};
 use strum::IntoEnumIterator;
 
-use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_structure, Structure, StructureId}, style::Style}, geometry::{Cardinal, Point3D, UP}, noise::RNG};
+use crate::{data::Loadable, editor::Editor, generator::{buildings::BuildingData, data::LoadedData, materials::Placer, nbts::{place_structure, Structure, StructureType}, style::Style}, geometry::{Cardinal, Point3D, UP}, noise::RNG};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RoofSetId(pub String);
@@ -12,9 +12,9 @@ pub struct RoofSetId(pub String);
 pub struct RoofSet {
     pub id : RoofSetId,
     pub style : Style,
-    pub side : StructureId,
-    pub corner : StructureId,
-    pub inner : StructureId,
+    pub side : StructureType,
+    pub corner : StructureType,
+    pub inner : StructureType,
 }
 
 impl Loadable<'_, RoofSet, RoofSetId> for RoofSet {
@@ -55,8 +55,8 @@ pub enum HipRoofPart {
     Inner,
 }
 
-impl Loadable<'_, RoofComponent, StructureId> for RoofComponent {
-    fn get_key(item: &RoofComponent) -> StructureId {
+impl Loadable<'_, RoofComponent, StructureType> for RoofComponent {
+    fn get_key(item: &RoofComponent) -> StructureType {
         item.structure.id.clone()
     }
 

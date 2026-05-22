@@ -23,11 +23,9 @@ impl BiomeStonetype {
     }
 
     pub fn from_biome(biome: Biome) -> Vec<BiomeStonetype> {
-        use super::Biome::*;
-        match biome {
-            Desert | DesertHills | DesertLakes => vec![BiomeStonetype::Sandstone],
-            Beach => vec![BiomeStonetype::Sandstone],
-            Badlands | ErodedBadlands | WoodedBadlands | Savanna | SavannaPlateau | ShatteredSavanna | ShatteredSavannaPlateau => vec![BiomeStonetype::RedSandstone],
+        match biome.name() {
+            "desert" | "desert_hills" | "desert_lakes" | "beach" => vec![BiomeStonetype::Sandstone],
+            "badlands" | "eroded_badlands" | "wooded_badlands" | "savanna" | "savanna_plateau" | "shattered_savanna" | "shattered_savanna_plateau" => vec![BiomeStonetype::RedSandstone],
             _ => vec![BiomeStonetype::Stone, BiomeStonetype::Deepslate, BiomeStonetype::Blackstone],
         }
     }

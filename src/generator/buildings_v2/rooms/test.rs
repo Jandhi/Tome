@@ -171,6 +171,7 @@ fn test_assign_types(frame: &Frame, size_class: SizeClass, has_attic: bool, rng:
                 interior,
                 constraints: ConstraintMap::new(&interior),
                 furniture: Vec::new(),
+                floor_type: None,
             });
         }
     }
@@ -187,6 +188,7 @@ fn test_assign_types(frame: &Frame, size_class: SizeClass, has_attic: bool, rng:
                 interior,
                 constraints: ConstraintMap::new(&interior),
                 furniture: Vec::new(),
+                floor_type: None,
             });
         }
     }
@@ -558,15 +560,19 @@ async fn build_single_class_with_signs(label: &str, size_class: SizeClass, max: 
 
     let mut rng = RNG::new(seed);
     let mut plot = Plot::fully_usable(bounds);
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    let culture = Culture::Medieval;
+    let styles = culture.roof_styles();
 
     let footprints = fill_plot_multi(&mut rng, &mut plot, &[size_class], max);
     let n = footprints.len();
 
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (i, (footprint, _)) in footprints.into_iter().enumerate() {
-        let pitch = pitches[i % pitches.len()];
-        let house = build_house(&mut ctx, footprint, size_class, pitch, bounds)
+        let pitch = styles[i % styles.len()];
+        let bctx = BuildingContext::new(culture, size_class, pitch);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .expect("build_house failed");
 
@@ -635,7 +641,9 @@ async fn build_mixed_sizes_with_random_roofs() {
 
     let mut rng = RNG::new(13);
     let mut plot = Plot::fully_usable(bounds);
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
+    let culture = Culture::Medieval;
+    let styles = culture.roof_styles();
 
     let size_classes = [
         SizeClass::Cottage, SizeClass::Cottage, SizeClass::Cottage,
@@ -652,8 +660,9 @@ async fn build_mixed_sizes_with_random_roofs() {
         let palette = base_palette.clone().merged_with(roof_palette);
 
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
-        let pitch = pitches[i % pitches.len()];
-        let house = build_house(&mut ctx, footprint, size_class, pitch, bounds)
+        let pitch = styles[i % styles.len()];
+        let bctx = BuildingContext::new(culture, size_class, pitch);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .expect("build_house failed");
 
@@ -688,21 +697,19 @@ async fn run_furnished_houses_pipeline(
     bounds: Rect2D,
     seed: i64,
     write_blueprints: bool,
-    palette_id: &str,
+    culture: crate::generator::buildings_v2::Culture,
 ) -> usize {
     use crate::generator::data::LoadedData;
-    use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::blueprint::{build_blueprint, render_svg, render_ascii};
-    use crate::generator::buildings_v2::roof::gable::GablePitch;
-    use crate::generator::buildings_v2::{BuildCtx, build_house};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, build_house};
 
     let data = LoadedData::load().expect("Failed to load data");
-    let palette_id: PaletteId = palette_id.into();
+    let palette_id = culture.palette_id();
     let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+    let roof_styles = culture.roof_styles();
 
     let mut rng = RNG::new(seed);
     let mut plot = Plot::fully_usable(bounds);
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
     let size_classes = [SizeClass::Cottage, SizeClass::House, SizeClass::Hall];
 
     let footprints = fill_plot_multi(&mut rng, &mut plot, &size_classes, 12);
@@ -710,8 +717,9 @@ async fn run_furnished_houses_pipeline(
 
     let mut ctx = BuildCtx::new(editor, &data, &palette, &mut rng);
     for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
-        let pitch = pitches[i % pitches.len()];
-        let house = build_house(&mut ctx, footprint, size_class, pitch, bounds)
+        let roof_style = roof_styles[i % roof_styles.len()];
+        let bctx = BuildingContext::new(culture, size_class, roof_style);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .unwrap_or_else(|msg| panic!("Seed {} building {} violated invariant: {}", seed, i, msg));
 
@@ -727,9 +735,9 @@ async fn run_furnished_houses_pipeline(
 
             let win_count = house.wall_segs.windows().count();
             println!(
-                "Building {}: {:?}, rects={}, floors={}, pitch={:?}, rooms={}, windows={}, blueprint={}",
+                "Building {}: {:?}, rects={}, floors={}, roof={:?}, rooms={}, windows={}, blueprint={}",
                 i, size_class, house.footprint.rects().len(), house.frame.max_floors(),
-                pitch, house.room_plan.rooms.len(), win_count, svg_path,
+                roof_style, house.room_plan.rooms.len(), win_count, svg_path,
             );
         }
     }
@@ -792,7 +800,8 @@ async fn build_furnished_houses() {
         Point2D::new(center.x + 63, center.y + 63),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "medieval_spruce").await;
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Medieval).await;
     println!("Done — {} furnished buildings placed", count);
 }
 
@@ -803,6 +812,7 @@ async fn build_furnished_desert_houses() {
     use crate::editor::World;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::util::init_logger;
+    use crate::generator::buildings_v2::roof::RoofStyle;
 
     init_logger();
 
@@ -817,7 +827,8 @@ async fn build_furnished_desert_houses() {
         Point2D::new(center.x + 63, center.y + 63),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "desert_sandstone").await;
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Desert).await;
     println!("Done — {} furnished desert buildings placed", count);
 }
 
@@ -848,7 +859,8 @@ async fn build_furnished_houses_offline() {
         Point2D::new(191, 191),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "medieval_spruce").await;
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Medieval).await;
     println!("Done — {} furnished buildings placed (offline)", count);
 }
 
@@ -860,6 +872,7 @@ async fn build_furnished_desert_houses_offline() {
     use crate::editor::World;
     use crate::geometry::Rect3D;
     use crate::util::init_logger;
+    use crate::generator::buildings_v2::roof::RoofStyle;
 
     init_logger();
 
@@ -875,7 +888,8 @@ async fn build_furnished_desert_houses_offline() {
         Point2D::new(191, 191),
     );
 
-    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, "desert_sandstone").await;
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Desert).await;
     println!("Done — {} furnished desert buildings placed (offline)", count);
 }
 
@@ -914,7 +928,8 @@ async fn pipeline_invariants_property_test() {
         // claims from one seed don't contaminate the next.
         let world = World::synthetic(build_area, 64);
         let mut editor = world.get_offline_editor();
-        total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false, "medieval_spruce").await;
+        use crate::generator::buildings_v2::Culture;
+        total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false, Culture::Medieval).await;
     }
 
     println!("Property test: {} buildings across {} seeds, all invariants hold",
@@ -929,6 +944,7 @@ async fn build_single_hall() {
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::blueprint::{build_blueprint, render_svg};
+    use crate::generator::buildings_v2::roof::RoofStyle;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
     use crate::generator::buildings_v2::{BuildCtx, build_house};
 
@@ -954,8 +970,10 @@ async fn build_single_hall() {
     let footprint = generate_footprint(&mut rng, &plot, &SizeClass::Hall)
         .expect("Failed to generate Hall footprint");
 
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
+    let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, RoofStyle::Gable(GablePitch::Double));
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
-    let house = build_house(&mut ctx, footprint, SizeClass::Hall, GablePitch::Double, bounds)
+    let house = build_house(&mut ctx, footprint, &bctx, bounds)
         .await
         .expect("build_house failed");
 
@@ -982,8 +1000,9 @@ async fn settlement_with_buildings_v2() {
     use crate::generator::data::LoadedData;
     use crate::generator::districts::generate_districts;
     use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::roof::RoofStyle;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
-    use crate::generator::buildings_v2::{BuildCtx, build_house};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
     use crate::generator::buildings::get_city_blocks_and_off_limits;
     use crate::geometry::get_outer_and_inner_points;
 
@@ -1014,7 +1033,7 @@ async fn settlement_with_buildings_v2() {
     // Step 2: Get city blocks from urban area
     let (city_blocks, _off_limits) = get_city_blocks_and_off_limits(&mut editor, &mut rng.derive());
 
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let pitches = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
     let size_classes = [
         SizeClass::Cottage, SizeClass::Cottage, SizeClass::Cottage,
         SizeClass::House, SizeClass::House,
@@ -1076,7 +1095,8 @@ async fn settlement_with_buildings_v2() {
 
             let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
             let pitch = pitches[total_buildings % pitches.len()];
-            let _house = build_house(&mut ctx, footprint, size_class, pitch, bounds)
+            let bctx = BuildingContext::new(Culture::Medieval, size_class, pitch);
+            let _house = build_house(&mut ctx, footprint, &bctx, bounds)
                 .await
                 .expect("build_house failed");
 

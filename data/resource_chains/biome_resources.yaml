@@ -1,0 +1,136 @@
+biome_resources:
+  # Temperate
+  minecraft:plains:
+    - wheat
+  minecraft:sunflower_plains:
+    - wheat
+  minecraft:forest:
+    - wood
+  minecraft:flower_forest:
+    - wood
+  minecraft:birch_forest:
+    - wood
+  minecraft:old_growth_birch_forest:
+    - wood
+  minecraft:dark_forest:
+    - wood
+  minecraft:swamp:
+    - wood
+  minecraft:mangrove_swamp:
+    - wood
+  minecraft:pale_garden:
+    - wood
+
+  # Warm / Tropical
+  minecraft:jungle:
+    - wood
+    - wheat
+  minecraft:sparse_jungle:
+    - wood
+    - wheat
+  minecraft:bamboo_jungle:
+    - wood
+    - wheat
+  minecraft:savanna:
+    - wood
+    - wheat
+  minecraft:savanna_plateau:
+    - wood
+    - iron_ore
+  minecraft:windswept_savanna:
+    - wood
+    - wheat
+  minecraft:desert:
+    - iron_ore
+  minecraft:badlands:
+    - iron_ore
+  minecraft:wooded_badlands:
+    - wood
+    - iron_ore
+  minecraft:eroded_badlands:
+    - iron_ore
+
+  # Cold
+  minecraft:taiga:
+    - wood
+  minecraft:old_growth_pine_taiga:
+    - wood
+  minecraft:old_growth_spruce_taiga:
+    - wood
+  minecraft:windswept_hills:
+    - iron_ore
+  minecraft:windswept_gravelly_hills:
+    - iron_ore
+  minecraft:windswept_forest:
+    - wood
+    - iron_ore
+
+  # Snowy / Frozen
+  minecraft:snowy_plains:
+    - iron_ore
+    - wheat
+  minecraft:ice_spikes:
+    - iron_ore
+  minecraft:snowy_taiga:
+    - wood
+  minecraft:snowy_slopes:
+    - iron_ore
+  minecraft:grove:
+    - wood
+    - iron_ore
+  minecraft:frozen_peaks:
+    - iron_ore
+  minecraft:jagged_peaks:
+    - iron_ore
+
+
+  # Mountain
+  minecraft:stony_peaks:
+    - iron_ore
+  minecraft:meadow:
+    - iron_ore
+    - wheat
+  minecraft:cherry_grove:
+    - wood
+    - iron_ore
+  minecraft:mountains:
+    - iron_ore
+
+
+  # Ocean
+  minecraft:ocean:
+
+  minecraft:deep_ocean:
+
+  minecraft:lukewarm_ocean:
+
+  minecraft:deep_lukewarm_ocean:
+
+  minecraft:warm_ocean:
+
+  minecraft:cold_ocean:
+
+  minecraft:deep_cold_ocean:
+
+  minecraft:frozen_ocean:
+
+  minecraft:deep_frozen_ocean:
+
+
+  # Beach / Shore
+  minecraft:beach:
+
+  minecraft:snowy_beach:
+  
+  minecraft:stony_shore:
+
+
+  # River
+  minecraft:river:
+
+  minecraft:frozen_river:
+
+
+  # Special
+  minecraft:mushroom_fields:
+    - wheat # Eventually Replace

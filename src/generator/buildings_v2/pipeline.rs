@@ -20,15 +20,20 @@ use super::footprint::{Footprint, SizeClass, find_boundaries};
 use super::foundation::place_foundation;
 use super::frame::{Frame, generate_frame};
 use super::furnish::furnish_rooms;
+use super::BuildingContext;
+use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
-use super::roof::place_roof;
+use super::roof::{place_roof, place_roof_ladder};
+use super::floors::place_room_floors;
 use super::rooms::{
-    RoomPlan, assign_attic_types, build_rooms, check_building_invariants,
-    mark_gable_doorways, mark_windows, place_attic_ladders,
+    RoomPlan, assign_attic_types, assign_room_floors, build_rooms,
+    check_building_invariants, mark_gable_doorways, mark_windows,
+    place_attic_ladders,
 };
 use super::walls::{
     WallInfill, WallSegments, build_segments, boundary_cell_set,
-    place_doors, place_frame, place_openings, place_wall_infill, place_windows,
+    place_doors, place_frame, place_openings, place_terrace_doors,
+    place_wall_infill, place_windows,
 };
 
 /// Shared context threaded through every placer stage. Reborrow the fields
@@ -62,7 +67,7 @@ pub struct HouseOutput {
     pub room_plan: RoomPlan,
     pub door_ramps: Vec<DoorRamp>,
     pub has_attic: bool,
-    pub pitch: GablePitch,
+    pub roof_style: RoofStyle,
     pub size_class: SizeClass,
 }
 
@@ -72,10 +77,14 @@ pub struct HouseOutput {
 pub async fn build_house(
     ctx: &mut BuildCtx<'_>,
     footprint: Footprint,
-    size_class: SizeClass,
-    pitch: GablePitch,
+    bctx: &BuildingContext,
     plot_bounds: Rect2D,
 ) -> Result<HouseOutput, String> {
+    let size_class = bctx.size_class;
+    let roof_style = bctx.roof_style;
+    let window_fill = bctx.window_fill;
+
+
     // Foundation: terrain analysis + level + stone course. Needs &mut Editor
     // to update the world heightmap.
     let base_y = place_foundation(ctx, &footprint).await;
@@ -89,12 +98,19 @@ pub async fn build_house(
     let boundary_cells = boundary_cell_set(footprint.rects());
     place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, ctx.rng);
 
-    let has_attic = matches!(pitch, GablePitch::Double);
+    let has_attic = matches!(roof_style, RoofStyle::Gable(GablePitch::Double));
+    let skip_ceilings = matches!(roof_style, RoofStyle::Flat);
 
-    let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic).await;
+    let _terrace_door_cells = if matches!(roof_style, RoofStyle::Flat) {
+        place_terrace_doors(&mut wall_segs, &frame)
+    } else {
+        Vec::new()
+    };
+
+    let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic, skip_ceilings).await;
     place_wall_infill(ctx, &wall_segs, &WallInfill::StoneBase, &WallInfill::Solid).await;
     place_frame(ctx, &frame).await;
-    let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, pitch).await;
+    let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
     }
@@ -106,6 +122,13 @@ pub async fn build_house(
     let ladder_walls = place_attic_ladders(ctx, &mut room_plan, &frame, &floor_plan, &wall_segs, &gable_doorways).await;
     assign_attic_types(&mut room_plan, size_class, ctx.rng);
 
+    let roof_ladder_wall = if matches!(roof_style, RoofStyle::Flat) {
+        place_roof_ladder(ctx, &frame, &floor_plan, &mut room_plan).await
+    } else {
+        None
+    };
+
+
     // Windows: the walls↔rooms back-edge. Interior wall cells come from room
     // partitioning; ladder walls come from attic ladder placement. Both must
     // be excluded from window placement.
@@ -114,14 +137,21 @@ pub async fn build_house(
         .flat_map(|b| b.wall_cells.iter().map(|c| (c.x, c.y)))
         .collect();
     interior_wall_cells.extend(ladder_walls);
+    if let Some(wall_cell) = roof_ladder_wall {
+        interior_wall_cells.insert(wall_cell);
+    }
     place_windows(&mut wall_segs, &interior_wall_cells, ctx.rng);
     mark_windows(&mut room_plan, &wall_segs);
-    place_openings(ctx, &wall_segs).await;
+    place_openings(ctx, &wall_segs, window_fill).await;
 
     // Reconcile doors with terrain: run parallel stair ramps along the wall
     // for doors where `base_y` doesn't match outside-terrain.
     let door_ramps = plan_door_ramps_from_world(&wall_segs, &footprint, ctx.editor.world());
     place_door_ramps(ctx, &door_ramps).await;
+
+    assign_room_floors(&mut room_plan);
+    place_room_floors(ctx, &frame, &room_plan, bctx).await;
+
 
     furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
 
@@ -135,7 +165,7 @@ pub async fn build_house(
         room_plan,
         door_ramps,
         has_attic,
-        pitch,
+        roof_style,
         size_class,
     })
 }

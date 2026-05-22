@@ -155,6 +155,15 @@ impl Editor {
         self.world.get_block(point).expect(&format!("Block at {:?} not found in world", point))
     }
 
+    /// Like `get_block` but returns `None` instead of panicking when the block
+    /// is not in the cache or the world (e.g. synthetic/offline worlds).
+    pub fn try_get_block(&self, point: Point3D) -> Option<Block> {
+        if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
+            return Some(block.clone());
+        }
+        self.world.get_block(point)
+    }
+
     pub async fn flush_buffer(&self) {
         // Drain the buffer first, releasing the borrow before the await
         let buffer: Vec<_> = self.block_buffer.borrow_mut().drain(..).collect();

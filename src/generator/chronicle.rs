@@ -32,7 +32,7 @@ impl SettlementInfo {
             top_three_biomes: biomes_by_count.iter()
                 .rev()
                 .take(3)
-                .map(|(biome, _)| **biome)
+                .map(|(biome, _)| (*biome).clone())
                 .collect(),
             house_count : world.buildings.len(),
         }
@@ -123,7 +123,8 @@ pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::R
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#, instruction);
-    let book: Book = try_ai_json::<Book>(user).await.expect("Failed to parse AI response");
+    let book: Book = try_ai_json::<Book>(user).await
+        .ok_or_else(|| anyhow::anyhow!("Failed to get or parse AI response for book"))?;
 
     let pages: Vec<String> = book.pages.iter().map(|page| {
             let mut components = page.iter();

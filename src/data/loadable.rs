@@ -14,6 +14,7 @@ pub trait Loadable<'de, TItem, TKey>
         info!("Loading items from {:?}", DATA_PATH);
         let mut items = HashMap::new();
         Self::load_all_in(&path, &mut items)?;
+        Self::post_load(&mut items)?;
         Ok(items)
     }
 

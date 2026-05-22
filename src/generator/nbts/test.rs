@@ -5,7 +5,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{VerticalWallPosition, WallComponent, WallType}}, data::LoadedData, materials::Placer, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure}, style::Style}, geometry::{Cardinal, Point3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::Block, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{roofs::{HipRoofPart, RoofComponent, RoofType}, walls::{VerticalWallPosition, WallComponent, WallType}}, data::LoadedData, materials::Placer, nbts::{nbt::NBTStructure, place::place_nbt, place::place_structure, NBTMeta, Structure, StructureType}, style::Style}, geometry::{Cardinal, Point3D}, http_mod::{Coordinate, GDMCHTTPProvider}, minecraft::Block, noise::RNG, util::init_logger};
     use std::fs::File;
     use fastnbt::to_writer;
 
@@ -117,17 +117,19 @@ mod tests {
         to_writer(file, &nbt_structure).expect("Failed to write NBT structure to file");
 
         let wall = WallComponent {
-            structure: Structure { 
-                id: name.into(), 
-                meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") }, 
-                facing: Cardinal::East, 
-                origin: Point3D { x: -6, y: 1, z: 0 }, 
-                palette: Some("medieval_spruce".into()), 
-                tags: None, 
-                mirror_x: false, 
+            structure: Structure {
+                id: name.into(),
+                meta: NBTMeta { path: (folder.to_owned() + "/" + name + ".nbt") },
+                facing: Cardinal::East,
+                origin: Point3D { x: -6, y: 1, z: 0 },
+                palette: Some("medieval_spruce".into()),
+                tags: None,
+                mirror_x: false,
                 mirror_z: false,
                 style: Some(Style::Medieval),
                 weight: 1.0,
+                size_xz: (0, 0),
+                y_offset: 0,
             },
             wall_type: Some(WallType::Support),
             vertical_position: Some(VerticalWallPosition::Bottom),
@@ -195,6 +197,8 @@ mod tests {
                 mirror_z: false,
                 style: Some(Style::Desert),
                 weight: 1.0,
+                size_xz: (0, 0),
+                y_offset: 0,
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),
         };
@@ -204,5 +208,53 @@ mod tests {
         let json_path = env::current_dir().expect("Should get current dir")
             .join(folder).join(format!("{}.json", name));
         write(&json_path, roof_json).expect("Failed to write wall JSON to file");
+    }
+
+    /// One-shot maintenance: reads each NBT under `data/structures/resource_buildings/`,
+    /// computes its bounding box and subgrade depth, and patches `size_xz` /
+    /// `y_offset` into the sidecar JSON. Run with `cargo test
+    /// migrate_resource_building_metadata -- --ignored --nocapture` whenever a
+    /// resource-building NBT is added or replaced.
+    #[test]
+    #[ignore]
+    fn migrate_resource_building_metadata() {
+        let structures = Structure::load().expect("Failed to load structures");
+        let dir = std::path::Path::new("data/structures/resource_buildings");
+        for entry in std::fs::read_dir(dir).expect("Failed to read resource_buildings dir") {
+            let path = entry.expect("Failed to read entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .expect("Filename was not valid unicode")
+                .to_string();
+            let key = StructureType(id.clone());
+            let structure = structures
+                .get(&key)
+                .unwrap_or_else(|| panic!("No loaded structure with id '{}'", id));
+
+            let raw = std::fs::read_to_string(&path).expect("Failed to read JSON");
+            let mut value: serde_json::Value =
+                serde_json::from_str(&raw).expect("Failed to parse JSON");
+            let obj = value.as_object_mut().expect("Expected top-level JSON object");
+            obj.insert(
+                "size_xz".to_string(),
+                serde_json::json!([structure.size_xz.0, structure.size_xz.1]),
+            );
+            obj.insert(
+                "y_offset".to_string(),
+                serde_json::json!(structure.y_offset),
+            );
+
+            let updated = serde_json::to_string_pretty(&value)
+                .expect("Failed to serialise updated JSON");
+            std::fs::write(&path, updated + "\n").expect("Failed to write JSON");
+            println!(
+                "Updated {}: size_xz=({}, {}), y_offset={}",
+                id, structure.size_xz.0, structure.size_xz.1, structure.y_offset
+            );
+        }
     }
 }
