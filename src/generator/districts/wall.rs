@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, env, hash::Hash};
+use std::collections::{HashMap, HashSet};
 use log::info;
 use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
@@ -20,22 +20,11 @@ pub enum WallType { //used for both interal wall calculations and for choosing w
 pub fn get_wall_points(
     inner_points: &HashSet<Point2D>,
     editor: &mut Editor,
-) -> (HashSet<Point2D>) {
-    let mut wall_points = get_edge(inner_points);
-
-    // Collect points to remove to avoid mutating while iterating
-    let mut to_remove = Vec::new();
+) -> HashSet<Point2D> {
+    let wall_points = get_edge(inner_points);
 
     for point in &wall_points {
         editor.world_mut().claim(*point, BuildClaim::Wall); // mark wall points as claimed
-        //let neighbours = get_neighbours_in_set(*point, inner_points);
-        //if neighbours.len() == 1 { // supposed to remove extra points
-        //    to_remove.push(*point);
-        //}
-    }
-
-    for point in to_remove {
-        wall_points.remove(&point);
     }
 
     wall_points
@@ -85,7 +74,6 @@ pub fn order_wall_points(
             // If no next point is found, we need to reverse the direction
             if reverse_check {
                 info!("Failed to find a neighbour");
-                reverse_check = false;
                 if ordered_vec.len() > 20 {
                     // Killing small wall structures, shouldnt really need to be here since those small urban sections shouldnt happen
                     list_of_ordered_vec.push(ordered_vec.clone());
@@ -273,11 +261,11 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
         if wall_type == &WallType::Water {
             continue;
         } else {
-            if (i == 0 || i == enhanced_wall_points.len() - 1 
+            if i == 0 || i == enhanced_wall_points.len() - 1
                 || enhanced_wall_points[i + 1].2 == WallType::Water
                 || enhanced_wall_points[i - 1].2 == WallType::Water
                 || point.y > enhanced_wall_points[i + 1].0.y + 4
-                || point.y > enhanced_wall_points[i - 1].0.y + 4) {  
+                || point.y > enhanced_wall_points[i - 1].0.y + 4 {  
                 fill_in = true; // Fill in the first and last points if they are StandardWithInner
             }
             if wall_type == &WallType::WaterWall {
@@ -367,7 +355,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
         }
     }
 
-    for (i, point) in inner_wall_points.clone().iter().enumerate() {
+    for (_i, point) in inner_wall_points.clone().iter().enumerate() {
         if !walkway_points.contains(&point.drop_y()) {
             for y in editor.world().get_height_at(point.drop_y())..=point.y {
                 material_placer.place_block(editor, point.drop_y().add_y(y), material_id, BlockForm::Block, None, None).await;
@@ -485,17 +473,12 @@ pub fn check_water(
     editor: &mut Editor,
 ) -> Vec<(Point3D, Vec<Cardinal>, WallType)> {
     let mut enhanced_wall_points = wall_points.clone();
-    let mut buildable = false;
-    let mut long_water = true;
 
     for i in 0..enhanced_wall_points.len() {
         let point = &enhanced_wall_points[i].0;
         if editor.world().is_water(point.drop_y()) {
             enhanced_wall_points[i].2 = WallType::WaterWall;
             // TO DO, implement more complex logic for water walls
-        } else {
-            buildable = false;
-            long_water = false;
         }
     }
     enhanced_wall_points
