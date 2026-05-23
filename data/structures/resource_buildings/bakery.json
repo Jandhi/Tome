@@ -1,14 +1,14 @@
 {
   "id": "bakery",
   "origin": {
-    "x": 2,
+    "x": 11,
     "y": 0,
-    "z": 2
+    "z": 8
   },
   "path": "data/structures/resource_buildings/bakery.nbt",
   "size_xz": [
-    5,
-    5
+    23,
+    17
   ],
   "y_offset": 0
 }

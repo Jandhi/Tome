@@ -151,13 +151,13 @@ mod tests {
 
         let plan = registry.select_production(&available, &mut rng);
 
-        // Furniture chain requires sawmill (planks) and carpentry (furniture)
+        // Furniture chain requires sawmill (planks) and carpenter (furniture)
         assert!(plan.building_run_cost.contains_key("sawmill"), "sawmill needed for planks");
-        assert!(plan.building_run_cost.contains_key("carpentry"), "carpentry needed for furniture");
-        // Charcoal chain requires kiln — but charcoal is tier 1, not tier 2,
+        assert!(plan.building_run_cost.contains_key("carpenter"), "carpenter needed for furniture");
+        // Charcoal chain requires charcoal_burner — but charcoal is tier 1, not tier 2,
         // so it only appears if it feeds a tier-2 chain. With only wood, no tier-2 chain
-        // needs charcoal, so kiln should NOT appear.
-        assert!(!plan.building_run_cost.contains_key("kiln"), "kiln not needed without a charcoal consumer");
+        // needs charcoal, so charcoal_burner should NOT appear.
+        assert!(!plan.building_run_cost.contains_key("charcoal_burner"), "charcoal_burner not needed without a charcoal consumer");
     }
 
     #[test]
@@ -489,32 +489,62 @@ mod tests {
         let available: HashSet<String> = remaining.keys().cloned().collect();
         let plan = registry.select_production(&available, &mut rng);
 
-        // For each chain (highest priority first), allocate as many units as remaining
-        // raw resources allow, then deduct those resources.
+        // For each chain (highest priority first), allocate a proportional raw budget
+        // and forward-execute its recipes. Each recipe consumes input fractionally but
+        // produces FLOORED integer output — anything below 1 unit of an intermediate is
+        // lost and can't flow to the next building. Matches `resolve_for_districts`.
         let mut goods_produced: Vec<(String, u32)> = Vec::new();
+        let mut total_buildings: HashMap<String, u32> = HashMap::new();
+        let mut intermediate_pool: HashMap<String, u32> = HashMap::new();
         for chain in &plan.chains {
             let cost = match registry.raw_cost(&chain.finished_good) {
                 Some(c) => c.clone(),
                 None => continue,
             };
+            let raw_units_f = cost.iter()
+                .map(|(raw, per)| remaining.get(raw).copied().unwrap_or(0.0) / per)
+                .fold(f32::INFINITY, f32::min);
+            if !raw_units_f.is_finite() || raw_units_f <= 0.0 { continue; }
 
-            let units = cost.iter()
-                .map(|(raw, cost_per)| {
-                    let have = remaining.get(raw).copied().unwrap_or(0.0);
-                    (have / cost_per).floor() as u32
-                })
-                .min()
-                .unwrap_or(0);
-
-            if units == 0 {
-                continue;
+            let mut local: HashMap<String, f32> = cost.iter()
+                .map(|(raw, per)| (raw.clone(), per * raw_units_f))
+                .collect();
+            for (raw, per) in &cost {
+                *remaining.entry(raw.clone()).or_insert(0.0) -= per * raw_units_f;
             }
 
-            for (raw, cost_per) in &cost {
-                *remaining.entry(raw.clone()).or_insert(0.0) -= cost_per * units as f32;
+            for recipe_id in &chain.recipe_ids {
+                let recipe = &registry.recipes()[recipe_id];
+                if recipe.inputs.is_empty() { continue; }
+
+                let batches = recipe.inputs.iter()
+                    .map(|(input, qty)| local.get(input).copied().unwrap_or(0.0) / *qty as f32)
+                    .fold(f32::INFINITY, f32::min);
+                if !batches.is_finite() || batches <= 0.0 { continue; }
+
+                for (input, qty) in &recipe.inputs {
+                    *local.entry(input.clone()).or_insert(0.0) -= batches * *qty as f32;
+                }
+                for (output, qty) in &recipe.outputs {
+                    let produced = (batches * *qty as f32).floor();
+                    *local.entry(output.clone()).or_insert(0.0) += produced;
+                }
+                *total_buildings.entry(recipe.building.clone()).or_insert(0) += batches.ceil() as u32;
             }
 
-            goods_produced.push((chain.finished_good.clone(), units));
+            let finished_qty = local.get(&chain.finished_good).copied().unwrap_or(0.0).floor() as u32;
+            if finished_qty > 0 {
+                goods_produced.push((chain.finished_good.clone(), finished_qty));
+            }
+            for (id, qty) in &local {
+                if id == &chain.finished_good { continue; }
+                if registry.resources().get(id).map(|r| r.tier == 1).unwrap_or(false) {
+                    let units = qty.floor() as u32;
+                    if units > 0 {
+                        *intermediate_pool.entry(id.clone()).or_insert(0) += units;
+                    }
+                }
+            }
         }
 
         // ── Report ──────────────────────────────────────────────────────────────
@@ -528,21 +558,6 @@ mod tests {
         }
 
         println!("║");
-        // Scale each chain's building run cost by units produced, then ceil.
-        // building_run_cost is buildings-per-1-unit, so multiply by units and round up.
-        let mut total_buildings: HashMap<String, u32> = HashMap::new();
-        for chain in &plan.chains {
-            let units = goods_produced.iter()
-                .find(|(g, _)| g == &chain.finished_good)
-                .map(|(_, u)| *u)
-                .unwrap_or(0);
-            if units == 0 { continue; }
-            for (building, runs_per_unit) in &chain.building_run_cost {
-                let count = (runs_per_unit * units as f32).ceil() as u32;
-                *total_buildings.entry(building.clone()).or_insert(0) += count;
-            }
-        }
-
         println!("║ Buildings required:");
         let mut buildings: Vec<_> = total_buildings.iter().collect();
         buildings.sort_by(|(a_name, a_count), (b_name, b_count)| b_count.cmp(a_count).then(a_name.cmp(b_name)));
@@ -556,6 +571,23 @@ mod tests {
             println!("║   (none)");
         }
         for (good, qty) in &goods_produced {
+            println!("║   {:<20} x{}", good, qty);
+        }
+
+        // Tier-1 intermediates that piled up because downstream recipes couldn't consume
+        // them (or fractional output got floored away). These are surfaced as production.
+        let mut intermediate_leftovers: Vec<(String, u32)> = intermediate_pool.iter()
+            .filter(|(_, q)| **q > 0)
+            .map(|(k, v)| (k.clone(), *v))
+            .collect();
+        intermediate_leftovers.sort_by_key(|(r, _)| r.clone());
+
+        println!("║");
+        println!("║ Leftover intermediate goods:");
+        if intermediate_leftovers.is_empty() {
+            println!("║   (none)");
+        }
+        for (good, qty) in &intermediate_leftovers {
             println!("║   {:<20} x{}", good, qty);
         }
 

@@ -1,5 +1,11 @@
 use fastnbt::Value;
 
+/// Escape a string for use inside an SNBT double-quoted literal. Backslashes
+/// must be escaped before quotes so the inserted `\` are not double-escaped.
+fn escape_snbt(s : &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 pub fn to_snbt(value : &Value) -> String {
     match value {
         Value::Byte(b) => format!("{}b", b),
@@ -8,7 +14,7 @@ pub fn to_snbt(value : &Value) -> String {
         Value::Long(l) => format!("{}l", l),
         Value::Float(f) => format!("{}f", f),
         Value::Double(d) => format!("{}d", d),
-        Value::String(s) => format!("\"{}\"", s),
+        Value::String(s) => format!("\"{}\"", escape_snbt(s)),
         Value::ByteArray(byte_array) => {
             let mut result = String::new();
             result.push_str("[B;");
@@ -71,9 +77,9 @@ pub fn to_snbt(value : &Value) -> String {
                     result.push(',');
                 }
 
-                if key.contains(' ') || key.contains(':') || key.contains('{') || key.contains('}') {
+                if key.contains(' ') || key.contains(':') || key.contains('{') || key.contains('}') || key.contains('"') || key.contains('\\') {
                     result.push('"');
-                    result.push_str(key);
+                    result.push_str(&escape_snbt(key));
                     result.push('"');
                 } else {
                     result.push_str(key);

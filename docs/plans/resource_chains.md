@@ -49,16 +49,16 @@ All resource chain data lives in `data/resource_chains/`.
 
 | Chain | Raw Inputs | Finished Good | Buildings |
 |-------|-----------|---------------|-----------|
-| Wood → Planks → Furniture | wood | furniture | sawmill, carpentry |
-| Wood → Charcoal → (+ Iron) → Steel → Tools | wood, iron_ore | tools | kiln, smelter, forge, smithy |
+| Wood → Planks → Furniture | wood | furniture | sawmill, carpenter |
+| Wood → Charcoal → (+ Iron) → Steel → Tools | wood, iron_ore | tools | charcoal_burner, smelter, forge, smithy |
 | Wheat → Flour → Bread | wheat | bread | mill, bakery |
 | Wheat + Flour → Ale | wheat | ale | mill, brewery |
 | Honey → Wax → Candles | honey | candles | apiary, chandlery |
 | Honey + Wheat → Mead | honey, wheat | mead | brewery |
 | Sugar Cane → Sugar + Cocoa → Chocolate | sugar_cane, cocoa_beans | chocolate | mill, confectionery |
 | Wool → Cloth → Clothing | wool | clothing | loom, tailor |
-| Sand + Charcoal → Glass → Panes | sand, wood | glass_panes | kiln, glassworks |
-| Clay + Charcoal → Bricks → Pottery | clay, wood | pottery | kiln, pottery_works |
+| Sand + Charcoal → Glass → Panes | sand, wood | glass_panes | charcoal_burner, glassworks |
+| Clay + Charcoal → Bricks → Pottery | clay, wood | pottery | charcoal_burner, pottery_works |
 | Sugar Cane → Paper + Leather → Books | sugar_cane, leather | books | paper_mill, scriptorium |
 | Flint + Feathers → Arrows | flint, feathers | arrows | fletcher |
 

@@ -1,14 +1,14 @@
 {
   "id": "smelter",
   "origin": {
-    "x": 2,
+    "x": 6,
     "y": 0,
-    "z": 2
+    "z": 6
   },
   "path": "data/structures/resource_buildings/smelter.nbt",
   "size_xz": [
-    5,
-    5
+    13,
+    13
   ],
   "y_offset": 0
 }

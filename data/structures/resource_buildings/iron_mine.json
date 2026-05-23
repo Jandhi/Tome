@@ -1,14 +1,14 @@
 {
   "id": "iron_mine",
   "origin": {
-    "x": 2,
+    "x": 4,
     "y": 0,
-    "z": 2
+    "z": 4
   },
   "path": "data/structures/resource_buildings/iron_mine.nbt",
   "size_xz": [
-    5,
-    5
+    9,
+    9
   ],
   "y_offset": 0
 }

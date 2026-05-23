@@ -1,0 +1,14 @@
+{
+  "id": "charcoal_burner",
+  "origin": {
+    "x": 5,
+    "y": 0,
+    "z": 5
+  },
+  "path": "data/structures/resource_buildings/charcoal_burner.nbt",
+  "size_xz": [
+    11,
+    11
+  ],
+  "y_offset": 0
+}

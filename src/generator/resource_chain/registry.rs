@@ -14,7 +14,8 @@ use super::types::{BiomeResourcesFile, DistrictResourceAssignment, RecipeDef, Re
 pub struct ChainSelection {
     /// The tier-2 good at the end of this chain.
     pub finished_good: String,
-    /// Recipe IDs in dependency traversal order (finished good first, raw inputs last).
+    /// Recipe IDs in topological order (raw inputs first, finished good last) — safe
+    /// to iterate forward when executing recipe-by-recipe.
     pub recipe_ids: Vec<String>,
     /// Buildings needed per 1 unit of finished good produced.
     /// Accounts for recipe batch sizes: a recipe that outputs 8 arrows from 1 run
@@ -377,43 +378,28 @@ impl ResourceRegistry {
                 *trial_supply.entry(a.resource.clone()).or_insert(0) += 2;
             }
 
-            // Run chain allocation on trial supply.
+            // Run chain allocation on trial supply via the same forward-execution model
+            // used for the real pass, so cap decisions reflect actual production output.
             let trial_available: HashSet<String> = trial_supply.keys().cloned().collect();
-            let trial_resolved = self.resolve(&trial_available);
             let trial_plan = self.select_production(&trial_available, &mut rng.derive());
             let mut trial_remaining: HashMap<String, f32> = trial_supply.iter()
                 .map(|(k, &v)| (k.clone(), v as f32))
                 .collect();
             let mut trial_finished: Vec<(String, u32)> = Vec::new();
+            let mut trial_intermediate_pool: HashMap<String, u32> = HashMap::new();
 
             for chain in &trial_plan.chains {
-                let cost = match self.raw_cost(&chain.finished_good) {
-                    Some(c) => c.clone(),
-                    None => continue,
-                };
-                let units = cost.iter()
-                    .map(|(raw, per)| (trial_remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
-                    .min()
-                    .unwrap_or(0);
-                if units == 0 { continue; }
-                for (raw, per) in &cost {
-                    *trial_remaining.entry(raw.clone()).or_insert(0.0) -= per * units as f32;
+                let (finished_qty, intermediates, _) = self.execute_chain(chain, &mut trial_remaining);
+                if finished_qty > 0 {
+                    trial_finished.push((chain.finished_good.clone(), finished_qty));
                 }
-                trial_finished.push((chain.finished_good.clone(), units));
+                for (id, q) in intermediates {
+                    *trial_intermediate_pool.entry(id).or_insert(0) += q;
+                }
             }
 
-            // Compute intermediate leftovers producible from remaining raw supply.
-            let trial_intermediates: Vec<(String, u32)> = trial_resolved.producible.iter()
-                .filter(|id| self.resources.get(*id).map(|r| r.tier == 1).unwrap_or(false))
-                .filter_map(|id| {
-                    let cost = self.raw_cost(id)?;
-                    if cost.is_empty() { return None; }
-                    let units = cost.iter()
-                        .map(|(raw, per)| (trial_remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
-                        .min()
-                        .unwrap_or(0);
-                    if units == 0 { None } else { Some((id.clone(), units)) }
-                })
+            let trial_intermediates: Vec<(String, u32)> = trial_intermediate_pool.into_iter()
+                .filter(|(_, q)| *q > 0)
                 .collect();
 
             let mut newly_capped: Vec<String> = Vec::new();
@@ -487,55 +473,47 @@ impl ResourceRegistry {
         let resolved = self.resolve(&available);
         let plan = self.select_production(&available, rng);
 
-        // Allocate supply across chains (highest priority first).
+        // Allocate supply across chains (highest priority first). Each chain gets a
+        // proportional raw budget based on `raw_cost`, then forward-executes its recipes:
+        // every building consumes input as floats but produces FLOORED integer output, so
+        // any fractional output (e.g. 2.5 of a resource) is truncated to 2 — the rest is lost
+        // and cannot flow to the next building.
         let mut remaining: HashMap<String, f32> = supply.iter()
             .map(|(k, &v)| (k.clone(), v as f32))
             .collect();
         let mut finished_goods: Vec<(String, u32)> = Vec::new();
         let mut processing_buildings: HashMap<String, u32> = HashMap::new();
+        let mut intermediate_pool: HashMap<String, u32> = HashMap::new();
 
         for chain in &plan.chains {
-            let cost = match self.raw_cost(&chain.finished_good) {
-                Some(c) => c.clone(),
-                None => continue,
-            };
-            let units = cost.iter()
-                .map(|(raw, per)| (remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
-                .min()
-                .unwrap_or(0);
-            if units == 0 { continue; }
-
-            for (raw, per) in &cost {
-                *remaining.entry(raw.clone()).or_insert(0.0) -= per * units as f32;
+            let (finished_qty, intermediates, buildings) = self.execute_chain(chain, &mut remaining);
+            if finished_qty > 0 {
+                finished_goods.push((chain.finished_good.clone(), finished_qty));
             }
-            finished_goods.push((chain.finished_good.clone(), units));
-
-            for (building, runs_per_unit) in &chain.building_run_cost {
-                if gather_buildings.contains_key(building) { continue; }
-                let count = (runs_per_unit * units as f32).ceil() as u32;
-                *processing_buildings.entry(building.clone()).or_insert(0) += count;
+            for (b, c) in buildings {
+                if gather_buildings.contains_key(&b) { continue; }
+                *processing_buildings.entry(b).or_insert(0) += c;
+            }
+            for (id, q) in intermediates {
+                *intermediate_pool.entry(id).or_insert(0) += q;
             }
         }
+        let _ = resolved; // intermediate leftovers now come from forward execution, not the raw-cost projection
 
-        // Leftover raw goods.
-        let mut leftover_goods: Vec<(String, u32)> = remaining.iter()
-            .filter(|(_, &qty)| qty.floor() >= 1.0)
-            .map(|(r, &qty)| (r.clone(), qty.floor() as u32))
+        // Leftover raw goods (tier 0).
+        let mut leftover_goods: Vec<(String, u32)> = self.resources.iter()
+            .filter(|(_, def)| def.tier == 0)
+            .filter_map(|(id, _)| {
+                let qty = remaining.get(id).copied().unwrap_or(0.0).floor() as u32;
+                if qty == 0 { None } else { Some((id.clone(), qty)) }
+            })
             .collect();
         leftover_goods.sort_by_key(|(r, _)| r.clone());
 
-        // Leftover intermediate goods producible from remaining raw supply.
-        let mut intermediate_leftovers: Vec<(String, u32)> = resolved.producible.iter()
-            .filter(|id| self.resources.get(*id).map(|r| r.tier == 1).unwrap_or(false))
-            .filter_map(|id| {
-                let cost = self.raw_cost(id)?;
-                if cost.is_empty() { return None; }
-                let units = cost.iter()
-                    .map(|(raw, per)| (remaining.get(raw).copied().unwrap_or(0.0) / per).floor() as u32)
-                    .min()
-                    .unwrap_or(0);
-                if units == 0 { None } else { Some((id.clone(), units)) }
-            })
+        // Intermediate goods (tier 1) that piled up because downstream recipes couldn't
+        // consume them — surfaced as leftover production.
+        let mut intermediate_leftovers: Vec<(String, u32)> = intermediate_pool.into_iter()
+            .filter(|(_, q)| *q > 0)
             .collect();
         intermediate_leftovers.sort_by_key(|(r, _)| r.clone());
         leftover_goods.extend(intermediate_leftovers);
@@ -765,8 +743,82 @@ impl ResourceRegistry {
         format!("[\n{}\n]", parts.join(",\n"))
     }
 
-    /// DFS walk backwards from a resource, accumulating recipe IDs (deduplicated)
-    /// and raw inputs.
+    /// Runs a single chain forward, allocating a proportional slice of `remaining` raw
+    /// supply to this chain and then firing each recipe in topological order.
+    /// Output is FLOORED at every recipe so fractional outputs (e.g. 2.5 → 2) cannot flow
+    /// downstream — the discarded fraction is lost. Returns the finished-good quantity,
+    /// any tier-1 intermediates left over after the chain ran, and the building counts
+    /// (ceil of fractional batches per recipe).
+    fn execute_chain(
+        &self,
+        chain: &ChainSelection,
+        remaining: &mut HashMap<String, f32>,
+    ) -> (u32, HashMap<String, u32>, HashMap<String, u32>) {
+        let cost = match self.raw_cost(&chain.finished_good) {
+            Some(c) => c.clone(),
+            None => return (0, HashMap::new(), HashMap::new()),
+        };
+
+        // Fractional finished-good units the chain's raw inputs support.
+        let raw_units_f = cost.iter()
+            .map(|(raw, per)| remaining.get(raw).copied().unwrap_or(0.0) / per)
+            .fold(f32::INFINITY, f32::min);
+        if !raw_units_f.is_finite() || raw_units_f <= 0.0 {
+            return (0, HashMap::new(), HashMap::new());
+        }
+
+        // Carve the chain's raw allocation out of the shared `remaining` pool.
+        let mut local: HashMap<String, f32> = cost.iter()
+            .map(|(raw, per)| (raw.clone(), per * raw_units_f))
+            .collect();
+        for (raw, per) in &cost {
+            *remaining.entry(raw.clone()).or_insert(0.0) -= per * raw_units_f;
+        }
+
+        // Fire each recipe in topological order. Inputs deplete fractionally,
+        // outputs are floored before being added to local stock.
+        let mut buildings: HashMap<String, u32> = HashMap::new();
+        for recipe_id in &chain.recipe_ids {
+            let recipe = &self.recipes[recipe_id];
+            if recipe.inputs.is_empty() { continue; }
+
+            let batches = recipe.inputs.iter()
+                .map(|(input, qty)| local.get(input).copied().unwrap_or(0.0) / *qty as f32)
+                .fold(f32::INFINITY, f32::min);
+            if !batches.is_finite() || batches <= 0.0 { continue; }
+
+            for (input, qty) in &recipe.inputs {
+                *local.entry(input.clone()).or_insert(0.0) -= batches * *qty as f32;
+            }
+            for (output, qty) in &recipe.outputs {
+                let produced = (batches * *qty as f32).floor();
+                *local.entry(output.clone()).or_insert(0.0) += produced;
+            }
+
+            *buildings.entry(recipe.building.clone()).or_insert(0) += batches.ceil() as u32;
+        }
+
+        let finished_qty = local.get(&chain.finished_good).copied().unwrap_or(0.0).floor() as u32;
+
+        // Tier-1 stock that survived the chain run = intermediate leftover.
+        let mut intermediates: HashMap<String, u32> = HashMap::new();
+        for (id, qty) in &local {
+            if id == &chain.finished_good { continue; }
+            if self.resources.get(id).map(|r| r.tier == 1).unwrap_or(false) {
+                let units = qty.floor() as u32;
+                if units > 0 {
+                    intermediates.insert(id.clone(), units);
+                }
+            }
+        }
+
+        (finished_qty, intermediates, buildings)
+    }
+
+    /// Post-order DFS walk backwards from a resource, accumulating recipe IDs in
+    /// topological order (raw inputs first, finished good last) and recording the
+    /// raw inputs touched. Inputs are visited in sorted order so the resulting
+    /// order is deterministic across HashMap iterations.
     fn trace_resource(
         &self,
         resource_id: &str,
@@ -779,20 +831,20 @@ impl ResourceRegistry {
                 raw_inputs.insert(resource_id.to_string());
             }
             Some(recipe_id) => {
+                if recipe_ids.contains(recipe_id) {
+                    return;
+                }
                 let recipe = &self.recipes[recipe_id];
                 if recipe.inputs.is_empty() {
-                    // Gather recipe: resource is still a raw input, but record the recipe
-                    // so its building is included in chain costs.
                     raw_inputs.insert(resource_id.to_string());
-                    if !recipe_ids.contains(recipe_id) {
-                        recipe_ids.push(recipe_id.clone());
-                    }
-                } else if !recipe_ids.contains(recipe_id) {
                     recipe_ids.push(recipe_id.clone());
-                    let inputs: Vec<String> = recipe.inputs.keys().cloned().collect();
+                } else {
+                    let mut inputs: Vec<String> = recipe.inputs.keys().cloned().collect();
+                    inputs.sort();
                     for input in inputs {
                         self.trace_resource(&input, recipe_ids, raw_inputs);
                     }
+                    recipe_ids.push(recipe_id.clone());
                 }
             }
         }
