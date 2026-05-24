@@ -9,6 +9,7 @@ use crate::generator::nbts::{Structure, StructureType};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
+use super::production_painter::{ProductionPainter, ProductionPaintersFile};
 use super::types::{BiomeResourcesFile, DistrictResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
 
 pub struct ChainSelection {
@@ -66,6 +67,8 @@ pub struct ResourceRegistry {
     raw_cost: HashMap<String, HashMap<String, f32>>,
     /// biome id (e.g. "minecraft:forest") -> raw resource ids
     biome_resources: HashMap<String, Vec<String>>,
+    /// painter name -> production painter definition
+    pub production_painters: HashMap<String, ProductionPainter>,
 }
 
 pub struct ResolvedChains {
@@ -89,12 +92,16 @@ impl ResourceRegistry {
         let resources: ResourcesFile = load_yaml(base.join("resources.yaml"))?;
         let recipes: RecipesFile = load_yaml(base.join("recipes.yaml"))?;
         let biome_resources: BiomeResourcesFile = load_yaml(base.join("biome_resources.yaml"))?;
+        let painters_file: ProductionPaintersFile = load_yaml(base.join("production_painters.yaml"))?;
 
-        Self::from_parts(
+        let mut registry = Self::from_parts(
             resources.resources,
             recipes.recipes,
             biome_resources.biome_resources,
-        )
+        )?;
+        registry.production_painters = painters_file.production_painters;
+        registry.validate_painters()?;
+        Ok(registry)
     }
 
     pub(super) fn from_parts(
@@ -118,6 +125,7 @@ impl ResourceRegistry {
             consumed_by,
             raw_cost,
             biome_resources,
+            production_painters: HashMap::new(),
         })
     }
 
@@ -226,6 +234,37 @@ impl ResourceRegistry {
             }
         }
         bail!(msg)
+    }
+
+    /// Verifies that every gather recipe's `production_painter` name exists in the
+    /// loaded painters map. Called from `load()` after painters are populated.
+    pub fn validate_painters(&self) -> anyhow::Result<()> {
+        let mut missing: Vec<String> = Vec::new();
+        for recipe in self.recipes.values() {
+            if let Some(painter_name) = &recipe.production_painter {
+                if !self.production_painters.contains_key(painter_name.as_str()) {
+                    missing.push(painter_name.clone());
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        if !missing.is_empty() {
+            bail!(
+                "Resource chain painter validation failed. Missing painters in production_painters.yaml: {}",
+                missing.join(", ")
+            );
+        }
+        Ok(())
+    }
+
+    /// Returns the full gather recipe for a raw resource — the recipe that produces
+    /// it with no inputs. Returns `None` if no such recipe exists.
+    fn gather_recipe(&self, resource_id: &str) -> Option<&RecipeDef> {
+        self.produced_by.get(resource_id)?
+            .iter()
+            .find(|recipe_id| self.recipes[*recipe_id].inputs.is_empty())
+            .map(|recipe_id| &self.recipes[recipe_id])
     }
 
     /// Given available raw resources, returns a ranked production plan:
@@ -581,9 +620,11 @@ impl ResourceRegistry {
                 .collect();
 
             let (resource, _) = scored.into_iter().max_by_key(|(_, s)| *s).unwrap();
-            let building = self.gather_building(&resource).unwrap().to_string();
+            let recipe = self.gather_recipe(&resource).unwrap();
+            let building = recipe.building.clone();
+            let production_painter = recipe.production_painter.clone();
             assigned_set.insert(resource.clone());
-            result.insert(id, DistrictResourceAssignment { resource, building });
+            result.insert(id, DistrictResourceAssignment { resource, building, production_painter });
         }
 
         result
@@ -592,10 +633,7 @@ impl ResourceRegistry {
     /// Returns the gathering building for a raw resource — the recipe that produces
     /// it with no inputs. Returns `None` if no such recipe exists.
     fn gather_building(&self, resource_id: &str) -> Option<&str> {
-        self.produced_by.get(resource_id)?
-            .iter()
-            .find(|recipe_id| self.recipes[*recipe_id].inputs.is_empty())
-            .map(|recipe_id| self.recipes[recipe_id].building.as_str())
+        self.gather_recipe(resource_id).map(|r| r.building.as_str())
     }
 
     /// Scores a raw resource by how many tier-2 finished goods require it anywhere

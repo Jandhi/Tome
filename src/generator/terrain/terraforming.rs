@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::{editor::Editor, geometry::Point3D};
+use crate::{editor::Editor, geometry::{average_to_neighbours_5_away_multi, Point2D, Point3D}};
 
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     for point in points {
@@ -28,4 +28,26 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
     }
     
     editor.world_mut().set_heights(points);
+}
+
+/// Smooths terrain over `points` using repeated wide-radius neighbour averaging
+/// (same algorithm as road smoothing). `strength` in [0.0, 1.0] maps to 0–5 passes.
+pub async fn smooth_terrain(points: &HashSet<Point2D>, strength: f32, editor: &mut Editor) {
+    const MAX_ITERATIONS: usize = 5;
+    let iterations = (strength.clamp(0.0, 1.0) * MAX_ITERATIONS as f32).round() as usize;
+    if iterations == 0 {
+        return;
+    }
+
+    let points_3d: HashSet<Point3D> = points
+        .iter()
+        .filter(|&&p| !editor.world().is_water(p))
+        .map(|&p| {
+            let y = editor.world().get_non_tree_height(p);
+            Point3D::new(p.x, y, p.y)
+        })
+        .collect();
+
+    let smoothed = average_to_neighbours_5_away_multi(&points_3d, iterations);
+    force_height(editor, &smoothed, true).await;
 }

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use anyhow::Result;
 use log::{info, warn};
-use strum::IntoEnumIterator;
 
 use crate::{
     editor::Editor,
@@ -139,7 +138,7 @@ pub async fn place_rural_building(
         .copied()
         .collect();
 
-    let best = select_best_candidate(&centres, &super_district.data.points_2d, structure, editor);
+    let best = select_best_candidate(&centres, &super_district.data.points_2d, structure, editor, rng);
     let Some((candidate, score, rect)) = best else {
         warn!(
             "No viable placement for '{}' in super-district {:?}",
@@ -215,7 +214,7 @@ pub async fn place_urban_building(
         .copied()
         .collect();
 
-    let best = select_best_candidate(&centres, &urban_points, structure, editor);
+    let best = select_best_candidate(&centres, &urban_points, structure, editor, rng);
     let Some((candidate, score, rect)) = best else {
         warn!("No viable urban placement for '{}'", structure.id.0);
         return Ok(());
@@ -274,15 +273,35 @@ pub async fn place_urban_buildings(
 /// Scans candidate `(centre, direction)` pairs against `points_2d` (the bounds the
 /// footprint must lie within), rejecting overlapping claims and water, and returns
 /// the lowest-scoring candidate with its rect.
+///
+/// For each centre the preferred facing direction is the one pointing toward the
+/// nearest road cell within `ROAD_SEARCH_RADIUS`. When no road is found a random
+/// cardinal is chosen instead. The three remaining directions act as fallbacks in
+/// case the preferred one produces an invalid footprint.
 fn select_best_candidate(
     centres: &[Point2D],
     points_2d: &HashSet<Point2D>,
     structure: &Structure,
     editor: &Editor,
+    rng: &mut RNG,
 ) -> Option<(Candidate, CandidateScore, Rect2D)> {
+    const ALL_CARDINALS: [Cardinal; 4] =
+        [Cardinal::North, Cardinal::East, Cardinal::South, Cardinal::West];
+
     let mut best: Option<(Candidate, CandidateScore, Rect2D)> = None;
     for centre in centres {
-        for direction in Cardinal::iter() {
+        let preferred = nearest_road_direction(*centre, ROAD_SEARCH_RADIUS, editor)
+            .unwrap_or_else(|| *rng.choose(&ALL_CARDINALS));
+
+        // Try preferred direction first, then the three fallbacks in clockwise order.
+        let directions = [
+            preferred,
+            preferred.rotate_right(),
+            preferred.opposite(),
+            preferred.rotate_left(),
+        ];
+
+        for direction in directions {
             let candidate = Candidate { centre: *centre, direction };
             let rect = footprint_rect(structure, candidate);
 
@@ -306,9 +325,46 @@ fn select_best_candidate(
                 }
                 _ => {}
             }
+            // Use the first valid direction for this centre (preferred direction wins).
+            break;
         }
     }
     best
+}
+
+/// Returns the `Cardinal` direction from `centre` toward the nearest road cell
+/// within `radius` (Manhattan distance). Returns `None` when no road is found.
+fn nearest_road_direction(centre: Point2D, radius: i32, editor: &Editor) -> Option<Cardinal> {
+    let world = editor.world();
+    let mut nearest_dist = i32::MAX;
+    let mut nearest_road: Option<Point2D> = None;
+
+    for x in (centre.x - radius)..=(centre.x + radius) {
+        for z in (centre.y - radius)..=(centre.y + radius) {
+            let p = Point2D::new(x, z);
+            if !world.is_in_bounds_2d(p) {
+                continue;
+            }
+            if matches!(world.get_claim(p), Some(BuildClaim::Path(_))) {
+                let dist = (x - centre.x).abs() + (z - centre.y).abs();
+                if dist < nearest_dist {
+                    nearest_dist = dist;
+                    nearest_road = Some(p);
+                }
+            }
+        }
+    }
+
+    let road = nearest_road?;
+    let dx = road.x - centre.x;
+    let dz = road.y - centre.y;
+
+    // Snap the direction vector to the dominant cardinal axis.
+    if dx.abs() >= dz.abs() {
+        if dx >= 0 { Some(Cardinal::East) } else { Some(Cardinal::West) }
+    } else {
+        if dz >= 0 { Some(Cardinal::South) } else { Some(Cardinal::North) }
+    }
 }
 
 /// Clears vegetation, flattens the footprint with a tapered blend ring, places the NBT,

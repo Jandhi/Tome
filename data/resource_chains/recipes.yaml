@@ -59,15 +59,18 @@ recipes:
     outputs:
       wood: 2
     building: woodcutter_hut
+    production_painter: logging_area
 
   gather_wheat:
     inputs: {}
     outputs:
       wheat: 2
     building: farm
+    production_painter: wheat_fields
 
   gather_iron_ore:
     inputs: {}
     outputs:
       iron_ore: 2
     building: iron_mine
+    production_painter: mine_terrain

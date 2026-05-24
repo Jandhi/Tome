@@ -1,0 +1,89 @@
+paint_palettes:
+
+  # --- Agricultural ---
+
+  farmland:
+    palette:
+      "farmland[moisture=7]": 1
+    smooth: false
+    tags: [farmland]
+
+  wheat:
+    palette:
+      "wheat[age=6]": 1
+      "wheat[age=7]": 2
+    smooth: false
+    tags: [crops]
+
+  young_wheat:
+    palette:
+      "wheat[age=1]": 1
+      "wheat[age=2]": 1
+      "wheat[age=3]": 1
+      "wheat[age=4]": 1
+      "wheat[age=5]": 1
+    smooth: false
+    tags: [crops]
+
+  carrot:
+    palette:
+      "carrots[age=1]": 1
+      "carrots[age=2]": 1
+      "carrots[age=3]": 1
+      "carrots[age=4]": 1
+      "carrots[age=5]": 1
+      "carrots[age=6]": 1
+      "carrots[age=7]": 5
+    smooth: false
+    tags: [crops]
+
+  potato:
+    palette:
+      "potatoes[age=1]": 1
+      "potatoes[age=2]": 1
+      "potatoes[age=3]": 1
+      "potatoes[age=4]": 1
+      "potatoes[age=5]": 1
+      "potatoes[age=6]": 1
+      "potatoes[age=7]": 5
+    smooth: false
+    tags: [crops]
+
+  beetroot:
+    palette:
+      "beetroots[age=0]": 1
+      "beetroots[age=1]": 1
+      "beetroots[age=2]": 2
+      "beetroots[age=3]": 2
+    smooth: false
+    tags: [crops]
+
+  # --- Roads ---
+
+  rural_road:
+    palette:
+      rooted_dirt: 3
+      dirt: 4
+      coarse_dirt: 3
+      packed_mud: 5
+    smooth: false
+
+  rural_road_wet:
+    palette:
+      brown_concrete_powder: 5
+      podzol: 7
+      brown_concrete: 2
+      farmland: 1
+      brown_terracotta: 2
+      brown_wool: 2
+    smooth: false
+
+  # --- Mining / Excavation ---
+
+  mine_ground:
+    palette:
+      coarse_dirt: 3
+      gravel: 4
+      stone: 2
+      cobblestone: 1
+    smooth: false

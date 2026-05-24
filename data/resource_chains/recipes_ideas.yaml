@@ -1,25 +1,5 @@
 recipes:
   # --- Wood / Forest ---
-  wood_to_planks:
-    inputs:
-      wood: 2
-    outputs:
-      planks: 4
-    building: sawmill
-
-  planks_to_furniture:
-    inputs:
-      planks: 2
-    outputs:
-      furniture: 1
-    building: carpenter
-
-  wood_to_charcoal:
-    inputs:
-      wood: 2
-    outputs:
-      charcoal: 2
-    building: charcoal_burner
 
   sugar_cane_to_paper:
     inputs:
@@ -37,19 +17,6 @@ recipes:
     building: scriptorium
 
   # --- Food / Agriculture ---
-  wheat_to_flour:
-    inputs:
-      wheat: 2
-    outputs:
-      flour: 2
-    building: mill
-
-  flour_to_bread:
-    inputs:
-      flour: 1
-    outputs:
-      bread: 2
-    building: bakery
 
   sugar_cane_to_sugar:
     inputs:

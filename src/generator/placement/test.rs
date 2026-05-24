@@ -13,6 +13,7 @@ mod tests {
                 anchor_offset_for_rotation, footprint_dims_for_rotation,
                 place_rural_building, place_urban_buildings,
             },
+            resource_chain::paint_production_area,
         },
         geometry::{Point2D, Point3D},
         http_mod::{GDMCHTTPProvider, HeightMapType},
@@ -20,6 +21,103 @@ mod tests {
         noise::{Seed, RNG},
         util::init_logger,
     };
+
+    /// Change this to any resource building name to place that building in every rural
+    /// super-district. Useful for quickly eyeballing a single building + its production
+    /// area on a flat Minecraft world without changing the resource chain data.
+    const OVERRIDE_BUILDING: &str = "iron_mine";
+
+    /// End-to-end rural placement test with a single hardcoded building type.
+    /// Identical to `rural_and_urban_placement_with_city_wall` except:
+    ///   - No city wall (suited for flat worlds).
+    ///   - Every rural super-district places `OVERRIDE_BUILDING` instead of the
+    ///     resource-chain-assigned building.
+    ///   - No urban processing building pass.
+    #[tokio::test]
+    async fn rural_placement_override_building() {
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_districts(seed, &mut editor).await;
+
+        let data = LoadedData::load().expect("Failed to load generator data");
+
+        let rural_analysis: HashMap<_, _> = editor
+            .world()
+            .super_district_analysis_data
+            .iter()
+            .filter(|(id, _)| {
+                editor
+                    .world()
+                    .super_districts
+                    .get(id)
+                    .map(|sd| sd.data.district_type == DistrictType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+
+        let result = data
+            .resource_registry
+            .resolve_for_districts(&rural_analysis, &mut rng);
+
+        let mut sd_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        sd_ids.sort_by_key(|id| id.0);
+
+        let structure_type = StructureType(OVERRIDE_BUILDING.to_string());
+        let Some(structure) = data.structures.get(&structure_type).cloned() else {
+            log::error!("OVERRIDE_BUILDING '{}' not found in loaded structures", OVERRIDE_BUILDING);
+            return;
+        };
+
+        // Resolve the painter from the override building's own gather recipe, not from
+        // the district assignment (which would use the resource-chain's painter instead).
+        let override_painter: Option<String> = data.resource_registry.recipes()
+            .values()
+            .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING)
+            .and_then(|r| r.production_painter.clone());
+
+        let mut placed_count = 0usize;
+        for sd_id in &sd_ids {
+            let assignment = &result.district_assignments[sd_id];
+
+            let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
+                continue;
+            };
+
+            log::info!(
+                "Placing '{}' (override) for resource '{}' in super-district {:?}",
+                OVERRIDE_BUILDING, assignment.resource, sd_id,
+            );
+
+            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+                Ok(()) => {
+                    placed_count += 1;
+                    if let Some(painter) = &override_painter {
+                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                    }
+                }
+                Err(e) => log::warn!(
+                    "Failed to place '{}' in super-district {:?}: {}",
+                    OVERRIDE_BUILDING, sd_id, e
+                ),
+            }
+        }
+        log::info!(
+            "Placed {} of {} rural buildings (override: '{}')",
+            placed_count, sd_ids.len(), OVERRIDE_BUILDING
+        );
+
+        editor.flush_buffer().await;
+    }
 
     #[test]
     fn footprint_dims_no_rotation() {
@@ -140,7 +238,12 @@ mod tests {
             );
 
             match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => placed_count += 1,
+                Ok(()) => {
+                    placed_count += 1;
+                    if let Some(painter) = &assignment.production_painter {
+                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                    }
+                }
                 Err(e) => log::warn!(
                     "Failed to place '{}' in super-district {:?}: {}",
                     assignment.building,
@@ -342,7 +445,12 @@ mod tests {
             };
 
             match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => placed_count += 1,
+                Ok(()) => {
+                    placed_count += 1;
+                    if let Some(painter) = &assignment.production_painter {
+                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                    }
+                }
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", assignment.building, e),
             }
         }
