@@ -7,10 +7,19 @@ use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Palette, Placer};
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
-use crate::minecraft::BlockForm;
+use crate::minecraft::{Block, BlockForm};
 use crate::noise::RNG;
 use super::footprint::merge::walk_edge_cells;
 use super::frame::Frame;
+use super::pipeline::BuildCtx;
+
+/// What fills a window opening.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowFill {
+    Glass,
+    Trapdoor,
+    Open,
+}
 
 /// A single straight run of wall between two outline vertices, at one floor level.
 #[derive(Debug, Clone)]
@@ -66,9 +75,11 @@ pub enum DoorStyle {
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowStyle {
-    Small, // 1 wide, 1 tall
-    Tall,  // 1 wide, 2 tall
-    Wide,  // 2 wide, 2 tall
+    Small,     // 1 wide, 1 tall
+    Tall,      // 1 wide, 2 tall
+    Wide,      // 2 wide, 2 tall
+    Decorated, // 1 wide, 2 tall — upside-down stair on top, air/fill below
+    Arched,    // 2 wide, 2 tall — inward-facing upside-down stairs on top, air/fill below
 }
 
 /// Collection of all wall segments for a building.
@@ -246,12 +257,18 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
     };
     let min_segment_len = door_width as i32 + 4; // 2 blocks margin each side
 
+    // Helper: true if a segment overlaps interior boundary cells (where archways go)
+    let is_on_boundary = |i: usize| {
+        segment_cells(&wall_segs.segments[i]).iter().any(|c| boundary_cells.contains(c))
+    };
+
     // Score ground-floor segments by distance to nearest plot edge (lower = better)
+    // Skip segments that overlap with interior boundary cells (where dividing walls go).
     let mut scored: Vec<(usize, i32)> = wall_segs
         .segments
         .iter()
         .enumerate()
-        .filter(|(_, s)| s.floor == 0 && s.length >= min_segment_len)
+        .filter(|(i, s)| s.floor == 0 && s.length >= min_segment_len && !is_on_boundary(*i))
         .map(|(i, s)| {
             let mid = segment_midpoint(s);
             let dist = distance_to_plot_edge(mid, plot_bounds);
@@ -278,17 +295,12 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
 
     // For larger buildings, place a second door on the opposite wall.
     // Falls back to any non-adjacent facing if opposite isn't available.
-    // Skip segments that overlap with interior boundary cells (where archways go).
     if footprint_area > 100 {
         let primary_facing = wall_segs.segments[primary_idx].facing;
         let opposite = -primary_facing;
-        let not_on_boundary = |&&(i, _): &&(usize, i32)| {
-            !segment_cells(&wall_segs.segments[i]).iter().any(|c| boundary_cells.contains(c))
-        };
         if let Some(&(idx, _)) = scored.iter()
-            .filter(not_on_boundary)
             .find(|&&(i, _)| wall_segs.segments[i].facing == opposite)
-            .or_else(|| scored.iter().filter(not_on_boundary).find(|&&(i, _)| {
+            .or_else(|| scored.iter().find(|&&(i, _)| {
                 wall_segs.segments[i].facing != primary_facing
             }))
         {
@@ -314,30 +326,108 @@ pub fn boundary_cell_set(rects: &[Rect2D]) -> HashSet<Point2D> {
         .collect()
 }
 
+/// Place doors from upper floors onto the flat roof of a shorter adjacent rect.
+/// For each boundary between rects with different floor counts, the shorter
+/// rect's roof aligns with a floor of the taller rect. A door is placed in the
+/// taller rect's wall at that floor, giving access to the rooftop terrace.
+///
+/// Returns the 2D positions of the door cells on the roof surface (for parapet
+/// exclusion and room/cell-state marking).
+pub fn place_terrace_doors(
+    wall_segs: &mut WallSegments,
+    frame: &Frame,
+) -> Vec<Point2D> {
+    use super::footprint::find_boundaries;
+    let rects = frame.footprint().rects();
+    let boundaries = find_boundaries(rects);
+    let mut terrace_door_cells = Vec::new();
+
+    for boundary in &boundaries {
+        let fc_a = frame.floor_counts()[boundary.rect_a];
+        let fc_b = frame.floor_counts()[boundary.rect_b];
+        if fc_a == fc_b { continue; }
+
+        // The shorter rect's roof is accessed from the taller rect's floor
+        // at index == shorter's floor count.
+        let (short_fc, _tall_fc) = if fc_a < fc_b { (fc_a, fc_b) } else { (fc_b, fc_a) };
+        let door_floor = short_fc; // floor index on the taller rect
+
+        // Find wall segments on that floor whose cells overlap with boundary cells
+        let boundary_set: HashSet<Point2D> = boundary.wall_cells.iter().copied().collect();
+
+        for seg_idx in 0..wall_segs.segments.len() {
+            let seg = &wall_segs.segments[seg_idx];
+            if seg.floor != door_floor { continue; }
+
+            let cells = segment_cells(seg);
+            // Find which cell indices overlap with the boundary
+            let overlapping: Vec<usize> = cells.iter().enumerate()
+                .filter(|(_, c)| boundary_set.contains(c))
+                .map(|(i, _)| i)
+                .collect();
+
+            if overlapping.is_empty() { continue; }
+
+            // Place a single door centered on the overlap
+            let mid_idx = overlapping[overlapping.len() / 2];
+            let offset = mid_idx as u32;
+
+            // Check segment is long enough and door doesn't overlap existing openings
+            if offset == 0 || offset >= seg.length as u32 - 1 { continue; }
+
+            let overlaps_existing = seg.openings.iter().any(|o| {
+                let o_start = o.offset.saturating_sub(1);
+                let o_end = o.offset + o.width + 1;
+                offset + 1 > o_start && offset < o_end
+            });
+            if overlaps_existing { continue; }
+
+            wall_segs.segments[seg_idx].openings.push(Opening {
+                kind: OpeningKind::Door(DoorStyle::Single),
+                offset,
+                width: 1,
+                height: 2,
+                y_offset: 0,
+            });
+
+            // The door cell on the roof surface
+            terrace_door_cells.push(cells[mid_idx]);
+        }
+    }
+
+    terrace_door_cells
+}
+
 /// Place windows on all wall segments. Even spacing, denser on upper floors.
 /// Skips positions that overlap with existing doors.
-pub fn place_windows(wall_segs: &mut WallSegments, _rng: &mut RNG) {
+pub fn place_windows(
+    wall_segs: &mut WallSegments,
+    interior_walls: &HashSet<(i32, i32)>,
+    _rng: &mut RNG,
+) {
     let corner_margin: u32 = 1;
 
     for seg_idx in 0..wall_segs.segments.len() {
         let seg = &wall_segs.segments[seg_idx];
         let seg_len = seg.length as u32;
 
-        if seg_len < corner_margin * 2 + 3 {
+        if seg_len < corner_margin * 2 + 1 {
             continue; // too short for any window
         }
 
+        let cells = segment_cells(seg);
         let available = seg_len - corner_margin * 2;
 
         // Window style based on segment length
-        let (style, win_width, win_height) = if available < 5 {
-            (WindowStyle::Small, 1u32, 1u32)
+        let (style, win_width, win_height) = if available >= 8 {
+            (WindowStyle::Arched, 2u32, 2u32)
+        } else if available >= 5 {
+            (WindowStyle::Decorated, 1, 2)
         } else {
-            (WindowStyle::Tall, 1, 2)
+            (WindowStyle::Small, 1u32, 1u32)
         };
 
-        // Spacing: ground floor is sparser
-        let spacing = if seg.floor == 0 { 5u32 } else { 4u32 };
+        let spacing = if matches!(style, WindowStyle::Arched) { 5u32 } else { 3u32 };
         let count = available / spacing;
         if count == 0 {
             continue;
@@ -356,9 +446,14 @@ pub fn place_windows(wall_segs: &mut WallSegments, _rng: &mut RNG) {
                 let o_end = o.offset + o.width + 1;
                 offset + win_width > o_start && offset < o_end
             });
-            if overlaps {
-                continue;
-            }
+            if overlaps { continue; }
+
+            // Check overlap with interior walls
+            let hits_interior = (0..win_width).any(|dx| {
+                let idx = (offset + dx) as usize;
+                idx < cells.len() && interior_walls.contains(&(cells[idx].x, cells[idx].y))
+            });
+            if hits_interior { continue; }
 
             wall_segs.segments[seg_idx].openings.push(Opening {
                 kind: OpeningKind::Window(style),
@@ -381,43 +476,129 @@ fn is_inside_opening(openings: &[Opening], idx: u32, ry: u32) -> bool {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Wall infill patterns
+// ---------------------------------------------------------------------------
+
+/// Context passed to wall infill for each non-opening cell.
+pub struct InfillCell {
+    /// World position of this cell.
+    pub pos: Point3D,
+    /// Index along the segment (0 = first cell).
+    pub idx: u32,
+    /// Row within the wall height (0 = floor level).
+    pub ry: u32,
+    /// Total wall height in blocks.
+    pub height: u32,
+    /// Length of the segment in blocks.
+    pub seg_length: u32,
+}
+
+/// A wall infill pattern that controls what blocks are placed in wall panels.
+pub enum WallInfill {
+    /// Single material fills every cell.
+    Solid,
+    /// PrimaryStone for most of the wall, SecondaryStone on the bottom row.
+    StoneBase,
+}
+
+impl WallInfill {
+    async fn fill_segment(
+        &self,
+        editor: &Editor,
+        seg: &WallSegment,
+        cells: &[Point2D],
+        data: &LoadedData,
+        palette: &Palette,
+        rng: &mut RNG,
+    ) {
+        match self {
+            WallInfill::Solid => {
+                let material_id = palette
+                    .get_material(MaterialRole::PrimaryWall)
+                    .expect("No primary wall material")
+                    .clone();
+                let mut placer_rng = rng.derive();
+                let mut placer = MaterialPlacer::new(
+                    Placer::new(&data.materials, &mut placer_rng),
+                    material_id,
+                );
+
+                for (idx, cell) in cells.iter().enumerate() {
+                    for ry in 0..seg.height {
+                        if is_inside_opening(&seg.openings, idx as u32, ry) {
+                            continue;
+                        }
+                        let y = seg.base_y + ry as i32;
+                        placer.place_block(
+                            editor,
+                            Point3D::new(cell.x, y, cell.y),
+                            BlockForm::Block,
+                            None,
+                            None,
+                        ).await;
+                    }
+                }
+            }
+            WallInfill::StoneBase => {
+                let primary_id = palette
+                    .get_material(MaterialRole::PrimaryStone)
+                    .expect("No primary stone material")
+                    .clone();
+                let secondary_id = palette
+                    .get_material(MaterialRole::SecondaryStone)
+                    .unwrap_or_else(|| palette.get_material(MaterialRole::PrimaryStone).expect("No stone material"))
+                    .clone();
+                let mut placer_rng = rng.derive();
+                let mut secondary_rng = placer_rng.derive();
+                let mut primary = MaterialPlacer::new(
+                    Placer::new(&data.materials, &mut placer_rng),
+                    primary_id,
+                );
+                let mut secondary = MaterialPlacer::new(
+                    Placer::new(&data.materials, &mut secondary_rng),
+                    secondary_id,
+                );
+
+                for (idx, cell) in cells.iter().enumerate() {
+                    for ry in 0..seg.height {
+                        if is_inside_opening(&seg.openings, idx as u32, ry) {
+                            continue;
+                        }
+                        let y = seg.base_y + ry as i32;
+                        let placer = if ry == 0 { &mut secondary } else { &mut primary };
+                        placer.place_block(
+                            editor,
+                            Point3D::new(cell.x, y, cell.y),
+                            BlockForm::Block,
+                            None,
+                            None,
+                        ).await;
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Place wall infill blocks for all segments. Should be called BEFORE
 /// place_frame and openings so the frame and openings can overwrite.
+/// Accepts separate infill patterns for the ground floor and upper floors.
 pub async fn place_wall_infill(
-    editor: &Editor,
+    ctx: &mut BuildCtx<'_>,
     wall_segs: &WallSegments,
-    data: &LoadedData,
-    palette: &Palette,
-    rng: &mut RNG,
+    ground_infill: &WallInfill,
+    upper_infill: &WallInfill,
 ) {
-    let material_id = palette
-        .get_material(MaterialRole::PrimaryWall)
-        .expect("No primary wall material")
-        .clone();
-
-    let mut placer_rng = rng.derive();
-    let mut placer = MaterialPlacer::new(
-        Placer::new(&data.materials, &mut placer_rng),
-        material_id,
-    );
+    let editor: &Editor = &*ctx.editor;
+    let data = ctx.data;
+    let palette = ctx.palette;
+    let rng = &mut *ctx.rng;
 
     for seg in &wall_segs.segments {
         let cells = segment_cells(seg);
-        for (idx, cell) in cells.iter().enumerate() {
-            for ry in 0..seg.height {
-                if is_inside_opening(&seg.openings, idx as u32, ry) {
-                    continue;
-                }
-                let y = seg.base_y + ry as i32;
-                placer.place_block(
-                    editor,
-                    Point3D::new(cell.x, y, cell.y),
-                    BlockForm::Block,
-                    None,
-                    None,
-                ).await;
-            }
-        }
+        let infill = if seg.floor == 0 { ground_infill } else { upper_infill };
+        infill.fill_segment(editor, seg, &cells, data, palette, rng).await;
     }
 }
 
@@ -425,21 +606,33 @@ pub async fn place_wall_infill(
 /// Doors use PrimaryWood with Door form and correct facing.
 /// Windows use PrimaryWood with Fence form for now.
 pub async fn place_openings(
-    editor: &Editor,
+    ctx: &mut BuildCtx<'_>,
     wall_segs: &WallSegments,
-    data: &LoadedData,
-    palette: &Palette,
-    rng: &mut RNG,
+    window_fill: WindowFill,
 ) {
-    let material_id = palette
+    let editor: &Editor = &*ctx.editor;
+    let data = ctx.data;
+    let palette = ctx.palette;
+    let rng = &mut *ctx.rng;
+
+    let wood_material = palette
         .get_material(MaterialRole::PrimaryWood)
         .expect("No primary wood material")
+        .clone();
+    let wall_material = palette
+        .get_material(MaterialRole::PrimaryWall)
+        .unwrap_or_else(|| palette.get_material(MaterialRole::PrimaryStone).expect("No wall or stone material"))
         .clone();
 
     let mut placer_rng = rng.derive();
     let mut placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut placer_rng),
-        material_id,
+        wood_material,
+    );
+    let mut wall_placer_rng = rng.derive();
+    let mut wall_placer = MaterialPlacer::new(
+        Placer::new(&data.materials, &mut wall_placer_rng),
+        wall_material,
     );
 
     for seg in &wall_segs.segments {
@@ -447,7 +640,7 @@ pub async fn place_openings(
 
         for opening in &seg.openings {
             match &opening.kind {
-                OpeningKind::Door(style) => {
+                OpeningKind::Door(_style) => {
                     let facing_str = seg.facing.to_string();
                     for dx in 0..opening.width {
                         let idx = (opening.offset + dx) as usize;
@@ -486,20 +679,68 @@ pub async fn place_openings(
                         ).await;
                     }
                 }
-                OpeningKind::Window(_style) => {
+                OpeningKind::Window(style) => {
+                    let is_arched = matches!(style, WindowStyle::Decorated | WindowStyle::Arched);
+                    let top_dy = opening.height.saturating_sub(1);
+
                     for dx in 0..opening.width {
                         let idx = (opening.offset + dx) as usize;
                         if idx >= cells.len() { continue; }
                         let cell = cells[idx];
                         for dy in 0..opening.height {
                             let y = seg.base_y + opening.y_offset as i32 + dy as i32;
-                            placer.place_block(
-                                editor,
-                                Point3D::new(cell.x, y, cell.y),
-                                BlockForm::Fence,
-                                None,
-                                None,
-                            ).await;
+                            let pos = Point3D::new(cell.x, y, cell.y);
+
+                            if is_arched && dy == top_dy {
+                                let stair_facing = match style {
+                                    WindowStyle::Arched => {
+                                        let walk_dir = match seg.facing {
+                                            Cardinal::South => Cardinal::East,
+                                            Cardinal::North => Cardinal::West,
+                                            Cardinal::East => Cardinal::North,
+                                            Cardinal::West => Cardinal::South,
+                                        };
+                                        if dx == 0 { -walk_dir } else { walk_dir }
+                                    }
+                                    _ => seg.facing,
+                                };
+                                let state = HashMap::from([
+                                    ("facing".to_string(), stair_facing.to_string()),
+                                    ("half".to_string(), "top".to_string()),
+                                ]);
+                                wall_placer.place_block_forced(
+                                    editor, pos, BlockForm::Stairs,
+                                    Some(&state), None,
+                                ).await;
+                                continue;
+                            }
+
+                            match window_fill {
+                                WindowFill::Glass => {
+                                    editor.place_block_forced(
+                                        &Block::from_id("minecraft:glass_pane".into()),
+                                        pos,
+                                    ).await;
+                                }
+                                WindowFill::Trapdoor => {
+                                    let facing_str = (-seg.facing).to_string();
+                                    let state = HashMap::from([
+                                        ("facing".to_string(), facing_str),
+                                        ("open".to_string(), "true".to_string()),
+                                        ("half".to_string(), "bottom".to_string()),
+                                    ]);
+                                    placer.place_block_forced(
+                                        editor, pos, BlockForm::Trapdoor,
+                                        Some(&state), None,
+                                    ).await;
+                                }
+                                WindowFill::Open => {
+                                    editor.place_block_forced(
+                                        &"air".into(),
+                                        pos,
+                                    ).await;
+                                }
+                            }
                         }
                     }
                 }
@@ -522,17 +763,24 @@ fn axis_state(facing: Cardinal) -> HashMap<String, String> {
 /// at floor/ceiling levels along each edge. Uses WoodPillar role with Block form
 /// and axis state to orient logs.
 pub async fn place_frame(
-    editor: &Editor,
+    ctx: &mut BuildCtx<'_>,
     frame: &Frame,
-    data: &LoadedData,
-    palette: &Palette,
-    rng: &mut RNG,
 ) {
+    let editor: &Editor = &*ctx.editor;
+    let data = ctx.data;
+    let palette = ctx.palette;
+    let rng = &mut *ctx.rng;
+
     let material_id = palette
         .get_material(MaterialRole::WoodPillar)
         .or_else(|| palette.get_material(MaterialRole::PrimaryWood))
         .expect("No wood pillar or primary wood material")
         .clone();
+
+    // Non-pillar blocks (e.g. cut_sandstone) don't accept an `axis` blockstate,
+    // and Minecraft will reject placements that specify one. Skip the axis state
+    // unless the material is a pillar-style block.
+    let supports_axis = material_supports_axis(material_id.as_str());
 
     let mut placer_rng = rng.derive();
     let mut placer = MaterialPlacer::new(
@@ -548,6 +796,7 @@ pub async fn place_frame(
     for seg in &wall_segs.segments {
         let cells = segment_cells(seg);
         let beam_axis = axis_state(seg.facing);
+        let beam_state = if supports_axis { Some(&beam_axis) } else { None };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
 
@@ -563,14 +812,14 @@ pub async fn place_frame(
                 editor,
                 Point3D::new(cell.x, floor_y - 1, cell.y),
                 BlockForm::Block,
-                Some(&beam_axis),
+                beam_state,
                 None,
             ).await;
             placer.place_block(
                 editor,
                 Point3D::new(cell.x, ceiling_y, cell.y),
                 BlockForm::Block,
-                Some(&beam_axis),
+                beam_state,
                 None,
             ).await;
         }
@@ -579,6 +828,7 @@ pub async fn place_frame(
     // Vertical corner posts (placed last to override crossbeams at intersections)
     let y_axis: HashMap<String, String> =
         HashMap::from([("axis".to_string(), "y".to_string())]);
+    let post_state = if supports_axis { Some(&y_axis) } else { None };
 
     for (&(vx, vz), &max_floor) in &corner_max_floor {
         let top_y = frame.floor_y(max_floor) + frame.wall_height() as i32;
@@ -587,9 +837,37 @@ pub async fn place_frame(
                 editor,
                 Point3D::new(vx, y, vz),
                 BlockForm::Block,
-                Some(&y_axis),
+                post_state,
                 None,
             ).await;
         }
     }
+}
+
+/// Returns true if a Minecraft block of the given material id accepts an
+/// `axis` blockstate. This covers logs, stripped logs, pillars, stems,
+/// hyphae, and a handful of axis-rotatable stone blocks.
+fn material_supports_axis(id: &str) -> bool {
+    let id = id.strip_prefix("minecraft:").unwrap_or(id);
+    if id.ends_with("_log")
+        || id.ends_with("_wood")
+        || id.ends_with("_stem")
+        || id.ends_with("_hyphae")
+        || id.ends_with("_pillar")
+    {
+        return true;
+    }
+    matches!(
+        id,
+        "basalt"
+            | "polished_basalt"
+            | "deepslate"
+            | "bone_block"
+            | "bamboo_block"
+            | "stripped_bamboo_block"
+            | "muddy_mangrove_roots"
+            | "ochre_froglight"
+            | "verdant_froglight"
+            | "pearlescent_froglight"
+    )
 }

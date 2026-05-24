@@ -1,0 +1,32 @@
+{
+	"nodes":[
+		{"id":"input","type":"text","text":"## Input\nPlot + SizeClass + RNG","x":-160,"y":-720,"width":320,"height":90,"color":"4"},
+		{"id":"footprint","type":"text","text":"### footprint\ncore + wings → polygon","x":-160,"y":-580,"width":320,"height":90},
+		{"id":"foundation","type":"text","text":"### foundation\nterrain leveling · base_y · foundation course","x":-160,"y":-440,"width":320,"height":100},
+		{"id":"frame","type":"text","text":"### frame\n3D skeleton · per-rect floor counts · outlines","x":-160,"y":-300,"width":320,"height":90},
+		{"id":"walls1","type":"text","text":"### walls — pass 1\nbuild_segments · place_doors","x":-160,"y":-160,"width":320,"height":90,"color":"5"},
+		{"id":"floors","type":"text","text":"### floors\nfloor/ceiling slabs · stairs · FloorPlan","x":-160,"y":-20,"width":320,"height":90},
+		{"id":"walls2","type":"text","text":"### walls — pass 2\nwall_infill · frame · openings · windows","x":-160,"y":120,"width":320,"height":90,"color":"5"},
+		{"id":"roof","type":"text","text":"### roof\ngable · heightmap merge · overhang brackets","x":-160,"y":260,"width":320,"height":90},
+		{"id":"rooms","type":"text","text":"### rooms\npartition · RoomType · interior walls + archways","x":-160,"y":400,"width":320,"height":90},
+		{"id":"furnish","type":"text","text":"### furnish\nBFS connectivity · wall slots · fill threshold","x":-160,"y":540,"width":320,"height":90},
+		{"id":"invariants","type":"text","text":"### check_building_invariants\nwall coverage · BlockedReachable neighbors","x":-160,"y":680,"width":320,"height":90,"color":"3"},
+		{"id":"output","type":"text","text":"## Output\nBlueprint → Editor / ASCII / SVG","x":-160,"y":820,"width":320,"height":90,"color":"4"},
+		{"id":"legend","type":"text","text":"## Legend\n\nPhases run strictly in order.\n\n- **walls** is the only module that runs twice: pass 1 stakes out segments and doors so `floors` can place stair landings; pass 2 fills infill, frame, openings, and windows once floor geometry is locked in.\n- **check_building_invariants** runs per building in `run_furnished_houses_pipeline`.\n- Blueprint output powers offline ASCII/SVG dumps and live Editor block writes.\n\nSee sibling `.md` docs in this folder for each module's design.","x":260,"y":-160,"width":380,"height":430,"color":"6"}
+	],
+	"edges":[
+		{"id":"e1","fromNode":"input","fromSide":"bottom","toNode":"footprint","toSide":"top"},
+		{"id":"e2","fromNode":"footprint","fromSide":"bottom","toNode":"foundation","toSide":"top"},
+		{"id":"e3","fromNode":"foundation","fromSide":"bottom","toNode":"frame","toSide":"top"},
+		{"id":"e4","fromNode":"frame","fromSide":"bottom","toNode":"walls1","toSide":"top"},
+		{"id":"e5","fromNode":"walls1","fromSide":"bottom","toNode":"floors","toSide":"top"},
+		{"id":"e6","fromNode":"floors","fromSide":"bottom","toNode":"walls2","toSide":"top"},
+		{"id":"e7","fromNode":"walls2","fromSide":"bottom","toNode":"roof","toSide":"top"},
+		{"id":"e8","fromNode":"roof","fromSide":"bottom","toNode":"rooms","toSide":"top"},
+		{"id":"e9","fromNode":"rooms","fromSide":"bottom","toNode":"furnish","toSide":"top"},
+		{"id":"e10","fromNode":"furnish","fromSide":"bottom","toNode":"invariants","toSide":"top"},
+		{"id":"e11","fromNode":"invariants","fromSide":"bottom","toNode":"output","toSide":"top"},
+		{"id":"e12","fromNode":"walls1","fromSide":"right","toNode":"walls2","toSide":"right","label":"same module, 2nd pass"}
+	],
+	"metadata":{}
+}

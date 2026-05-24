@@ -1,21 +1,16 @@
 use crate::editor::World;
-use crate::generator::buildings_v2::floors::{place_floors, clear_attic_stair_headroom};
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
-use crate::generator::buildings_v2::foundation::place_foundation;
-use crate::generator::buildings_v2::frame::{Frame, generate_frame};
-use crate::generator::buildings_v2::walls::{
-    boundary_cell_set, build_segments, place_doors, place_frame, place_openings, place_wall_infill,
-};
+use crate::generator::buildings_v2::frame::Frame;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
 use crate::geometry::{Point2D, Rect2D};
 use crate::http_mod::GDMCHTTPProvider;
 use crate::noise::RNG;
 use crate::util::init_logger;
-use super::gable::{GablePitch, RidgeAxis, gable_heightmap, pick_ridge_axis};
+use super::gable::{GablePitch, RidgeAxis, gable_heightmap};
+use super::RoofStyle;
 use super::heightmap::RoofHeightmap;
-use super::place_roof;
 
 fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
     let vertices = outline_from_rects(&rects);
@@ -158,7 +153,7 @@ fn render_topdown(hm: &RoofHeightmap) -> String {
 fn gable_heightmap_values_pitch_1() {
     // 8-wide rect (x:0-7), 12-long (z:0-11), ridge along Z
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
 
     // Heights along X at any Z inside rect (all Z give same profile)
     // x: -1  0  1  2  3  4  5  6  7  8
@@ -182,7 +177,7 @@ fn gable_heightmap_values_pitch_1() {
 #[test]
 fn gable_heightmap_values_pitch_half() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z);
+    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z, (false, false));
 
     // x: -1   0    1    2    3    4    5    6    7    8
     // h: -0.5 0.0  0.5  1.0  1.5  1.5  1.0  0.5  0.0 -0.5
@@ -200,7 +195,7 @@ fn gable_heightmap_values_pitch_half() {
 #[test]
 fn gable_heightmap_values_pitch_double() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z);
+    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z, (false, false));
 
     // x: -1  0  1  2  3  4  5  6  7  8
     // h: -2  0  2  4  6  6  4  2  0 -2
@@ -219,7 +214,7 @@ fn gable_ridge_along_x() {
     // 6-wide (x:0-5), 10-long (z:0-9). Width > length so ridge along Z.
     // But if we force ridge along X, slopes fall in Z.
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(9, 5));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X);
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X, (false, false));
 
     // Heights along Z at x=5 (any x inside gives same profile since ridge along X)
     // z: -1  0  1  2  3  4  5  6
@@ -243,8 +238,8 @@ fn merge_l_shape_heightmaps() {
     // Wing: 6x4 at (10,0)-(15,3), ridge along X (longer)
     let wing = Rect2D::from_points(Point2D::new(10, 0), Point2D::new(15, 3));
 
-    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X);
-    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X);
+    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X, (false, false));
+    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X, (false, false));
 
     // Merge into combined heightmap
     let combined_min_x = hm_core.min_x().min(hm_wing.min_x());
@@ -281,7 +276,7 @@ fn merge_l_shape_heightmaps() {
 fn odd_width_single_peak() {
     // 7-wide rect: should have a single peak at center
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 9));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
 
     // x: -1  0  1  2  3  4  5  6  7
     // h: -1  0  1  2  3  2  1  0 -1
@@ -321,6 +316,8 @@ fn fill_plot(rng: &mut RNG, plot: &mut Plot, size_class: &SizeClass, max: usize)
 
 #[tokio::test]
 async fn build_full_buildings_with_roofs() {
+    use crate::generator::buildings_v2::{BuildCtx, build_house};
+
     init_logger();
 
     let provider = GDMCHTTPProvider::new();
@@ -341,62 +338,34 @@ async fn build_full_buildings_with_roofs() {
 
     let mut rng = RNG::new(123);
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 50);
-    println!("Placed {} house footprints", footprints.len());
+    let n = footprints.len();
+    println!("Placed {} house footprints", n);
 
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
+    let styles = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
 
-    for (i, footprint) in footprints.iter().enumerate() {
-        let base_y = place_foundation(&mut editor, footprint, &data, &palette, &mut rng).await;
-
-        let frame_footprint = Footprint::new(
-            outline_from_rects(footprint.rects()),
-            footprint.rects().to_vec(),
-        );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
-
-        // Build segments and plan openings
-        let mut wall_segs = build_segments(&frame);
-        let footprint_area = footprint.filled_points().len() as i32;
-        let bc = boundary_cell_set(footprint.rects());
-        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
-
-
-        // Roof — cycle through pitches
-        let pitch = pitches[i % pitches.len()];
-        let has_attic = matches!(pitch, GablePitch::Double);
-
-        // Upper floor slabs + stairs
-        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
-
-        // Wall infill
-        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
-
-        // Timber frame
-        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
-
-        // Openings
-        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
-
-        // Roof
-        place_roof(&editor, &frame, pitch, &data, &palette, &mut rng).await;
-
-        // Re-clear headroom above attic stairs (roof blocks may have overwritten air)
-        if has_attic {
-            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
-        }
+    use crate::generator::buildings_v2::{Culture, BuildingContext};
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, footprint) in footprints.into_iter().enumerate() {
+        let pitch = styles[i % styles.len()];
+        let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, pitch);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
+            .await
+            .expect("build_house failed");
 
         println!(
-            "  Building {}: base_y={}, floors={}, rects={}, pitch={:?}",
-            i, base_y, frame.max_floors(), footprint.rects().len(), pitch,
+            "  Building {}: floors={}, rects={}, pitch={:?}",
+            i, house.frame.max_floors(), house.footprint.rects().len(), pitch,
         );
     }
 
     editor.flush_buffer().await;
-    println!("Done — {} buildings with roofs", footprints.len());
+    println!("Done — {} buildings with roofs", n);
 }
 
 #[tokio::test]
 async fn compare_three_pitches() {
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
     init_logger();
 
     let provider = GDMCHTTPProvider::new();
@@ -410,7 +379,6 @@ async fn compare_three_pitches() {
     let world_rect = editor.world().world_rect_2d();
     let center = world_rect.midpoint();
 
-    // Generate one footprint
     let plot_min = Point2D::new(center.x - 16, center.y - 16);
     let plot_max = Point2D::new(center.x + 15, center.y + 15);
     let bounds = Rect2D::from_points(plot_min, plot_max);
@@ -419,50 +387,26 @@ async fn compare_three_pitches() {
     let footprints = fill_plot(&mut rng, &mut plot, &SizeClass::Hall, 1);
     let footprint = &footprints[0];
 
-    let pitches = [GablePitch::Slab, GablePitch::Stairs, GablePitch::Double];
-    let offsets = [0, 20, 40]; // space them apart along X
+    let styles = [RoofStyle::Gable(GablePitch::Slab), RoofStyle::Gable(GablePitch::Stairs), RoofStyle::Gable(GablePitch::Double)];
+    let offsets = [0, 20, 40];
 
-    for (pitch, x_offset) in pitches.iter().zip(offsets.iter()) {
-        let mut rng = RNG::new(42); // same RNG for consistent results
-
-        // Shift footprint rects by x_offset
+    for (style, x_offset) in styles.iter().zip(offsets.iter()) {
         let shifted_rects: Vec<Rect2D> = footprint.rects().iter().map(|r| {
             Rect2D::from_points(
                 Point2D::new(r.min().x + x_offset, r.min().y),
                 Point2D::new(r.max().x + x_offset, r.max().y),
             )
         }).collect();
+        let shifted_footprint = Footprint::new(outline_from_rects(&shifted_rects), shifted_rects);
 
-        let shifted_footprint = Footprint::new(
-            outline_from_rects(&shifted_rects),
-            shifted_rects.clone(),
-        );
+        let mut pitch_rng = RNG::new(42);
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut pitch_rng);
+        let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Hall, *style);
+        build_house(&mut ctx, shifted_footprint, &bctx, bounds)
+            .await
+            .expect("build_house failed");
 
-        let base_y = place_foundation(&mut editor, &shifted_footprint, &data, &palette, &mut rng).await;
-
-        let frame_footprint = Footprint::new(
-            outline_from_rects(&shifted_rects),
-            shifted_rects.clone(),
-        );
-        let frame = generate_frame(frame_footprint, base_y, &SizeClass::Hall, &mut rng);
-
-        let mut wall_segs = build_segments(&frame);
-        let footprint_area = shifted_footprint.filled_points().len() as i32;
-        let bc = boundary_cell_set(&shifted_rects);
-        place_doors(&mut wall_segs, &bounds, footprint_area, &bc, &mut rng);
-
-
-        let has_attic = matches!(pitch, GablePitch::Double);
-        let floor_plan = place_floors(&editor, &frame, &wall_segs, has_attic, &data, &palette, &mut rng).await;
-        place_wall_infill(&editor, &wall_segs, &data, &palette, &mut rng).await;
-        place_frame(&editor, &frame, &data, &palette, &mut rng).await;
-        place_openings(&editor, &wall_segs, &data, &palette, &mut rng).await;
-        place_roof(&editor, &frame, *pitch, &data, &palette, &mut rng).await;
-        if has_attic {
-            clear_attic_stair_headroom(&editor, &frame, &floor_plan).await;
-        }
-
-        println!("  {:?} pitch at x_offset={}", pitch, x_offset);
+        println!("  {:?} at x_offset={}", style, x_offset);
     }
 
     editor.flush_buffer().await;

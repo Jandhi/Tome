@@ -49,11 +49,11 @@ fn multi_rect_different_heights() {
     assert_eq!(frame.roof_y(1), 73); // 64 + 2*4 + 1
 
     // Floor 0: both rects active
-    assert_eq!(frame.active_rects(0), vec![0, 1]);
+    assert_eq!(frame.active_rects(0), &[0, 1]);
     // Floor 1: both rects active
-    assert_eq!(frame.active_rects(1), vec![0, 1]);
+    assert_eq!(frame.active_rects(1), &[0, 1]);
     // Floor 2: only core active
-    assert_eq!(frame.active_rects(2), vec![0]);
+    assert_eq!(frame.active_rects(2), &[0]);
 }
 
 #[test]

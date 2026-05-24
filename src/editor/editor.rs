@@ -23,6 +23,11 @@ pub struct Editor {
     world: World,
     materials: HashMap<MaterialId, Material>,
     block_form_cache: RefCell<HashMap<BlockID, BlockForm>>,
+    /// When true, skip all outbound HTTP traffic. Block placements still land
+    /// in `block_cache` so reads stay consistent, but nothing reaches the
+    /// Minecraft server. Use for offline pipeline tests that only exercise
+    /// generator logic + blueprint rendering.
+    offline: bool,
 }
 
 impl Editor {
@@ -36,9 +41,22 @@ impl Editor {
             world,
             materials: HashMap::new(),
             block_form_cache: RefCell::new(HashMap::new()),
+            offline: false,
         };
         editor.load_data().expect("Failed to load materials");
         editor
+    }
+
+    /// Construct an editor that skips all HTTP traffic. Pair with
+    /// `World::synthetic` for a fully offline pipeline run.
+    pub fn new_offline(build_area: Rect3D, world: World) -> Self {
+        let mut editor = Self::new(build_area, world);
+        editor.offline = true;
+        editor
+    }
+
+    pub fn is_offline(&self) -> bool {
+        self.offline
     }
 
     pub fn set_buffer_size(&mut self, size: usize) {
@@ -120,8 +138,12 @@ impl Editor {
         }
 
         self.block_cache.borrow_mut().insert(point, block.clone());
-        let positioned = PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into());
 
+        if self.offline {
+            return;
+        }
+
+        let positioned = PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into());
         let _ = self.provider.put_blocks_no_updates(&vec![positioned]).await;
     }
 
@@ -133,11 +155,25 @@ impl Editor {
         self.world.get_block(point).expect(&format!("Block at {:?} not found in world", point))
     }
 
+    /// Like `get_block` but returns `None` instead of panicking when the block
+    /// is not in the cache or the world (e.g. synthetic/offline worlds).
+    pub fn try_get_block(&self, point: Point3D) -> Option<Block> {
+        if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
+            return Some(block.clone());
+        }
+        self.world.get_block(point)
+    }
+
     pub async fn flush_buffer(&self) {
         // Drain the buffer first, releasing the borrow before the await
         let buffer: Vec<_> = self.block_buffer.borrow_mut().drain(..).collect();
 
         if buffer.is_empty() {
+            return;
+        }
+
+        if self.offline {
+            // Offline mode: blocks already live in block_cache; skip HTTP.
             return;
         }
 
