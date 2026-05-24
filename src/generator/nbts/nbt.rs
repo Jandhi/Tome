@@ -1,8 +1,23 @@
 use std::collections::HashMap;
 
+use fastnbt::Value;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{geometry::Point3D, minecraft::{Block, BlockID}};
+
+/// Parse a block's SNBT `data` string into an NBT value for storage in a
+/// structure. Returns `None` when there is no data; logs and drops the data
+/// when the SNBT fails to parse, rather than failing silently.
+fn snbt_to_value(data : Option<String>) -> Option<Value> {
+    let snbt = data?;
+    match fastsnbt::from_str::<Value>(&snbt) {
+        Ok(value) => Some(value),
+        Err(e) => {
+            log::warn!("Dropping unparseable block SNBT data ({e}): {snbt}");
+            None
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct NBTStructure {
@@ -25,7 +40,7 @@ impl NBTStructure {
         self.blocks.push(BlockData {
             state,
             pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-            nbt: block.data,
+            nbt: snbt_to_value(block.data),
         });
     }
 
@@ -62,7 +77,7 @@ impl NBTStructure {
             block_data.push(BlockData {
                 state,
                 pos: [pos.x as i32, pos.y as i32, pos.z as i32],
-                nbt: block.data,
+                nbt: snbt_to_value(block.data),
             });
         }
 
@@ -88,7 +103,10 @@ pub struct PaletteBlock {
 pub struct BlockData {
     pub state: usize,
     pub pos : [i32; 3],
-    pub nbt : Option<String>
+    /// Block-entity NBT, stored as a compound `Value` (the format Minecraft
+    /// structure files and the GDMC server use). Converted to an SNBT string
+    /// at placement time. `None` when the block carries no block entity.
+    pub nbt : Option<Value>
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

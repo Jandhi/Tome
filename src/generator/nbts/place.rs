@@ -4,7 +4,16 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{editor::Editor, generator::{data::LoadedData, materials::{Palette, PaletteSwapResult, Placer}, nbts::{Rotation, Structure, meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::{Cardinal, Point3D}, minecraft::Block};
+use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Palette, PaletteSwapResult, Placer}, nbts::{Rotation, Structure, meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::{Cardinal, Point3D}, minecraft::Block};
+
+/// Convert a block's stored NBT compound into the SNBT string the editor
+/// sends to the server. Empty compounds carry no real data and are dropped.
+fn block_nbt_to_snbt(value : &fastnbt::Value) -> Option<String> {
+    match value {
+        fastnbt::Value::Compound(map) if map.is_empty() => None,
+        other => Some(to_snbt(other)),
+    }
+}
 
 
 pub async fn place_structure<'materials>(editor: &Editor, placer: Option<&mut Placer<'materials>>, structure: &Structure, offset: Point3D, direction: Cardinal, data: Option<&LoadedData>, palette: Option<&Palette>, mirror_x: bool, mirror_z: bool) -> anyhow::Result<()> {
@@ -52,11 +61,7 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
     if input_palette.is_none() || output_palette.is_none() {
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
-            let mut data = blockdata.nbt;
-
-            if data.as_ref().is_some_and(|d| d == "\"{}\"") {
-                data = None;
-            }
+            let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
             if palette_data.name == "air".into() {
                 continue; // Skip air blocks
@@ -83,11 +88,7 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
         let LoadedData { materials, .. } = generator_data.unwrap();
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
-            let mut data = blockdata.nbt;
-
-            if data.as_ref().is_some_and(|d| d == "\"{}\"") {
-                data = None;
-            }
+            let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
             if palette_data.name == "air".into() {
                 continue; // Skip air blocks
