@@ -19,6 +19,13 @@ pub struct Frame {
     active_rects_cache: Vec<Vec<usize>>,
 }
 
+/// Sentinel floor index for a below-ground cellar. Cellars live one story
+/// below `base_y` and outside the normal `0..max_floors` range, so they reuse
+/// the floor-indexed APIs (`floor_y`, `ceiling_y`) via this special value
+/// rather than extending floor indices to signed. Mirrors how attics reuse the
+/// index space by sitting *above* the top floor.
+pub const CELLAR_FLOOR: u32 = u32::MAX;
+
 impl Frame {
     pub fn new(footprint: Footprint, base_y: i32, floor_counts: Vec<u32>, wall_height: u32) -> Self {
         debug_assert_eq!(
@@ -71,7 +78,11 @@ impl Frame {
     }
 
     /// Y level of the floor surface for a given story (0-indexed).
+    /// `CELLAR_FLOOR` resolves to one story below `base_y`.
     pub fn floor_y(&self, floor: u32) -> i32 {
+        if floor == CELLAR_FLOOR {
+            return self.base_y - (self.wall_height as i32 + 1);
+        }
         self.base_y + floor as i32 * (self.wall_height as i32 + 1)
     }
 

@@ -10,6 +10,7 @@ use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
 use crate::minecraft::{Block, BlockForm};
 use crate::noise::RNG;
 use super::footprint::merge::walk_edge_cells;
+use super::footprint::SizeClass;
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
 
@@ -19,6 +20,66 @@ pub enum WindowFill {
     Glass,
     Trapdoor,
     Open,
+}
+
+/// Extra timber detail laid over the baseline corner posts + floor/ceiling beams.
+/// `Plain` is the original look (just the skeleton). The other variants compose
+/// vertical studs, a mid-rail, and corner knee braces in increasing density.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimberPattern {
+    Plain,
+    Studded { spacing: u32 },
+    Gridded { spacing: u32 },
+    Braced { spacing: u32 },
+}
+
+impl TimberPattern {
+    /// Roll a pattern biased by size class. Cottages stay simple; bigger
+    /// buildings get denser timber so a settlement reads as a mix.
+    pub fn pick(size_class: SizeClass, rng: &mut RNG) -> Self {
+        match size_class {
+            SizeClass::Cottage => match rng.rand_i32_range(0, 4) {
+                0..=1 => Self::Plain,
+                _ => Self::Studded { spacing: 3 },
+            },
+            SizeClass::House => match rng.rand_i32_range(0, 4) {
+                0 => Self::Plain,
+                1..=2 => Self::Studded { spacing: 3 },
+                _ => Self::Gridded { spacing: 4 },
+            },
+            SizeClass::Hall => match rng.rand_i32_range(0, 4) {
+                0 => Self::Studded { spacing: 3 },
+                1..=2 => Self::Gridded { spacing: 4 },
+                _ => Self::Braced { spacing: 4 },
+            },
+            SizeClass::Manor => match rng.rand_i32_range(0, 4) {
+                0 => Self::Gridded { spacing: 3 },
+                1..=2 => Self::Braced { spacing: 4 },
+                _ => Self::Braced { spacing: 3 },
+            },
+        }
+    }
+
+    fn has_studs(&self) -> bool {
+        matches!(self, Self::Studded { .. } | Self::Gridded { .. } | Self::Braced { .. })
+    }
+
+    fn has_mid_rail(&self) -> bool {
+        matches!(self, Self::Gridded { .. } | Self::Braced { .. })
+    }
+
+    fn has_corner_braces(&self) -> bool {
+        matches!(self, Self::Braced { .. })
+    }
+
+    fn spacing(&self) -> u32 {
+        match self {
+            Self::Plain => 0,
+            Self::Studded { spacing }
+            | Self::Gridded { spacing }
+            | Self::Braced { spacing } => *spacing,
+        }
+    }
 }
 
 /// A single straight run of wall between two outline vertices, at one floor level.
@@ -761,17 +822,20 @@ fn axis_state(facing: Cardinal) -> HashMap<String, String> {
 
 /// Place the timber frame: vertical corner posts and horizontal crossbeams
 /// at floor/ceiling levels along each edge. Uses WoodPillar role with Block form
-/// and axis state to orient logs.
+/// and axis state to orient logs. `pattern` adds extra timber (vertical studs,
+/// a mid-rail, corner knee braces) over the baseline skeleton — see
+/// `TimberPattern` for the variants.
 pub async fn place_frame(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
+    pattern: &TimberPattern,
 ) {
     let editor: &Editor = &*ctx.editor;
     let data = ctx.data;
     let palette = ctx.palette;
     let rng = &mut *ctx.rng;
 
-    let material_id = palette
+    let pillar_id = palette
         .get_material(MaterialRole::WoodPillar)
         .or_else(|| palette.get_material(MaterialRole::PrimaryWood))
         .expect("No wood pillar or primary wood material")
@@ -780,13 +844,24 @@ pub async fn place_frame(
     // Non-pillar blocks (e.g. cut_sandstone) don't accept an `axis` blockstate,
     // and Minecraft will reject placements that specify one. Skip the axis state
     // unless the material is a pillar-style block.
-    let supports_axis = material_supports_axis(material_id.as_str());
+    let supports_axis = material_supports_axis(pillar_id.as_str());
 
-    let mut placer_rng = rng.derive();
-    let mut placer = MaterialPlacer::new(
-        Placer::new(&data.materials, &mut placer_rng),
-        material_id,
+    let mut pillar_rng = rng.derive();
+    let mut pillar_placer = MaterialPlacer::new(
+        Placer::new(&data.materials, &mut pillar_rng),
+        pillar_id,
     );
+
+    // Knee braces use stairs; logs don't come in stair form so fall back to
+    // PrimaryWood (planks → spruce_stairs etc.). Construct lazily — `Plain`
+    // and `Studded`/`Gridded` patterns don't need it.
+    let brace_material = palette
+        .get_material(MaterialRole::PrimaryWood)
+        .cloned();
+    let mut brace_rng = rng.derive();
+    let mut brace_placer = brace_material.map(|id| {
+        MaterialPlacer::new(Placer::new(&data.materials, &mut brace_rng), id)
+    });
 
     let wall_segs = build_segments(frame);
 
@@ -797,6 +872,9 @@ pub async fn place_frame(
         let cells = segment_cells(seg);
         let beam_axis = axis_state(seg.facing);
         let beam_state = if supports_axis { Some(&beam_axis) } else { None };
+        let y_axis_state: HashMap<String, String> =
+            HashMap::from([("axis".to_string(), "y".to_string())]);
+        let stud_state = if supports_axis { Some(&y_axis_state) } else { None };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
 
@@ -808,20 +886,87 @@ pub async fn place_frame(
 
         // Crossbeams at floor and ceiling
         for cell in &cells {
-            placer.place_block(
+            pillar_placer.place_block(
                 editor,
                 Point3D::new(cell.x, floor_y - 1, cell.y),
                 BlockForm::Block,
                 beam_state,
                 None,
             ).await;
-            placer.place_block(
+            pillar_placer.place_block(
                 editor,
                 Point3D::new(cell.x, ceiling_y, cell.y),
                 BlockForm::Block,
                 beam_state,
                 None,
             ).await;
+        }
+
+        // Vertical studs at regular spacing along the segment. Skip the
+        // corner columns (they get a full post) and any rows inside an opening.
+        if pattern.has_studs() {
+            for idx in stud_indices(seg.length as u32, pattern.spacing()) {
+                if idx >= cells.len() as u32 { continue; }
+                let cell = cells[idx as usize];
+                for ry in 0..seg.height {
+                    if is_inside_opening(&seg.openings, idx, ry) { continue; }
+                    pillar_placer.place_block_forced(
+                        editor,
+                        Point3D::new(cell.x, floor_y + ry as i32, cell.y),
+                        BlockForm::Block,
+                        stud_state,
+                        None,
+                    ).await;
+                }
+            }
+        }
+
+        // Mid-rail: a horizontal beam halfway up the wall. Only worth placing
+        // if the wall is tall enough for it to sit between floor and ceiling.
+        if pattern.has_mid_rail() && seg.height >= 3 {
+            let ry = seg.height / 2;
+            for (idx, cell) in cells.iter().enumerate() {
+                if is_inside_opening(&seg.openings, idx as u32, ry) { continue; }
+                pillar_placer.place_block_forced(
+                    editor,
+                    Point3D::new(cell.x, floor_y + ry as i32, cell.y),
+                    BlockForm::Block,
+                    beam_state,
+                    None,
+                ).await;
+            }
+        }
+
+        // Knee braces: stair blocks at the top of each segment, just inside
+        // the corner posts, leaning inward toward the segment midpoint.
+        if pattern.has_corner_braces() && seg.length >= 4 {
+            if let Some(brace_placer) = brace_placer.as_mut() {
+                let walk_dir = match seg.facing {
+                    Cardinal::South => Cardinal::East,
+                    Cardinal::North => Cardinal::West,
+                    Cardinal::East => Cardinal::North,
+                    Cardinal::West => Cardinal::South,
+                };
+                let top_ry = seg.height - 1;
+                let brace_y = floor_y + top_ry as i32;
+
+                for (idx, facing) in [(1u32, walk_dir), (seg.length as u32 - 2, -walk_dir)] {
+                    if (idx as usize) >= cells.len() { continue; }
+                    if is_inside_opening(&seg.openings, idx, top_ry) { continue; }
+                    let cell = cells[idx as usize];
+                    let state = HashMap::from([
+                        ("facing".to_string(), facing.to_string()),
+                        ("half".to_string(), "top".to_string()),
+                    ]);
+                    brace_placer.place_block_forced(
+                        editor,
+                        Point3D::new(cell.x, brace_y, cell.y),
+                        BlockForm::Stairs,
+                        Some(&state),
+                        None,
+                    ).await;
+                }
+            }
         }
     }
 
@@ -833,7 +978,7 @@ pub async fn place_frame(
     for (&(vx, vz), &max_floor) in &corner_max_floor {
         let top_y = frame.floor_y(max_floor) + frame.wall_height() as i32;
         for y in frame.base_y()..=top_y {
-            placer.place_block_forced(
+            pillar_placer.place_block_forced(
                 editor,
                 Point3D::new(vx, y, vz),
                 BlockForm::Block,
@@ -842,6 +987,21 @@ pub async fn place_frame(
             ).await;
         }
     }
+}
+
+/// Stud column indices along a segment of `length` cells, stepped by `spacing`.
+/// Excludes the two corner columns (0 and length-1) so corner posts stay clean.
+fn stud_indices(length: u32, spacing: u32) -> Vec<u32> {
+    if length < 3 || spacing < 2 {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut idx = spacing;
+    while idx + 1 < length {
+        out.push(idx);
+        idx += spacing;
+    }
+    out
 }
 
 /// Returns true if a Minecraft block of the given material id accepts an

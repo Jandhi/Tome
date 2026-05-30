@@ -245,6 +245,19 @@ fn upper_floors_get_more_windows() {
 }
 
 #[test]
+fn stud_indices_distribution() {
+    use super::stud_indices;
+    assert!(stud_indices(2, 3).is_empty(), "no room for any stud");
+    assert!(stud_indices(3, 3).is_empty(), "spacing reaches corner");
+    assert_eq!(stud_indices(5, 3), vec![3]);
+    assert_eq!(stud_indices(8, 3), vec![3, 6]);
+    assert_eq!(stud_indices(10, 3), vec![3, 6]);
+    assert_eq!(stud_indices(12, 3), vec![3, 6, 9]);
+    assert_eq!(stud_indices(16, 4), vec![4, 8, 12]);
+    assert_eq!(stud_indices(20, 4), vec![4, 8, 12, 16]);
+}
+
+#[test]
 fn facing_directions_simple_rect() {
     // A simple rect should have one segment facing each direction
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(4, 4));
@@ -460,6 +473,107 @@ const COLORS: &[&str] = &[
     "purple_concrete", "blue_concrete", "brown_concrete", "green_concrete",
     "red_concrete", "black_concrete", "gray_concrete", "light_gray_concrete",
 ];
+
+/// Offline visualization: build one House with each TimberPattern variant
+/// against a synthetic world, then dump the longest ground-floor wall as an
+/// ASCII slice so studs/mid-rail/braces show up without a live server.
+#[tokio::test]
+async fn visualize_timber_patterns_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, TimberPattern, build_house};
+    use super::segment_cells;
+
+    let patterns = [
+        ("Plain",   TimberPattern::Plain),
+        ("Studded", TimberPattern::Studded { spacing: 3 }),
+        ("Gridded", TimberPattern::Gridded { spacing: 4 }),
+        ("Braced",  TimberPattern::Braced  { spacing: 4 }),
+    ];
+
+    for (name, pattern) in patterns {
+        let build_area = Rect3D::from_points(
+            Point3D::new(0, 0, 0),
+            Point3D::new(255, 127, 255),
+        );
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+
+        let data = LoadedData::load().expect("Failed to load data");
+        let palette_id: PaletteId = "medieval_spruce".into();
+        let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+        let bounds = Rect2D::from_points(Point2D::new(96, 96), Point2D::new(159, 159));
+        let mut rng = RNG::new(7);
+        let plot = Plot::fully_usable(bounds);
+        let footprint = generate_footprint(&mut rng, &plot, &SizeClass::House)
+            .expect("Failed to generate House footprint");
+
+        let mut bctx = BuildingContext::new(
+            Culture::Medieval,
+            SizeClass::House,
+            RoofStyle::Gable(GablePitch::Stairs),
+        );
+        bctx.timber_pattern = pattern;
+
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
+            .await
+            .expect("build_house failed");
+
+        // Find the longest ground-floor segment to read back.
+        let seg = house.wall_segs.segments.iter()
+            .filter(|s| s.floor == 0)
+            .max_by_key(|s| s.length)
+            .expect("no ground-floor segment");
+        let cells = segment_cells(seg);
+
+        println!("\n=== Timber: {} ({:?}) — wall facing {:?}, len={} ===",
+            name, pattern, seg.facing, seg.length);
+        // Top row first so the printed slice reads like the wall as seen
+        // from outside: ceiling on top, floor at bottom.
+        for ry in (0..seg.height).rev() {
+            let y = seg.base_y + ry as i32;
+            let mut row = String::new();
+            for cell in &cells {
+                let b = editor.try_get_block(Point3D::new(cell.x, y, cell.y));
+                row.push(classify(b.as_ref()));
+            }
+            println!("  y{} |{}|", ry, row);
+        }
+        // Floor beam (y = base_y - 1) and ceiling beam (y = base_y + height).
+        let mut beam = String::new();
+        for cell in &cells {
+            let b = editor.try_get_block(Point3D::new(cell.x, seg.base_y - 1, cell.y));
+            beam.push(classify(b.as_ref()));
+        }
+        println!("  y-1|{}|  (floor beam)", beam);
+    }
+}
+
+/// Classify a placed block into the ASCII glyph used by the wall dump.
+fn classify(block: Option<&Block>) -> char {
+    let Some(b) = block else { return '.' };
+    let id_full = b.id.as_str();
+    let id = id_full.strip_prefix("minecraft:").unwrap_or(id_full);
+    if id.ends_with("_log") || id.ends_with("_pillar") || id.ends_with("_wood") {
+        'P'
+    } else if id.ends_with("_stairs") {
+        '/'
+    } else if id == "air" {
+        '.'
+    } else if id.contains("door") {
+        'D'
+    } else if id.contains("glass") || id.contains("pane") {
+        'W'
+    } else if id.contains("planks") {
+        'p'
+    } else if id.contains("wool") || id.contains("brick") || id.contains("stone") || id.contains("cobble") {
+        '#'
+    } else {
+        '?'
+    }
+}
 
 #[tokio::test]
 async fn debug_single_manor_segments() {

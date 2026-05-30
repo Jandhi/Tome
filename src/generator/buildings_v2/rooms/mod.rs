@@ -33,6 +33,8 @@ pub enum RoomRole {
     Upper,
     /// Attic room under a double-pitch roof.
     Attic,
+    /// Below-ground cellar under the core rect.
+    Cellar,
 }
 
 /// A room within a building.

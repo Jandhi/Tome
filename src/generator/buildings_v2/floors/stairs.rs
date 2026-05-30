@@ -15,7 +15,7 @@ use crate::noise::RNG;
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
-use super::super::walls::{OpeningKind, WallSegments};
+use super::super::walls::{segment_cells, OpeningKind, WallSegments};
 use super::{StairKind, Stairwell};
 
 // ---------------------------------------------------------------------------
@@ -179,13 +179,28 @@ pub(super) fn select_stairwells(
     has_attic: bool,
     rng: &mut RNG,
 ) -> Vec<Stairwell> {
-    let mut stairwells = Vec::new();
+    let mut stairwells: Vec<Stairwell> = Vec::new();
     let mut occupied: HashSet<(i32, i32)> = HashSet::new();
 
     for floor in 0..frame.max_floors().saturating_sub(1) {
-        if let Some((kind, positions, direction)) = pick_stair_for_floor(
-            frame, floor, wall_segs, &occupied, rng,
-        ) {
+        // A flight on `floor` has its steps here and emerges onto `floor + 1`,
+        // so it must keep clear of doorways on both.
+        let mut door_cells = door_cells_on_floor(wall_segs, floor);
+        door_cells.extend(door_cells_on_floor(wall_segs, floor + 1));
+
+        // Prefer stacking straight onto the flight directly below so multi-floor
+        // cores read as one continuous tower; fall back to a fresh footprint when
+        // the stack doesn't fit or would block a door.
+        let stacked = stairwells
+            .last()
+            .filter(|prev| prev.floor + 1 == floor)
+            .and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells));
+
+        let chosen = stacked.or_else(|| {
+            pick_stair_for_floor(frame, floor, wall_segs, &occupied, &door_cells, rng)
+        });
+
+        if let Some((kind, positions, direction)) = chosen {
             for pos in &positions {
                 occupied.insert((pos.x, pos.y));
             }
@@ -207,6 +222,62 @@ pub(super) fn select_stairwells(
     stairwells
 }
 
+/// Interior cells one step inward from every doorway on `floor` — the cells a
+/// player stands on to use the door. A stair landing or step here walls the
+/// door off, so these are excluded from every candidate's footprint.
+fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i32)> {
+    let mut cells = HashSet::new();
+    for seg in wall_segs.segments_on_floor(floor) {
+        let inward: Point2D = (-seg.facing).into();
+        let seg_cells = segment_cells(seg);
+        for o in &seg.openings {
+            if !matches!(o.kind, OpeningKind::Door(_)) {
+                continue;
+            }
+            for w in 0..o.width as usize {
+                if let Some(&dc) = seg_cells.get(o.offset as usize + w) {
+                    let c = dc + inward;
+                    cells.insert((c.x, c.y));
+                }
+            }
+        }
+    }
+    cells
+}
+
+/// Try to continue the previous floor's flight straight up: same kind and
+/// direction, offset one cell along the travel axis so the two flights stagger
+/// into one continuous tower (mirrors the cellar's stacked descent). Only
+/// straight flights stack, the continuation must still fit the core, and no
+/// step or landing may sit in a doorway cell on its own floor or the floor it
+/// emerges onto. Returns None to fall back to a fresh-footprint pick.
+fn try_stack_on_previous(
+    prev: &Stairwell,
+    frame: &Frame,
+    floor: u32,
+    door_cells: &HashSet<(i32, i32)>,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    if prev.kind != StairKind::Straight {
+        return None;
+    }
+    if !(frame.active_rects(floor).contains(&0) && frame.active_rects(floor + 1).contains(&0)) {
+        return None;
+    }
+    let core = &frame.footprint().rects()[0];
+    let run = (frame.wall_height() + 1) as i32;
+    let dir = prev.direction;
+    let sv: Point2D = dir.into();
+    let start = *prev.positions.first()? + sv;
+    if !stair_fits_in_rect(start, dir, run, core) {
+        return None;
+    }
+    let positions = stair_positions(start, dir, run);
+    if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) {
+        return None;
+    }
+    Some((StairKind::Straight, positions, dir))
+}
+
 /// Pick a stair position for a specific floor transition.
 /// Considers straight, spiral, and L-shaped candidates across the core rect only.
 /// Prefers exterior-wall positions over interior, avoids door-facing walls.
@@ -215,6 +286,7 @@ fn pick_stair_for_floor(
     floor: u32,
     wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
+    door_cells: &HashSet<(i32, i32)>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
     let rects = frame.footprint().rects();
@@ -266,6 +338,7 @@ fn pick_stair_for_floor(
             if !stair_fits_in_rect(start, dir, run, rect) { continue; }
             let positions = stair_positions(start, dir, run);
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let wall_facing = match dir {
                 Cardinal::East | Cardinal::West => {
                     if start.y == min.y + 1 { Cardinal::North } else { Cardinal::South }
@@ -284,6 +357,7 @@ fn pick_stair_for_floor(
         for (anchor, dir) in spiral_anchors(rect) {
             let positions = spiral_positions(anchor, dir);
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let walls = spiral_adjacent_walls(anchor, rect);
             if walls.iter().all(|w| door_facings.contains(w)) { continue; }
             let candidate = (StairKind::Spiral, positions, dir);
@@ -296,6 +370,7 @@ fn pick_stair_for_floor(
             let positions = l_stair_positions(start, primary, turn);
             if !positions_fit_in_rect(&positions, rect) { continue; }
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let walls = spiral_adjacent_walls(start, rect);
             if walls.iter().any(|w| door_facings.contains(w)) { continue; }
             let candidate = (StairKind::LShaped, positions, primary);

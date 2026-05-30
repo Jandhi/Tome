@@ -4,19 +4,19 @@ armory:
 
 bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase, carpet, carpet, reading_nook, dressing_screen]
+  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase, carpet, carpet, reading_nook, dressing_screen, potted_plant]
 
 common:
   required: [bed, crafting_table, furnace, chest]
-  optional: [lantern, table, chair]
+  optional: [lantern, table, chair, bench]
 
 dining:
   required: [lantern, table]
-  optional: [chair, chair, chair, chair, wall_banner, vase, chest, carpet, carpet]
+  optional: [chair, chair, chair, chair, wall_banner, vase, chest, carpet, carpet, bench, chandelier, potted_plant]
 
 great_room:
   required: [lantern]
-  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf, carpet, carpet]
+  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf, carpet, carpet, lectern, bench, chandelier, potted_plant]
 
 hearth:
   required: [furnace, crafting_table]
@@ -24,19 +24,19 @@ hearth:
 
 kitchen:
   required: [furnace, smoker]
-  optional: [cauldron, barrel, lantern]
+  optional: [cauldron, barrel, lantern, potted_plant]
 
 library:
   required: [bookshelf]
-  optional: [bookshelf, lantern]
+  optional: [bookshelf, lantern, lectern]
 
 master_bedroom:
   required: [bed, lantern]
-  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table, carpet, carpet, reading_nook, dressing_screen]
+  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table, carpet, carpet, reading_nook, dressing_screen, chandelier, potted_plant]
 
 multi_bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen]
+  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen, potted_plant]
 
 pantry:
   fill_threshold: 0.78
@@ -84,4 +84,4 @@ studio:
 
 study:
   required: [bookshelf]
-  optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet]
+  optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet, lectern, potted_plant]

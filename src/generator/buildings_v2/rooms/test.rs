@@ -604,6 +604,85 @@ async fn build_houses_with_signs() {
 }
 
 #[tokio::test]
+async fn build_manors_with_signs() {
+    build_single_class_with_signs("Manor", SizeClass::Manor, 12, 13).await;
+}
+
+/// Builds exactly one Manor for debugging. Change `SEED` and re-run to inspect
+/// different layouts in-game: `cargo test build_single_manor -- --nocapture`.
+/// Asserts the manor got a cellar so a dud seed fails loudly.
+#[tokio::test]
+async fn build_single_manor() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::{BuildCtx, build_house, BuildingContext, Culture};
+    use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
+
+    const SEED: i64 = 27;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    let mut rng = RNG::new(SEED);
+    let mut plot = Plot::fully_usable(bounds);
+    let culture = Culture::Medieval;
+    let pitch = culture.roof_styles()[0];
+
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 1);
+    let (footprint, _) = footprints.into_iter().next().expect("no footprint generated");
+
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let bctx = BuildingContext::new(culture, SizeClass::Manor, pitch);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds)
+        .await
+        .expect("build_house failed");
+
+    for room in &house.room_plan.rooms {
+        let cx = (room.rect.min().x + room.rect.max().x) / 2;
+        let cz = (room.rect.min().y + room.rect.max().y) / 2;
+        let y = house.frame.floor_y(room.floor) + 1;
+        let sign = sign_block(&format!("F{} R{}", room.floor, room.rect_index), &format!("{:?}", room.room_type));
+        ctx.editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+    }
+
+    editor.flush_buffer().await;
+
+    let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
+    let ascii = render_ascii(&blueprint);
+    std::fs::write("output/single_manor.txt", &ascii).expect("Failed to write blueprint ASCII");
+    println!("{ascii}");
+    println!(
+        "Manor seed={SEED}: rects={}, floors={}, pitch={:?}, rooms={}, cellar={}",
+        house.footprint.rects().len(), house.frame.max_floors(),
+        pitch, house.room_plan.rooms.len(), house.has_cellar,
+    );
+    println!("Cellar stair cells: {:?}", house.cellar_stair);
+    let f0_doors: Vec<_> = house.room_plan.interior_doors.iter()
+        .filter(|(floor, ..)| *floor == 0)
+        .map(|(_, a, b, c)| (*a, *b, c.x, c.y))
+        .collect();
+    println!("Floor-0 interior doors (rect_a, rect_b, x, z): {f0_doors:?}");
+    assert!(house.has_cellar, "seed {SEED} manor has no cellar — terrain too wet or stair didn't fit; try another seed");
+}
+
+#[tokio::test]
 async fn build_mixed_sizes_with_random_roofs() {
     use crate::editor::World;
     use crate::http_mod::GDMCHTTPProvider;
@@ -701,7 +780,7 @@ async fn run_furnished_houses_pipeline(
 ) -> usize {
     use crate::generator::data::LoadedData;
     use crate::generator::buildings_v2::blueprint::{build_blueprint, render_svg, render_ascii};
-    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, build_house};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, TimberPattern, build_house};
 
     let data = LoadedData::load().expect("Failed to load data");
     let palette_id = culture.palette_id();
@@ -718,7 +797,9 @@ async fn run_furnished_houses_pipeline(
     let mut ctx = BuildCtx::new(editor, &data, &palette, &mut rng);
     for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
         let roof_style = roof_styles[i % roof_styles.len()];
-        let bctx = BuildingContext::new(culture, size_class, roof_style);
+        let timber_pattern = TimberPattern::pick(size_class, ctx.rng);
+        let mut bctx = BuildingContext::new(culture, size_class, roof_style);
+        bctx.timber_pattern = timber_pattern;
         let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .unwrap_or_else(|msg| panic!("Seed {} building {} violated invariant: {}", seed, i, msg));
@@ -735,9 +816,9 @@ async fn run_furnished_houses_pipeline(
 
             let win_count = house.wall_segs.windows().count();
             println!(
-                "Building {}: {:?}, rects={}, floors={}, roof={:?}, rooms={}, windows={}, blueprint={}",
+                "Building {}: {:?}, rects={}, floors={}, roof={:?}, rooms={}, timber={:?}, windows={}, blueprint={}",
                 i, size_class, house.footprint.rects().len(), house.frame.max_floors(),
-                roof_style, house.room_plan.rooms.len(), win_count, svg_path,
+                roof_style, house.room_plan.rooms.len(), timber_pattern, win_count, svg_path,
             );
         }
     }
@@ -891,6 +972,75 @@ async fn build_furnished_desert_houses_offline() {
     use crate::generator::buildings_v2::Culture;
     let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Desert).await;
     println!("Done — {} furnished desert buildings placed (offline)", count);
+}
+
+/// Cellar regression: a Manor always rolls a cellar (size chance = always) and
+/// the synthetic world is dry, so `has_cellar` must be true and the carved
+/// volume must be present in the editor — air at the cellar floor surface and a
+/// solid stone slab one block below it, beneath the core rect.
+#[tokio::test]
+async fn cellar_built_under_manor_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(
+        Point3D::new(0, 0, 0),
+        Point3D::new(255, 127, 255),
+    );
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let bounds = Rect2D::from_points(
+        Point2D::new(96, 96),
+        Point2D::new(159, 159),
+    );
+
+    let mut rng = RNG::new(42);
+    let plot = Plot::fully_usable(bounds);
+    let footprint = generate_footprint(&mut rng, &plot, &SizeClass::Manor)
+        .expect("Failed to generate Manor footprint");
+
+    let bctx = BuildingContext::new(Culture::Medieval, SizeClass::Manor, RoofStyle::Gable(GablePitch::Double));
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds)
+        .await
+        .expect("build_house failed");
+
+    assert!(house.has_cellar, "Manor in a dry synthetic world must get a cellar");
+
+    let floor_y = house.frame.floor_y(CELLAR_FLOOR);
+    let slab_y = floor_y - 1;
+    let core = house.footprint.rects()[0];
+    let center = core.midpoint();
+
+    let at = |y: i32| editor.try_get_block(Point3D::new(center.x, y, center.y));
+    let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
+    let floor_block = at(floor_y);
+    let slab_block = at(slab_y);
+
+    assert!(
+        floor_block.as_ref().map_or(true, is_air),
+        "cellar floor surface at y={} should be air, got {:?}", floor_y, floor_block,
+    );
+    assert!(
+        slab_block.as_ref().map_or(false, |b| !is_air(b)),
+        "cellar floor slab at y={} should be solid stone, got {:?}", slab_y, slab_block,
+    );
+
+    println!("Manor cellar carved: floor_y={}, slab_y={}, core={:?}", floor_y, slab_y, core);
 }
 
 /// Property test: run the offline pipeline across many seeds and assert that

@@ -11,9 +11,10 @@ use std::collections::HashSet;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::Palette;
-use crate::geometry::Rect2D;
+use crate::geometry::{Point2D, Rect2D};
 use crate::noise::RNG;
 
+use super::cellar;
 use super::door_ramp::{DoorRamp, place_door_ramps, plan_door_ramps_from_world};
 use super::floors::{FloorPlan, clear_attic_stair_headroom, place_floors};
 use super::footprint::{Footprint, SizeClass, find_boundaries};
@@ -67,6 +68,10 @@ pub struct HouseOutput {
     pub room_plan: RoomPlan,
     pub door_ramps: Vec<DoorRamp>,
     pub has_attic: bool,
+    pub has_cellar: bool,
+    /// Cellar descending-stair cells (position 0 is the cellar landing), if a
+    /// cellar was built. Surfaced for blueprint/debug inspection.
+    pub cellar_stair: Option<Vec<Point2D>>,
     pub roof_style: RoofStyle,
     pub size_class: SizeClass,
 }
@@ -109,7 +114,7 @@ pub async fn build_house(
 
     let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic, skip_ceilings).await;
     place_wall_infill(ctx, &wall_segs, &WallInfill::StoneBase, &WallInfill::Solid).await;
-    place_frame(ctx, &frame).await;
+    place_frame(ctx, &frame, &bctx.timber_pattern).await;
     let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
@@ -157,6 +162,12 @@ pub async fn build_house(
 
     check_building_invariants(&frame, &room_plan, &floor_plan)?;
 
+    // Cellar runs last: it carves below the finished building using a derived
+    // RNG, so it neither perturbs the main stream nor disturbs the room_plan
+    // that blueprint/invariant code iterates.
+    let cellar_stair = cellar::maybe_build_cellar(ctx, &frame, &footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
+    let has_cellar = cellar_stair.is_some();
+
     Ok(HouseOutput {
         footprint,
         frame,
@@ -165,6 +176,8 @@ pub async fn build_house(
         room_plan,
         door_ramps,
         has_attic,
+        has_cellar,
+        cellar_stair,
         roof_style,
         size_class,
     })

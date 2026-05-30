@@ -1,4 +1,5 @@
 pub mod blueprint;
+pub mod cellar;
 pub mod door_ramp;
 pub mod floors;
 pub mod footprint;
@@ -11,7 +12,7 @@ pub mod rooms;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
-pub use self::walls::WindowFill;
+pub use self::walls::{TimberPattern, WindowFill};
 
 use crate::generator::materials::PaletteId;
 use footprint::SizeClass;
@@ -74,16 +75,20 @@ pub struct BuildingContext {
     pub size_class: SizeClass,
     pub roof_style: RoofStyle,
     pub window_fill: WindowFill,
+    pub timber_pattern: TimberPattern,
 }
 
 impl BuildingContext {
     /// Create a context with culture defaults for roof and window style.
+    /// Timber pattern defaults to `Plain`; callers wanting variation should
+    /// roll one via `TimberPattern::pick` and assign it explicitly.
     pub fn new(culture: Culture, size_class: SizeClass, roof_style: RoofStyle) -> Self {
         Self {
             culture,
             size_class,
             roof_style,
             window_fill: culture.window_fill(),
+            timber_pattern: TimberPattern::Plain,
         }
     }
 }
