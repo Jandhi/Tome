@@ -11,6 +11,7 @@ mod wall;
 mod district_painter;
 mod gate;
 mod paint_palette;
+pub mod subdivide;
 
 pub use district::District;
 pub use district::DistrictID;

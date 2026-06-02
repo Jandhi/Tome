@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::editor::Editor;
+use crate::generator::BuildClaim;
 use crate::generator::buildings_v2::footprint::Footprint;
 use crate::generator::buildings_v2::pipeline::BuildCtx;
 use crate::geometry::{Point2D, Point3D};
@@ -23,6 +24,14 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
         let ring = ring_at_distance(&footprint_set, dist, &world_bounds);
 
         for point in ring {
+            // Don't raise terrain onto already-paved roads — the lerped fill
+            // would bury the pavement. `PathPlanned` is fine to blend through:
+            // those cells are reserved but not yet built, and a later pave
+            // pass will repave at the new (raised) height.
+            if matches!(ctx.editor.world().get_claim(point), Some(BuildClaim::Path(_))) {
+                continue;
+            }
+
             let terrain_y = ctx.editor.world().get_ocean_floor_height_at(point);
 
             // Only raise terrain, never lower it. If terrain is already at or
