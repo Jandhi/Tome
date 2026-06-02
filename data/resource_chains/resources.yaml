@@ -12,6 +12,30 @@ resources:
     name: Iron Ore
     category: mineral
     tier: 0
+  coal:
+    name: Coal
+    category: mineral
+    tier: 0
+  honey:
+    name: Honey
+    category: food
+    tier: 0
+  beeswax:
+    name: Beeswax
+    category: animal
+    tier: 0
+  wool:
+    name: Wool
+    category: animal
+    tier: 0
+  sugar_cane:
+    name: Sugar Cane
+    category: crop
+    tier: 0
+  cow:
+    name: Cow
+    category: animal
+    tier: 0
 
   # --- Intermediate (tier 1) ---
   planks:
@@ -30,6 +54,22 @@ resources:
     name: Iron Ingot
     category: metal
     tier: 1
+  cloth:
+    name: Cloth
+    category: animal
+    tier: 1
+  sugar:
+    name: Sugar
+    category: food
+    tier: 1
+  paper:
+    name: Paper
+    category: knowledge
+    tier: 1
+  leather:
+    name: Leather
+    category: animal
+    tier: 1
 
   # --- Finished goods (tier 2) ---
   bread:
@@ -43,4 +83,28 @@ resources:
   furniture:
     name: Furniture
     category: forest
+    tier: 2
+  candles:
+    name: Candles
+    category: animal
+    tier: 2
+  mead:
+    name: Mead
+    category: food
+    tier: 2
+  clothing:
+    name: Clothing
+    category: animal
+    tier: 2
+  book:
+    name: Book
+    category: knowledge
+    tier: 2
+  candy:
+    name: Candy
+    category: food
+    tier: 2
+  beef:
+    name: Beef
+    category: food
     tier: 2

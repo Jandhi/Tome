@@ -1,0 +1,14 @@
+{
+  "id": "tailor",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/tailor.nbt",
+  "origin": {
+    "x": 8,
+    "y": 0,
+    "z": 5
+  },
+  "size_xz": [
+    17,
+    11
+  ]
+}

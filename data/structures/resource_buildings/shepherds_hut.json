@@ -1,0 +1,14 @@
+{
+  "id": "shepherds_hut",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/shepherds_hut.nbt",
+  "origin": {
+    "x": 8,
+    "y": 0,
+    "z": 4
+  },
+  "size_xz": [
+    17,
+    9
+  ]
+}

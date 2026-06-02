@@ -1,0 +1,14 @@
+{
+  "id": "coal_mine",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/coal_mine.nbt",
+  "origin": {
+    "x": 4,
+    "y": 0,
+    "z": 4
+  },
+  "size_xz": [
+    9,
+    9
+  ]
+}

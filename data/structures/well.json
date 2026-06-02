@@ -1,0 +1,14 @@
+{
+  "id": "well",
+  "y_offset": 0,
+  "path": "data/structures/well.nbt",
+  "origin": {
+    "x": 2,
+    "y": 0,
+    "z": 2
+  },
+  "size_xz": [
+    5,
+    5
+  ]
+}

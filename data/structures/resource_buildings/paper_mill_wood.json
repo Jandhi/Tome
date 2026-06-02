@@ -1,0 +1,14 @@
+{
+  "id": "paper_mill_wood",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/paper_mill_wood.nbt",
+  "origin": {
+    "x": 11,
+    "y": 0,
+    "z": 7
+  },
+  "size_xz": [
+    23,
+    15
+  ]
+}
