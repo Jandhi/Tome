@@ -245,12 +245,19 @@ fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i3
     cells
 }
 
-/// Try to continue the previous floor's flight straight up: same kind and
-/// direction, offset one cell along the travel axis so the two flights stagger
-/// into one continuous tower (mirrors the cellar's stacked descent). Only
-/// straight flights stack, the continuation must still fit the core, and no
-/// step or landing may sit in a doorway cell on its own floor or the floor it
-/// emerges onto. Returns None to fall back to a fresh-footprint pick.
+/// Try to continue the previous floor's flight as one straight run: same kind
+/// and direction, with the new flight's landing sitting on the floor directly
+/// above the previous flight's *top step* and its steps carrying on in the same
+/// direction. This is the only stagger that keeps a full floor of clearance
+/// between the two flights — a smaller offset (`d` cells) leaves only `run - d`
+/// blocks of vertical gap at the cells they share in plan, so the upper flight's
+/// underside drops into the lower flight's headroom (the steps visibly collide).
+/// Continuing end-to-end needs a long core; when it doesn't fit, or a step would
+/// block a doorway, we return None and a fresh-footprint pick is used instead.
+///
+/// (The cellar's `stacked_under_main_stair` can use a one-cell stagger because
+/// its flight descends *below* the floor while the main flight rises above it —
+/// they never share vertical space. Two ascending flights one story apart do.)
 fn try_stack_on_previous(
     prev: &Stairwell,
     frame: &Frame,
@@ -269,12 +276,23 @@ fn try_stack_on_previous(
     let run = (frame.wall_height() + 1) as i32;
     let dir = prev.direction;
     let sv: Point2D = dir.into();
-    let start = *prev.positions.first()? + sv;
+    // Start the new flight at the previous flight's top step: its landing lands
+    // one block above that step, and the steps continue past it. The two runs
+    // then overlap only at that single handoff cell (a landing, which places no
+    // block), so they never intrude on each other's headroom.
+    let start = *prev.positions.last()?;
     if !stair_fits_in_rect(start, dir, run, &core) {
         return None;
     }
     let positions = stair_positions(start, dir, run);
     if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) {
+        return None;
+    }
+    // Safety net: only the handoff landing (positions[0]) may coincide with the
+    // previous flight; no actual step may re-enter its footprint.
+    let prev_cells: HashSet<(i32, i32)> =
+        prev.positions.iter().map(|p| (p.x, p.y)).collect();
+    if positions[1..].iter().any(|p| prev_cells.contains(&(p.x, p.y))) {
         return None;
     }
     Some((StairKind::Straight, positions, dir))
@@ -657,5 +675,65 @@ async fn clear_headroom(editor: &Editor, x: i32, y: i32, z: i32) {
             &"air".into(),
             Point3D::new(x, clear_y, z),
         ).await;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
+
+    fn frame_with_core(core: Rect2D, floors: u32) -> Frame {
+        let footprint = Footprint::new(outline_from_rects(&[core]), vec![core]);
+        Frame::new(footprint, 64, vec![floors], 3)
+    }
+
+    fn straight_flight(start: Point2D, dir: Cardinal, run: i32, floor: u32) -> Stairwell {
+        Stairwell {
+            positions: stair_positions(start, dir, run),
+            floor,
+            direction: dir,
+            kind: StairKind::Straight,
+        }
+    }
+
+    #[test]
+    fn stacked_flight_continues_end_to_end_without_overlap() {
+        // Long core so a continued run fits. run = wall_height + 1 = 4.
+        let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 8));
+        let frame = frame_with_core(core, 3);
+        let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
+        let doors = HashSet::new();
+
+        let (kind, positions, dir) =
+            try_stack_on_previous(&prev, &frame, 1, &doors).expect("should stack on a long core");
+
+        assert_eq!(kind, StairKind::Straight);
+        assert_eq!(dir, Cardinal::East);
+        // New landing sits on the previous flight's top step (the handoff);
+        // every actual step is past it, so no step shares a cell with prev.
+        assert_eq!(positions[0], *prev.positions.last().unwrap());
+        let prev_cells: HashSet<(i32, i32)> =
+            prev.positions.iter().map(|p| (p.x, p.y)).collect();
+        for step in &positions[1..] {
+            assert!(
+                !prev_cells.contains(&(step.x, step.y)),
+                "stacked step {:?} re-enters the lower flight's footprint",
+                step,
+            );
+        }
+    }
+
+    #[test]
+    fn stacked_flight_rejected_when_run_would_not_fit() {
+        // Short core: continuing end-to-end from the previous top step runs off
+        // the rect, so stacking must bail (caller falls back to a fresh pick).
+        let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 8));
+        let frame = frame_with_core(core, 3);
+        let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
+        let doors = HashSet::new();
+
+        assert!(try_stack_on_previous(&prev, &frame, 1, &doors).is_none());
     }
 }
