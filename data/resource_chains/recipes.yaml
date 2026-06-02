@@ -30,11 +30,11 @@ recipes:
 
   # --- Paper / Knowledge ---
   wood_to_paper:
-   inputs:
-     wood: 2
-   outputs:
-     paper: 3
-   building: paper_mill_wood
+    inputs:
+      wood: 2
+    outputs:
+      paper: 3
+    building: paper_mill_wood
 
   sugar_cane_to_paper:
     inputs:

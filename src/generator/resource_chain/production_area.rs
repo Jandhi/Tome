@@ -182,7 +182,7 @@ async fn paint_palettes(
         let mut field: HashSet<Point2D> = HashSet::new();
         for &p in free_cells {
             let coord = if axis_x { p.x } else { p.y };
-            if coord % 5 == offset {
+            if coord.rem_euclid(5) == offset {
                 irr.insert(p);
             } else {
                 field.insert(p);
