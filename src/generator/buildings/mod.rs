@@ -22,6 +22,8 @@ pub use set::{
     BuildingSetID,
 };
 pub use placement::{
+    PavingType,
     place_buildings,
     get_city_blocks_and_off_limits,
+    smooth_and_pave_road,
 };

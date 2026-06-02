@@ -630,9 +630,11 @@ async fn place_chimney(
     let min = rect.min();
     let max = rect.max();
 
-    // Chimney height above the roof surface depends on pitch
+    // Chimney height above the roof surface depends on pitch.
+    // Slab pitch needs +1 because its surface_y sits one block lower than
+    // the adjacent up-slope slab, so shelves at surface_y+1 would overwrite it.
     let chimney_height: i32 = match pitch {
-        GablePitch::Slab => 1,
+        GablePitch::Slab => 2,
         GablePitch::Stairs => 2,
         GablePitch::Double => 3,
     };
