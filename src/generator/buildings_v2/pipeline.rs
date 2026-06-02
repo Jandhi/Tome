@@ -19,7 +19,7 @@ use super::door_ramp::{DoorRamp, place_door_ramps, plan_door_ramps_from_world};
 use super::floors::{FloorPlan, clear_attic_stair_headroom, place_floors};
 use super::footprint::{Footprint, SizeClass, find_boundaries};
 use super::foundation::place_foundation;
-use super::frame::{Frame, generate_frame};
+use super::frame::{Frame, apply_jetty, generate_frame};
 use super::furnish::furnish_rooms;
 use super::BuildingContext;
 use super::roof::RoofStyle;
@@ -32,7 +32,7 @@ use super::rooms::{
     place_attic_ladders,
 };
 use super::walls::{
-    WallInfill, WallSegments, build_segments, boundary_cell_set,
+    TimberPattern, WallInfill, WallSegments, build_segments, boundary_cell_set,
     place_doors, place_frame, place_openings, place_terrace_doors,
     place_wall_infill, place_windows,
 };
@@ -74,6 +74,7 @@ pub struct HouseOutput {
     pub cellar_stair: Option<Vec<Point2D>>,
     pub roof_style: RoofStyle,
     pub size_class: SizeClass,
+    pub timber_pattern: TimberPattern,
 }
 
 /// Runs the full per-building pipeline. Caller owns footprint generation and
@@ -97,6 +98,7 @@ pub async fn build_house(
     // Frame consumes a Footprint; keep the original for later lookups
     // (find_boundaries, filled_points).
     let frame = generate_frame(footprint.clone(), base_y, &size_class, ctx.rng);
+    let frame = if bctx.jetty { apply_jetty(frame, &plot_bounds) } else { frame };
 
     let mut wall_segs = build_segments(&frame);
     let footprint_area = footprint.filled_points().len() as i32;
@@ -114,7 +116,20 @@ pub async fn build_house(
 
     let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic, skip_ceilings).await;
     place_wall_infill(ctx, &wall_segs, &WallInfill::StoneBase, &WallInfill::Solid).await;
-    place_frame(ctx, &frame, &bctx.timber_pattern).await;
+
+    // Resolve the timber pattern now that the frame is known — auto-pick
+    // filters out patterns whose studs wouldn't fit the longest wall segment.
+    // Use a derived RNG so adding the auto-pick path doesn't shift the main
+    // stream that rooms/furnish later draw from.
+    let timber_pattern = bctx.timber_pattern.unwrap_or_else(|| {
+        let max_seg_len = wall_segs.segments.iter()
+            .map(|s| s.length.max(0) as u32)
+            .max()
+            .unwrap_or(0);
+        let mut timber_rng = ctx.rng.derive();
+        TimberPattern::pick(size_class, max_seg_len, &mut timber_rng)
+    });
+    place_frame(ctx, &frame, &timber_pattern).await;
     let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
@@ -180,5 +195,6 @@ pub async fn build_house(
         cellar_stair,
         roof_style,
         size_class,
+        timber_pattern,
     })
 }

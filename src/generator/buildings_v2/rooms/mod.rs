@@ -10,7 +10,7 @@ use crate::geometry::{Point2D, Point3D, Rect2D};
 use crate::minecraft::{Block, BlockForm};
 use crate::noise::RNG;
 use super::footprint::merge::{walk_edge_cells, concave_corner_cells};
-use super::footprint::{find_boundaries, SizeClass};
+use super::footprint::{find_boundaries, phantom_wall_cells, SizeClass};
 use super::frame::Frame;
 use super::floors::FloorPlan;
 use super::pipeline::BuildCtx;
@@ -170,7 +170,7 @@ fn pick_room_type(
             }
         }
         SizeClass::House => {
-            let num_rects = frame.footprint().rects().len();
+            let num_rects = frame.rect_count();
             if frame.max_floors() == 1 {
                 if num_rects == 1 {
                     RoomType::Common
@@ -611,6 +611,27 @@ pub async fn build_rooms(
                 }
             }
         }
+
+
+        // Phantom walls plug the partial-shared edge gap (see
+        // `phantom_wall_cells`). No doorway carved — these are corner-pillar
+        // continuations of the adjacent boundary wall, not their own room
+        // boundary.
+        let active_rects: Vec<Rect2D> = active.iter().map(|&i| rects[i]).collect();
+        let base_y = frame.floor_y(floor);
+        let height = frame.wall_height();
+        for cell in phantom_wall_cells(&active_rects) {
+            if perimeter.contains(&(cell.x, cell.y)) { continue; }
+            for ry in 0..height {
+                placer.place_block(
+                    editor,
+                    Point3D::new(cell.x, base_y + ry as i32, cell.y),
+                    BlockForm::Block,
+                    None,
+                    None,
+                ).await;
+            }
+        }
     }
 
     // Cache per-floor stair-cell sets so a stairwell only affects the floor
@@ -651,8 +672,22 @@ pub async fn build_rooms(
             RoomRole::Secondary
         };
 
-        let rect = rects[rect_idx];
-        let interior = compute_room_interior(rects, rect_idx);
+        // Per-floor extents: for jettied buildings the rect on floor ≥ 1 is grown
+        // by 1 on each side, and the room's interior must shrink from that grown
+        // extent (otherwise walls land one cell outside the room and the wall-
+        // adjacency invariant fails). Attic floors reuse the top regular extent.
+        let extent_at_floor = |i: usize, f: u32| -> Rect2D {
+            if f < frame.floor_counts()[i] {
+                frame.rect_at(i, f).unwrap_or(rects[i])
+            } else {
+                frame.rect_at_top(i).unwrap_or(rects[i])
+            }
+        };
+        let floor_rects: Vec<Rect2D> = (0..frame.rect_count())
+            .map(|i| extent_at_floor(i, floor))
+            .collect();
+        let rect = floor_rects[rect_idx];
+        let interior = compute_room_interior(&floor_rects, rect_idx);
         let has_interior = interior.size.x > 0 && interior.size.y > 0;
         let mut constraints = ConstraintMap::new(&interior);
 
@@ -768,7 +803,11 @@ pub async fn place_attic_ladders(
     gable_doorways: &[Point2D],
 ) -> Vec<(i32, i32)> {
     let editor: &Editor = &*ctx.editor;
-    let rects = frame.footprint().rects();
+    // Attic occupies the same XZ as the top regular floor of each rect — use the
+    // jettied extent if jetty is set, ground extent otherwise.
+    let rects: Vec<Rect2D> = (0..frame.rect_count())
+        .map(|i| frame.rect_at_top(i).expect("rect must exist at its top floor"))
+        .collect();
 
     // Find all attic rooms (room index → rect index)
     let attic_rooms: Vec<(usize, usize)> = room_plan.rooms.iter().enumerate()
@@ -819,7 +858,7 @@ pub async fn place_attic_ladders(
     // Adjacent attic rects with shared boundaries are inherently connected
     // (no interior walls are placed on the attic floor)
     let attic_rect_set: HashSet<usize> = attic_rooms.iter().map(|&(_, ri)| ri).collect();
-    let boundaries = find_boundaries(rects);
+    let boundaries = find_boundaries(&rects);
     for b in &boundaries {
         if attic_rect_set.contains(&b.rect_a) && attic_rect_set.contains(&b.rect_b) {
             // Both rects have attics at the same floor level
@@ -971,6 +1010,15 @@ fn wall_cells_on_floor(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
         for cell in b.wall_cells {
             cells.insert((cell.x, cell.y));
         }
+    }
+    // Phantom walls plug the air gap on partially-shared rect edges where
+    // compute_room_interior shrinks but find_boundaries' wall lives in the
+    // lower-indexed neighbor. Without these, room invariant (a) fails on
+    // L/T-shape Manors where one wing only partly meets another.
+    let all_rects = frame.footprint().rects();
+    let active: Vec<Rect2D> = frame.active_rects(floor).iter().map(|&i| all_rects[i]).collect();
+    for cell in phantom_wall_cells(&active) {
+        cells.insert((cell.x, cell.y));
     }
     cells
 }

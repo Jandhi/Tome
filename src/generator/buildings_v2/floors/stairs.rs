@@ -263,12 +263,14 @@ fn try_stack_on_previous(
     if !(frame.active_rects(floor).contains(&0) && frame.active_rects(floor + 1).contains(&0)) {
         return None;
     }
-    let core = &frame.footprint().rects()[0];
+    // The stair must fit in both floors it spans. Jetty only grows upward, so
+    // the lower floor (`floor`) is the binding extent — use its rect.
+    let core = frame.rect_at(0, floor)?;
     let run = (frame.wall_height() + 1) as i32;
     let dir = prev.direction;
     let sv: Point2D = dir.into();
     let start = *prev.positions.first()? + sv;
-    if !stair_fits_in_rect(start, dir, run, core) {
+    if !stair_fits_in_rect(start, dir, run, &core) {
         return None;
     }
     let positions = stair_positions(start, dir, run);
@@ -289,10 +291,11 @@ fn pick_stair_for_floor(
     door_cells: &HashSet<(i32, i32)>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let rects = frame.footprint().rects();
     let run = (frame.wall_height() + 1) as i32;
 
     // Stairs only in core rect — wings are too small and architecturally odd.
+    // Constrain to the lower floor's extent (jetty grows upward, so the lower
+    // side is the binding rect).
     let candidate_rects: Vec<usize> = if frame.active_rects(floor).contains(&0)
         && frame.active_rects(floor + 1).contains(&0)
     {
@@ -312,25 +315,24 @@ fn pick_stair_for_floor(
         }
     }
 
-    // Interior facings: sides of the core with adjacent wing rects.
+    // Interior facings: sides of the core with adjacent wing rects on this
+    // floor. Adjacency is computed at `floor` so jettied geometry stays in sync.
     let mut interior_facings: HashSet<Cardinal> = HashSet::new();
-    let core = &rects[0];
-    for i in 1..rects.len() {
-        if !frame.active_rects(floor).contains(&i) {
-            continue;
-        }
-        let wing = &rects[i];
-        if wing.min().x == core.max().x + 1 { interior_facings.insert(Cardinal::East); }
-        if wing.max().x + 1 == core.min().x { interior_facings.insert(Cardinal::West); }
-        if wing.min().y == core.max().y + 1 { interior_facings.insert(Cardinal::South); }
-        if wing.max().y + 1 == core.min().y { interior_facings.insert(Cardinal::North); }
+    let core_at_floor = frame.rect_at(0, floor)?;
+    for i in 1..frame.rect_count() {
+        let Some(wing) = frame.rect_at(i, floor) else { continue; };
+        if wing.min().x == core_at_floor.max().x + 1 { interior_facings.insert(Cardinal::East); }
+        if wing.max().x + 1 == core_at_floor.min().x { interior_facings.insert(Cardinal::West); }
+        if wing.min().y == core_at_floor.max().y + 1 { interior_facings.insert(Cardinal::South); }
+        if wing.max().y + 1 == core_at_floor.min().y { interior_facings.insert(Cardinal::North); }
     }
 
     let mut exterior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
     let mut interior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
 
     for &rect_idx in &candidate_rects {
-        let rect = &rects[rect_idx];
+        let Some(rect_owned) = frame.rect_at(rect_idx, floor) else { continue; };
+        let rect = &rect_owned;
         let min = rect.min();
 
         // --- Straight stair candidates ---
@@ -395,9 +397,12 @@ fn pick_attic_stair(
     occupied: &HashSet<(i32, i32)>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let rects = frame.footprint().rects();
     let run = (frame.wall_height() + 1) as i32;
-    let rect = &rects[0];
+    // Attic stairs connect the top regular floor to the attic above it; both
+    // share the top-floor extent (jettied if jetty is enabled).
+    let top_floor = frame.max_floors().checked_sub(1)?;
+    let rect_owned = frame.rect_at(0, top_floor)?;
+    let rect = &rect_owned;
 
     let eave_dirs: &[Cardinal] = if rect.length() >= rect.width() {
         &[Cardinal::North, Cardinal::South]

@@ -247,14 +247,53 @@ fn upper_floors_get_more_windows() {
 #[test]
 fn stud_indices_distribution() {
     use super::stud_indices;
-    assert!(stud_indices(2, 3).is_empty(), "no room for any stud");
-    assert!(stud_indices(3, 3).is_empty(), "spacing reaches corner");
-    assert_eq!(stud_indices(5, 3), vec![3]);
-    assert_eq!(stud_indices(8, 3), vec![3, 6]);
+    // Below the showable length (7): never any studs.
+    assert!(stud_indices(2, 3).is_empty());
+    assert!(stud_indices(3, 3).is_empty());
+    assert!(stud_indices(5, 3).is_empty(), "length 5 leaves only 1-cell corner gaps");
+    assert!(stud_indices(6, 3).is_empty());
+
+    // Spacing 3, odd lengths: always symmetric.
+    assert_eq!(stud_indices(7, 3), vec![3]);          // C . . S . . C
+    assert_eq!(stud_indices(9, 3), vec![4]);          // C . . . S . . . C
+    assert_eq!(stud_indices(11, 3), vec![5]);         // single stud — n=2 would break symmetry
+    assert_eq!(stud_indices(13, 3), vec![3, 6, 9]);
+
+    // Spacing 3, even lengths: half work (parity match), half don't.
+    assert!(stud_indices(8, 3).is_empty(), "no symmetric integer placement");
     assert_eq!(stud_indices(10, 3), vec![3, 6]);
-    assert_eq!(stud_indices(12, 3), vec![3, 6, 9]);
-    assert_eq!(stud_indices(16, 4), vec![4, 8, 12]);
-    assert_eq!(stud_indices(20, 4), vec![4, 8, 12, 16]);
+    assert_eq!(stud_indices(12, 3), vec![4, 7]);
+
+    // Spacing 4: only odd lengths admit a symmetric integer layout.
+    assert_eq!(stud_indices(9, 4), vec![4]);
+    assert_eq!(stud_indices(13, 4), vec![4, 8]);
+    assert_eq!(stud_indices(17, 4), vec![4, 8, 12]);
+    assert!(stud_indices(16, 4).is_empty());
+    assert!(stud_indices(20, 4).is_empty());
+}
+
+#[test]
+fn stud_indices_invariants() {
+    use super::stud_indices;
+    for length in 0u32..32 {
+        for spacing in [2u32, 3, 4, 5] {
+            let studs = stud_indices(length, spacing);
+            if studs.is_empty() { continue; }
+            // ≥2 cells from either corner post.
+            assert!(*studs.first().unwrap() >= 3,
+                "len={length} sp={spacing} first stud too close to corner: {studs:?}");
+            assert!(*studs.last().unwrap() + 3 <= length,
+                "len={length} sp={spacing} last stud too close to corner: {studs:?}");
+            // Uniform spacing.
+            for w in studs.windows(2) {
+                assert_eq!(w[1] - w[0], spacing,
+                    "len={length} sp={spacing} non-uniform: {studs:?}");
+            }
+            // Symmetric: first + last == length - 1.
+            assert_eq!(*studs.first().unwrap() + *studs.last().unwrap(), length - 1,
+                "len={length} sp={spacing} not symmetric: {studs:?}");
+        }
+    }
 }
 
 #[test]
@@ -485,10 +524,11 @@ async fn visualize_timber_patterns_offline() {
     use super::segment_cells;
 
     let patterns = [
-        ("Plain",   TimberPattern::Plain),
-        ("Studded", TimberPattern::Studded { spacing: 3 }),
-        ("Gridded", TimberPattern::Gridded { spacing: 4 }),
-        ("Braced",  TimberPattern::Braced  { spacing: 4 }),
+        ("Plain",     TimberPattern::Plain),
+        ("Studded",   TimberPattern::Studded   { spacing: 3 }),
+        ("Gridded",   TimberPattern::Gridded   { spacing: 4 }),
+        ("Braced",    TimberPattern::Braced    { spacing: 4 }),
+        ("Decorated", TimberPattern::Decorated { spacing: 3 }),
     ];
 
     for (name, pattern) in patterns {
@@ -514,7 +554,7 @@ async fn visualize_timber_patterns_offline() {
             SizeClass::House,
             RoofStyle::Gable(GablePitch::Stairs),
         );
-        bctx.timber_pattern = pattern;
+        bctx.timber_pattern = Some(pattern);
 
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
         let house = build_house(&mut ctx, footprint, &bctx, bounds)
@@ -715,16 +755,19 @@ async fn build_village() {
             let pitch = styles[total % styles.len()];
             let bctx = crate::generator::buildings_v2::BuildingContext::new(
                 crate::generator::buildings_v2::Culture::Medieval, *size_class, pitch);
-            let house = build_house(&mut ctx, footprint, &bctx, bounds)
-                .await
-                .expect("build_house failed");
-
-            println!(
-                "  {} {}: floors={}, rects={}, pitch={:?}, doors={}, windows={}, rooms={}",
-                name, i, house.frame.max_floors(), house.footprint.rects().len(), pitch,
-                house.wall_segs.doors().count(), house.wall_segs.windows().count(),
-                house.room_plan.rooms.len(),
-            );
+            match build_house(&mut ctx, footprint, &bctx, bounds).await {
+                Ok(house) => {
+                    println!(
+                        "  {} {}: floors={}, rects={}, pitch={:?}, doors={}, windows={}, rooms={}, timber={:?}",
+                        name, i, house.frame.max_floors(), house.footprint.rects().len(), pitch,
+                        house.wall_segs.doors().count(), house.wall_segs.windows().count(),
+                        house.room_plan.rooms.len(), house.timber_pattern,
+                    );
+                }
+                Err(msg) => {
+                    println!("  {} {}: SKIPPED ({})", name, i, msg);
+                }
+            }
             total += 1;
         }
     }

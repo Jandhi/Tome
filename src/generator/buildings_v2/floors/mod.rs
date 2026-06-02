@@ -245,11 +245,10 @@ async fn place_ceilings(ctx: &mut BuildCtx<'_>, frame: &Frame) {
         material_id,
     );
 
-    let rects = frame.footprint().rects();
     let ground_perimeter = perimeter_cells(frame, 0);
     let mut placed: HashSet<(i32, i32, i32)> = HashSet::new();
 
-    for i in 0..rects.len() {
+    for i in 0..frame.rect_count() {
         let y = frame.roof_y(i) - 2;
         let top_floor = frame.floor_counts()[i].saturating_sub(1);
         let ceil_perimeter = if top_floor == 0 {
@@ -257,7 +256,8 @@ async fn place_ceilings(ctx: &mut BuildCtx<'_>, frame: &Frame) {
         } else {
             &perimeter_cells(frame, top_floor)
         };
-        for point in rects[i].iter() {
+        let Some(rect) = frame.rect_at(i, top_floor) else { continue; };
+        for point in rect.iter() {
             if ceil_perimeter.contains(&(point.x, point.y)) { continue; }
             if placed.insert((point.x, y, point.y)) {
                 placer.place_block(
