@@ -211,7 +211,7 @@ pub(super) fn select_stairwells(
     // Attic stairwell: from top regular floor up through the ceiling.
     if has_attic && frame.max_floors() >= 1 {
         let top_floor = frame.max_floors() - 1;
-        if let Some((kind, positions, direction)) = pick_attic_stair(frame, &occupied, rng) {
+        if let Some((kind, positions, direction)) = pick_attic_stair(frame, wall_segs, &occupied, rng) {
             for pos in &positions {
                 occupied.insert((pos.x, pos.y));
             }
@@ -392,8 +392,12 @@ fn pick_stair_for_floor(
 
 /// Attic stairs sit at a gable-end corner and run along an eave wall (perpendicular
 /// to the ridge). Straight-only since they fit naturally against the wall.
+/// Rejects candidates whose positions overlap doorways on the floor the stair
+/// sits on — critical for 1-story attic buildings where the attic stair shares
+/// the same y-layer as the ground-floor door.
 fn pick_attic_stair(
     frame: &Frame,
+    wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
@@ -410,6 +414,8 @@ fn pick_attic_stair(
         &[Cardinal::East, Cardinal::West]
     };
 
+    let door_cells = door_cells_on_floor(wall_segs, top_floor);
+
     let mut candidates: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
 
     for (start, dir) in corner_candidates(rect) {
@@ -417,6 +423,7 @@ fn pick_attic_stair(
         if !stair_fits_in_rect(start, dir, run, rect) { continue; }
         let positions = stair_positions(start, dir, run);
         if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+        if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
         candidates.push((StairKind::Straight, positions, dir));
     }
 
