@@ -514,7 +514,16 @@ pub async fn build_rooms(
     let rng = &mut *ctx.rng;
 
     let rects = frame.footprint().rects();
-    let boundaries = find_boundaries(rects);
+
+    // Per-floor extents (grown on jettied upper floors). Interior walls must be
+    // placed from these — not the ground rects — so partition/phantom walls land
+    // where `compute_room_interior` shrinks the (grown) rooms. When jetty is off
+    // `rect_at(i, floor)` equals the ground rect, so this is a no-op.
+    let floor_rects_at = |floor: u32| -> Vec<Rect2D> {
+        (0..frame.rect_count())
+            .map(|i| frame.rect_at(i, floor).unwrap_or(rects[i]))
+            .collect()
+    };
 
     // Stair cells used to steer archway placement away from the stair
     // footprint, computed per-floor. For straight stairs, drop the topmost
@@ -552,6 +561,8 @@ pub async fn build_rooms(
     for floor in frame.floors() {
         let active = frame.active_rects(floor);
         let stair_cells = archway_stair_cells(floor);
+        let floor_rects = floor_rects_at(floor);
+        let boundaries = find_boundaries(&floor_rects);
 
         // Compute perimeter cells so interior walls don't overwrite exterior walls
         let outline = frame.outline_at_floor(floor);
@@ -617,7 +628,7 @@ pub async fn build_rooms(
         // `phantom_wall_cells`). No doorway carved — these are corner-pillar
         // continuations of the adjacent boundary wall, not their own room
         // boundary.
-        let active_rects: Vec<Rect2D> = active.iter().map(|&i| rects[i]).collect();
+        let active_rects: Vec<Rect2D> = active.iter().map(|&i| floor_rects[i]).collect();
         let base_y = frame.floor_y(floor);
         let height = frame.wall_height();
         for cell in phantom_wall_cells(&active_rects) {
@@ -1006,17 +1017,20 @@ fn wall_cells_on_floor(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
     for cell in concave_corner_cells(&outline) {
         cells.insert((cell.x, cell.y));
     }
-    for b in find_boundaries(frame.footprint().rects()) {
+    // Interior boundary + phantom walls from the per-floor (grown on jettied
+    // upper floors) extents, matching where `build_rooms` actually places them
+    // and where `compute_room_interior` shrinks the rooms. A no-op when jetty
+    // is off, since `rect_at(i, floor)` then equals the ground rect.
+    let all_rects = frame.footprint().rects();
+    let floor_rects: Vec<Rect2D> = (0..frame.rect_count())
+        .map(|i| frame.rect_at(i, floor).unwrap_or(all_rects[i]))
+        .collect();
+    for b in find_boundaries(&floor_rects) {
         for cell in b.wall_cells {
             cells.insert((cell.x, cell.y));
         }
     }
-    // Phantom walls plug the air gap on partially-shared rect edges where
-    // compute_room_interior shrinks but find_boundaries' wall lives in the
-    // lower-indexed neighbor. Without these, room invariant (a) fails on
-    // L/T-shape Manors where one wing only partly meets another.
-    let all_rects = frame.footprint().rects();
-    let active: Vec<Rect2D> = frame.active_rects(floor).iter().map(|&i| all_rects[i]).collect();
+    let active: Vec<Rect2D> = frame.active_rects(floor).iter().map(|&i| floor_rects[i]).collect();
     for cell in phantom_wall_cells(&active) {
         cells.insert((cell.x, cell.y));
     }

@@ -144,8 +144,10 @@ fn apply_jetty_noop_on_single_floor() {
 }
 
 #[test]
-fn apply_jetty_noop_on_multi_rect() {
-    // Multi-rect skipped in Phase 2; compensation arrives in Phase 3.
+fn apply_jetty_multi_rect_grows_only_open_sides() {
+    // L-shape: core (0,0)..(6,6), wing (7,1)..(9,5) abutting the core's east
+    // edge. Phase 3 grows each rect's open-air sides by 1 and keeps the shared
+    // seam (core east / wing west) flush.
     let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 6));
     let wing = Rect2D::from_points(Point2D::new(7, 1), Point2D::new(9, 5));
     let footprint = simple_footprint(vec![core, wing]);
@@ -154,13 +156,95 @@ fn apply_jetty_noop_on_multi_rect() {
 
     let frame = apply_jetty(frame, &plot);
 
-    // Upper-floor extents equal ground (no jetty applied).
+    // Ground floor unchanged for both rects.
+    assert_eq!(frame.rect_at(0, 0).unwrap().min(), core.min());
+    assert_eq!(frame.rect_at(0, 0).unwrap().max(), core.max());
+    assert_eq!(frame.rect_at(1, 0).unwrap().min(), wing.min());
+    assert_eq!(frame.rect_at(1, 0).unwrap().max(), wing.max());
+
+    // Core upper floor: west/north/south grow, east (seam) flush at x=6.
     let c1 = frame.rect_at(0, 1).unwrap();
+    assert_eq!(c1.min(), Point2D::new(-1, -1));
+    assert_eq!(c1.max(), Point2D::new(6, 7));
+
+    // Wing upper floor: east/north/south grow, west (seam) flush at x=7.
     let w1 = frame.rect_at(1, 1).unwrap();
-    assert_eq!(c1.min(), core.min());
-    assert_eq!(c1.max(), core.max());
-    assert_eq!(w1.min(), wing.min());
-    assert_eq!(w1.max(), wing.max());
+    assert_eq!(w1.min(), Point2D::new(7, 0));
+    assert_eq!(w1.max(), Point2D::new(10, 6));
+
+    // Seam stays aligned on the jettied floor: no gap, no overlap.
+    assert_eq!(c1.max().x + 1, w1.min().x);
+}
+
+#[test]
+fn apply_jetty_u_shape_grows_three_open_sides_each() {
+    // Core (0,0)..(8,6) with a wing on its west and a wing on its east, both
+    // abutting the core. Each side wing keeps its core-facing seam flush; the
+    // core keeps both east and west flush and grows only north/south.
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6));
+    let west_wing = Rect2D::from_points(Point2D::new(-3, 1), Point2D::new(-1, 5));
+    let east_wing = Rect2D::from_points(Point2D::new(9, 1), Point2D::new(11, 5));
+    let footprint = simple_footprint(vec![core, west_wing, east_wing]);
+    let frame = Frame::new(footprint, 64, vec![2, 2, 2], 3);
+    let plot = Rect2D::from_points(Point2D::new(-10, -10), Point2D::new(20, 20));
+
+    let frame = apply_jetty(frame, &plot);
+
+    // Core: both x-sides flush (seams), y-sides grow.
+    let c1 = frame.rect_at(0, 1).unwrap();
+    assert_eq!(c1.min(), Point2D::new(0, -1));
+    assert_eq!(c1.max(), Point2D::new(8, 7));
+
+    // West wing: east (seam) flush at x=-1; west/north/south grow.
+    let w1 = frame.rect_at(1, 1).unwrap();
+    assert_eq!(w1.min(), Point2D::new(-4, 0));
+    assert_eq!(w1.max(), Point2D::new(-1, 6));
+
+    // East wing: west (seam) flush at x=9; east/north/south grow.
+    let e1 = frame.rect_at(2, 1).unwrap();
+    assert_eq!(e1.min(), Point2D::new(9, 0));
+    assert_eq!(e1.max(), Point2D::new(12, 6));
+}
+
+#[test]
+fn apply_jetty_one_floor_wing_stays_flush() {
+    // Core has 2 floors, wing has 1. The wing has no upper floor (stays flush),
+    // and the core's east side — shared with the wing on the ground — stays
+    // flush on the upper floor too (no overhang over the wing's roof).
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 6));
+    let wing = Rect2D::from_points(Point2D::new(7, 1), Point2D::new(9, 5));
+    let footprint = simple_footprint(vec![core, wing]);
+    let frame = Frame::new(footprint, 64, vec![2, 1], 3);
+    let plot = Rect2D::from_points(Point2D::new(-10, -10), Point2D::new(20, 20));
+
+    let frame = apply_jetty(frame, &plot);
+
+    // Wing has no presence above the ground floor.
+    assert!(frame.rect_at(1, 1).is_none());
+
+    // Core upper floor grows on open sides but keeps the wing-facing east flush.
+    let c1 = frame.rect_at(0, 1).unwrap();
+    assert_eq!(c1.min(), Point2D::new(-1, -1));
+    assert_eq!(c1.max(), Point2D::new(6, 7));
+}
+
+#[test]
+fn apply_jetty_noop_when_multi_rect_grown_exceeds_plot() {
+    // Core fits, but its grown extent would poke past the plot edge → the whole
+    // building falls back to flush.
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 6));
+    let wing = Rect2D::from_points(Point2D::new(7, 1), Point2D::new(9, 5));
+    let footprint = simple_footprint(vec![core, wing]);
+    let frame = Frame::new(footprint, 64, vec![2, 2], 3);
+    // Plot hugs the core's north/west edge so growing core north/west overflows.
+    let plot = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 20));
+
+    let frame = apply_jetty(frame, &plot);
+
+    assert_eq!(frame.rect_at(0, 1).unwrap().min(), core.min());
+    assert_eq!(frame.rect_at(0, 1).unwrap().max(), core.max());
+    assert_eq!(frame.rect_at(1, 1).unwrap().min(), wing.min());
+    assert_eq!(frame.rect_at(1, 1).unwrap().max(), wing.max());
 }
 
 #[test]

@@ -1168,6 +1168,78 @@ async fn pipeline_invariants_property_test_jetty() {
              total_buildings, seeds.len());
 }
 
+/// Phase 3 guard: run multi-rect Manors and Halls through the offline pipeline
+/// with jetty forced on, across many seeds. `build_house` applies the jetty and
+/// runs `check_building_invariants` internally, so any overhang that breaks a
+/// wall/reachability invariant panics here. Also asserts the jetty actually
+/// triggered on some multi-rect building, so a regression that silently stopped
+/// jettying can't let this pass vacuously.
+#[tokio::test]
+async fn pipeline_invariants_property_test_jetty_multirect() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let bounds = Rect2D::from_points(Point2D::new(64, 64), Point2D::new(191, 191));
+    let styles = [
+        RoofStyle::Gable(GablePitch::Slab),
+        RoofStyle::Gable(GablePitch::Stairs),
+        RoofStyle::Gable(GablePitch::Double),
+    ];
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let seeds: [i64; 10] = [1, 7, 13, 42, 99, 123, 256, 777, 1000, 2000];
+    let mut total = 0usize;
+    let mut multi_rect = 0usize;
+    let mut jettied = 0usize;
+
+    for &seed in &seeds {
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(seed);
+        let mut plot = Plot::fully_usable(bounds);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor, SizeClass::Hall], 8);
+
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+            let mut bctx = BuildingContext::new(Culture::Medieval, size_class, styles[i % styles.len()]);
+            bctx.jetty = true;
+            let house = build_house(&mut ctx, footprint, &bctx, bounds)
+                .await
+                .unwrap_or_else(|msg| panic!("seed {} building {} ({:?}) invariant: {}", seed, i, size_class, msg));
+
+            total += 1;
+            let rects = house.footprint.rects().len();
+            if rects > 1 { multi_rect += 1; }
+            // Jetty triggered if any rect's top-floor extent grew past its ground extent.
+            let grew = (0..rects).any(|r| match (house.frame.rect_at(r, 0), house.frame.rect_at_top(r)) {
+                (Some(g), Some(t)) => t.area() > g.area(),
+                _ => false,
+            });
+            if grew { jettied += 1; }
+        }
+        ctx.editor.flush_buffer().await;
+    }
+
+    assert!(multi_rect > 0, "test exercised no multi-rect buildings");
+    assert!(jettied > 0, "jetty never triggered — multi-rect compensation may be broken");
+    println!(
+        "Multi-rect jetty property test: {} buildings ({} multi-rect, {} jettied) across {} seeds, all invariants hold",
+        total, multi_rect, jettied, seeds.len(),
+    );
+}
+
 /// Manor-only offline reproducer for the invariant (a) failure seen in
 /// `walls::test::build_village`. The main property test only covers
 /// Cottage/House/Hall, so Manor regressions slip through. Iterates seeds and
@@ -1405,6 +1477,98 @@ async fn build_single_jetty_house() {
     );
 
     editor.flush_buffer().await;
+}
+
+/// Live: places a small grid of Manors and Halls, each generated from a distinct
+/// seed, with jetty forced on. A label sign on each marks the seed, class, rect
+/// count, and whether jetty actually applied. With Phase 3 multi-rect jetty,
+/// each rect overhangs on its open-air sides, so Manors/Halls should mostly read
+/// "JETTY". Run with: `cargo test build_jetty_manors_halls_live -- --nocapture`
+#[tokio::test]
+async fn build_jetty_manors_halls_live() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let center = editor.world().world_rect_2d().midpoint();
+
+    // 3x2 grid of 72x72 cells, one building per cell, distinct seed each.
+    // (seed, size class) per cell — alternating Manor / Hall.
+    let cells: [(i64, SizeClass); 6] = [
+        (3,  SizeClass::Manor), (7,  SizeClass::Hall), (11, SizeClass::Manor),
+        (19, SizeClass::Hall),  (23, SizeClass::Manor), (31, SizeClass::Hall),
+    ];
+    let col_off = [-84i32, 0, 84];
+    let row_off = [-42i32, 42];
+    const HALF: i32 = 35; // 70x70 usable cell
+
+    // One ctx for the whole grid; reseed the rng in place per building so each
+    // gets a distinct, reproducible layout without rebinding the borrowed ref.
+    let mut rng = RNG::new(0);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, (seed, size_class)) in cells.iter().enumerate() {
+        let cx = center.x + col_off[i % 3];
+        let cz = center.y + row_off[i / 3];
+        let bounds = Rect2D::from_points(
+            Point2D::new(cx - HALF, cz - HALF),
+            Point2D::new(cx + HALF, cz + HALF),
+        );
+
+        *ctx.rng = RNG::new(*seed);
+        let plot = Plot::fully_usable(bounds);
+        let Some(footprint) = generate_footprint(ctx.rng, &plot, size_class) else {
+            println!("seed {} {:?}: no footprint, skipped", seed, size_class);
+            continue;
+        };
+
+        let pitch = RoofStyle::Gable(GablePitch::Stairs);
+        let mut bctx = BuildingContext::new(Culture::Medieval, *size_class, pitch);
+        bctx.jetty = true;
+
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
+            .await
+            .expect("build_house failed");
+
+        // Jettied if any rect's top-floor extent grew past its ground extent.
+        let rects = house.footprint.rects().len();
+        let jettied = (0..rects).any(|r| {
+            match (house.frame.rect_at(r, 0), house.frame.rect_at_top(r)) {
+                (Some(g), Some(t)) => t.area() > g.area(),
+                _ => false,
+            }
+        });
+        let tag = if jettied { "JETTY" } else { "flush" };
+
+        // Label sign at the building center, one block above the ground floor.
+        let sx = (house.footprint.bounds().min().x + house.footprint.bounds().max().x) / 2;
+        let sz = (house.footprint.bounds().min().y + house.footprint.bounds().max().y) / 2;
+        let sy = house.frame.floor_y(0) + 1;
+        let sign = sign_block(&format!("{:?} s{}", size_class, seed), tag);
+        ctx.editor.place_block_forced(&sign, Point3D::new(sx, sy, sz)).await;
+
+        println!(
+            "seed {:>2} {:?}: rects={}, floors={}, {}",
+            seed, size_class, rects, house.frame.max_floors(), tag,
+        );
+    }
+
+    ctx.editor.flush_buffer().await;
+    println!("Done — manor/hall jetty grid placed live");
 }
 
 /// Generates districts, partitions urban area into city blocks, then fills each block
