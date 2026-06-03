@@ -191,13 +191,15 @@ pub(super) fn select_stairwells(
         // Prefer stacking straight onto the flight directly below so multi-floor
         // cores read as one continuous tower; fall back to a fresh footprint when
         // the stack doesn't fit or would block a door.
-        let stacked = stairwells
-            .last()
-            .filter(|prev| prev.floor + 1 == floor)
-            .and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells));
+        // The flight that rises onto `floor` (placed last) — its footprint is the
+        // hole in this floor's slab and its top step is where the player emerges.
+        let below = stairwells.last().filter(|prev| prev.floor + 1 == floor);
+
+        let stacked =
+            below.and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells));
 
         let chosen = stacked.or_else(|| {
-            pick_stair_for_floor(frame, floor, wall_segs, &occupied, &door_cells, rng)
+            pick_stair_for_floor(frame, floor, wall_segs, &occupied, &door_cells, below, rng)
         });
 
         if let Some((kind, positions, direction)) = chosen {
@@ -298,15 +300,101 @@ fn try_stack_on_previous(
     Some((StairKind::Straight, positions, dir))
 }
 
+/// The cell a player stands on to board a stairwell (its base), and the cells
+/// its step blocks occupy (impassable on that floor). Straight stairs board from
+/// the flat landing at `positions[0]`; spiral / L-shaped stairs have a step block
+/// there, so the boarding cell is one back from `positions[0]` (opposite ascent).
+fn stair_base_and_blocked(
+    kind: StairKind,
+    positions: &[Point2D],
+    dir: Cardinal,
+) -> (Point2D, HashSet<(i32, i32)>) {
+    match kind {
+        StairKind::Straight => {
+            let blocked = positions[1..].iter().map(|p| (p.x, p.y)).collect();
+            (positions[0], blocked)
+        }
+        _ => {
+            let back: Point2D = (-dir).into();
+            let blocked = positions.iter().map(|p| (p.x, p.y)).collect();
+            (positions[0] + back, blocked)
+        }
+    }
+}
+
+/// Whether a stair's base on `floor` can be walked to from where the flight
+/// below emerges — i.e. it isn't stranded by the hole that the flight below
+/// punches in this floor's slab. `below` is the flight rising onto `floor`;
+/// its footprint marks both the slab hole and (at its top step) the cell where
+/// the player arrives. We flood-fill from that emergence cell across the core's
+/// interior, treating the hole and this stair's own steps as impassable, and
+/// require the base to be reached. Returns true when there is no flight below
+/// (no hole) or the geometry can't be evaluated.
+fn base_reachable_from_below(
+    frame: &Frame,
+    floor: u32,
+    base: Point2D,
+    blocked: &HashSet<(i32, i32)>,
+    below: &Stairwell,
+) -> bool {
+    let Some(core) = frame.rect_at(0, floor) else { return true; };
+    let Some(&emerge) = below.positions.last() else { return true; };
+    let emerge = (emerge.x, emerge.y);
+    let target = (base.x, base.y);
+
+    // The handoff landing of a stacked flight sits on the flight below's top
+    // step — that's exactly where you arrive, so it's reachable by definition.
+    if target == emerge {
+        return true;
+    }
+
+    let hole: HashSet<(i32, i32)> = below.positions.iter().map(|p| (p.x, p.y)).collect();
+    // A cell is walkable if it's strictly inside the core (not an exterior wall),
+    // isn't part of the slab hole, and isn't one of this stair's step blocks.
+    let walkable = |c: (i32, i32)| -> bool {
+        c.0 > core.min().x
+            && c.0 < core.max().x
+            && c.1 > core.min().y
+            && c.1 < core.max().y
+            && !hole.contains(&c)
+            && !blocked.contains(&c)
+    };
+    // The base must itself be standable, else it's over the void or in a wall.
+    if !walkable(target) {
+        return false;
+    }
+
+    // Flood-fill from the emergence cell (the flight-below top step, which the
+    // player stands on at this floor's level) into adjacent walkable cells.
+    let mut seen: HashSet<(i32, i32)> = HashSet::from([emerge]);
+    let mut stack = vec![emerge];
+    while let Some(c) = stack.pop() {
+        for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
+            let n = (c.0 + dx, c.1 + dy);
+            if n == target {
+                return true;
+            }
+            if walkable(n) && seen.insert(n) {
+                stack.push(n);
+            }
+        }
+    }
+    false
+}
+
 /// Pick a stair position for a specific floor transition.
 /// Considers straight, spiral, and L-shaped candidates across the core rect only.
 /// Prefers exterior-wall positions over interior, avoids door-facing walls.
+/// When `below` is the flight rising onto this floor, candidates whose base is
+/// stranded by that flight's slab hole are filtered out (re-picked) so the new
+/// stair always connects to where the player emerges.
 fn pick_stair_for_floor(
     frame: &Frame,
     floor: u32,
     wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
     door_cells: &HashSet<(i32, i32)>,
+    below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
     let run = (frame.wall_height() + 1) as i32;
@@ -399,7 +487,31 @@ fn pick_stair_for_floor(
         }
     }
 
-    let mut candidates = if !exterior.is_empty() { exterior } else { interior };
+    // Filter out candidates whose base is stranded by the flight below's hole.
+    // Prefer connected exterior, then connected interior, then fall back to any
+    // candidate (so a floor never loses its stair if the check rejects all —
+    // which shouldn't happen for a normal open core).
+    let connected = |cand: &(StairKind, Vec<Point2D>, Cardinal)| -> bool {
+        match below {
+            None => true,
+            Some(b) => {
+                let (base, blocked) = stair_base_and_blocked(cand.0, &cand.1, cand.2);
+                base_reachable_from_below(frame, floor, base, &blocked, b)
+            }
+        }
+    };
+    let ext_ok: Vec<_> = exterior.iter().filter(|c| connected(c)).cloned().collect();
+    let int_ok: Vec<_> = interior.iter().filter(|c| connected(c)).cloned().collect();
+
+    let mut candidates = if !ext_ok.is_empty() {
+        ext_ok
+    } else if !int_ok.is_empty() {
+        int_ok
+    } else if !exterior.is_empty() {
+        exterior
+    } else {
+        interior
+    };
     if candidates.is_empty() {
         return None;
     }
@@ -723,6 +835,51 @@ mod test {
                 step,
             );
         }
+    }
+
+    fn below_with(positions: Vec<Point2D>) -> Stairwell {
+        Stairwell { positions, floor: 0, direction: Cardinal::East, kind: StairKind::Straight }
+    }
+
+    #[test]
+    fn base_reachable_across_open_floor() {
+        // Partial hole line; the base sits in the open part of the floor.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(4, 1), Point2D::new(4, 2), Point2D::new(4, 3),
+            Point2D::new(4, 4), Point2D::new(4, 5),
+        ]);
+        assert!(base_reachable_from_below(
+            &frame, 1, Point2D::new(6, 3), &HashSet::new(), &below,
+        ));
+    }
+
+    #[test]
+    fn base_stranded_when_boxed_by_hole() {
+        // Base in a corner walled off by the hole on its two open sides, with
+        // the emergence cell far away — unreachable.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(2, 1), Point2D::new(1, 2), Point2D::new(7, 7),
+        ]);
+        assert!(!base_reachable_from_below(
+            &frame, 1, Point2D::new(1, 1), &HashSet::new(), &below,
+        ));
+    }
+
+    #[test]
+    fn stacked_handoff_landing_is_always_reachable() {
+        // A stacked flight's landing sits on the flight-below top step (the
+        // emergence cell), so it is reachable by definition.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(1, 4), Point2D::new(2, 4), Point2D::new(3, 4),
+            Point2D::new(4, 4), Point2D::new(5, 4),
+        ]);
+        // Base == the flight-below top step.
+        assert!(base_reachable_from_below(
+            &frame, 1, Point2D::new(5, 4), &HashSet::new(), &below,
+        ));
     }
 
     #[test]
