@@ -40,15 +40,15 @@ pub enum PanelShape {
 }
 
 /// Extra timber detail laid over the baseline corner posts + floor/ceiling beams.
-/// `Plain` is the original look (just the skeleton). `Studded`, `Gridded`, and
-/// `Braced` compose vertical studs, a mid-rail, and corner knee braces in
-/// increasing density. `Decorated` adds a per-panel sequence of `PanelShape`
-/// motifs rolled by the panel-count picker.
+/// `Plain` is the original look (just the skeleton). `Studded` adds vertical
+/// studs; `Braced` adds corner knee braces on top of the studs. `Decorated`
+/// fills each stud-bounded panel with a single uniform `PanelShape` motif
+/// (one design per wall — never a mix). Braces are placed as contrasting
+/// plank stairs, not logs, so the frame reads as posts + lighter carpentry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimberPattern {
     Plain,
     Studded { spacing: u32 },
-    Gridded { spacing: u32 },
     Braced { spacing: u32 },
     Decorated { spacing: u32 },
 }
@@ -69,18 +69,16 @@ impl TimberPattern {
             SizeClass::House => &[
                 (Self::Plain, 1),
                 (Self::Studded { spacing: 3 }, 2),
-                (Self::Gridded { spacing: 4 }, 1),
+                (Self::Braced { spacing: 4 }, 1),
                 (Self::Decorated { spacing: 3 }, 1),
             ],
             SizeClass::Hall => &[
                 (Self::Studded { spacing: 3 }, 1),
-                (Self::Gridded { spacing: 4 }, 2),
-                (Self::Braced { spacing: 4 }, 1),
+                (Self::Braced { spacing: 4 }, 3),
                 (Self::Decorated { spacing: 3 }, 2),
             ],
             SizeClass::Manor => &[
-                (Self::Gridded { spacing: 3 }, 1),
-                (Self::Braced { spacing: 4 }, 1),
+                (Self::Braced { spacing: 4 }, 2),
                 (Self::Decorated { spacing: 3 }, 2),
                 (Self::Decorated { spacing: 4 }, 1),
             ],
@@ -109,7 +107,6 @@ impl TimberPattern {
         match self {
             Self::Plain => true,
             Self::Studded { spacing }
-            | Self::Gridded { spacing }
             | Self::Braced { spacing }
             | Self::Decorated { spacing } => !stud_indices(max_seg_length, *spacing).is_empty(),
         }
@@ -117,12 +114,7 @@ impl TimberPattern {
 
     fn has_studs(&self) -> bool {
         matches!(self,
-            Self::Studded { .. } | Self::Gridded { .. }
-            | Self::Braced { .. } | Self::Decorated { .. })
-    }
-
-    fn has_mid_rail(&self) -> bool {
-        matches!(self, Self::Gridded { .. } | Self::Braced { .. })
+            Self::Studded { .. } | Self::Braced { .. } | Self::Decorated { .. })
     }
 
     fn has_corner_braces(&self) -> bool {
@@ -137,7 +129,6 @@ impl TimberPattern {
         match self {
             Self::Plain => 0,
             Self::Studded { spacing }
-            | Self::Gridded { spacing }
             | Self::Braced { spacing }
             | Self::Decorated { spacing } => *spacing,
         }
@@ -914,6 +905,22 @@ pub async fn place_frame(
         pillar_id,
     );
 
+    // Braces (panel diagonals + corner knee braces) use a contrasting plank
+    // wood placed as stairs, so they read as lighter carpentry against the log
+    // frame instead of thickening it. Falls back to the pillar wood if the
+    // palette defines no plank role.
+    let brace_id = palette
+        .get_material(MaterialRole::PrimaryWood)
+        .or_else(|| palette.get_material(MaterialRole::SecondaryWood))
+        .or_else(|| palette.get_material(MaterialRole::WoodPillar))
+        .expect("No wood material for braces")
+        .clone();
+    let mut brace_rng = rng.derive();
+    let mut brace_placer = MaterialPlacer::new(
+        Placer::new(&data.materials, &mut brace_rng),
+        brace_id,
+    );
+
     let wall_segs = build_segments(frame);
 
     // Track the lowest and highest floor each corner vertex appears on. The
@@ -929,6 +936,15 @@ pub async fn place_frame(
         let y_axis_state: HashMap<String, String> =
             HashMap::from([("axis".to_string(), "y".to_string())]);
         let stud_state = if supports_axis { Some(&y_axis_state) } else { None };
+        // Direction of increasing cell index along this segment. Brace stairs
+        // face down-slope: a `/` (rising with idx) faces -walk_dir, a `\`
+        // (falling with idx) faces +walk_dir — the gable-rake convention.
+        let walk_dir = match seg.facing {
+            Cardinal::South => Cardinal::East,
+            Cardinal::North => Cardinal::West,
+            Cardinal::East => Cardinal::North,
+            Cardinal::West => Cardinal::South,
+        };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
 
@@ -984,28 +1000,11 @@ pub async fn place_frame(
             }
         }
 
-        // Mid-rail: a horizontal beam halfway up the wall. Only worth placing
-        // if the wall is tall enough for it to sit between floor and ceiling.
-        if apply_pattern && pattern.has_mid_rail() && seg.height >= 3 {
-            let ry = seg.height / 2;
-            for (idx, cell) in cells.iter().enumerate() {
-                if is_inside_opening(&seg.openings, idx as u32, ry) { continue; }
-                pillar_placer.place_block_forced(
-                    editor,
-                    Point3D::new(cell.x, floor_y + ry as i32, cell.y),
-                    BlockForm::Block,
-                    beam_state,
-                    None,
-                ).await;
-            }
-        }
-
-        // Per-panel decorations: roll a PanelShape sequence keyed to the
-        // panel count of this segment, then place stepped log-block braces
-        // (and optional extra pillar columns) inside each panel. Diagonals
-        // step one column and one row per cell — e.g. `\` from upper-left
-        // skips the top row then walks (col+1, ry-1) until it hits the
-        // bottom or right edge of the panel.
+        // Per-panel decorations: pick one uniform PanelShape for the whole
+        // segment, then place stepped plank-stair braces (and optional extra
+        // pillar columns) inside each panel. Diagonals step one column and one
+        // row per cell — e.g. `\` from upper-left skips the top row then walks
+        // (col+1, ry-1) until it hits the bottom or right edge of the panel.
         if apply_pattern && pattern.has_panel_decorations() && seg.length >= 4 && seg.height >= 2 {
             let studs: Vec<u32> = stud_indices(seg.length as u32, pattern.spacing());
             let spans = panel_spans(&studs, seg.length as u32);
@@ -1021,7 +1020,10 @@ pub async fn place_frame(
                 let inner_right = right - 1;
                 let mid = (inner_left + inner_right) / 2;
 
-                let mut diagonal_logs: Vec<(u32, u32)> = Vec::new();
+                // (col, ry, rising): rising = the diagonal ascends as the cell
+                // index increases (a `/`), so its stair faces down-slope toward
+                // -walk_dir; a falling `\` faces +walk_dir.
+                let mut diagonal_braces: Vec<(u32, u32, bool)> = Vec::new();
                 let mut pillars: Vec<u32> = Vec::new();
                 match shape {
                     PanelShape::Empty => {}
@@ -1031,7 +1033,7 @@ pub async fn place_frame(
                         let mut col = inner_left;
                         let mut ry = top_ry as i32 - 1;
                         while col <= inner_right && ry >= 0 {
-                            diagonal_logs.push((col, ry as u32));
+                            diagonal_braces.push((col, ry as u32, false));
                             col += 1; ry -= 1;
                         }
                     }
@@ -1041,7 +1043,7 @@ pub async fn place_frame(
                         let mut col = inner_left;
                         let mut ry = 1u32;
                         while col <= inner_right && ry < seg.height {
-                            diagonal_logs.push((col, ry));
+                            diagonal_braces.push((col, ry, true));
                             col += 1; ry += 1;
                         }
                     }
@@ -1050,55 +1052,55 @@ pub async fn place_frame(
                         let mut col = inner_left;
                         let mut ry = top_ry as i32 - 1;
                         while col <= inner_right && ry >= 0 {
-                            diagonal_logs.push((col, ry as u32));
+                            diagonal_braces.push((col, ry as u32, false));
                             col += 1; ry -= 1;
                         }
                         let mut col = inner_left;
                         let mut ry = 1u32;
                         while col <= inner_right && ry < seg.height {
-                            diagonal_logs.push((col, ry));
+                            diagonal_braces.push((col, ry, true));
                             col += 1; ry += 1;
                         }
                     }
                     PanelShape::Vee => {
-                        // V — half-length \ on the left + half-length / mirrored
-                        // on the right, both descending from the top corners
-                        // toward the panel midpoint. Steps `half` cells in.
+                        // V — half-length \ on the left + half-length / on the
+                        // right, both descending from the top corners toward the
+                        // panel midpoint. Steps `half` cells in.
                         let panel_width = inner_right - inner_left + 1;
                         let half = panel_width.div_ceil(2);
                         let mut col = inner_left;
                         let mut ry = top_ry as i32 - 1;
                         for _ in 0..half {
                             if col > inner_right || ry < 0 { break; }
-                            diagonal_logs.push((col, ry as u32));
+                            diagonal_braces.push((col, ry as u32, false));
                             col += 1; ry -= 1;
                         }
                         let mut col = inner_right as i32;
                         let mut ry = top_ry as i32 - 1;
                         for _ in 0..half {
                             if col < inner_left as i32 || ry < 0 { break; }
-                            diagonal_logs.push((col as u32, ry as u32));
+                            diagonal_braces.push((col as u32, ry as u32, true));
                             col -= 1; ry -= 1;
                         }
                     }
                     PanelShape::Chevron => {
-                        // ^ — half-length / on the left + half-length \ mirrored
-                        // on the right, both rising from the bottom corners
-                        // toward the panel midpoint.
+                        // ^ — half-length / on the left + half-length \ on the
+                        // right, both rising from the bottom corners toward the
+                        // panel midpoint.
                         let panel_width = inner_right - inner_left + 1;
                         let half = panel_width.div_ceil(2);
                         let mut col = inner_left;
                         let mut ry = 1u32;
                         for _ in 0..half {
                             if col > inner_right || ry >= seg.height { break; }
-                            diagonal_logs.push((col, ry));
+                            diagonal_braces.push((col, ry, true));
                             col += 1; ry += 1;
                         }
                         let mut col = inner_right as i32;
                         let mut ry = 1u32;
                         for _ in 0..half {
                             if col < inner_left as i32 || ry >= seg.height { break; }
-                            diagonal_logs.push((col as u32, ry));
+                            diagonal_braces.push((col as u32, ry, false));
                             col -= 1; ry += 1;
                         }
                     }
@@ -1112,7 +1114,7 @@ pub async fn place_frame(
                             let mut col = mid + 1;
                             let mut ry = 1u32;
                             while col <= inner_right && ry < seg.height {
-                                diagonal_logs.push((col, ry));
+                                diagonal_braces.push((col, ry, true));
                                 col += 1; ry += 1;
                             }
                         }
@@ -1125,22 +1127,27 @@ pub async fn place_frame(
                             let mut col = inner_left;
                             let mut ry = top_ry as i32 - 1;
                             while col <= left_inner_right && ry >= 0 {
-                                diagonal_logs.push((col, ry as u32));
+                                diagonal_braces.push((col, ry as u32, false));
                                 col += 1; ry -= 1;
                             }
                         }
                     }
                 }
 
-                for (idx, ry) in diagonal_logs {
+                for (idx, ry, rising) in diagonal_braces {
                     if (idx as usize) >= cells.len() { continue; }
                     if is_inside_opening(&seg.openings, idx, ry) { continue; }
                     let cell = cells[idx as usize];
-                    pillar_placer.place_block_forced(
+                    let facing = if rising { -walk_dir } else { walk_dir };
+                    let brace_state = HashMap::from([
+                        ("facing".to_string(), facing.to_string()),
+                        ("half".to_string(), "bottom".to_string()),
+                    ]);
+                    brace_placer.place_block_forced(
                         editor,
                         Point3D::new(cell.x, floor_y + ry as i32, cell.y),
-                        BlockForm::Block,
-                        stud_state,
+                        BlockForm::Stairs,
+                        Some(&brace_state),
                         None,
                     ).await;
                 }
@@ -1161,28 +1168,34 @@ pub async fn place_frame(
             }
         }
 
-        // Knee braces: stepped log diagonals near each segment corner, just
-        // inside the corner post. Left corner gets a short `\` (down-right
-        // from idx=1), right corner gets a mirrored `/` (down-left from
-        // idx=length-2). Each brace is 2 logs long, descending from one row
-        // below the ceiling.
+        // Knee braces: stepped plank-stair diagonals near each segment corner,
+        // just inside the corner post. Left corner gets a short `\` (falling
+        // from idx=1, faces +walk_dir), right corner gets a mirrored `/`
+        // (rising into idx=length-2, faces -walk_dir). Each brace is 2 cells
+        // long, descending from one row below the ceiling.
         if apply_pattern && pattern.has_corner_braces() && seg.length >= 5 && seg.height >= 3 {
             let top_ry = seg.height - 1;
-            let knee_logs: Vec<(u32, u32)> = vec![
-                (1, top_ry - 1),
-                (2, top_ry - 2),
-                (seg.length as u32 - 2, top_ry - 1),
-                (seg.length as u32 - 3, top_ry - 2),
+            // (col, ry, rising) — see the panel-decoration braces above.
+            let knee_braces: Vec<(u32, u32, bool)> = vec![
+                (1, top_ry - 1, false),
+                (2, top_ry - 2, false),
+                (seg.length as u32 - 2, top_ry - 1, true),
+                (seg.length as u32 - 3, top_ry - 2, true),
             ];
-            for (idx, ry) in knee_logs {
+            for (idx, ry, rising) in knee_braces {
                 if (idx as usize) >= cells.len() { continue; }
                 if is_inside_opening(&seg.openings, idx, ry) { continue; }
                 let cell = cells[idx as usize];
-                pillar_placer.place_block_forced(
+                let facing = if rising { -walk_dir } else { walk_dir };
+                let brace_state = HashMap::from([
+                    ("facing".to_string(), facing.to_string()),
+                    ("half".to_string(), "bottom".to_string()),
+                ]);
+                brace_placer.place_block_forced(
                     editor,
                     Point3D::new(cell.x, floor_y + ry as i32, cell.y),
-                    BlockForm::Block,
-                    stud_state,
+                    BlockForm::Stairs,
+                    Some(&brace_state),
                     None,
                 ).await;
             }
@@ -1236,101 +1249,43 @@ fn panel_spans(stud_cols: &[u32], length: u32) -> Vec<(u32, u32)> {
     spans
 }
 
-/// Mirror a shape across a vertical axis. Used to flip the right half of a
-/// symmetric panel sequence so `\` (Back) becomes `/` (Forward), etc.
-fn mirror_shape(s: PanelShape) -> PanelShape {
-    use PanelShape::*;
-    match s {
-        Forward => Back,
-        Back => Forward,
-        KRight => KLeft,
-        KLeft => KRight,
-        other => other,
-    }
-}
-
-/// Roll a symmetric per-panel motif sequence sized for `panel_count`. Always
-/// mirror-symmetric: panel[i] is the mirror of panel[N-1-i]. Pulls from a
-/// curated set of templates so long walls read as a coherent design rather
-/// than a chaotic mix:
-///   - empty (no decoration)
-///   - all-same shape (V V V V, X X X X, ^ ^ ^ ^)
-///   - outer pillars only (`| . . . |`)
-///   - outer pillar + inward diagonal (`| \ . . / |`)
-///   - outer back-diagonals only (`\ . . . . /`)
-///   - alternating pillars (`| . | . | . |`)
-///   - centered /|\ branch (odd N only — `. . / | \ . .`)
-///   - centered single decoration (`. . X . .`)
+/// Pick ONE motif and apply it uniformly across every panel of the wall, so a
+/// long wall reads as a single coherent design instead of a chaotic mix of
+/// shapes. The only within-wall variation is the alternating single brace
+/// (`/ \ / \`), which flips lean panel-to-panel — still one design, just
+/// rhythmic. Small walls get the plainer designs by virtue of the weighting;
+/// the richer X / ^ / V motifs are the feature look for long façades.
 fn pick_panel_sequence(panel_count: usize, rng: &mut RNG) -> Vec<PanelShape> {
     use PanelShape::*;
     if panel_count == 0 { return Vec::new(); }
-    if panel_count == 1 {
-        let picks = [Vee, Chevron, Cross, Pillar];
-        return vec![picks[rng.rand_i32_range(0, picks.len() as i32) as usize]];
+
+    // Weighted design table: (design id, weight).
+    //   0 empty (studs only)   1 alternating single brace   2 cross
+    //   3 chevron              4 vee
+    let table: &[(u8, u32)] = &[
+        (0, 1),
+        (1, 4),
+        (2, 2),
+        (3, 2),
+        (4, 1),
+    ];
+    let total: u32 = table.iter().map(|(_, w)| w).sum();
+    let mut roll = rng.rand_i32_range(0, total as i32) as u32;
+    let mut design = 1u8;
+    for (d, w) in table {
+        if roll < *w { design = *d; break; }
+        roll -= w;
     }
 
-    let half = panel_count.div_ceil(2);
-    let mut left = vec![Empty; half];
-
-    // Templates 0..6 work for any N ≥ 2; template 7 (center branch) is odd-N only.
-    let n_templates = if panel_count >= 3 && panel_count % 2 == 1 { 8 } else { 7 };
-
-    match rng.rand_i32_range(0, n_templates) {
-        0 => {
-            // All-same uniform shape across the wall.
-            let picks = [Vee, Chevron, Cross];
-            let s = picks[rng.rand_i32_range(0, picks.len() as i32) as usize];
-            for slot in left.iter_mut() { *slot = s; }
-        }
-        1 => {
-            // Outer pillars: `| . . . |`.
-            left[0] = Pillar;
-        }
-        2 => {
-            // Outer pillar + inward back-diagonal: `| \ . . / |`.
-            left[0] = Pillar;
-            if half > 1 { left[1] = Back; }
-        }
-        3 => {
-            // Outer back-diagonals only: `\ . . . . /`.
-            left[0] = Back;
-        }
-        4 => {
-            // Alternating pillars starting at the outside: `| . | . | . |`.
-            for i in (0..half).step_by(2) { left[i] = Pillar; }
-        }
-        5 => {
-            // Centered single decoration: `. . X . .` (only the middle gets shape).
-            // For odd N the center is panel[half-1]; for even N the two
-            // central panels get a self-mirror shape.
-            let picks = [Vee, Chevron, Cross];
-            let s = picks[rng.rand_i32_range(0, picks.len() as i32) as usize];
-            if half > 0 { left[half - 1] = s; }
-        }
-        6 => {
-            // Pure empty — wall reads as just studs + crossbeams.
-        }
-        _ => {
-            // Centered /|\ branch (odd N only).
-            if half >= 2 {
-                left[half - 1] = Pillar;
-                left[half - 2] = Forward;
-            } else {
-                left[half - 1] = Pillar;
-            }
-        }
-    }
-
-    // Mirror left into right.
-    let mut full = vec![Empty; panel_count];
-    for i in 0..half {
-        full[i] = left[i];
-        let mirror_idx = panel_count - 1 - i;
-        if mirror_idx != i {
-            full[mirror_idx] = mirror_shape(left[i]);
-        }
-    }
-    full
+    (0..panel_count)
+        .map(|i| match design {
+            0 => Empty,
+            1 => if i % 2 == 0 { Forward } else { Back },
+            2 => Cross,
+            3 => Chevron,
+            _ => Vee,
+        })
+        .collect()
 }
 
 /// Symmetric stud column indices along a segment of `length` cells, with

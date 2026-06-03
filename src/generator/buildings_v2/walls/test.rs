@@ -526,7 +526,6 @@ async fn visualize_timber_patterns_offline() {
     let patterns = [
         ("Plain",     TimberPattern::Plain),
         ("Studded",   TimberPattern::Studded   { spacing: 3 }),
-        ("Gridded",   TimberPattern::Gridded   { spacing: 4 }),
         ("Braced",    TimberPattern::Braced    { spacing: 4 }),
         ("Decorated", TimberPattern::Decorated { spacing: 3 }),
     ];
@@ -561,11 +560,15 @@ async fn visualize_timber_patterns_offline() {
             .await
             .expect("build_house failed");
 
-        // Find the longest ground-floor segment to read back.
+        // Read back the longest segment on the highest floor that has any —
+        // timber patterns only apply above the ground floor, so reading floor 0
+        // would show nothing but the baseline posts + beams.
+        let top_floor = house.wall_segs.segments.iter().map(|s| s.floor).max().unwrap_or(0);
+        let read_floor = if top_floor > 0 { top_floor } else { 0 };
         let seg = house.wall_segs.segments.iter()
-            .filter(|s| s.floor == 0)
+            .filter(|s| s.floor == read_floor)
             .max_by_key(|s| s.length)
-            .expect("no ground-floor segment");
+            .expect("no segment on read floor");
         let cells = segment_cells(seg);
 
         println!("\n=== Timber: {} ({:?}) — wall facing {:?}, len={} ===",
