@@ -1,0 +1,15 @@
+production_painters:
+
+  wheat_fields:
+    type: palettes
+    palettes: [farmland, wheat]
+    border_palette: rural_road
+    flatten_strength: 0.6
+
+  logging_area:
+    type: logging
+    percent: 0.7
+
+  mine_terrain:
+    type: palettes
+    palettes: [mine_ground]

@@ -1,0 +1,14 @@
+{
+  "id": "copper_smelter",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/copper_smelter.nbt",
+  "origin": {
+    "x": 6,
+    "y": 0,
+    "z": 6
+  },
+  "size_xz": [
+    13,
+    13
+  ]
+}

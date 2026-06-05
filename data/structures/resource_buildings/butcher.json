@@ -1,0 +1,14 @@
+{
+  "id": "butcher",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/butcher.nbt",
+  "origin": {
+    "x": 10,
+    "y": 0,
+    "z": 6
+  },
+  "size_xz": [
+    21,
+    13
+  ]
+}

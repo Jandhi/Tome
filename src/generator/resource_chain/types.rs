@@ -13,6 +13,10 @@ pub struct RecipeDef {
     pub inputs: HashMap<String, u32>,
     pub outputs: HashMap<String, u32>,
     pub building: String,
+    /// Name of the production painter to run after placing this recipe's building.
+    /// Only meaningful on gather (no-input) recipes.
+    #[serde(default)]
+    pub production_painter: Option<String>,
 }
 
 /// The resource and gathering building assigned to a single district after selection.
@@ -22,6 +26,8 @@ pub struct DistrictResourceAssignment {
     pub resource: String,
     /// The gathering building required to produce it (e.g. `"logging_camp"`).
     pub building: String,
+    /// Painter name to run after placing the building, if any.
+    pub production_painter: Option<String>,
 }
 
 /// Wrapper structs matching the top-level YAML keys.

@@ -1,0 +1,14 @@
+{
+  "id": "scriptorium",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/scriptorium.nbt",
+  "origin": {
+    "x": 16,
+    "y": 0,
+    "z": 7
+  },
+  "size_xz": [
+    33,
+    15
+  ]
+}

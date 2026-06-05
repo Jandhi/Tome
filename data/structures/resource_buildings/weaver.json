@@ -1,0 +1,14 @@
+{
+  "id": "weaver",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/weaver.nbt",
+  "origin": {
+    "x": 5,
+    "y": 0,
+    "z": 7
+  },
+  "size_xz": [
+    11,
+    15
+  ]
+}

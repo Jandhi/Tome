@@ -10,6 +10,7 @@ mod classification;
 mod wall;
 mod district_painter;
 mod gate;
+mod paint_palette;
 
 pub use district::District;
 pub use district::DistrictID;
@@ -22,3 +23,4 @@ pub use data::{DistrictData, HasDistrictData};
 pub use district_painter::*;
 pub use wall::{build_wall, WallType};
 pub use gate::build_wall_gate;
+pub use paint_palette::{PaintPaletteId, PaintPalette, PaintPalettesFile};

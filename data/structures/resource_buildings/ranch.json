@@ -1,0 +1,14 @@
+{
+  "id": "ranch",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/ranch.nbt",
+  "origin": {
+    "x": 10,
+    "y": 0,
+    "z": 5
+  },
+  "size_xz": [
+    21,
+    11
+  ]
+}

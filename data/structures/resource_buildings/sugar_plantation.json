@@ -1,0 +1,14 @@
+{
+  "id": "sugar_plantation",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/sugar_plantation.nbt",
+  "origin": {
+    "x": 5,
+    "y": 0,
+    "z": 5
+  },
+  "size_xz": [
+    11,
+    11
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "tannery",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/tannery.nbt",
+  "origin": {
+    "x": 5,
+    "y": 0,
+    "z": 8
+  },
+  "size_xz": [
+    11,
+    17
+  ]
+}

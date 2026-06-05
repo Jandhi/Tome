@@ -1,0 +1,14 @@
+{
+  "id": "chandlery",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/chandlery.nbt",
+  "origin": {
+    "x": 6,
+    "y": 0,
+    "z": 6
+  },
+  "size_xz": [
+    13,
+    13
+  ]
+}

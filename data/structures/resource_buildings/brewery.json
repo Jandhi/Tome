@@ -1,0 +1,14 @@
+{
+  "id": "brewery",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/brewery.nbt",
+  "origin": {
+    "x": 14,
+    "y": 0,
+    "z": 9
+  },
+  "size_xz": [
+    30,
+    20
+  ]
+}

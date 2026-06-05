@@ -1,0 +1,14 @@
+{
+  "id": "apiary",
+  "y_offset": 0,
+  "path": "data/structures/resource_buildings/apiary.nbt",
+  "origin": {
+    "x": 7,
+    "y": 0,
+    "z": 7
+  },
+  "size_xz": [
+    16,
+    15
+  ]
+}

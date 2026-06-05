@@ -8,5 +8,6 @@ pub enum BuildClaim {
     Path(PathType),
     Building(BuildingID),
     Structure(StructureID),
+    ProductionArea(StructureID),
     None,
 }

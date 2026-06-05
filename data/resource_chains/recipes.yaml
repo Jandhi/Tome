@@ -21,6 +21,36 @@ recipes:
       charcoal: 2
     building: charcoal_burner
 
+  beeswax_to_candles:
+    inputs:
+      beeswax: 2
+    outputs:
+      candles: 2
+    building: chandlery
+
+  # --- Paper / Knowledge ---
+  wood_to_paper:
+    inputs:
+      wood: 2
+    outputs:
+      paper: 3
+    building: paper_mill_wood
+
+  sugar_cane_to_paper:
+    inputs:
+      sugar_cane: 3
+    outputs:
+      paper: 2
+    building: paper_mill_sugar
+
+  paper_to_books:
+    inputs:
+      paper: 2
+      leather: 1
+    outputs:
+      book: 1
+    building: scriptorium
+
   # --- Food / Agriculture ---
   wheat_to_flour:
     inputs:
@@ -36,11 +66,48 @@ recipes:
       bread: 2
     building: bakery
 
+  sugar_cane_to_sugar:
+    inputs:
+      sugar_cane: 3
+    outputs:
+      sugar: 2
+    building: sugar_mill
+
+  sugar_to_candy:
+    inputs:
+      sugar: 2
+    outputs:
+      candy: 3
+    building: confectionery
+
+  honey_to_mead:
+    inputs:
+      honey: 2
+      flour: 1
+    outputs:
+      mead: 1
+    building: brewery
+
+  cow_to_beef:
+    inputs:
+      cow: 1
+    outputs:
+      beef: 2
+    building: butcher
+
   # --- Metal / Mining ---
   iron_ore_charcoal_to_ingot:
     inputs:
       iron_ore: 2
       charcoal: 1
+    outputs:
+      iron_ingot: 2
+    building: smelter
+
+  iron_ore_coal_to_ingot:
+    inputs:
+      iron_ore: 2
+      coal: 1
     outputs:
       iron_ingot: 2
     building: smelter
@@ -53,21 +120,90 @@ recipes:
       tools: 1
     building: smithy
 
+  iron_ingot_to_tools_coal:
+    inputs:
+      iron_ingot: 1
+      coal: 1
+    outputs:
+      tools: 1
+    building: smithy
+
+  # --- Animal products ---
+  wool_to_cloth:
+    inputs:
+      wool: 3
+    outputs:
+      cloth: 2
+    building: weaver
+
+  cloth_to_clothing:
+    inputs:
+      cloth: 2
+    outputs:
+      clothing: 1
+    building: tailor
+
+  cow_to_leather:
+    inputs:
+      cow: 1
+    outputs:
+      leather: 2
+    building: tannery
+
   # --- Gathering (raw resource production) ---
   gather_wood:
     inputs: {}
     outputs:
       wood: 2
     building: woodcutter_hut
+    production_painter: logging_area
 
   gather_wheat:
     inputs: {}
     outputs:
       wheat: 2
     building: farm
+    production_painter: wheat_fields
 
   gather_iron_ore:
     inputs: {}
     outputs:
       iron_ore: 2
     building: iron_mine
+    production_painter: mine_terrain
+
+  gather_bees:
+    inputs: {}
+    outputs:
+      honey: 2
+      beeswax: 1
+    building: apiary
+    production_painter: 
+
+  gather_wool:
+    inputs: {}
+    outputs:
+      wool: 2
+    building: shepherds_hut
+    production_painter: 
+
+  gather_sugar_cane:
+    inputs: {}
+    outputs:
+      sugar_cane: 2
+    building: sugar_plantation
+    production_painter:
+
+  gather_cows:
+    inputs: {}
+    outputs:
+      cow: 1
+    building: ranch
+    production_painter: 
+
+  gather_coal:
+    inputs: {}
+    outputs:
+      coal: 2
+    building: coal_mine
+    production_painter: mine_terrain
