@@ -6,3 +6,5 @@ mod building;
 
 pub use a_star::a_star;
 pub use path::{Path, PathPriority, PathType};
+pub use routing::get_path;
+pub use building::build_path;

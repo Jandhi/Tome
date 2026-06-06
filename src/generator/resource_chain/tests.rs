@@ -319,7 +319,7 @@ mod tests {
 
         // Sole-option district always gets wheat with the farm building
         let a0 = assignments.get(&0).unwrap();
-        assert_eq!(a0.resource, "wheat");
+        assert_eq!(a0.primary_resource, "wheat");
         assert_eq!(a0.building, "farm");
 
         // All buildings must be non-empty
@@ -342,8 +342,8 @@ mod tests {
         let assignments = registry.assign_district_resources(&options, &mut rng);
 
         assert_eq!(assignments.len(), 2);
-        let r0 = &assignments[&0].resource;
-        let r1 = &assignments[&1].resource;
+        let r0 = &assignments[&0].primary_resource;
+        let r1 = &assignments[&1].primary_resource;
         assert_ne!(r0, r1, "districts should pick different resources when possible");
     }
 
@@ -362,7 +362,7 @@ mod tests {
 
         // District 0 has no valid candidates and is skipped
         assert_eq!(assignments.len(), 1);
-        assert_eq!(assignments[&1].resource, "wood");
+        assert_eq!(assignments[&1].primary_resource, "wood");
     }
 
     /// Diagnostic test — passes a `HashMap<SuperDistrictID, DistrictAnalysis>` to
@@ -411,7 +411,7 @@ mod tests {
             };
             if let Some(a) = result.district_assignments.get(id) {
                 println!("║   District {:>2} ({:<18}) → {} x2 [{}]",
-                    id.0, biome_names, a.resource, a.building);
+                    id.0, biome_names, a.primary_resource, a.building);
             } else {
                 println!("║   District {:>2} ({:<18}) → (no valid resource)", id.0, biome_names);
             }

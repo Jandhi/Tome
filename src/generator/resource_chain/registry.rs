@@ -411,10 +411,11 @@ impl ResourceRegistry {
 
             let trial_assignments = self.assign_district_resources(&filtered, &mut rng.derive());
 
-            // Compute trial supply.
+            // Compute trial supply, crediting all gather recipe outputs (handles multi-output
+            // recipes like gather_bees which produces both honey and beeswax).
             let mut trial_supply: HashMap<String, u32> = HashMap::new();
             for (_, a) in &trial_assignments {
-                *trial_supply.entry(a.resource.clone()).or_insert(0) += 2;
+                self.credit_gather_supply(&a.primary_resource, &mut trial_supply);
             }
 
             // Run chain allocation on trial supply via the same forward-execution model
@@ -497,14 +498,15 @@ impl ResourceRegistry {
             })
             .collect();
 
-        // Each super-district is assigned exactly one resource producing exactly 2 units —
-        // fixed regardless of how many constituent districts the super-district contains.
+        // Each super-district is assigned exactly one gather recipe (identified by its
+        // primary resource). The primary output is credited at 2 units; co-products from
+        // multi-output recipes (e.g. gather_bees → honey + beeswax) are scaled proportionally.
         let district_assignments = self.assign_district_resources(&options, rng);
 
         let mut supply: HashMap<String, u32> = HashMap::new();
         let mut gather_buildings: HashMap<String, u32> = HashMap::new();
         for (_, a) in &district_assignments {
-            *supply.entry(a.resource.clone()).or_insert(0) += 2;
+            self.credit_gather_supply(&a.primary_resource, &mut supply);
             *gather_buildings.entry(a.building.clone()).or_insert(0) += 1;
         }
 
@@ -624,10 +626,28 @@ impl ResourceRegistry {
             let building = recipe.building.clone();
             let production_painter = recipe.production_painter.clone();
             assigned_set.insert(resource.clone());
-            result.insert(id, DistrictResourceAssignment { resource, building, production_painter });
+            result.insert(id, DistrictResourceAssignment { primary_resource: resource, building, production_painter });
         }
 
         result
+    }
+
+    /// Credits all outputs of the gather recipe for `primary_resource` into `supply`.
+    /// The primary output is credited at 2 units (the fixed per-district convention).
+    /// Co-products are scaled proportionally: `(co_qty / primary_qty) * 2`, rounded.
+    /// Falls back to crediting only the primary at +2 if the recipe is not found.
+    fn credit_gather_supply(&self, primary_resource: &str, supply: &mut HashMap<String, u32>) {
+        let Some(recipe) = self.gather_recipe(primary_resource) else {
+            *supply.entry(primary_resource.to_string()).or_insert(0) += 2;
+            return;
+        };
+        let primary_qty = recipe.outputs.get(primary_resource).copied().unwrap_or(1) as f32;
+        for (output, &qty) in &recipe.outputs {
+            let scaled = ((qty as f32 / primary_qty) * 2.0).round() as u32;
+            if scaled > 0 {
+                *supply.entry(output.clone()).or_insert(0) += scaled;
+            }
+        }
     }
 
     /// Returns the gathering building for a raw resource — the recipe that produces

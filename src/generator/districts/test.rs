@@ -353,7 +353,7 @@ mod tests {
             };
             let a = &result.district_assignments[id];
             println!("║   Super-District {:>3} ({:<25}) → {} x2 [{}]",
-                id.0, biome_names, a.resource, a.building);
+                id.0, biome_names, a.primary_resource, a.building);
         }
 
         println!("║");

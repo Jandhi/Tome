@@ -22,8 +22,10 @@ pub struct RecipeDef {
 /// The resource and gathering building assigned to a single district after selection.
 #[derive(Debug, Clone)]
 pub struct DistrictResourceAssignment {
-    /// The raw resource this district will produce (e.g. `"wood"`).
-    pub resource: String,
+    /// The biome-selected raw resource used to identify this district's gather recipe
+    /// (e.g. `"wood"`). For multi-output gather recipes (e.g. `gather_bees` → honey +
+    /// beeswax), this is the primary output; all outputs are credited to the supply pool.
+    pub primary_resource: String,
     /// The gathering building required to produce it (e.g. `"logging_camp"`).
     pub building: String,
     /// Painter name to run after placing the building, if any.
