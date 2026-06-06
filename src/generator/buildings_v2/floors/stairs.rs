@@ -15,7 +15,7 @@ use crate::noise::RNG;
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
-use super::super::walls::{OpeningKind, WallSegments};
+use super::super::walls::{segment_cells, OpeningKind, WallSegments};
 use super::{StairKind, Stairwell};
 
 // ---------------------------------------------------------------------------
@@ -179,13 +179,30 @@ pub(super) fn select_stairwells(
     has_attic: bool,
     rng: &mut RNG,
 ) -> Vec<Stairwell> {
-    let mut stairwells = Vec::new();
+    let mut stairwells: Vec<Stairwell> = Vec::new();
     let mut occupied: HashSet<(i32, i32)> = HashSet::new();
 
     for floor in 0..frame.max_floors().saturating_sub(1) {
-        if let Some((kind, positions, direction)) = pick_stair_for_floor(
-            frame, floor, wall_segs, &occupied, rng,
-        ) {
+        // A flight on `floor` has its steps here and emerges onto `floor + 1`,
+        // so it must keep clear of doorways on both.
+        let mut door_cells = door_cells_on_floor(wall_segs, floor);
+        door_cells.extend(door_cells_on_floor(wall_segs, floor + 1));
+
+        // Prefer stacking straight onto the flight directly below so multi-floor
+        // cores read as one continuous tower; fall back to a fresh footprint when
+        // the stack doesn't fit or would block a door.
+        // The flight that rises onto `floor` (placed last) — its footprint is the
+        // hole in this floor's slab and its top step is where the player emerges.
+        let below = stairwells.last().filter(|prev| prev.floor + 1 == floor);
+
+        let stacked =
+            below.and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells));
+
+        let chosen = stacked.or_else(|| {
+            pick_stair_for_floor(frame, floor, wall_segs, &occupied, &door_cells, below, rng)
+        });
+
+        if let Some((kind, positions, direction)) = chosen {
             for pos in &positions {
                 occupied.insert((pos.x, pos.y));
             }
@@ -196,7 +213,7 @@ pub(super) fn select_stairwells(
     // Attic stairwell: from top regular floor up through the ceiling.
     if has_attic && frame.max_floors() >= 1 {
         let top_floor = frame.max_floors() - 1;
-        if let Some((kind, positions, direction)) = pick_attic_stair(frame, &occupied, rng) {
+        if let Some((kind, positions, direction)) = pick_attic_stair(frame, wall_segs, &occupied, rng) {
             for pos in &positions {
                 occupied.insert((pos.x, pos.y));
             }
@@ -207,20 +224,184 @@ pub(super) fn select_stairwells(
     stairwells
 }
 
+/// Interior cells one step inward from every doorway on `floor` — the cells a
+/// player stands on to use the door. A stair landing or step here walls the
+/// door off, so these are excluded from every candidate's footprint.
+fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i32)> {
+    let mut cells = HashSet::new();
+    for seg in wall_segs.segments_on_floor(floor) {
+        let inward: Point2D = (-seg.facing).into();
+        let seg_cells = segment_cells(seg);
+        for o in &seg.openings {
+            if !matches!(o.kind, OpeningKind::Door(_)) {
+                continue;
+            }
+            for w in 0..o.width as usize {
+                if let Some(&dc) = seg_cells.get(o.offset as usize + w) {
+                    let c = dc + inward;
+                    cells.insert((c.x, c.y));
+                }
+            }
+        }
+    }
+    cells
+}
+
+/// Try to continue the previous floor's flight as one straight run: same kind
+/// and direction, with the new flight's landing sitting on the floor directly
+/// above the previous flight's *top step* and its steps carrying on in the same
+/// direction. This is the only stagger that keeps a full floor of clearance
+/// between the two flights — a smaller offset (`d` cells) leaves only `run - d`
+/// blocks of vertical gap at the cells they share in plan, so the upper flight's
+/// underside drops into the lower flight's headroom (the steps visibly collide).
+/// Continuing end-to-end needs a long core; when it doesn't fit, or a step would
+/// block a doorway, we return None and a fresh-footprint pick is used instead.
+///
+/// (The cellar's `stacked_under_main_stair` can use a one-cell stagger because
+/// its flight descends *below* the floor while the main flight rises above it —
+/// they never share vertical space. Two ascending flights one story apart do.)
+fn try_stack_on_previous(
+    prev: &Stairwell,
+    frame: &Frame,
+    floor: u32,
+    door_cells: &HashSet<(i32, i32)>,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    if prev.kind != StairKind::Straight {
+        return None;
+    }
+    if !(frame.active_rects(floor).contains(&0) && frame.active_rects(floor + 1).contains(&0)) {
+        return None;
+    }
+    // The stair must fit in both floors it spans. Jetty only grows upward, so
+    // the lower floor (`floor`) is the binding extent — use its rect.
+    let core = frame.rect_at(0, floor)?;
+    let run = (frame.wall_height() + 1) as i32;
+    let dir = prev.direction;
+    let sv: Point2D = dir.into();
+    // Start the new flight at the previous flight's top step: its landing lands
+    // one block above that step, and the steps continue past it. The two runs
+    // then overlap only at that single handoff cell (a landing, which places no
+    // block), so they never intrude on each other's headroom.
+    let start = *prev.positions.last()?;
+    if !stair_fits_in_rect(start, dir, run, &core) {
+        return None;
+    }
+    let positions = stair_positions(start, dir, run);
+    if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) {
+        return None;
+    }
+    // Safety net: only the handoff landing (positions[0]) may coincide with the
+    // previous flight; no actual step may re-enter its footprint.
+    let prev_cells: HashSet<(i32, i32)> =
+        prev.positions.iter().map(|p| (p.x, p.y)).collect();
+    if positions[1..].iter().any(|p| prev_cells.contains(&(p.x, p.y))) {
+        return None;
+    }
+    Some((StairKind::Straight, positions, dir))
+}
+
+/// The cell a player stands on to board a stairwell (its base), and the cells
+/// its step blocks occupy (impassable on that floor). Straight stairs board from
+/// the flat landing at `positions[0]`; spiral / L-shaped stairs have a step block
+/// there, so the boarding cell is one back from `positions[0]` (opposite ascent).
+fn stair_base_and_blocked(
+    kind: StairKind,
+    positions: &[Point2D],
+    dir: Cardinal,
+) -> (Point2D, HashSet<(i32, i32)>) {
+    match kind {
+        StairKind::Straight => {
+            let blocked = positions[1..].iter().map(|p| (p.x, p.y)).collect();
+            (positions[0], blocked)
+        }
+        _ => {
+            let back: Point2D = (-dir).into();
+            let blocked = positions.iter().map(|p| (p.x, p.y)).collect();
+            (positions[0] + back, blocked)
+        }
+    }
+}
+
+/// Whether a stair's base on `floor` can be walked to from where the flight
+/// below emerges — i.e. it isn't stranded by the hole that the flight below
+/// punches in this floor's slab. `below` is the flight rising onto `floor`;
+/// its footprint marks both the slab hole and (at its top step) the cell where
+/// the player arrives. We flood-fill from that emergence cell across the core's
+/// interior, treating the hole and this stair's own steps as impassable, and
+/// require the base to be reached. Returns true when there is no flight below
+/// (no hole) or the geometry can't be evaluated.
+fn base_reachable_from_below(
+    frame: &Frame,
+    floor: u32,
+    base: Point2D,
+    blocked: &HashSet<(i32, i32)>,
+    below: &Stairwell,
+) -> bool {
+    let Some(core) = frame.rect_at(0, floor) else { return true; };
+    let Some(&emerge) = below.positions.last() else { return true; };
+    let emerge = (emerge.x, emerge.y);
+    let target = (base.x, base.y);
+
+    // The handoff landing of a stacked flight sits on the flight below's top
+    // step — that's exactly where you arrive, so it's reachable by definition.
+    if target == emerge {
+        return true;
+    }
+
+    let hole: HashSet<(i32, i32)> = below.positions.iter().map(|p| (p.x, p.y)).collect();
+    // A cell is walkable if it's strictly inside the core (not an exterior wall),
+    // isn't part of the slab hole, and isn't one of this stair's step blocks.
+    let walkable = |c: (i32, i32)| -> bool {
+        c.0 > core.min().x
+            && c.0 < core.max().x
+            && c.1 > core.min().y
+            && c.1 < core.max().y
+            && !hole.contains(&c)
+            && !blocked.contains(&c)
+    };
+    // The base must itself be standable, else it's over the void or in a wall.
+    if !walkable(target) {
+        return false;
+    }
+
+    // Flood-fill from the emergence cell (the flight-below top step, which the
+    // player stands on at this floor's level) into adjacent walkable cells.
+    let mut seen: HashSet<(i32, i32)> = HashSet::from([emerge]);
+    let mut stack = vec![emerge];
+    while let Some(c) = stack.pop() {
+        for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
+            let n = (c.0 + dx, c.1 + dy);
+            if n == target {
+                return true;
+            }
+            if walkable(n) && seen.insert(n) {
+                stack.push(n);
+            }
+        }
+    }
+    false
+}
+
 /// Pick a stair position for a specific floor transition.
 /// Considers straight, spiral, and L-shaped candidates across the core rect only.
 /// Prefers exterior-wall positions over interior, avoids door-facing walls.
+/// When `below` is the flight rising onto this floor, candidates whose base is
+/// stranded by that flight's slab hole are filtered out (re-picked) so the new
+/// stair always connects to where the player emerges.
 fn pick_stair_for_floor(
     frame: &Frame,
     floor: u32,
     wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
+    door_cells: &HashSet<(i32, i32)>,
+    below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let rects = frame.footprint().rects();
     let run = (frame.wall_height() + 1) as i32;
 
     // Stairs only in core rect — wings are too small and architecturally odd.
+    // Constrain to the lower floor's extent (jetty grows upward, so the lower
+    // side is the binding rect).
     let candidate_rects: Vec<usize> = if frame.active_rects(floor).contains(&0)
         && frame.active_rects(floor + 1).contains(&0)
     {
@@ -240,25 +421,24 @@ fn pick_stair_for_floor(
         }
     }
 
-    // Interior facings: sides of the core with adjacent wing rects.
+    // Interior facings: sides of the core with adjacent wing rects on this
+    // floor. Adjacency is computed at `floor` so jettied geometry stays in sync.
     let mut interior_facings: HashSet<Cardinal> = HashSet::new();
-    let core = &rects[0];
-    for i in 1..rects.len() {
-        if !frame.active_rects(floor).contains(&i) {
-            continue;
-        }
-        let wing = &rects[i];
-        if wing.min().x == core.max().x + 1 { interior_facings.insert(Cardinal::East); }
-        if wing.max().x + 1 == core.min().x { interior_facings.insert(Cardinal::West); }
-        if wing.min().y == core.max().y + 1 { interior_facings.insert(Cardinal::South); }
-        if wing.max().y + 1 == core.min().y { interior_facings.insert(Cardinal::North); }
+    let core_at_floor = frame.rect_at(0, floor)?;
+    for i in 1..frame.rect_count() {
+        let Some(wing) = frame.rect_at(i, floor) else { continue; };
+        if wing.min().x == core_at_floor.max().x + 1 { interior_facings.insert(Cardinal::East); }
+        if wing.max().x + 1 == core_at_floor.min().x { interior_facings.insert(Cardinal::West); }
+        if wing.min().y == core_at_floor.max().y + 1 { interior_facings.insert(Cardinal::South); }
+        if wing.max().y + 1 == core_at_floor.min().y { interior_facings.insert(Cardinal::North); }
     }
 
     let mut exterior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
     let mut interior: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
 
     for &rect_idx in &candidate_rects {
-        let rect = &rects[rect_idx];
+        let Some(rect_owned) = frame.rect_at(rect_idx, floor) else { continue; };
+        let rect = &rect_owned;
         let min = rect.min();
 
         // --- Straight stair candidates ---
@@ -266,6 +446,7 @@ fn pick_stair_for_floor(
             if !stair_fits_in_rect(start, dir, run, rect) { continue; }
             let positions = stair_positions(start, dir, run);
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let wall_facing = match dir {
                 Cardinal::East | Cardinal::West => {
                     if start.y == min.y + 1 { Cardinal::North } else { Cardinal::South }
@@ -284,6 +465,7 @@ fn pick_stair_for_floor(
         for (anchor, dir) in spiral_anchors(rect) {
             let positions = spiral_positions(anchor, dir);
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let walls = spiral_adjacent_walls(anchor, rect);
             if walls.iter().all(|w| door_facings.contains(w)) { continue; }
             let candidate = (StairKind::Spiral, positions, dir);
@@ -296,6 +478,7 @@ fn pick_stair_for_floor(
             let positions = l_stair_positions(start, primary, turn);
             if !positions_fit_in_rect(&positions, rect) { continue; }
             if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+            if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
             let walls = spiral_adjacent_walls(start, rect);
             if walls.iter().any(|w| door_facings.contains(w)) { continue; }
             let candidate = (StairKind::LShaped, positions, primary);
@@ -304,7 +487,31 @@ fn pick_stair_for_floor(
         }
     }
 
-    let mut candidates = if !exterior.is_empty() { exterior } else { interior };
+    // Filter out candidates whose base is stranded by the flight below's hole.
+    // Prefer connected exterior, then connected interior, then fall back to any
+    // candidate (so a floor never loses its stair if the check rejects all —
+    // which shouldn't happen for a normal open core).
+    let connected = |cand: &(StairKind, Vec<Point2D>, Cardinal)| -> bool {
+        match below {
+            None => true,
+            Some(b) => {
+                let (base, blocked) = stair_base_and_blocked(cand.0, &cand.1, cand.2);
+                base_reachable_from_below(frame, floor, base, &blocked, b)
+            }
+        }
+    };
+    let ext_ok: Vec<_> = exterior.iter().filter(|c| connected(c)).cloned().collect();
+    let int_ok: Vec<_> = interior.iter().filter(|c| connected(c)).cloned().collect();
+
+    let mut candidates = if !ext_ok.is_empty() {
+        ext_ok
+    } else if !int_ok.is_empty() {
+        int_ok
+    } else if !exterior.is_empty() {
+        exterior
+    } else {
+        interior
+    };
     if candidates.is_empty() {
         return None;
     }
@@ -315,20 +522,29 @@ fn pick_stair_for_floor(
 
 /// Attic stairs sit at a gable-end corner and run along an eave wall (perpendicular
 /// to the ridge). Straight-only since they fit naturally against the wall.
+/// Rejects candidates whose positions overlap doorways on the floor the stair
+/// sits on — critical for 1-story attic buildings where the attic stair shares
+/// the same y-layer as the ground-floor door.
 fn pick_attic_stair(
     frame: &Frame,
+    wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let rects = frame.footprint().rects();
     let run = (frame.wall_height() + 1) as i32;
-    let rect = &rects[0];
+    // Attic stairs connect the top regular floor to the attic above it; both
+    // share the top-floor extent (jettied if jetty is enabled).
+    let top_floor = frame.max_floors().checked_sub(1)?;
+    let rect_owned = frame.rect_at(0, top_floor)?;
+    let rect = &rect_owned;
 
     let eave_dirs: &[Cardinal] = if rect.length() >= rect.width() {
         &[Cardinal::North, Cardinal::South]
     } else {
         &[Cardinal::East, Cardinal::West]
     };
+
+    let door_cells = door_cells_on_floor(wall_segs, top_floor);
 
     let mut candidates: Vec<(StairKind, Vec<Point2D>, Cardinal)> = Vec::new();
 
@@ -337,6 +553,7 @@ fn pick_attic_stair(
         if !stair_fits_in_rect(start, dir, run, rect) { continue; }
         let positions = stair_positions(start, dir, run);
         if positions.iter().any(|p| occupied.contains(&(p.x, p.y))) { continue; }
+        if positions.iter().any(|p| door_cells.contains(&(p.x, p.y))) { continue; }
         candidates.push((StairKind::Straight, positions, dir));
     }
 
@@ -570,5 +787,110 @@ async fn clear_headroom(editor: &Editor, x: i32, y: i32, z: i32) {
             &"air".into(),
             Point3D::new(x, clear_y, z),
         ).await;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
+
+    fn frame_with_core(core: Rect2D, floors: u32) -> Frame {
+        let footprint = Footprint::new(outline_from_rects(&[core]), vec![core]);
+        Frame::new(footprint, 64, vec![floors], 3)
+    }
+
+    fn straight_flight(start: Point2D, dir: Cardinal, run: i32, floor: u32) -> Stairwell {
+        Stairwell {
+            positions: stair_positions(start, dir, run),
+            floor,
+            direction: dir,
+            kind: StairKind::Straight,
+        }
+    }
+
+    #[test]
+    fn stacked_flight_continues_end_to_end_without_overlap() {
+        // Long core so a continued run fits. run = wall_height + 1 = 4.
+        let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 8));
+        let frame = frame_with_core(core, 3);
+        let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
+        let doors = HashSet::new();
+
+        let (kind, positions, dir) =
+            try_stack_on_previous(&prev, &frame, 1, &doors).expect("should stack on a long core");
+
+        assert_eq!(kind, StairKind::Straight);
+        assert_eq!(dir, Cardinal::East);
+        // New landing sits on the previous flight's top step (the handoff);
+        // every actual step is past it, so no step shares a cell with prev.
+        assert_eq!(positions[0], *prev.positions.last().unwrap());
+        let prev_cells: HashSet<(i32, i32)> =
+            prev.positions.iter().map(|p| (p.x, p.y)).collect();
+        for step in &positions[1..] {
+            assert!(
+                !prev_cells.contains(&(step.x, step.y)),
+                "stacked step {:?} re-enters the lower flight's footprint",
+                step,
+            );
+        }
+    }
+
+    fn below_with(positions: Vec<Point2D>) -> Stairwell {
+        Stairwell { positions, floor: 0, direction: Cardinal::East, kind: StairKind::Straight }
+    }
+
+    #[test]
+    fn base_reachable_across_open_floor() {
+        // Partial hole line; the base sits in the open part of the floor.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(4, 1), Point2D::new(4, 2), Point2D::new(4, 3),
+            Point2D::new(4, 4), Point2D::new(4, 5),
+        ]);
+        assert!(base_reachable_from_below(
+            &frame, 1, Point2D::new(6, 3), &HashSet::new(), &below,
+        ));
+    }
+
+    #[test]
+    fn base_stranded_when_boxed_by_hole() {
+        // Base in a corner walled off by the hole on its two open sides, with
+        // the emergence cell far away — unreachable.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(2, 1), Point2D::new(1, 2), Point2D::new(7, 7),
+        ]);
+        assert!(!base_reachable_from_below(
+            &frame, 1, Point2D::new(1, 1), &HashSet::new(), &below,
+        ));
+    }
+
+    #[test]
+    fn stacked_handoff_landing_is_always_reachable() {
+        // A stacked flight's landing sits on the flight-below top step (the
+        // emergence cell), so it is reachable by definition.
+        let frame = frame_with_core(Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 8)), 3);
+        let below = below_with(vec![
+            Point2D::new(1, 4), Point2D::new(2, 4), Point2D::new(3, 4),
+            Point2D::new(4, 4), Point2D::new(5, 4),
+        ]);
+        // Base == the flight-below top step.
+        assert!(base_reachable_from_below(
+            &frame, 1, Point2D::new(5, 4), &HashSet::new(), &below,
+        ));
+    }
+
+    #[test]
+    fn stacked_flight_rejected_when_run_would_not_fit() {
+        // Short core: continuing end-to-end from the previous top step runs off
+        // the rect, so stacking must bail (caller falls back to a fresh pick).
+        let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 8));
+        let frame = frame_with_core(core, 3);
+        let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
+        let doors = HashSet::new();
+
+        assert!(try_stack_on_previous(&prev, &frame, 1, &doors).is_none());
     }
 }

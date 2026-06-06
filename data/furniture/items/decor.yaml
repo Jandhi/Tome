@@ -1,0 +1,136 @@
+# Decorative furniture — lighting, greenery, and reading furniture. All
+# pure-block items that plug into the existing placement engine (no code).
+# Conventions match common.yaml: wall items use a `wall` constraint (+ optional
+# `away_from_wall` facing so the front faces the room); freestanding items use
+# `blocked_reachable`; ceiling items use `layer: ceiling`. Wood-tinted blocks
+# carry `swap: wood` so they pick up the palette's secondary wood.
+
+# ---------------------------------------------------------------------------
+# Reading furniture
+# ---------------------------------------------------------------------------
+
+# Open bookshelf with visible book slots. Tagged `bookshelf` so it shows up
+# anywhere plain bookshelves do, as a more detailed variant. Books face into
+# the room (away_from_wall). chiseled_bookshelf has only one wood variant, so
+# no palette swap.
+chiseled_bookshelf:
+  tags: [bookshelf]
+  blocks:
+    - block: "minecraft:chiseled_bookshelf[facing=south]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# Reading stand against a wall, lectern face (open book) toward the room.
+lectern:
+  blocks:
+    - block: "minecraft:lectern[facing=south]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# 2-wide bench: two wooden stairs side by side against a wall, seats facing
+# into the room. Mirrors `chair` (oak_stairs, away_from_wall) but two cells
+# wide. Both cells keep a walkable cell in front for the connectivity check.
+bench:
+  blocks:
+    - block: "minecraft:oak_stairs[facing=south]"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:oak_stairs[facing=south]"
+      offset: [1, 0, 0]
+      layer: ground
+      swap: wood
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+    - offset: [1, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+# ---------------------------------------------------------------------------
+# Lighting
+# ---------------------------------------------------------------------------
+
+# Ceiling centerpiece: a central chain with four hanging lanterns in a plus.
+# Placed at the room center like `lantern`. Gated to larger rooms so the 3×3
+# spread stays well inside the interior. Tagged `chandelier`; lanterns hang
+# from the ceiling block above each arm cell.
+chandelier:
+  tags: [chandelier]
+  min_room_area: 35
+  blocks:
+    - { block: "minecraft:chain",                  offset: [0, 0, 0],  layer: ceiling }
+    - { block: "minecraft:lantern[hanging=true]",  offset: [1, 0, 0],  layer: ceiling }
+    - { block: "minecraft:lantern[hanging=true]",  offset: [-1, 0, 0], layer: ceiling }
+    - { block: "minecraft:lantern[hanging=true]",  offset: [0, 1, 0],  layer: ceiling }
+    - { block: "minecraft:lantern[hanging=true]",  offset: [0, -1, 0], layer: ceiling }
+
+# ---------------------------------------------------------------------------
+# Greenery — potted plants. All tagged `potted_plant`; rooms reference the tag
+# so one of the variants is chosen at random. Freestanding single-cell decor.
+# ---------------------------------------------------------------------------
+
+potted_fern:
+  tags: [potted_plant]
+  blocks:
+    - block: "minecraft:potted_fern"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+potted_azalea:
+  tags: [potted_plant]
+  blocks:
+    - block: "minecraft:potted_azalea_bush"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+potted_tulip:
+  tags: [potted_plant]
+  blocks:
+    - block: "minecraft:potted_red_tulip"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+potted_cactus:
+  tags: [potted_plant]
+  blocks:
+    - block: "minecraft:potted_cactus"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+# Taller planter: a wood-topped base with a leafy azalea shrub on top.
+# 2 blocks tall, well under the wall height.
+potted_shrub:
+  tags: [potted_plant]
+  blocks:
+    - block: "minecraft:oak_planks"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: wood
+    - block: "minecraft:azalea"
+      offset: [0, 1, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable

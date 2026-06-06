@@ -1,4 +1,5 @@
 pub mod blueprint;
+pub mod cellar;
 pub mod door_ramp;
 pub mod floors;
 pub mod footprint;
@@ -11,7 +12,7 @@ pub mod rooms;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
-pub use self::walls::WindowFill;
+pub use self::walls::{TimberPattern, WindowFill};
 
 use crate::generator::materials::PaletteId;
 use footprint::SizeClass;
@@ -64,6 +65,18 @@ impl Culture {
             _ => WindowFill::Glass,
         }
     }
+
+    /// Probability (num, denom) that a multi-floor building of this culture
+    /// jetties its upper floor over the ground. Eligibility (shape, plot
+    /// bounds, floor count) is enforced at frame generation; this is just the
+    /// cultural taste filter. Medieval timber-frame jetties are the iconic case.
+    pub fn jetty_chance(&self) -> (u32, u32) {
+        match self {
+            Culture::Medieval => (2, 3),
+            Culture::Desert => (0, 1),
+            Culture::Japanese => (0, 1),
+        }
+    }
 }
 
 /// Per-building context threaded through the pipeline. Bundles culture, size,
@@ -74,16 +87,29 @@ pub struct BuildingContext {
     pub size_class: SizeClass,
     pub roof_style: RoofStyle,
     pub window_fill: WindowFill,
+    /// Per-building timber override. `None` means `build_house` auto-rolls one
+    /// once the frame is known (so it can filter to patterns that actually fit
+    /// the longest wall). Set to `Some(...)` to pin a pattern for tests/debug.
+    pub timber_pattern: Option<TimberPattern>,
+    /// Whether to jetty upper floors over the ground (each upper rect grows by
+    /// 1 on each side, where the plot allows). Frame generation enforces the
+    /// shape/floor/plot eligibility gates and silently no-ops when ineligible,
+    /// so it's safe to set this true unconditionally for testing.
+    pub jetty: bool,
 }
 
 impl BuildingContext {
     /// Create a context with culture defaults for roof and window style.
+    /// Timber pattern is left unset (auto-pick during `build_house`).
+    /// Jetty is left off; callers wanting it should set the field after.
     pub fn new(culture: Culture, size_class: SizeClass, roof_style: RoofStyle) -> Self {
         Self {
             culture,
             size_class,
             roof_style,
             window_fill: culture.window_fill(),
+            timber_pattern: None,
+            jetty: false,
         }
     }
 }

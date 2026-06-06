@@ -39,6 +39,16 @@ pub enum ParapetStyle {
     SlabTopped,
 }
 
+/// Per-rect extents at each rect's top floor. The roof sits on the topmost
+/// extent of each rect — for jettied buildings this is the grown upper rect,
+/// for un-jettied buildings it equals `footprint().rects()[i]`. Caller indexes
+/// the result by rect index (parallel to `footprint().rects()`).
+fn top_floor_rects(frame: &Frame) -> Vec<Rect2D> {
+    (0..frame.rect_count())
+        .map(|i| frame.rect_at_top(i).expect("rect must exist at its top floor"))
+        .collect()
+}
+
 /// Extend wing rects inward to the core's ridge line for roof heightmap generation.
 /// Only extends wings whose ridge axis is perpendicular to the core's ridge axis.
 fn extend_rects_for_roof(rects: &[Rect2D], axes: &[RidgeAxis]) -> Vec<Rect2D> {
@@ -179,7 +189,8 @@ async fn place_gable_roof(
     let rng = &mut *ctx.rng;
 
     let mut gable_doorways = Vec::new();
-    let rects = frame.footprint().rects();
+    let rects = top_floor_rects(frame);
+    let rects = &rects[..];
     let overhang = 1;
 
     // Pick ridge axis per rect (store so we don't call RNG twice)
@@ -294,7 +305,8 @@ async fn place_flat_roof(
     let palette = ctx.palette;
     let rng = &mut *ctx.rng;
 
-    let rects = frame.footprint().rects();
+    let rects = top_floor_rects(frame);
+    let rects = &rects[..];
 
     let mut placer_rng = rng.derive();
     let roof_material = palette
@@ -468,7 +480,8 @@ pub async fn place_roof_ladder(
 ) -> Option<(i32, i32)> {
     use super::rooms::CellState;
     let editor: &Editor = &*ctx.editor;
-    let rects = frame.footprint().rects();
+    let rects = top_floor_rects(frame);
+    let rects = &rects[..];
 
     let tallest_rect_idx = (0..rects.len())
         .max_by_key(|&i| frame.floor_counts()[i])
@@ -492,9 +505,11 @@ pub async fn place_roof_ladder(
             .map(|(_, x, z)| (*x, *z)))
         .collect();
 
-    // Parapet cells: cells on the edge of this rect at this roof level
+    // Parapet cells: cells on the edge of this rect at this roof level.
+    // Use the top-floor filled set (which accounts for jettied extents) rather
+    // than the ground footprint, since the parapet sits at the top-floor level.
     let footprint_set: std::collections::HashSet<Point2D> =
-        frame.footprint().filled_points().into_iter().collect();
+        frame.filled_points_at_floor(top_floor).into_iter().collect();
     let parapet_set: std::collections::HashSet<Point2D> = tallest_rect.iter()
         .filter(|p| {
             [Point2D::new(p.x-1,p.y), Point2D::new(p.x+1,p.y),

@@ -227,6 +227,67 @@ pub fn find_boundaries(rects: &[Rect2D]) -> Vec<RectBoundary> {
     boundaries
 }
 
+/// Cells on each rect's own edge that need wall blocks because the side is
+/// **partially** shared with a lower-indexed rect. `compute_room_interior`
+/// uses an all-or-nothing rule: a side is "shared" (no shrink) only if every
+/// adjacency cell is covered by a lower-indexed rect. Partial overlap falls
+/// back to shrinking — leaving a 1-cell gap on this rect's edge for the
+/// shared portion, since `find_boundaries` placed those walls inside the
+/// lower-indexed neighbor instead of here. Without these phantom cells,
+/// rect-i's interior shrinks expecting a wall slot at its edge that nothing
+/// has actually filled, producing the room invariant (a) air-gap failure
+/// seen on L-/T-shape Manors where two wings meet a partial neighbor.
+pub fn phantom_wall_cells(rects: &[Rect2D]) -> Vec<Point2D> {
+    let mut out = Vec::new();
+    for idx in 0..rects.len() {
+        let rect = rects[idx];
+        let rmin = rect.min();
+        let rmax = rect.max();
+        let covered = |p: Point2D| -> bool {
+            rects.iter().take(idx).any(|other| other.contains(p))
+        };
+
+        let push_partial = |out: &mut Vec<Point2D>, cov: Vec<bool>, edge: Vec<Point2D>| {
+            let any = cov.iter().any(|&c| c);
+            let all = cov.iter().all(|&c| c);
+            if any && !all {
+                for (c, p) in cov.iter().zip(edge.iter()) {
+                    if *c { out.push(*p); }
+                }
+            }
+        };
+
+        // West edge cells (x = rmin.x) ↔ adjacency at x = rmin.x - 1
+        let west_cov: Vec<bool> = (rmin.y..=rmax.y)
+            .map(|y| covered(Point2D::new(rmin.x - 1, y))).collect();
+        let west_edge: Vec<Point2D> = (rmin.y..=rmax.y)
+            .map(|y| Point2D::new(rmin.x, y)).collect();
+        push_partial(&mut out, west_cov, west_edge);
+
+        // East edge (x = rmax.x) ↔ adjacency at x = rmax.x + 1
+        let east_cov: Vec<bool> = (rmin.y..=rmax.y)
+            .map(|y| covered(Point2D::new(rmax.x + 1, y))).collect();
+        let east_edge: Vec<Point2D> = (rmin.y..=rmax.y)
+            .map(|y| Point2D::new(rmax.x, y)).collect();
+        push_partial(&mut out, east_cov, east_edge);
+
+        // North edge (y = rmin.y) ↔ adjacency at y = rmin.y - 1
+        let north_cov: Vec<bool> = (rmin.x..=rmax.x)
+            .map(|x| covered(Point2D::new(x, rmin.y - 1))).collect();
+        let north_edge: Vec<Point2D> = (rmin.x..=rmax.x)
+            .map(|x| Point2D::new(x, rmin.y)).collect();
+        push_partial(&mut out, north_cov, north_edge);
+
+        // South edge (y = rmax.y) ↔ adjacency at y = rmax.y + 1
+        let south_cov: Vec<bool> = (rmin.x..=rmax.x)
+            .map(|x| covered(Point2D::new(x, rmax.y + 1))).collect();
+        let south_edge: Vec<Point2D> = (rmin.x..=rmax.x)
+            .map(|x| Point2D::new(x, rmax.y)).collect();
+        push_partial(&mut out, south_cov, south_edge);
+    }
+    out
+}
+
 /// Full footprint generation pipeline: generate layouts, score/select, merge into polygon.
 /// Returns `None` if no valid building fits the plot.
 pub fn generate_footprint(rng: &mut RNG, plot: &Plot, size_class: &SizeClass) -> Option<Footprint> {

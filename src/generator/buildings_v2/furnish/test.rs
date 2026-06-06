@@ -9,7 +9,7 @@ use super::{
     placement_keeps_connectivity, shuffle, is_ceiling_item, needs_wall,
     try_place_freestanding,
     resolve_offset, try_place_at_wall_slot, try_place_ceiling,
-    resolve_candidates,
+    resolve_candidates, try_place_item, WallSlot,
     CellConstraint, FacingMode, BlockLayer,
     PlacementResult, DEFAULT_FILL_THRESHOLD,
 };
@@ -2139,4 +2139,141 @@ fn loot_roll_empty_pool_emits_empty_items() {
     let table = LootTable { count: Some([1, 3]), capacity: None, items: vec![], fixed: vec![] };
     let mut rng = RNG::new(1);
     assert_eq!(roll_loot_snbt(&table, &mut rng), "{Items:[]}");
+}
+
+/// Make a standing sign labeling a furniture piece. `rotation=0` faces south,
+/// so the text reads from the open (south) side of each booth.
+fn gallery_sign(line1: &str, line2: &str) -> crate::minecraft::Block {
+    let nbt = format!(
+        "{{front_text:{{messages:['\"{}\"','\"{}\"','\"\"','\"\"']}}}}",
+        line1, line2
+    );
+    crate::minecraft::Block::new(
+        "minecraft:oak_sign".into(),
+        Some(HashMap::from([("rotation".to_string(), "0".to_string())])),
+        Some(nbt),
+    )
+}
+
+/// Build a flat raised platform with one open booth per furniture item, each
+/// labeled by a sign. Booths are uncovered (only a low back wall) and tightly
+/// packed so the whole collection reads at a glance from a distance. Lets you
+/// walk the gallery in-game and judge every piece. Needs a live GDMC server.
+#[tokio::test]
+async fn build_furniture_gallery() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::geometry::Point3D;
+    use crate::minecraft::Block;
+
+    // Booth geometry. A 7×7 booth → 5×5 interior (fits the largest items, which
+    // span 4×4). Booths tile edge-to-edge on a 7-block grid; the open south side
+    // of one row leaves a 1-cell viewing aisle in front of the next.
+    const RECT: i32 = 7;
+    const PITCH: i32 = 7;
+    const COLS: i32 = 12;
+    const WALL_HEIGHT: i32 = 3; // low back wall only; booths are otherwise open
+    const LIFT: i32 = 12; // platform height above ground
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    // Sorted item list so the grid layout is stable across runs.
+    let mut names: Vec<&String> = data.furniture.items.keys().collect();
+    names.sort();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let ground_y = editor.world().get_height_at(center);
+    let floor_y = ground_y + LIFT;          // furniture stands here
+    let surface_y = floor_y - 1;            // solid platform top
+    let ceiling_y = floor_y + WALL_HEIGHT;  // solid ceiling here
+
+    let rows = (names.len() as i32 + COLS - 1) / COLS;
+    // Origin: top-left booth corner, grid centered on the build area.
+    let base_x = center.x - (COLS * PITCH) / 2;
+    let base_z = center.y - (rows * PITCH) / 2;
+
+    // One big platform under the whole grid (+2 margin so signs have support).
+    let plat_min = Point2D::new(base_x - 2, base_z - 2);
+    let plat_max = Point2D::new(base_x + COLS * PITCH + 1, base_z + rows * PITCH + 1);
+    let floor_block: Block = "minecraft:smooth_stone".into();
+    for p in Rect2D::from_points(plat_min, plat_max).iter() {
+        editor.place_block(&floor_block, Point3D::new(p.x, surface_y, p.y)).await;
+    }
+
+    let wall_block: Block = "minecraft:stone_bricks".into();
+    let ceiling_block: Block = "minecraft:smooth_stone".into();
+
+    for (i, name) in names.iter().enumerate() {
+        let item = &data.furniture.items[*name];
+        let col = i as i32 % COLS;
+        let row = i as i32 / COLS;
+        let bx = base_x + col * PITCH;
+        let bz = base_z + row * PITCH;
+
+        let booth = Rect2D::from_points(
+            Point2D::new(bx, bz),
+            Point2D::new(bx + RECT - 1, bz + RECT - 1),
+        );
+        let interior = booth.shrink(1);
+
+        // Low back wall only (north edge) — a visual backdrop for wall-mounted
+        // items. Sides and top stay open so the gallery reads from afar.
+        for p in booth.iter() {
+            if p.y == booth.min().y {
+                for h in 0..WALL_HEIGHT {
+                    editor.place_block(&wall_block, Point3D::new(p.x, floor_y + h, p.y)).await;
+                }
+            }
+        }
+        // Ceiling items (chandelier, hanging lantern) need a block above to hang
+        // from — give those booths a thin cap over the interior; leave the rest
+        // open.
+        if is_ceiling_item(item) {
+            for p in interior.iter() {
+                editor.place_block(&ceiling_block, Point3D::new(p.x, ceiling_y, p.y)).await;
+            }
+        }
+
+        // Place the item via the real furnish engine. Wall items attach to the
+        // north (back) wall so they face the viewer; freestanding items prefer
+        // the booth center; ceiling items go at the interior midpoint.
+        let mut constraints = ConstraintMap::new(&interior);
+        let slots: Vec<WallSlot> = wall_slots(&interior)
+            .into_iter()
+            .filter(|s| s.wall_dir == Cardinal::North)
+            .collect();
+        let mid = interior.midpoint();
+        let mut open_cells: Vec<(i32, i32)> = interior.iter().map(|p| (p.x, p.y)).collect();
+        open_cells.sort_by_key(|&(x, z)| (x - mid.x).abs() + (z - mid.y).abs());
+
+        let mut item_rng = RNG::new(0xF00D + i as i64);
+        let placed = try_place_item(
+            &editor, item, &interior, &mut constraints,
+            &slots, &open_cells, floor_y, ceiling_y,
+            None, &palette, &data.materials, &data.furniture.loot, &mut item_rng,
+        ).await;
+        if placed.is_none() {
+            println!("gallery: could not place '{}'", name);
+        }
+
+        // Label sign at the front-center threshold, facing the viewer.
+        let sign = gallery_sign(name, "");
+        let sign_x = (booth.min().x + booth.max().x) / 2;
+        editor.place_block_forced(&sign, Point3D::new(sign_x, floor_y, booth.max().y)).await;
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — furniture gallery: {} items in a {}-wide grid", names.len(), COLS);
 }
