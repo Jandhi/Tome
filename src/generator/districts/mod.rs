@@ -10,6 +10,7 @@ mod classification;
 mod wall;
 mod district_painter;
 mod gate;
+pub mod subdivide;
 
 pub use district::District;
 pub use district::DistrictID;

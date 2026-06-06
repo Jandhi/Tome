@@ -57,6 +57,14 @@ impl Footprint {
         Self { vertices, rects }
     }
 
+    /// Construct a footprint from a single rectangle, skipping the
+    /// `generate_layouts → select_layout → merge_layout` pipeline. Used by
+    /// frontage placement where the caller has already chosen exact dimensions.
+    pub fn from_rect(rect: Rect2D) -> Self {
+        let vertices = merge::outline_from_rects(&[rect]);
+        Self { vertices, rects: vec![rect] }
+    }
+
     pub fn bounds(&self) -> Rect2D {
         let mut min_x = i32::MAX;
         let mut min_y = i32::MAX;
@@ -150,6 +158,28 @@ impl SizeClass {
     }
     pub fn max_bedrooms(&self) -> u32 {
         match self { Self::Cottage => 1, Self::House => 2, Self::Hall => 3, Self::Manor => 4 }
+    }
+
+    /// Width (along the street) of a rectangle when this size class is placed
+    /// on a road frontage. Used by `generator::city_houses` to pick stride sizes.
+    pub fn front_width_range(&self) -> std::ops::RangeInclusive<i32> {
+        match self {
+            Self::Cottage => 5..=6,
+            Self::House   => 6..=8,
+            Self::Hall    => 8..=10,
+            Self::Manor   => 9..=12,
+        }
+    }
+
+    /// Depth (into the block, away from the road) of a frontage rectangle.
+    /// Biased depth ≥ width to give townhouse silhouettes.
+    pub fn depth_range(&self) -> std::ops::RangeInclusive<i32> {
+        match self {
+            Self::Cottage => 5..=7,
+            Self::House   => 7..=10,
+            Self::Hall    => 9..=12,
+            Self::Manor   => 11..=15,
+        }
     }
 }
 

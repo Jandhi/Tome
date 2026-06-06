@@ -212,6 +212,356 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn subdivide_urban_test() {
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider.get_heightmap(build_area.origin.x, build_area.origin.z, build_area.size.x, build_area.size.z, HeightMapType::MotionBlockingNoPlants).await.expect("Failed to get heightmap");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let _districts = generate_districts(seed, &mut editor).await;
+
+        // Snapshot the cell-sets of every urban super-district while we hold a borrow,
+        // then drop the borrow before touching the editor again.
+        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().super_districts.values()
+            .filter(|sd| sd.data.district_type == district::DistrictType::Urban)
+            .map(|sd| sd.data.points_2d.clone())
+            .collect();
+
+        println!("Subdividing {} urban super-districts", urban_blocks.len());
+
+        let alley_block = Block { id: "polished_andesite".into(), data: None, state: None };
+
+        let mut color_idx: usize = 0;
+        let mut total_sub_blocks = 0usize;
+        let mut total_alley_cells = 0usize;
+
+        for block_cells in urban_blocks {
+            let (sub_blocks, alleys) = crate::generator::districts::subdivide::subdivide_block(
+                &block_cells, &mut rng, 32,
+            );
+            total_sub_blocks += sub_blocks.len();
+            total_alley_cells += alleys.len();
+
+            for sub in &sub_blocks {
+                let paint = get_block_for_id(color_idx);
+                color_idx += 1;
+                for p in sub {
+                    if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
+                        continue;
+                    }
+                    let h = height_map[p.x as usize][p.y as usize] - build_area.origin.y;
+                    editor.place_block(&paint, Point3D::new(p.x, h, p.y)).await;
+                }
+            }
+
+            for p in &alleys {
+                if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
+                    continue;
+                }
+                let h = height_map[p.x as usize][p.y as usize] - build_area.origin.y;
+                editor.place_block(&alley_block, Point3D::new(p.x, h, p.y)).await;
+            }
+        }
+
+        println!("Produced {} sub-blocks, {} alley cells", total_sub_blocks, total_alley_cells);
+        editor.flush_buffer().await;
+    }
+
+    /// Subdivide urban super-districts as in `subdivide_urban_test`, then mark
+    /// the alley cells as `BuildClaim::Path` and run the buildings_v2 +
+    /// city_houses frontage/interior fill on each sub-block. Used to judge how
+    /// well subdivision sizing produces buildable sub-blocks. Requires a live
+    /// Minecraft server.
+    #[tokio::test]
+    async fn subdivide_urban_with_houses() {
+        use crate::generator::BuildClaim;
+        use crate::generator::buildings_v2::{BuildCtx, Culture};
+        use crate::generator::buildings_v2::roof::RoofStyle;
+        use crate::generator::buildings_v2::roof::gable::GablePitch;
+        use crate::generator::buildings_v2::footprint::SizeClass;
+        use crate::generator::city_houses::{
+            fill_interior, place_block_frontage, plot_from_block,
+        };
+        use crate::generator::data::LoadedData;
+        use crate::generator::materials::PaletteId;
+        use crate::generator::paths::PathType;
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let _districts = generate_districts(seed, &mut editor).await;
+
+        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().super_districts.values()
+            .filter(|sd| sd.data.district_type == district::DistrictType::Urban)
+            .map(|sd| sd.data.points_2d.clone())
+            .collect();
+        println!("Subdividing {} urban super-districts", urban_blocks.len());
+
+        // Take a 2-cell-thick ring at the edge of each urban super-district as
+        // the perimeter road. The interior cells are what we actually subdivide.
+        let mut perimeter_roads: HashSet<Point2D> = HashSet::new();
+        let mut interior_blocks: Vec<HashSet<Point2D>> = Vec::new();
+        for sd_cells in &urban_blocks {
+            let (outer, inner) = crate::geometry::get_outer_and_inner_points(sd_cells, 2);
+            perimeter_roads.extend(outer);
+            interior_blocks.push(inner);
+        }
+
+        let data = LoadedData::load().expect("Failed to load data");
+        let base_palette_id: PaletteId = "medieval_spruce".into();
+        let base_palette = data.palettes.get(&base_palette_id).expect("Base palette not found").clone();
+        let roof_palette_ids: Vec<PaletteId> = vec![
+            "acacia_wood_roof".into(),
+            "brick_roof".into(),
+            "oak_wood_roof".into(),
+            "red_wood_roof".into(),
+        ];
+        // Medieval-feeling woods and stones — skipping tropical (jungle, acacia)
+        // and nether (blackstone) variants. Each is a partial palette that only
+        // overrides its respective roles, so stacking them gives ~36 combos.
+        let wood_palette_ids: Vec<PaletteId> = vec![
+            "oak".into(),
+            "spruce".into(),
+            "dark_oak".into(),
+        ];
+        let stone_palette_ids: Vec<PaletteId> = vec![
+            "stone_bricks".into(),
+            "cobblestone".into(),
+            "deepslate".into(),
+        ];
+        let pitches = [
+            RoofStyle::Gable(GablePitch::Slab),
+            RoofStyle::Gable(GablePitch::Stairs),
+            RoofStyle::Gable(GablePitch::Double),
+        ];
+        let frontage_pool = vec![SizeClass::House];
+        let interior_pool = vec![SizeClass::House];
+
+        // Subdivide the INTERIOR of each urban super-district, alternating
+        // between BSP (axis-aligned cuts) and voronoi (organic partitions) so
+        // adjacent districts visually compare the two patterns.
+        let mut all_sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
+        let mut all_alleys: HashSet<Point2D> = HashSet::new();
+        for (i, inner) in interior_blocks.iter().enumerate() {
+            let (sub_blocks, alleys) = if i % 2 == 0 {
+                println!("Super-district {}: BSP partition", i);
+                crate::generator::districts::subdivide::subdivide_block(inner, &mut rng, 32)
+            } else {
+                let sections = (inner.len() / 400).max(2);
+                println!("Super-district {}: voronoi partition ({} sections)", i, sections);
+                crate::generator::districts::subdivide::voronoi_subdivide_block(inner, &mut rng, sections)
+            };
+            all_sub_blocks.extend(sub_blocks);
+            all_alleys.extend(alleys);
+        }
+        println!(
+            "Partitioning produced {} sub-blocks, {} alley cells, {} perimeter road cells",
+            all_sub_blocks.len(), all_alleys.len(), perimeter_roads.len(),
+        );
+
+        // All road cells: perimeter + alleys. Claim as PathPlanned so the
+        // frontage walker treats them as roads, but foundation terrain
+        // blending will still raise the heightmap on them — meaning the
+        // post-house pave step picks up the foundation-influenced heights.
+        let road_cells: HashSet<Point2D> = perimeter_roads.iter().chain(all_alleys.iter()).copied().collect();
+        for p in &road_cells {
+            editor.world_mut().claim(*p, BuildClaim::PathPlanned(PathType::Pavement));
+        }
+
+        // Place houses one at a time so we can roll a fresh roof style and
+        // palette per building. `place_block_frontage` / `fill_interior` lock a
+        // single style for the whole sub-block, so we replicate their loops
+        // here with the per-house roll.
+        use crate::generator::buildings_v2::{BuildingContext, build_house};
+        use crate::generator::city_houses::{
+            INTERIOR_BUFFER_CELLS, SIDE_BUFFER_CELLS, detect_frontages,
+            detect_perimeter_frontages, rect_from_frontage, synthetic_plot_bounds,
+        };
+        use crate::generator::buildings_v2::footprint::{
+            Footprint, generate_footprint,
+        };
+        use crate::geometry::Point2D as P2;
+
+        fn roll_palette(
+            rng: &mut RNG,
+            base: &crate::generator::materials::Palette,
+            data: &crate::generator::data::LoadedData,
+            woods: &[crate::generator::materials::PaletteId],
+            stones: &[crate::generator::materials::PaletteId],
+            roofs: &[crate::generator::materials::PaletteId],
+        ) -> crate::generator::materials::Palette {
+            let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
+            let s = &stones[rng.rand_i32_range(0, stones.len() as i32) as usize];
+            let r = &roofs[rng.rand_i32_range(0, roofs.len() as i32) as usize];
+            base.clone()
+                .merged_with(data.palettes.get(w).expect("wood palette not found"))
+                .merged_with(data.palettes.get(s).expect("stone palette not found"))
+                .merged_with(data.palettes.get(r).expect("roof palette not found"))
+        }
+
+        fn mark_rect_used(plot: &mut crate::generator::buildings_v2::footprint::Plot, rect: &crate::geometry::Rect2D, buffer: i32) {
+            let plot_min = plot.bounds.min();
+            for x in (rect.min().x - buffer)..=(rect.max().x + buffer) {
+                for z in (rect.min().y - buffer)..=(rect.max().y + buffer) {
+                    let lx = x - plot_min.x;
+                    let lz = z - plot_min.y;
+                    if lx < 0 || lz < 0 { continue; }
+                    let lx = lx as usize;
+                    let lz = lz as usize;
+                    if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                        plot.usable[lx][lz] = false;
+                    }
+                }
+            }
+        }
+        fn mark_footprint_used(plot: &mut crate::generator::buildings_v2::footprint::Plot, footprint: &Footprint, buffer: i32) {
+            let plot_min = plot.bounds.min();
+            for point in footprint.filled_points() {
+                for dx in -buffer..=buffer {
+                    for dz in -buffer..=buffer {
+                        let lx = point.x + dx - plot_min.x;
+                        let lz = point.y + dz - plot_min.y;
+                        if lx < 0 || lz < 0 { continue; }
+                        let lx = lx as usize;
+                        let lz = lz as usize;
+                        if lx < plot.usable.len() && lz < plot.usable[0].len() {
+                            plot.usable[lx][lz] = false;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut total_buildings = 0usize;
+        for sub_block in all_sub_blocks.iter() {
+            if sub_block.is_empty() {
+                continue;
+            }
+            let mut plot = match plot_from_block(sub_block) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            // Frontage pass — one house per slot along each frontage chain.
+            let frontages = {
+                let detected = detect_frontages(sub_block, &editor);
+                if detected.is_empty() {
+                    detect_perimeter_frontages(sub_block)
+                } else {
+                    detected
+                }
+            };
+            for frontage in &frontages {
+                if frontage.cells.is_empty() { continue; }
+                let min_front = frontage_pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
+                let chain_len = frontage.cells.len() as i32;
+                if chain_len < min_front { continue; }
+                let mut cursor: i32 = if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 };
+                while cursor + min_front <= chain_len {
+                    let size_class = *rng.choose(&frontage_pool);
+                    let fw = rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1);
+                    let depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
+                    if cursor + fw > chain_len { cursor += 1; continue; }
+                    let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
+                    let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
+                    let cells_ok = rect.iter().all(|p: P2| {
+                        let lx = p.x - plot.bounds.min().x;
+                        let lz = p.y - plot.bounds.min().y;
+                        lx >= 0 && lz >= 0
+                            && (lx as usize) < plot.usable.len()
+                            && (lz as usize) < plot.usable[0].len()
+                            && plot.usable[lx as usize][lz as usize]
+                    });
+                    if !cells_ok { cursor += 1; continue; }
+
+                    // Per-house roll: roof + palette.
+                    let palette = roll_palette(
+                        &mut rng, &base_palette, &data,
+                        &wood_palette_ids, &stone_palette_ids, &roof_palette_ids,
+                    );
+                    let roof_style = pitches[rng.rand_i32_range(0, pitches.len() as i32) as usize];
+
+                    let footprint = Footprint::from_rect(rect);
+                    let plot_bounds = synthetic_plot_bounds(chain_slice, frontage.outward);
+                    let bctx = BuildingContext::new(Culture::Medieval, size_class, roof_style);
+                    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+                    match build_house(&mut ctx, footprint, &bctx, plot_bounds).await {
+                        Ok(_) => {
+                            mark_rect_used(&mut plot, &rect, SIDE_BUFFER_CELLS);
+                            total_buildings += 1;
+                            cursor += fw + SIDE_BUFFER_CELLS;
+                        }
+                        Err(msg) => {
+                            log::warn!("frontage build_house failed: {}", msg);
+                            cursor += 1;
+                        }
+                    }
+                }
+            }
+
+            // Interior pass disabled — frontage only for now.
+            // let max_interior = 10usize;
+            // let mut placed = 0usize;
+            // while placed < max_interior {
+            //     let size_class = *rng.choose(&interior_pool);
+            //     let footprint = match generate_footprint(&mut rng, &plot, &size_class) {
+            //         Some(fp) => fp,
+            //         None => break,
+            //     };
+            //     let palette = roll_palette(
+            //         &mut rng, &base_palette, &data,
+            //         &wood_palette_ids, &stone_palette_ids, &roof_palette_ids,
+            //     );
+            //     let roof_style = pitches[rng.rand_i32_range(0, pitches.len() as i32) as usize];
+            //     mark_footprint_used(&mut plot, &footprint, INTERIOR_BUFFER_CELLS);
+            //     let bctx = BuildingContext::new(Culture::Medieval, size_class, roof_style);
+            //     let plot_bounds = plot.bounds;
+            //     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+            //     match build_house(&mut ctx, footprint, &bctx, plot_bounds).await {
+            //         Ok(_) => { placed += 1; total_buildings += 1; }
+            //         Err(msg) => log::warn!("interior build_house failed: {}", msg),
+            //     }
+            // }
+        }
+
+        // Post-house pave pass: now that foundations have raised the heightmap
+        // around each building (including the PathPlanned road cells in their
+        // blend ring), read the live heightmap and paint pavement one block
+        // below it. Convert claims to Path so any subsequent passes treat
+        // these as proper roads.
+        let alley_block = Block { id: "polished_andesite".into(), data: None, state: None };
+        for p in &road_cells {
+            if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
+                continue;
+            }
+            let h = editor.world().get_ocean_floor_height_at(*p);
+            editor.place_block(&alley_block, Point3D::new(p.x, h - 1, p.y)).await;
+            editor.world_mut().claim(*p, BuildClaim::Path(PathType::Pavement));
+        }
+
+        editor.flush_buffer().await;
+        println!(
+            "Done — {} total buildings across {} sub-blocks",
+            total_buildings, all_sub_blocks.len(),
+        );
+    }
+
+    #[tokio::test]
     async fn district_classification() {
         init_logger();
 
