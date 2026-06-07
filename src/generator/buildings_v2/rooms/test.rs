@@ -6,7 +6,8 @@ use crate::generator::buildings_v2::RoomType;
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint, find_boundaries};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
-use super::{assign_roles, assign_types_to_rooms, RoomRole, RoomPlan, Room, ConstraintMap};
+use super::{assign_types_to_rooms, RoomRole, RoomPlan, Room, ConstraintMap};
+use super::assign::assign_roles;
 
 // --- Unit tests for pure logic ---
 
@@ -899,6 +900,36 @@ async fn build_furnished_houses() {
     println!("Done — {} furnished buildings placed", count);
 }
 
+/// Live twin of `build_furnished_houses` with jetty forced on: places the
+/// seed-42 set into a live Minecraft world so the upper-floor overhangs can be
+/// seen in-game. Eligible buildings (≥2 floors, plot room) jetty; cottages and
+/// single-floor houses fall back to flush walls. Requires a live server.
+#[tokio::test]
+async fn build_furnished_jetty_houses() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline_jettied(
+        &mut editor, bounds, 42, true, Culture::Medieval, true,
+    ).await;
+    println!("Done — {} furnished buildings (jetty forced) placed", count);
+}
+
 /// Online desert variant: places desert_sandstone houses in a live Minecraft
 /// world. Requires a live Minecraft server with the GDMC HTTP mod.
 #[tokio::test]
@@ -1255,7 +1286,7 @@ async fn manor_invariant_repro() {
     use crate::generator::buildings_v2::roof::RoofStyle;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
     use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
-    use super::wall_cells_on_floor;
+    use super::invariants::wall_cells_on_floor;
 
     init_logger();
 

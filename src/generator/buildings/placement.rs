@@ -208,14 +208,14 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     }
 }
 
-enum PavingType {
+pub enum PavingType {
     Stone,
     Sandstone,
     RedSandstone
 }
 
 impl PavingType {
-    fn from_biome(biome : Biome) -> Self {
+    pub fn from_biome(biome : Biome) -> Self {
         match biome.name() {
             "desert" | "desert_hills" | "desert_lakes" | "beach" => PavingType::Sandstone,
             "badlands" | "eroded_badlands" | "wooded_badlands" | "savanna" | "savanna_plateau" | "shattered_savanna" | "shattered_savanna_plateau" => PavingType::RedSandstone,
@@ -224,7 +224,7 @@ impl PavingType {
     }
 }
 
-async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>, paving_type : PavingType) {
+pub async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>, paving_type : PavingType) {
     let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
     points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
     force_height(editor, &points, true).await;

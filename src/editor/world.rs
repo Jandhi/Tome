@@ -360,11 +360,11 @@ impl World {
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
-        self.ground_block_map[point.x as usize][point.y as usize].id == "water".into()
+        self.ground_block_map[point.x as usize][point.y as usize].id.is_water()
     }
 
     pub fn is_water_3d(&self, point : Point3D) -> bool {
-        self.get_block(point).expect("failed to get block").id == "water".into()
+        self.get_block(point).expect("failed to get block").id.is_water()
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {

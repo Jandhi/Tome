@@ -160,6 +160,7 @@ pub fn extract_claims(world: &World) -> ClaimMapData {
                 BuildClaim::Wall => "wall",
                 BuildClaim::Gate => "gate",
                 BuildClaim::Path(_) => "path",
+                BuildClaim::PathPlanned(_) => "path",
                 BuildClaim::Building(_) => "building",
                 BuildClaim::Structure(_) => "structure",
             };
