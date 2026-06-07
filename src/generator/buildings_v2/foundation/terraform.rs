@@ -10,6 +10,28 @@ use crate::minecraft::Block;
 /// How many blocks outward from the footprint edge to blend terrain.
 const BLEND_RADIUS: i32 = 5;
 
+/// Over how many cells the blend tapers to zero as it approaches the town wall
+/// or a gate: a cell `d` cells from the wall keeps only `d / WALL_FALLOFF` of its
+/// raise, reaching 0 displacement at the wall itself so the terraform never
+/// disturbs it and meets it flush.
+const WALL_FALLOFF: i32 = 4;
+
+/// Chebyshev distance from `p` to the nearest Wall/Gate-claimed cell within
+/// `WALL_FALLOFF`, or `None` if none is that close (no taper needed).
+fn wall_proximity(editor: &Editor, p: Point2D) -> Option<i32> {
+    let mut best: Option<i32> = None;
+    for dx in -WALL_FALLOFF..=WALL_FALLOFF {
+        for dz in -WALL_FALLOFF..=WALL_FALLOFF {
+            let c = Point2D::new(p.x + dx, p.y + dz);
+            if matches!(editor.world().get_claim(c), Some(BuildClaim::Wall | BuildClaim::Gate)) {
+                let d = dx.abs().max(dz.abs());
+                best = Some(best.map_or(d, |b| b.min(d)));
+            }
+        }
+    }
+    best
+}
+
 /// Blend surrounding terrain upward to meet the building's `base_y`.
 ///
 /// For each column within `BLEND_RADIUS` blocks of the footprint perimeter,
@@ -24,11 +46,15 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
         let ring = ring_at_distance(&footprint_set, dist, &world_bounds);
 
         for point in ring {
-            // Don't raise terrain onto already-paved roads — the lerped fill
-            // would bury the pavement. `PathPlanned` is fine to blend through:
-            // those cells are reserved but not yet built, and a later pave
-            // pass will repave at the new (raised) height.
-            if matches!(ctx.editor.world().get_claim(point), Some(BuildClaim::Path(_))) {
+            // Don't raise terrain onto already-paved roads (the lerped fill would
+            // bury the pavement) or onto another building/structure (the fill
+            // would cut earth and grass into a neighbouring house). `PathPlanned`
+            // is fine to blend through: those cells are reserved but not yet
+            // built, and a later pave pass repaves at the new (raised) height.
+            if matches!(
+                ctx.editor.world().get_claim(point),
+                Some(BuildClaim::Path(_) | BuildClaim::Building(_) | BuildClaim::Structure(_))
+            ) {
                 continue;
             }
 
@@ -37,7 +63,15 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
             // Only raise terrain, never lower it. If terrain is already at or
             // above the lerped target there's nothing to do.
             let t = dist as f64 / BLEND_RADIUS as f64;
-            let target_y = lerp_i32(base_y, terrain_y, t);
+            let mut target_y = lerp_i32(base_y, terrain_y, t);
+
+            // Taper the raise toward natural terrain near the wall/gate so the
+            // foundation blend never lifts the ground into them — 0 raise at the
+            // wall, ramping back to full over WALL_FALLOFF cells.
+            if let Some(d) = wall_proximity(ctx.editor, point) {
+                let w = (d as f64 / WALL_FALLOFF as f64).clamp(0.0, 1.0);
+                target_y = lerp_i32(terrain_y, target_y, w);
+            }
 
             if target_y <= terrain_y {
                 continue;
@@ -70,8 +104,10 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
                 ctx.editor.place_block(&fill, point.add_y(y)).await;
             }
 
-            // Top block becomes the appropriate surface.
-            ctx.editor.place_block(&top, point.add_y(target_y - 1)).await;
+            // Top block becomes the appropriate surface. Forced, because the
+            // fill loop above just placed dirt at `target_y - 1`, and a normal
+            // place_block skips an equal-density block — leaving a dirt top.
+            ctx.editor.place_block_forced(&top, point.add_y(target_y - 1)).await;
             if is_snow {
                 ctx.editor.place_block(&surface, point.add_y(target_y)).await;
             }

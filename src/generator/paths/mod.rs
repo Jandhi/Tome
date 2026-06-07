@@ -3,6 +3,10 @@ mod test;
 mod routing;
 mod path;
 mod building;
+pub mod network;
 
 pub use a_star::a_star;
+pub use building::{build_path, build_paths_merged};
+pub use network::{build_road_network, find_blocks};
 pub use path::{Path, PathPriority, PathType};
+pub use routing::{get_path, get_path_with, route_path, route_path_with, RouteContext, RouteParams};

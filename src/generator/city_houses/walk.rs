@@ -67,8 +67,8 @@ pub async fn walk_and_place(
             continue;
         }
 
+        let plot_bounds = synthetic_plot_bounds(&rect, frontage.outward);
         let footprint = Footprint::from_rect(rect);
-        let plot_bounds = synthetic_plot_bounds(chain_slice, frontage.outward);
         let bctx = BuildingContext::new(culture, size_class, roof_style);
 
         match build_house(ctx, footprint, &bctx, plot_bounds).await {
@@ -87,44 +87,76 @@ pub async fn walk_and_place(
     out
 }
 
-/// Anchor a `front_width × depth` rect with one short edge flush along
-/// `chain_slice`, extending in `-outward` (into the block).
+/// Anchor a `front_width × depth` rect against `chain_slice`, extending `depth`
+/// cells in `-outward` (into the block).
+///
+/// The rect spans the slice's full extent along the street, and its front edge
+/// sits at the slice's **block-interior extreme** on the perpendicular axis —
+/// the cell farthest from the road. For a straight (collinear) slice every cell
+/// shares that coordinate, so this is the classic flush-against-the-road rect.
+/// For a stepped (diagonal) slice it guarantees the footprint stays entirely on
+/// the block side of the staircase — never poking onto the road — at the cost of
+/// a small triangular front verge, giving a stepped terrace along the street.
 pub fn rect_from_frontage(chain_slice: &[Point2D], outward: Cardinal, depth: i32) -> Rect2D {
     assert!(!chain_slice.is_empty(), "chain_slice must be non-empty");
-    let first = chain_slice[0];
-    let last = *chain_slice.last().unwrap();
+    let min_x = chain_slice.iter().map(|p| p.x).min().unwrap();
+    let max_x = chain_slice.iter().map(|p| p.x).max().unwrap();
+    let min_z = chain_slice.iter().map(|p| p.y).min().unwrap();
+    let max_z = chain_slice.iter().map(|p| p.y).max().unwrap();
     match outward {
         Cardinal::North => {
-            // Chain runs along x at fixed z. Inside the block is +z.
-            Rect2D::from_points(first, Point2D::new(last.x, first.y + depth - 1))
+            // Road is -z, inside is +z. Front line = deepest (max z) cell.
+            Rect2D::from_points(Point2D::new(min_x, max_z), Point2D::new(max_x, max_z + depth - 1))
         }
         Cardinal::South => {
-            // Chain runs along x at fixed z. Inside the block is -z.
-            Rect2D::from_points(Point2D::new(first.x, first.y - depth + 1), last)
+            // Road is +z, inside is -z. Front line = min z.
+            Rect2D::from_points(Point2D::new(min_x, min_z - depth + 1), Point2D::new(max_x, min_z))
         }
         Cardinal::East => {
-            // Chain runs along z at fixed x. Inside the block is -x.
-            Rect2D::from_points(Point2D::new(first.x - depth + 1, first.y), last)
+            // Road is +x, inside is -x. Front line = min x.
+            Rect2D::from_points(Point2D::new(min_x - depth + 1, min_z), Point2D::new(min_x, max_z))
         }
         Cardinal::West => {
-            // Chain runs along z at fixed x. Inside the block is +x.
-            Rect2D::from_points(first, Point2D::new(first.x + depth - 1, last.y))
+            // Road is -x, inside is +x. Front line = max x.
+            Rect2D::from_points(Point2D::new(max_x, min_z), Point2D::new(max_x + depth - 1, max_z))
         }
     }
 }
 
-/// A 1×1 sentinel rect at the chain's midpoint, offset one cell outward (onto
-/// the road). Used as the `plot_bounds` argument to `place_doors` so the
-/// road-facing wall has the smallest distance-to-plot-edge and wins door
-/// placement.
+/// Plot bounds that steer `place_doors` to the road-facing wall: a rectangle
+/// **flush with the building's road-facing edge** but extended `MARGIN` cells on
+/// the other three sides. `distance_to_plot_edge` then reads exactly 0 for the
+/// road-facing wall (it sits on a plot edge) and a positive margin for the back
+/// and side walls, so the primary door reliably lands facing the road.
 ///
-/// We use a 1×1 rect (not a strip along the chain) so the building's side
-/// walls don't share an axis with the strip's east/west edges — which would
-/// give those walls distance 0 and steal the door from the road-facing wall.
-pub fn synthetic_plot_bounds(chain_slice: &[Point2D], outward: Cardinal) -> Rect2D {
-    let mid = chain_slice[chain_slice.len() / 2];
-    let sentinel = mid + Point2D::from(outward);
-    Rect2D::from_points(sentinel, sentinel)
+/// A 1×1 sentinel does *not* work: `distance_to_plot_edge` takes the *min* of the
+/// per-axis distances, so the front and back walls — both centred on the
+/// sentinel's axis — tie at 0 and the door can land on the back wall.
+pub fn synthetic_plot_bounds(rect: &Rect2D, outward: Cardinal) -> Rect2D {
+    const MARGIN: i32 = 8;
+    let (min, max) = (rect.min(), rect.max());
+    match outward {
+        // Road on -z: flush along the north (min.y) edge.
+        Cardinal::North => Rect2D::from_points(
+            Point2D::new(min.x - MARGIN, min.y),
+            Point2D::new(max.x + MARGIN, max.y + MARGIN),
+        ),
+        // Road on +z: flush along the south (max.y) edge.
+        Cardinal::South => Rect2D::from_points(
+            Point2D::new(min.x - MARGIN, min.y - MARGIN),
+            Point2D::new(max.x + MARGIN, max.y),
+        ),
+        // Road on +x: flush along the east (max.x) edge.
+        Cardinal::East => Rect2D::from_points(
+            Point2D::new(min.x - MARGIN, min.y - MARGIN),
+            Point2D::new(max.x, max.y + MARGIN),
+        ),
+        // Road on -x: flush along the west (min.x) edge.
+        Cardinal::West => Rect2D::from_points(
+            Point2D::new(min.x, min.y - MARGIN),
+            Point2D::new(max.x + MARGIN, max.y + MARGIN),
+        ),
+    }
 }
 
 fn rect_fits_in_plot(plot: &Plot, rect: &Rect2D) -> bool {
@@ -196,12 +228,28 @@ mod tests {
     }
 
     #[test]
-    fn synthetic_plot_bounds_sits_one_cell_outside_block() {
-        let chain = vec![Point2D::new(5, 10), Point2D::new(6, 10), Point2D::new(7, 10)];
-        let pb = synthetic_plot_bounds(&chain, Cardinal::North);
-        // 1×1 rect at chain midpoint (6, 10) offset 1 cell north to (6, 9).
-        assert_eq!(pb.min(), Point2D::new(6, 9));
-        assert_eq!(pb.max(), Point2D::new(6, 9));
+    fn synthetic_plot_bounds_is_flush_on_road_side_extended_elsewhere() {
+        // House rect (5,10)-(8,18), road to the north (-z).
+        let rect = Rect2D::from_points(Point2D::new(5, 10), Point2D::new(8, 18));
+        let pb = synthetic_plot_bounds(&rect, Cardinal::North);
+        // Flush along the north edge (min.y unchanged), extended 8 on the others.
+        assert_eq!(pb.min(), Point2D::new(5 - 8, 10));
+        assert_eq!(pb.max(), Point2D::new(8 + 8, 18 + 8));
+        // The north (road-facing) wall midpoint sits on a plot edge → distance 0.
+        let front_mid = Point2D::new((5 + 8) / 2, 10);
+        assert_eq!(distance_to_plot_edge_test(front_mid, &pb), 0);
+        // The south (back) wall is a full margin away.
+        let back_mid = Point2D::new((5 + 8) / 2, 18);
+        assert!(distance_to_plot_edge_test(back_mid, &pb) > 0);
+    }
+
+    // Mirror of walls::openings::distance_to_plot_edge (private there).
+    fn distance_to_plot_edge_test(point: Point2D, b: &Rect2D) -> i32 {
+        let (min, max) = (b.min(), b.max());
+        (point.x - min.x).abs()
+            .min((point.x - max.x).abs())
+            .min((point.y - min.y).abs())
+            .min((point.y - max.y).abs())
     }
 
     #[test]

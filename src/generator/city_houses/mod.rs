@@ -22,7 +22,7 @@ use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseOu
 use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::geometry::{Point2D, Rect2D};
 
-pub use frontage::{Frontage, detect_frontages, detect_perimeter_frontages};
+pub use frontage::{Frontage, detect_frontages, detect_perimeter_frontages, frontage_from_roads};
 pub use walk::{SIDE_BUFFER_CELLS, rect_from_frontage, synthetic_plot_bounds, walk_and_place};
 
 /// Default size classes eligible for the frontage pass — small, townhouse-style.

@@ -22,6 +22,6 @@ pub use super_district::SuperDistrict;
 pub use super_district::SuperDistrictID;
 pub use data::{DistrictData, HasDistrictData};
 pub use district_painter::*;
-pub use wall::{build_wall, WallType};
+pub use wall::{build_wall, get_wall_points, WallType};
 pub use gate::build_wall_gate;
 pub use paint_palette::{PaintPaletteId, PaintPalette, PaintPalettesFile};

@@ -47,6 +47,32 @@ pub fn detect_frontages(block: &HashSet<Point2D>, editor: &Editor) -> Vec<Fronta
     out
 }
 
+/// Like [`detect_frontages`] but keyed off an explicit set of `road` cells
+/// rather than `BuildClaim`s. A block cell whose cardinal neighbour is a road
+/// cell (and not part of the block) becomes frontage, facing that road. The
+/// road's width is irrelevant — `road` is the full paved band, so we only ever
+/// touch its near edge. Pass a single tier's road cells to get that tier's
+/// frontage (e.g. arterial-facing vs collector-facing).
+pub fn frontage_from_roads(block: &HashSet<Point2D>, road: &HashSet<Point2D>) -> Vec<Frontage> {
+    let mut by_dir: [Vec<Point2D>; 4] = Default::default();
+    for &cell in block {
+        for (i, dir) in Cardinal::iter().enumerate() {
+            let neighbour = cell + Point2D::from(dir);
+            if block.contains(&neighbour) {
+                continue;
+            }
+            if road.contains(&neighbour) {
+                by_dir[i].push(cell);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (i, outward) in Cardinal::iter().enumerate() {
+        out.extend(split_into_chains(std::mem::take(&mut by_dir[i]), outward));
+    }
+    out
+}
+
 /// Fallback frontage detection for blocks with no `BuildClaim::Path` neighbours
 /// (interior blocks). Treats the block's outer perimeter as the frontage:
 /// every cell that has at least one out-of-block neighbour contributes one
@@ -69,33 +95,53 @@ pub fn detect_perimeter_frontages(block: &HashSet<Point2D>) -> Vec<Frontage> {
     out
 }
 
-fn split_into_chains(mut cells: Vec<Point2D>, outward: Cardinal) -> Vec<Frontage> {
+/// Group the cells of one outward bucket into ordered frontage chains.
+///
+/// Uses **8-connectivity** so a staircased road edge (a diagonal street) stays a
+/// single chain instead of shattering into 1-cell runs. Within a chain the road
+/// is on the `outward` side of every cell, but the cells may step along the
+/// perpendicular axis as the street angles. Each chain is ordered along its
+/// dominant axis (x for N/S frontage, z for E/W) so the placement walker can
+/// stride along the street; the perpendicular step shows up as a stepped terrace
+/// once `rect_from_frontage` anchors each house to its slice's interior extreme.
+fn split_into_chains(cells: Vec<Point2D>, outward: Cardinal) -> Vec<Frontage> {
     if cells.is_empty() {
         return Vec::new();
     }
 
-    // For N/S outward, chain runs along x at fixed z (Point2D::y).
-    // For E/W outward, chain runs along z at fixed x.
-    let perp_axis_north_south = matches!(outward, Cardinal::North | Cardinal::South);
-    let key = |p: &Point2D| if perp_axis_north_south { p.y } else { p.x };
-    let along = |p: &Point2D| if perp_axis_north_south { p.x } else { p.y };
+    // For N/S outward the chain runs along x (key = z); for E/W along z (key = x).
+    let runs_along_x = matches!(outward, Cardinal::North | Cardinal::South);
+    let sort_key = |p: &Point2D| if runs_along_x { (p.x, p.y) } else { (p.y, p.x) };
 
-    cells.sort_by_key(|p| (key(p), along(p)));
+    let mut remaining: HashSet<Point2D> = cells.iter().copied().collect();
+    // Seed components in a deterministic order (HashSet iteration isn't stable).
+    let mut seeds = cells;
+    seeds.sort_by_key(sort_key);
 
     let mut chains = Vec::new();
-    let mut current: Vec<Point2D> = Vec::new();
-    for cell in cells {
-        let start_new = match current.last() {
-            None => true,
-            Some(prev) => key(prev) != key(&cell) || along(&cell) - along(prev) != 1,
-        };
-        if start_new && !current.is_empty() {
-            chains.push(Frontage { cells: std::mem::take(&mut current), outward });
+    for seed in seeds {
+        if !remaining.remove(&seed) {
+            continue;
         }
-        current.push(cell);
-    }
-    if !current.is_empty() {
-        chains.push(Frontage { cells: current, outward });
+        // Flood-fill the 8-connected component containing `seed`.
+        let mut comp = vec![seed];
+        let mut stack = vec![seed];
+        while let Some(p) = stack.pop() {
+            for dx in -1..=1 {
+                for dz in -1..=1 {
+                    if dx == 0 && dz == 0 {
+                        continue;
+                    }
+                    let n = Point2D::new(p.x + dx, p.y + dz);
+                    if remaining.remove(&n) {
+                        comp.push(n);
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+        comp.sort_by_key(sort_key);
+        chains.push(Frontage { cells: comp, outward });
     }
     chains
 }
@@ -127,6 +173,24 @@ mod tests {
         ];
         let chains = split_into_chains(cells, Cardinal::North);
         assert_eq!(chains.len(), 2);
+    }
+
+    #[test]
+    fn split_into_chains_keeps_staircase_as_one_chain() {
+        // A 45° staircase of north-facing cells (road steps up to the NW). The
+        // old collinear logic would shatter this into five 1-cell runs; with
+        // 8-connectivity it must stay one ordered chain.
+        let cells = vec![
+            Point2D::new(0, 5), Point2D::new(1, 5),
+            Point2D::new(2, 6), Point2D::new(3, 6),
+            Point2D::new(4, 7),
+        ];
+        let chains = split_into_chains(cells, Cardinal::North);
+        assert_eq!(chains.len(), 1, "staircase should be a single 8-connected chain");
+        assert_eq!(chains[0].cells.len(), 5);
+        // Ordered along x (the dominant axis).
+        let xs: Vec<i32> = chains[0].cells.iter().map(|p| p.x).collect();
+        assert_eq!(xs, vec![0, 1, 2, 3, 4]);
     }
 
     #[test]

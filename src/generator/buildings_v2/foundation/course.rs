@@ -14,8 +14,15 @@ use crate::noise::RNG;
 
 /// Full foundation pipeline: analyze terrain, fill/cut, place foundation course,
 /// update heightmap. Returns `base_y` so downstream modules know where the building starts.
-pub async fn place_foundation(ctx: &mut BuildCtx<'_>, footprint: &Footprint) -> i32 {
-    let profile = analyze_terrain(footprint, ctx.editor.world());
+///
+/// `base_y_override` forces the floor level (e.g. to match an adjacent road) instead
+/// of deriving it from the terrain percentile; cut/fill then reconciles the ground to it.
+pub async fn place_foundation(
+    ctx: &mut BuildCtx<'_>,
+    footprint: &Footprint,
+    base_y_override: Option<i32>,
+) -> i32 {
+    let profile = analyze_terrain(footprint, ctx.editor.world(), base_y_override);
 
     let columns = classify_columns(&profile);
     execute_columns(ctx.editor, &profile, &columns, ctx.data, ctx.palette, ctx.rng).await;
@@ -48,7 +55,9 @@ pub struct TerrainProfile {
 /// Analyzes terrain under the footprint and chooses a base Y level.
 ///
 /// Footprint points use the same local coordinate system as the World heightmaps.
-pub fn analyze_terrain(footprint: &Footprint, world: &World) -> TerrainProfile {
+/// `base_y_override`, when set, is used verbatim as the floor level (the cut/fill
+/// pass then reconciles the columns to it) instead of the terrain percentile.
+pub fn analyze_terrain(footprint: &Footprint, world: &World, base_y_override: Option<i32>) -> TerrainProfile {
     let points = footprint.filled_points();
 
     let heights: HashMap<Point2D, i32> = points
@@ -63,7 +72,7 @@ pub fn analyze_terrain(footprint: &Footprint, world: &World) -> TerrainProfile {
     let max_height = *heights.values().max().unwrap();
     let slope = max_height - min_height;
 
-    let base_y = choose_base_y(&heights, slope);
+    let base_y = base_y_override.unwrap_or_else(|| choose_base_y(&heights, slope));
 
     TerrainProfile {
         heights,

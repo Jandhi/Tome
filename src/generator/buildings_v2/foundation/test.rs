@@ -62,7 +62,7 @@ async fn build_foundations_in_world() {
 
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
     for (i, footprint) in footprints.iter().enumerate() {
-        let base_y = place_foundation(&mut ctx, footprint).await;
+        let base_y = place_foundation(&mut ctx, footprint, None).await;
         let area = footprint.filled_points().len();
         println!("  Foundation {}: base_y={}, area={}", i, base_y, area);
     }

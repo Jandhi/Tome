@@ -1,9 +1,108 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::{
     geometry::{voronoi_fill_with_recenter, Point2D, CARDINALS_2D},
     noise::RNG,
 };
+
+/// Peel a frontage *ribbon* — the band of block cells within `depth` cardinal
+/// steps of a main road — off a block before its interior is subdivided.
+///
+/// Subdividing a block directly fragments the edge that faces a main road into
+/// short stubs, so the long arterial/collector frontage we actually want goes
+/// unused. Reserving the ribbon first keeps that edge whole: the ribbon faces
+/// the road along its full length and houses placed on it get long continuous
+/// frontage chains (the whole point of the road hierarchy). The leftover
+/// `interior` is what gets subdivided into back lots served by alleys.
+///
+/// Returns `(ribbon_parcels, interior)`. `ribbon_parcels` is the ribbon split
+/// into connected components (each a buildable parcel); `interior` is the block
+/// minus the ribbon. If no block cell touches a `main_road` cell, the ribbon is
+/// empty and the whole block comes back as `interior`.
+///
+/// `depth` is measured in cells: the cells touching the road are depth 1, and
+/// the BFS stops once it has taken `depth` cells inward. Pick it to match the
+/// deepest house the road tier should host so the deepest footprint still fits.
+pub fn reserve_road_ribbon(
+    block: &HashSet<Point2D>,
+    main_roads: &HashSet<Point2D>,
+    depth: i32,
+) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
+    // Multi-source BFS inward from every cell fronting a main road.
+    let mut ribbon: HashSet<Point2D> = HashSet::new();
+    let mut frontier: VecDeque<(Point2D, i32)> = VecDeque::new();
+    for &cell in block {
+        let fronts_road = CARDINALS_2D.iter().any(|&d| {
+            let n = cell + d;
+            !block.contains(&n) && main_roads.contains(&n)
+        });
+        if fronts_road && ribbon.insert(cell) {
+            frontier.push_back((cell, 1));
+        }
+    }
+    while let Some((cell, dist)) = frontier.pop_front() {
+        if dist >= depth {
+            continue;
+        }
+        for d in CARDINALS_2D {
+            let n = cell + d;
+            if block.contains(&n) && ribbon.insert(n) {
+                frontier.push_back((n, dist + 1));
+            }
+        }
+    }
+
+    let interior: HashSet<Point2D> = block.difference(&ribbon).copied().collect();
+    (connected_components(&ribbon), interior)
+}
+
+/// Carve connectors so the interior alley network reaches the main roads through
+/// a reserved frontage [ribbon](reserve_road_ribbon). Without this the alleys
+/// dead-end behind the ribbon, never touching the big roads.
+///
+/// From each alley cell that is the roadward *tip* of a perpendicular run (the
+/// alley continues ≥2 cells away from the road), walk straight through the ribbon
+/// in the road direction; if the walk reaches a `main_roads` cell, the ribbon
+/// cells it crossed become a connector. The ≥2-cell back-check is what keeps a
+/// parallel alley flanking the ribbon from carving its whole side into road.
+///
+/// Returns the union of connector cells (a subset of `ribbon`). Callers convert
+/// these from frontage ribbon to alley.
+pub fn carve_ribbon_connectors(
+    ribbon: &HashSet<Point2D>,
+    alleys: &HashSet<Point2D>,
+    main_roads: &HashSet<Point2D>,
+) -> HashSet<Point2D> {
+    let mut connectors = HashSet::new();
+    for &a in alleys {
+        for dir in CARDINALS_2D {
+            let out = a + dir;
+            if !ribbon.contains(&out) {
+                continue;
+            }
+            let nd = Point2D::new(-dir.x, -dir.y);
+            if !alleys.contains(&(a + nd)) || !alleys.contains(&(a + nd + nd)) {
+                continue;
+            }
+            let mut p = out;
+            let mut seg = Vec::new();
+            let mut reached = false;
+            while ribbon.contains(&p) {
+                seg.push(p);
+                let next = p + dir;
+                if main_roads.contains(&next) {
+                    reached = true;
+                    break;
+                }
+                p = next;
+            }
+            if reached {
+                connectors.extend(seg);
+            }
+        }
+    }
+    connectors
+}
 
 /// Recursively subdivide a block of cells until every sub-block fits within
 /// `max_dim` along both axes. Each cut lays a 1-cell alley on the split line
@@ -187,4 +286,84 @@ fn connected_components(cells: &HashSet<Point2D>) -> Vec<HashSet<Point2D>> {
         comps.push(comp);
     }
     comps
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rect_block(x0: i32, x1: i32, z0: i32, z1: i32) -> HashSet<Point2D> {
+        (x0..=x1).flat_map(|x| (z0..=z1).map(move |z| Point2D::new(x, z))).collect()
+    }
+
+    #[test]
+    fn ribbon_peels_depth_band_along_one_road() {
+        // 10×10 block; a road runs along its north edge (z = 4).
+        let block = rect_block(0, 9, 5, 14);
+        let road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 4)).collect();
+
+        let (parcels, interior) = reserve_road_ribbon(&block, &road, 3);
+
+        // One contiguous ribbon parcel, 3 rows deep (z = 5,6,7) × 10 wide.
+        assert_eq!(parcels.len(), 1);
+        assert_eq!(parcels[0].len(), 30);
+        assert!(parcels[0].iter().all(|p| (5..=7).contains(&p.y)));
+        // Interior is the remaining 7 rows.
+        assert_eq!(interior.len(), 70);
+        assert!(interior.iter().all(|p| (8..=14).contains(&p.y)));
+    }
+
+    #[test]
+    fn ribbon_empty_when_no_road_touches() {
+        let block = rect_block(0, 9, 0, 9);
+        let road: HashSet<Point2D> = HashSet::new();
+
+        let (parcels, interior) = reserve_road_ribbon(&block, &road, 5);
+
+        assert!(parcels.is_empty());
+        assert_eq!(interior, block);
+    }
+
+    #[test]
+    fn connector_punches_perpendicular_alley_to_road() {
+        // Road along z=0. Ribbon is z=1..=3 (3 deep). A perpendicular alley runs
+        // up x=5 at z=4..=7 (in the interior, just past the ribbon).
+        let road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 0)).collect();
+        let ribbon: HashSet<Point2D> = (0..=9)
+            .flat_map(|x| (1..=3).map(move |z| Point2D::new(x, z)))
+            .collect();
+        let alleys: HashSet<Point2D> = (4..=7).map(|z| Point2D::new(5, z)).collect();
+
+        let connectors = carve_ribbon_connectors(&ribbon, &alleys, &road);
+        // Carves x=5, z=1..=3 (the column from the alley tip through the ribbon).
+        assert_eq!(connectors, (1..=3).map(|z| Point2D::new(5, z)).collect());
+    }
+
+    #[test]
+    fn connector_ignores_alley_running_parallel_to_road() {
+        // Road along z=0, ribbon z=1..=3, and a 2-wide alley running parallel to
+        // the road at z=4,5 (no perpendicular approach) — nothing should carve.
+        let road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 0)).collect();
+        let ribbon: HashSet<Point2D> = (0..=9)
+            .flat_map(|x| (1..=3).map(move |z| Point2D::new(x, z)))
+            .collect();
+        let alleys: HashSet<Point2D> = (0..=9)
+            .flat_map(|x| [Point2D::new(x, 4), Point2D::new(x, 5)])
+            .collect();
+
+        let connectors = carve_ribbon_connectors(&ribbon, &alleys, &road);
+        assert!(connectors.is_empty(), "parallel alley must not carve the ribbon flank");
+    }
+
+    #[test]
+    fn ribbon_wraps_a_corner_as_one_component() {
+        // Roads on the north (z=4) and west (x=-1) edges meet at a corner, so
+        // the ribbon is an L — a single connected component.
+        let block = rect_block(0, 9, 5, 14);
+        let mut road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 4)).collect();
+        road.extend((5..=14).map(|z| Point2D::new(-1, z)));
+
+        let (parcels, _interior) = reserve_road_ribbon(&block, &road, 2);
+        assert_eq!(parcels.len(), 1, "L-shaped ribbon should be one component");
+    }
 }

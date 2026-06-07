@@ -19,6 +19,8 @@ use super::door_ramp::{DoorRamp, place_door_ramps, plan_door_ramps_from_world};
 use super::floors::{FloorPlan, clear_attic_stair_headroom, place_floors};
 use super::footprint::{Footprint, SizeClass, find_boundaries};
 use super::foundation::place_foundation;
+use crate::generator::BuildClaim;
+use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
 use super::furnish::furnish_rooms;
 use super::BuildingContext;
@@ -92,8 +94,9 @@ pub async fn build_house(
 
 
     // Foundation: terrain analysis + level + stone course. Needs &mut Editor
-    // to update the world heightmap.
-    let base_y = place_foundation(ctx, &footprint).await;
+    // to update the world heightmap. `base_y_override` pins the floor (e.g. to a
+    // road's height) instead of deriving it from the terrain percentile.
+    let base_y = place_foundation(ctx, &footprint, bctx.base_y_override).await;
 
     // Frame consumes a Footprint; keep the original for later lookups
     // (find_boundaries, filled_points).
@@ -182,6 +185,14 @@ pub async fn build_house(
     // that blueprint/invariant code iterates.
     let cellar_stair = cellar::maybe_build_cellar(ctx, &frame, &footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
     let has_cellar = cellar_stair.is_some();
+
+    // Claim the structural footprint (the actual house cells, no buffer) so a
+    // later building's foundation blend won't raise earth/grass into this house
+    // — `blend_terrain` skips Building-claimed cells.
+    let building_idx = ctx.editor.world().buildings.len();
+    for p in footprint.filled_points() {
+        ctx.editor.world_mut().claim(p, BuildClaim::Building(BuildingID(building_idx)));
+    }
 
     Ok(HouseOutput {
         footprint,

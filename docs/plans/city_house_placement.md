@@ -142,7 +142,7 @@ pub async fn walk_and_place(
 State machine along `frontage.cells`:
 
 ```
-cursor = rng.rand_i32_range(0, stride.start)   // random starting offset
+cursor = rng.rand_i32_range(0, stride.start)   // random starting offset3
 while cursor + min_front_width ≤ chain.len():
     size_class    = roll_size_class(...)
     front_width   = rng.rand in size_class.front_width_range
