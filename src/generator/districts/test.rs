@@ -1047,7 +1047,7 @@ mod tests {
     async fn hierarchical_roads() {
         use crate::generator::data::LoadedData;
         use crate::generator::paths::{build_paths_merged, build_road_network, find_blocks, Path, PathPriority};
-        use crate::generator::terrain::{flatten_urban_area, force_height};
+        use crate::generator::terrain::{flatten_urban_area, force_height, log_trees};
 
         init_logger();
 
@@ -1071,7 +1071,17 @@ mod tests {
             const TARGET_URBAN: usize = 4;
             let mut info: Vec<(crate::generator::districts::SuperDistrictID, Point2D, bool)> =
                 editor.world().super_districts.iter()
-                    .filter(|(_, sd)| sd.data.district_type != DistrictType::OffLimits)
+                    .filter(|(id, sd)| {
+                        if sd.data.district_type == DistrictType::OffLimits {
+                            return false;
+                        }
+                        // Never force a water-heavy district urban — it would build the
+                        // town on a lake. (Matches URBAN_WATER_LIMIT in classification.)
+                        let water = editor.world().super_district_analysis_data
+                            .get(id)
+                            .map_or(0.0, |a| a.water_percentage());
+                        water <= 0.33
+                    })
                     .map(|(id, sd)| {
                         let pts = &sd.data.points_2d;
                         let c = pts.iter().fold(Point2D::ZERO, |a, p| a + *p) / pts.len().max(1) as i32;
@@ -1110,6 +1120,10 @@ mod tests {
 
         // Phase 1 — feathered urban flatten.
         let urban = editor.world().get_urban_points();
+        // Log (clear) the urban area of trees so roads, buildings, and houses
+        // aren't dropped into standing forest.
+        log_trees(&editor, urban.clone()).await;
+        println!("Logged {} urban cells of trees", urban.len());
         flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
 
         let data = LoadedData::load().expect("Failed to load data");

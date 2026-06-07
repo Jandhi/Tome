@@ -344,6 +344,16 @@ pub async fn place_openings(
                             Some(&upper_state),
                             None,
                         ).await;
+
+                        // Clear the exterior of the doorway so terrain, a road
+                        // slab, or a verge lip can't wall the door shut: force air
+                        // in the cell just outside, over the full door height.
+                        // Forced because air is the least-dense block and a normal
+                        // placement would skip an existing solid.
+                        let out = cell + Point2D::from(seg.facing);
+                        for h in 0..opening.height as i32 {
+                            editor.place_block_forced(&"air".into(), Point3D::new(out.x, y + h, out.y)).await;
+                        }
                     }
                 }
                 OpeningKind::Window(style) => {
