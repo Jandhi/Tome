@@ -1728,3 +1728,216 @@ async fn settlement_with_buildings_v2() {
         total_buildings, city_blocks.len(),
     );
 }
+
+/// Debug: dump the ASCII blueprint + stairwell footprints for one building from
+/// the `stair_door_clearance_sweep` generation, selected by env vars
+/// DEBUG_SEED / DEBUG_BLD. Run:
+/// `DEBUG_SEED=21 DEBUG_BLD=5 cargo test stair_door_debug_dump -- --nocapture`
+#[tokio::test]
+async fn stair_door_debug_dump() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+    use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
+
+    init_logger();
+    let Ok(seed) = std::env::var("DEBUG_SEED").unwrap_or_default().parse::<i64>() else { return; };
+    let target: usize = std::env::var("DEBUG_BLD").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let bounds = Rect2D::from_points(Point2D::new(64, 64), Point2D::new(191, 191));
+    let styles = [
+        RoofStyle::Gable(GablePitch::Slab),
+        RoofStyle::Gable(GablePitch::Stairs),
+        RoofStyle::Gable(GablePitch::Double),
+    ];
+    let size_classes = [SizeClass::Cottage, SizeClass::House, SizeClass::Hall, SizeClass::Manor];
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Medieval.palette_id()).expect("Palette not found").clone();
+
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(seed);
+    let mut plot = Plot::fully_usable(bounds);
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &size_classes, 6);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+        let pitch = styles[(seed as usize + i) % styles.len()];
+        let bctx = BuildingContext::new(Culture::Medieval, size_class, pitch);
+        let Ok(house) = build_house(&mut ctx, footprint, &bctx, bounds).await else { continue; };
+        if i != target { continue; }
+        println!("=== seed={seed} bld#{i} {size_class:?} ===");
+        println!("rects: {:?}", house.footprint.rects());
+        for sw in &house.floor_plan.stairwells {
+            println!("stair floor={} kind={:?} dir={:?} positions={:?}", sw.floor, sw.kind, sw.direction, sw.positions);
+        }
+        for (f, a, b, c) in &house.room_plan.interior_doors {
+            println!("interior_door floor={f} rects=({a},{b}) cell=({},{})", c.x, c.y);
+        }
+        let bp = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
+        println!("{}", render_ascii(&bp));
+    }
+}
+
+/// Floor-level solid stair cells: the (x,z) cells where a stair places a block
+/// (step or solid fill / underside) at the floor's base_y, so the cell is NOT
+/// walkable on that floor. These are the cells that, if they sit in front of a
+/// door, visibly cover it. Mirrors the rendering in `place_stair_blocks`.
+fn floor_level_stair_cells(
+    floor_plan: &crate::generator::buildings_v2::floors::FloorPlan,
+    floor: u32,
+) -> std::collections::HashSet<(i32, i32)> {
+    use crate::generator::buildings_v2::floors::StairKind;
+    let mut cells = std::collections::HashSet::new();
+    for sw in floor_plan.stairwells.iter().filter(|s| s.floor == floor) {
+        let p = &sw.positions;
+        match sw.kind {
+            // Straight: positions[1] is the step at base_y; positions[2] gets an
+            // underside block at base_y. positions[0] is a flat (walkable)
+            // landing; positions[3..] clear the floor (walk-under).
+            StairKind::Straight => {
+                for c in p.iter().skip(1).take(2) {
+                    cells.insert((c.x, c.y));
+                }
+            }
+            // Spiral / L: positions[0] step at base_y, positions[1] fills down to
+            // base_y. positions[2..] sit higher with clear floor beneath.
+            StairKind::Spiral | StairKind::LShaped => {
+                for c in p.iter().take(2) {
+                    cells.insert((c.x, c.y));
+                }
+            }
+            // A ladder is a single walkable climb-through cell — it never covers
+            // a door, so it contributes no floor-level stair blocks.
+            StairKind::Ladder => {}
+        }
+    }
+    cells
+}
+
+/// Diagnostic sweep: build many seeds offline and report every door whose
+/// interior approach cell is covered by a floor-level stair block. Catches the
+/// "stair placed in front of a door" bug. Run with:
+/// `cargo test stair_door_clearance_sweep -- --nocapture`
+#[tokio::test]
+async fn stair_door_clearance_sweep() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+    use crate::generator::buildings_v2::walls::{segment_cells, OpeningKind};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let bounds = Rect2D::from_points(Point2D::new(64, 64), Point2D::new(191, 191));
+    let styles = [
+        RoofStyle::Gable(GablePitch::Slab),
+        RoofStyle::Gable(GablePitch::Stairs),
+        RoofStyle::Gable(GablePitch::Double),
+    ];
+    let size_classes = [SizeClass::Cottage, SizeClass::House, SizeClass::Hall, SizeClass::Manor];
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data
+        .palettes
+        .get(&Culture::Medieval.palette_id())
+        .expect("Palette not found")
+        .clone();
+
+    let mut violations: Vec<String> = Vec::new();
+    let mut total = 0usize;
+
+    // Keep the default cheap enough for the normal suite; run a deeper sweep with
+    // `SWEEP_SEEDS=1000 cargo test stair_door_clearance_sweep`.
+    let sweep_seeds: i64 = std::env::var("SWEEP_SEEDS").ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(200);
+    for seed in 0..sweep_seeds {
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(seed);
+        let mut plot = Plot::fully_usable(bounds);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &size_classes, 6);
+
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+            let pitch = styles[(seed as usize + i) % styles.len()];
+            let bctx = BuildingContext::new(Culture::Medieval, size_class, pitch);
+            let house = match build_house(&mut ctx, footprint, &bctx, bounds).await {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+            total += 1;
+
+            for floor in house.frame.floors() {
+                let stair_cells = floor_level_stair_cells(&house.floor_plan, floor);
+                if stair_cells.is_empty() {
+                    continue;
+                }
+
+                // Exterior doors: inward cell is one step opposite the wall facing.
+                for seg in house.wall_segs.segments_on_floor(floor) {
+                    let cells = segment_cells(seg);
+                    let inward: Point2D = (-seg.facing).into();
+                    for o in &seg.openings {
+                        if !matches!(o.kind, OpeningKind::Door(_)) {
+                            continue;
+                        }
+                        for w in 0..o.width as usize {
+                            if let Some(&dc) = cells.get(o.offset as usize + w) {
+                                let c = dc + inward;
+                                if stair_cells.contains(&(c.x, c.y)) {
+                                    violations.push(format!(
+                                        "seed={seed} bld#{i} {size_class:?} floor={floor} EXTERIOR door@({},{}) approach@({},{}) covered",
+                                        dc.x, dc.y, c.x, c.y,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Interior doors: both sides of the wall gap are approach cells.
+                for (_df, _a, _b, cell) in house
+                    .room_plan
+                    .interior_doors
+                    .iter()
+                    .filter(|(f, ..)| *f == floor)
+                {
+                    let neighbors = [
+                        (cell.x + 1, cell.y),
+                        (cell.x - 1, cell.y),
+                        (cell.x, cell.y + 1),
+                        (cell.x, cell.y - 1),
+                    ];
+                    let covered: Vec<_> =
+                        neighbors.iter().filter(|n| stair_cells.contains(n)).collect();
+                    if !covered.is_empty() {
+                        violations.push(format!(
+                            "seed={seed} bld#{i} {size_class:?} floor={floor} INTERIOR door@({},{}) covered sides={covered:?}",
+                            cell.x, cell.y,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Sweep: {} buildings, {} violations", total, violations.len());
+    for v in violations.iter().take(40) {
+        println!("  {v}");
+    }
+    assert!(
+        violations.is_empty(),
+        "{} stair-covers-door violations (see above)",
+        violations.len()
+    );
+}

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
-use crate::minecraft::BlockForm;
+use crate::minecraft::{Block, BlockForm};
 use crate::noise::RNG;
 
 use super::super::frame::Frame;
@@ -195,8 +195,15 @@ pub(super) fn select_stairwells(
         // hole in this floor's slab and its top step is where the player emerges.
         let below = stairwells.last().filter(|prev| prev.floor + 1 == floor);
 
-        let stacked =
-            below.and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells));
+        // A stacked continuation keeps the "one continuous tower" look, but only
+        // accept it if it doesn't bury an interior-door approach lane — otherwise
+        // fall through to a fresh pick (which may choose a ladder).
+        let stacked = below
+            .and_then(|prev| try_stack_on_previous(prev, frame, floor, &door_cells))
+            .filter(|(_, positions, _)| {
+                let lane = boundary_approach_cells(frame, floor);
+                positions.iter().all(|p| !lane.contains(&(p.x, p.y)))
+            });
 
         let chosen = stacked.or_else(|| {
             pick_stair_for_floor(frame, floor, wall_segs, &occupied, &door_cells, below, rng)
@@ -213,7 +220,10 @@ pub(super) fn select_stairwells(
     // Attic stairwell: from top regular floor up through the ceiling.
     if has_attic && frame.max_floors() >= 1 {
         let top_floor = frame.max_floors() - 1;
-        if let Some((kind, positions, direction)) = pick_attic_stair(frame, wall_segs, &occupied, rng) {
+        // The flight that rises onto the top floor — its top step is where the
+        // player emerges, so an attic ladder must be reachable from it.
+        let below = stairwells.last().filter(|prev| prev.floor + 1 == top_floor);
+        if let Some((kind, positions, direction)) = pick_attic_stair(frame, wall_segs, &occupied, below, rng) {
             for pos in &positions {
                 occupied.insert((pos.x, pos.y));
             }
@@ -240,6 +250,50 @@ fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i3
                 if let Some(&dc) = seg_cells.get(o.offset as usize + w) {
                     let c = dc + inward;
                     cells.insert((c.x, c.y));
+                }
+            }
+        }
+    }
+    cells
+}
+
+/// The cells immediately on either side of every interior boundary wall active
+/// on `floor` — the lane a player walks through to use the archway that will be
+/// carved there later (in `build_rooms`). A stair that sits flush along a whole
+/// boundary covers all of these, leaving the archway no clear slot and burying
+/// the door in the stair. Stair selection *prefers* candidates that keep this
+/// lane clear (see `pick_stair_for_floor`), so the archway always has somewhere
+/// open to land.
+fn boundary_approach_cells(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
+    use super::super::footprint::find_boundaries;
+    let mut cells = HashSet::new();
+    // A flight on `floor` emerges onto `floor + 1`; both floors' boundary lanes
+    // matter, just like doorways.
+    let ground = frame.footprint().rects();
+    for f in [floor, floor + 1] {
+        let active = frame.active_rects(f);
+        // Keep the vec length == rect_count so `find_boundaries` indices line up
+        // with `active_rects`; inactive rects get a ground-rect placeholder and
+        // are filtered out by the active check below.
+        let floor_rects: Vec<Rect2D> = (0..frame.rect_count())
+            .map(|i| frame.rect_at(i, f).unwrap_or(ground[i]))
+            .collect();
+        for b in find_boundaries(&floor_rects) {
+            if !active.contains(&b.rect_a) || !active.contains(&b.rect_b) {
+                continue;
+            }
+            // The wall is colinear: constant x means it runs along z (approaches
+            // are east/west), otherwise it runs along x (approaches north/south).
+            let perp_x = b.wall_cells.first().map_or(true, |c0| {
+                b.wall_cells.iter().all(|c| c.x == c0.x)
+            });
+            for c in &b.wall_cells {
+                if perp_x {
+                    cells.insert((c.x + 1, c.y));
+                    cells.insert((c.x - 1, c.y));
+                } else {
+                    cells.insert((c.x, c.y + 1));
+                    cells.insert((c.x, c.y - 1));
                 }
             }
         }
@@ -503,21 +557,128 @@ fn pick_stair_for_floor(
     let ext_ok: Vec<_> = exterior.iter().filter(|c| connected(c)).cloned().collect();
     let int_ok: Vec<_> = interior.iter().filter(|c| connected(c)).cloned().collect();
 
-    let mut candidates = if !ext_ok.is_empty() {
-        ext_ok
-    } else if !int_ok.is_empty() {
-        int_ok
-    } else if !exterior.is_empty() {
-        exterior
-    } else {
-        interior
+    // Steer away from runs that sit flush along an interior boundary wall: such
+    // a run covers that boundary's whole archway lane, leaving the door (carved
+    // later) no clear slot. A stair perpendicular to a wall only clips one lane
+    // cell; one parallel to it covers the lot. So prefer the candidate(s) that
+    // cover the *fewest* lane cells — leaving the rest of each boundary open for
+    // its archway. Soft min, never empties the pool.
+    let boundary_cells = boundary_approach_cells(frame, floor);
+    let lane_cover = |cand: &(StairKind, Vec<Point2D>, Cardinal)| -> usize {
+        cand.1.iter().filter(|p| boundary_cells.contains(&(p.x, p.y))).count()
     };
+    let prefer_clear = |pool: Vec<(StairKind, Vec<Point2D>, Cardinal)>| {
+        match pool.iter().map(|c| lane_cover(c)).min() {
+            Some(min) => pool.into_iter().filter(|c| lane_cover(c) == min).collect(),
+            None => pool,
+        }
+    };
+
+    let mut candidates = if !ext_ok.is_empty() {
+        prefer_clear(ext_ok)
+    } else if !int_ok.is_empty() {
+        prefer_clear(int_ok)
+    } else if !exterior.is_empty() {
+        prefer_clear(exterior)
+    } else {
+        prefer_clear(interior)
+    };
+
+    // If the best surviving stair still covers an interior-door approach lane —
+    // or no stair fits at all — fall back to a 1x1 ladder, which never runs
+    // along a lane. Only then: a clean stair is always preferred.
+    let clips_or_empty = candidates.first().map_or(true, |c| lane_cover(c) > 0);
+    if clips_or_empty {
+        if let Some(ladder) =
+            pick_ladder_for_floor(frame, floor, occupied, door_cells, &boundary_cells, below)
+        {
+            return Some(ladder);
+        }
+    }
     if candidates.is_empty() {
         return None;
     }
 
     let idx = rng.rand_i32_range(0, candidates.len() as i32) as usize;
     Some(candidates.swap_remove(idx))
+}
+
+/// Pick a 1x1 ladder cell connecting `floor` to `floor + 1`, used as a fallback
+/// when no stair keeps the interior-door approach lanes clear. The cell sits one
+/// step in from an exterior wall of the core (so a solid block backs the ladder)
+/// and clears doorways, interior-boundary approach lanes, already-placed stair
+/// footprints, and the flight-below hole. Facing points inward, away from the
+/// backing wall. Returns None if no such cell exists (caller keeps the stair).
+fn pick_ladder_for_floor(
+    frame: &Frame,
+    floor: u32,
+    occupied: &HashSet<(i32, i32)>,
+    door_cells: &HashSet<(i32, i32)>,
+    boundary_cells: &HashSet<(i32, i32)>,
+    below: Option<&Stairwell>,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    let core = frame.rect_at(0, floor)?;
+    // The ladder spans both floors, so the cell must be interior on the floor
+    // above too (jetty grows upward — floor+1 is at least as large).
+    let core_above = frame.rect_at(0, floor + 1)?;
+    find_ladder_cell(frame, floor, &core, &core_above, occupied, door_cells, boundary_cells, below)
+}
+
+/// Shared ladder-cell search. Scans the inner ring of `core` — one step in from
+/// an exterior wall, so a solid block backs the ladder — for a 1x1 cell that is
+/// strictly interior on both `core` and `core_above`, clear of occupied/door/
+/// boundary-lane cells, and reachable from the flight below. Returns the cell
+/// with its inward facing (away from the backing wall), or None.
+fn find_ladder_cell(
+    frame: &Frame,
+    floor: u32,
+    core: &Rect2D,
+    core_above: &Rect2D,
+    occupied: &HashSet<(i32, i32)>,
+    door_cells: &HashSet<(i32, i32)>,
+    boundary_cells: &HashSet<(i32, i32)>,
+    below: Option<&Stairwell>,
+) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
+    let (min, max) = (core.min(), core.max());
+
+    // Scan every cell on the inner ring — one step in from an exterior wall, so a
+    // solid block backs the ladder. Corners alone aren't enough: on a small core
+    // the flight-below footprint and the boundary lane can claim all four, and
+    // we'd wrongly fall back to a door-clipping stair. The ladder faces inward,
+    // away from the wall it hangs on.
+    for cell in core.iter() {
+        // Must be strictly inside both floors' cores (not on an exterior wall),
+        // and against exactly one exterior wall so it has a backing block.
+        let inside = |r: &Rect2D| cell.x > r.min().x && cell.x < r.max().x
+            && cell.y > r.min().y && cell.y < r.max().y;
+        if !inside(core) || !inside(core_above) {
+            continue;
+        }
+        // Facing = away from the backing exterior wall. Inner-ring cells touch a
+        // wall on at least one side; interior cells touch none and are skipped.
+        let dir = if cell.x == min.x + 1 { Cardinal::East }
+            else if cell.x == max.x - 1 { Cardinal::West }
+            else if cell.y == min.y + 1 { Cardinal::South }
+            else if cell.y == max.y - 1 { Cardinal::North }
+            else { continue; };
+
+        let key = (cell.x, cell.y);
+        if occupied.contains(&key)
+            || door_cells.contains(&key)
+            || boundary_cells.contains(&key)
+        {
+            continue;
+        }
+        // Don't get stranded by the flight-below hole (empty blocked set: the
+        // ladder cell itself is walkable).
+        if let Some(b) = below {
+            if !base_reachable_from_below(frame, floor, cell, &HashSet::new(), b) {
+                continue;
+            }
+        }
+        return Some((StairKind::Ladder, vec![cell], dir));
+    }
+    None
 }
 
 /// Attic stairs sit at a gable-end corner and run along an eave wall (perpendicular
@@ -529,6 +690,7 @@ fn pick_attic_stair(
     frame: &Frame,
     wall_segs: &WallSegments,
     occupied: &HashSet<(i32, i32)>,
+    below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
     let run = (frame.wall_height() + 1) as i32;
@@ -559,6 +721,30 @@ fn pick_attic_stair(
 
     if candidates.is_empty() {
         return None;
+    }
+
+    // Prefer runs that cover the fewest interior-boundary archway-lane cells, so
+    // the archway carved there later isn't buried in the stair (see
+    // `boundary_approach_cells`). Soft: keeps the least-covering candidates.
+    let boundary_cells = boundary_approach_cells(frame, top_floor);
+    let lane_cover = |c: &(StairKind, Vec<Point2D>, Cardinal)| -> usize {
+        c.1.iter().filter(|p| boundary_cells.contains(&(p.x, p.y))).count()
+    };
+    if let Some(min) = candidates.iter().map(|c| lane_cover(c)).min() {
+        candidates.retain(|c| lane_cover(c) == min);
+    }
+
+    // If the best surviving eave stair still buries an archway lane, drop to a
+    // 1x1 ladder instead — a ladder never runs along a lane (see
+    // `pick_ladder_for_floor`). The attic shares the top floor's extent, so the
+    // ladder's cell-above is that same rect. Only then: a clean stair wins.
+    if candidates.first().map_or(true, |c| lane_cover(c) > 0) {
+        let door_cells = door_cells_on_floor(wall_segs, top_floor);
+        if let Some(ladder) = find_ladder_cell(
+            frame, top_floor, rect, rect, occupied, &door_cells, &boundary_cells, below,
+        ) {
+            return Some(ladder);
+        }
     }
 
     let idx = rng.rand_i32_range(0, candidates.len() as i32) as usize;
@@ -596,7 +782,25 @@ pub(super) async fn place_stair_blocks(
             StairKind::Straight => place_straight_stair(editor, &mut placer, sw, base_y).await,
             StairKind::Spiral   => place_spiral_stair(editor, &mut placer, sw, base_y).await,
             StairKind::LShaped  => place_l_stair(editor, &mut placer, sw, base_y).await,
+            StairKind::Ladder   => place_ladder(editor, sw, frame).await,
         }
+    }
+}
+
+/// Render a 1x1 ladder column from the floor it starts on up to the floor above.
+/// The slab hole is already carved by `place_floors`; the ladder faces inward
+/// (`sw.direction`), backed by the exterior wall opposite that facing.
+async fn place_ladder(editor: &Editor, sw: &Stairwell, frame: &Frame) {
+    let Some(&cell) = sw.positions.first() else { return; };
+    let base_y = frame.floor_y(sw.floor);
+    let top_y = frame.floor_y(sw.floor + 1);
+    let facing = sw.direction.to_string();
+    for y in base_y..top_y {
+        let mut ladder = Block::from_id("minecraft:ladder".into());
+        ladder.state = Some(HashMap::from([("facing".to_string(), facing.clone())]));
+        editor
+            .place_block_forced(&ladder, Point3D::new(cell.x, y, cell.y))
+            .await;
     }
 }
 
