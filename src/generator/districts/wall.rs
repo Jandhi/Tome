@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use log::info;
-use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, is_straight_point2d, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
+use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 
@@ -386,56 +386,48 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
 
 
 /// Adds height to wall points based on a heightmap, smoothing transitions.
-/// Returns a Vec<Point3D> with smoothed wall heights.
+/// Returns a Vec<Point3D> where `.y` is the wall *top* height at each point.
+///
+/// The base height tracks the terrain but is rate-limited to MAX_STEP per point in
+/// *both* directions, so adjacent wall columns can never differ in top height by
+/// more than MAX_STEP. This is what prevents the tall single-block spikes: a sharp
+/// terrain change is spread over several points instead of jumping in one step. The
+/// only exception is the gap guard, which pulls the base up on a genuine cliff so
+/// the wall always covers the ground — and only by as much as that requires.
 pub fn add_wall_points_height(
     wall_points: &[Point2D],
     editor: &mut Editor,
 ) -> Vec<Point3D> {
+    // Max change in wall-top height between adjacent points, in either direction.
+    const MAX_STEP: i32 = 1;
+    // Minimum wall thickness that must remain above the terrain. If the rate-limited
+    // base drops so far below a rising cliff that less than this would be left, the
+    // base is forced up just enough to keep it.
+    const MIN_CLEARANCE: i32 = 3;
+
     let mut current_height = editor.world().get_height_at(wall_points[0]);
-    let mut target_height = current_height;
-    let wall_height_2_3 = WALL_HEIGHT * 2 / 3;
     let mut height_wall_points = Vec::with_capacity(wall_points.len());
 
-    for (i, point) in wall_points.iter().enumerate() {
-        if i % 5 == 0 {
-            // Wrap around if out of bounds
-            let idx5 = if i + 5 >= wall_points.len() - 1 { 0 } else { i + 5 };
-            target_height = editor.world().get_height_at(wall_points[idx5]);
+    for point in wall_points {
+        let target_height = editor.world().get_height_at(*point);
 
-            
-            if (target_height > current_height + wall_height_2_3)
-                || (target_height < current_height + wall_height_2_3)
-            {
-                let idx10 = if i + 10 >= wall_points.len() - 1 { 0 } else { i + 10 };
-                target_height = editor.world().get_height_at(wall_points[idx10]);
-            }
+        // Step the base toward the terrain, capped to MAX_STEP per point so a steep
+        // change is smeared across several points rather than producing a spike.
+        let delta = (target_height - current_height).clamp(-MAX_STEP, MAX_STEP);
+        current_height += delta;
+
+        // Gap guard: on a cliff the rate-limited base can fall far enough below the
+        // terrain that the wall would no longer cover it — pull it up just enough to
+        // keep MIN_CLEARANCE of wall above the ground.
+        if current_height + WALL_HEIGHT < target_height + MIN_CLEARANCE {
+            current_height = target_height + MIN_CLEARANCE - WALL_HEIGHT;
         }
 
-        // Check for drastic height difference
-        let point_height = editor.world().get_height_at(*point);
-        if current_height < point_height - wall_height_2_3 {
-            current_height = point_height;
-            target_height = current_height;
-        } else if current_height != target_height && (1 < i && i < wall_points.len() - 2) {
-            if is_straight_point2d(
-                wall_points[i - 2],
-                wall_points[i + 2],
-                4,
-            ) {
-                if current_height < target_height {
-                    current_height += 1;
-                } else if current_height > target_height {
-                    current_height -= 1;
-                }
-            }
-        }
-
-        let new_point = Point3D {
+        height_wall_points.push(Point3D {
             x: point.x,
             y: current_height + WALL_HEIGHT,
             z: point.y,
-        };
-        height_wall_points.push(new_point);
+        });
     }
 
     height_wall_points
@@ -632,6 +624,122 @@ pub async fn build_wall_towers(
             }
         } else {
                 tower_possible -= 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+
+    // Mirror the private consts inside `add_wall_points_height`.
+    const MAX_STEP: i32 = 1;
+    const MIN_CLEARANCE: i32 = 3;
+
+    /// Run `add_wall_points_height` over a 1-D terrain profile laid along x at
+    /// z=1, returning the wall-top height at each point.
+    fn tops_for(terrain: &[i32]) -> Vec<i32> {
+        let n = terrain.len() as i32;
+        let build_area =
+            Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(n + 2, 320, 4));
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+
+        let mut heights = HashSet::new();
+        let mut wall_points = Vec::new();
+        for (i, &h) in terrain.iter().enumerate() {
+            wall_points.push(Point2D::new(i as i32, 1));
+            heights.insert(Point3D::new(i as i32, h, 1));
+        }
+        editor.world_mut().set_heights(&heights);
+
+        add_wall_points_height(&wall_points, &mut editor)
+            .iter()
+            .map(|p| p.y)
+            .collect()
+    }
+
+    /// Assert the three correctness invariants over any terrain profile:
+    /// (1) the wall always covers the ground, (2) the top never drops by more
+    /// than MAX_STEP (no downward spikes), and (3) any upward jump bigger than
+    /// MAX_STEP is forced by the gap guard — it lands exactly at the minimum
+    /// clearance, never gratuitously.
+    fn assert_invariants(terrain: &[i32]) {
+        let tops = tops_for(terrain);
+        assert_eq!(tops.len(), terrain.len());
+        for i in 0..terrain.len() {
+            assert!(
+                tops[i] >= terrain[i] + MIN_CLEARANCE,
+                "point {i}: top {} does not cover terrain {} + clearance {MIN_CLEARANCE} (profile {terrain:?})",
+                tops[i], terrain[i],
+            );
+            if i > 0 {
+                assert!(
+                    tops[i] >= tops[i - 1] - MAX_STEP,
+                    "point {i}: downward spike {} -> {} (profile {terrain:?})",
+                    tops[i - 1], tops[i],
+                );
+                if tops[i] > tops[i - 1] + MAX_STEP {
+                    assert_eq!(
+                        tops[i], terrain[i] + MIN_CLEARANCE,
+                        "point {i}: upward spike not pinned to gap guard (profile {terrain:?})",
+                        );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn flat_terrain_is_uniform() {
+        let tops = tops_for(&[64; 10]);
+        assert!(tops.iter().all(|&t| t == 64 + WALL_HEIGHT));
+    }
+
+    #[test]
+    fn smooth_profiles_hold_invariants() {
+        assert_invariants(&[64; 8]);
+        assert_invariants(&[60, 61, 62, 63, 64, 65, 66, 67]); // gentle rise
+        assert_invariants(&[70, 69, 68, 67, 66, 65, 64, 63]); // gentle fall
+        assert_invariants(&[64, 65, 66, 65, 64, 65, 66, 65]); // rolling
+    }
+
+    #[test]
+    fn cliffs_hold_invariants() {
+        assert_invariants(&[64, 64, 64, 90, 90, 90]); // up-cliff (+26)
+        assert_invariants(&[90, 90, 90, 64, 64, 64]); // down-cliff (-26)
+        assert_invariants(&[64, 90, 64, 90, 64, 90]); // alternating spikes
+        assert_invariants(&[64, 64, 100, 64, 64]); // single tall spike
+    }
+
+    #[test]
+    fn up_cliff_does_not_overshoot() {
+        // A sharp rise is rate-limited until the gap guard must intervene; once
+        // it does, the top hugs terrain + clearance rather than overshooting.
+        let terrain = [64, 64, 64, 64, 90, 90, 90, 90];
+        let tops = tops_for(&terrain);
+        for (i, &t) in tops.iter().enumerate() {
+            assert!(t <= terrain[i].max(64) + WALL_HEIGHT,
+                "point {i}: top {t} overshoots above wall height over terrain {}", terrain[i]);
+        }
+    }
+
+    #[test]
+    fn down_cliff_stays_tall_then_recovers() {
+        // The base lags a steep drop by one block per point, so the wall is tall
+        // over the low ground and steps back down toward the terrain gradually.
+        // Recovery is 1 block/point, so the flat run must be longer than the drop
+        // (here a drop of 6 over 8 flat points) for the wall to fully settle.
+        let terrain = [70, 70, 64, 64, 64, 64, 64, 64, 64, 64];
+        let tops = tops_for(&terrain);
+        // Right after the drop the wall is much taller than its resting height.
+        assert!(tops[2] > 64 + WALL_HEIGHT, "wall should stay tall right after the drop");
+        // Given enough flat run it settles back to the resting height.
+        assert_eq!(*tops.last().unwrap(), 64 + WALL_HEIGHT);
+        // And it only ever steps down by MAX_STEP at a time.
+        for i in 1..tops.len() {
+            assert!(tops[i] >= tops[i - 1] - MAX_STEP);
         }
     }
 }
