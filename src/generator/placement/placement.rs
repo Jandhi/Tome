@@ -22,6 +22,12 @@ pub const BLEND_RADIUS: i32 = 4;
 pub const MAX_BLEND_DELTA: i32 = 4;
 pub const YARD_RADIUS: i32 = 2;
 pub const ROAD_SEARCH_RADIUS: i32 = 8;
+/// When seeding urban industrial candidates, prefer interior cells within this
+/// Chebyshev distance of a built road (`BuildClaim::Path`). A candidate seeded
+/// here fronts a street *by construction*, rather than merely being nudged
+/// toward one by `road_bonus`. Falls back to the full interior when no road is
+/// near (roads not built yet, or a district with none routed through it).
+pub const ROAD_SEED_RADIUS: i32 = 6;
 /// Minimum distance (in cells) a placed building's footprint must keep from any
 /// `BuildClaim::Wall` cell. Guarantees a visible gap between buildings and the city wall.
 pub const WALL_BUFFER_RADIUS: i32 = 1;
@@ -208,11 +214,22 @@ pub async fn place_urban_building(
         return Ok(());
     }
 
-    let centres: Vec<Point2D> = rng
-        .choose_many(&interior, NUM_CANDIDATES)
+    // Seed candidates from road-adjacent cells *and* the general interior. The
+    // road-adjacent ones win when viable (their `road_bonus` discount dominates a
+    // flattened site's score), so industrial buildings front the streets; the
+    // interior ones are a fallback so placement never starves when every
+    // road-adjacent footprint collides with the pavement, wall buffer, or edge.
+    let road_adjacent = road_adjacent_centres(&interior, editor, ROAD_SEED_RADIUS);
+    let mut centres: Vec<Point2D> = rng
+        .choose_many(&road_adjacent, NUM_CANDIDATES)
         .into_iter()
         .copied()
         .collect();
+    centres.extend(
+        rng.choose_many(&interior, NUM_CANDIDATES)
+            .into_iter()
+            .copied(),
+    );
 
     let best = select_best_candidate(&centres, &urban_points, structure, editor, rng);
     let Some((candidate, score, rect)) = best else {
@@ -330,6 +347,31 @@ fn select_best_candidate(
         }
     }
     best
+}
+
+/// Interior cells lying within `radius` (Chebyshev) of a claimed road
+/// (`BuildClaim::Path`) — the prime sites for urban industrial buildings, which
+/// want to front a street. Returns empty when no road is near (e.g. roads not
+/// built yet), so callers can fall back to the full interior.
+fn road_adjacent_centres(interior: &[Point2D], editor: &Editor, radius: i32) -> Vec<Point2D> {
+    let world = editor.world();
+    interior
+        .iter()
+        .filter(|&&p| {
+            for dx in -radius..=radius {
+                for dz in -radius..=radius {
+                    let q = Point2D::new(p.x + dx, p.y + dz);
+                    if world.is_in_bounds_2d(q)
+                        && matches!(world.get_claim(q), Some(BuildClaim::Path(_)))
+                    {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+        .copied()
+        .collect()
 }
 
 /// Returns the `Cardinal` direction from `centre` toward the nearest road cell

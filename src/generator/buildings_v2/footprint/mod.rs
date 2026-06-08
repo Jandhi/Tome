@@ -39,6 +39,34 @@ impl Plot {
             && z < self.usable[0].len()
             && self.usable[x][z]
     }
+
+    /// True only if every cell of `rect` lies inside the plot and is still usable.
+    pub fn is_rect_usable(&self, rect: &Rect2D) -> bool {
+        rect.iter().all(|p| self.is_usable(p))
+    }
+
+    /// Mark `rect` — expanded by `buffer` cells on every side — as unusable, so
+    /// later placements can't overlap or crowd it. Cells outside the plot bounds
+    /// are ignored.
+    pub fn mark_rect_used(&mut self, rect: &Rect2D, buffer: i32) {
+        if self.usable.is_empty() {
+            return;
+        }
+        let min = self.bounds.min();
+        for x in (rect.min().x - buffer)..=(rect.max().x + buffer) {
+            for z in (rect.min().y - buffer)..=(rect.max().y + buffer) {
+                let lx = x - min.x;
+                let lz = z - min.y;
+                if lx < 0 || lz < 0 {
+                    continue;
+                }
+                let (lx, lz) = (lx as usize, lz as usize);
+                if lx < self.usable.len() && lz < self.usable[0].len() {
+                    self.usable[lx][lz] = false;
+                }
+            }
+        }
+    }
 }
 
 /// Determines the building's 2D shape and position within a plot.
@@ -55,6 +83,14 @@ pub struct Footprint {
 impl Footprint {
     pub fn new(vertices: Vec<Point2D>, rects: Vec<Rect2D>) -> Self {
         Self { vertices, rects }
+    }
+
+    /// Construct a footprint from a single rectangle, skipping the
+    /// `generate_layouts → select_layout → merge_layout` pipeline. Used by
+    /// frontage placement where the caller has already chosen exact dimensions.
+    pub fn from_rect(rect: Rect2D) -> Self {
+        let vertices = merge::outline_from_rects(&[rect]);
+        Self { vertices, rects: vec![rect] }
     }
 
     pub fn bounds(&self) -> Rect2D {
@@ -150,6 +186,28 @@ impl SizeClass {
     }
     pub fn max_bedrooms(&self) -> u32 {
         match self { Self::Cottage => 1, Self::House => 2, Self::Hall => 3, Self::Manor => 4 }
+    }
+
+    /// Width (along the street) of a rectangle when this size class is placed
+    /// on a road frontage. Used by `generator::city_houses` to pick stride sizes.
+    pub fn front_width_range(&self) -> std::ops::RangeInclusive<i32> {
+        match self {
+            Self::Cottage => 5..=6,
+            Self::House   => 6..=8,
+            Self::Hall    => 8..=10,
+            Self::Manor   => 9..=12,
+        }
+    }
+
+    /// Depth (into the block, away from the road) of a frontage rectangle.
+    /// Biased depth ≥ width to give townhouse silhouettes.
+    pub fn depth_range(&self) -> std::ops::RangeInclusive<i32> {
+        match self {
+            Self::Cottage => 5..=7,
+            Self::House   => 7..=10,
+            Self::Hall    => 9..=12,
+            Self::Manor   => 11..=15,
+        }
     }
 }
 

@@ -4,17 +4,17 @@ use crate::noise::RNG;
 use crate::generator::buildings_v2::RoomType;
 use crate::generator::buildings_v2::rooms::{CellState, ConstraintMap, Room, RoomRole};
 use std::collections::HashSet;
-use super::{
+use super::{CellConstraint, FacingMode, BlockLayer};
+use super::placement::{
     interior_rect, wall_slots, flood_fill, check_connectivity,
-    placement_keeps_connectivity, shuffle, is_ceiling_item, needs_wall,
-    try_place_freestanding,
-    resolve_offset, try_place_at_wall_slot, try_place_ceiling,
-    resolve_candidates, try_place_item, WallSlot,
-    CellConstraint, FacingMode, BlockLayer,
-    PlacementResult, DEFAULT_FILL_THRESHOLD,
+    placement_keeps_connectivity, is_ceiling_item, needs_wall,
+    try_place_freestanding, try_place_at_wall_slot, try_place_ceiling,
+    WallSlot, PlacementResult,
 };
+use super::block::resolve_offset;
+use super::room::{resolve_candidates, try_place_item, shuffle, DEFAULT_FILL_THRESHOLD};
 use super::data::{Furniture, FurnitureBlock, FurnitureConstraint, FurnitureData, FixedSlot, LootItem, LootTable, PaletteSwap, RoomFurnitureList};
-use super::roll_loot_snbt;
+use super::loot::roll_loot_snbt;
 
 fn make_room(rect: Rect2D, constraints: ConstraintMap) -> Room {
     Room {
@@ -935,7 +935,7 @@ struct DiagramRoom {
     room_rect: Rect2D,
     interior: Rect2D,
     cm: ConstraintMap,
-    slots: Vec<super::WallSlot>,
+    slots: Vec<super::placement::WallSlot>,
     open_cells: Vec<(i32, i32)>,
     wall_doors: Vec<(i32, i32)>,
     /// Tracks placed furniture labels per cell for rendering.
@@ -1176,7 +1176,7 @@ async fn place_room_sizes_in_world() {
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::{Block, Color};
-    use super::furnish_room;
+    use super::room::furnish_room;
 
     const ROOM_KEY: &str = "bedroom";
     const SEED: i64 = 42;
@@ -1338,7 +1338,7 @@ async fn place_feature_rooms_in_world() {
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::minecraft::{Block, Color};
-    use super::furnish_room;
+    use super::room::furnish_room;
 
     enum LiveFeature {
         Door { wall_cell: (i32, i32), interior: (i32, i32) },

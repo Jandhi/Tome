@@ -246,7 +246,7 @@ fn upper_floors_get_more_windows() {
 
 #[test]
 fn stud_indices_distribution() {
-    use super::stud_indices;
+    use super::timber::stud_indices;
     // Below the showable length (7): never any studs.
     assert!(stud_indices(2, 3).is_empty());
     assert!(stud_indices(3, 3).is_empty());
@@ -274,7 +274,7 @@ fn stud_indices_distribution() {
 
 #[test]
 fn stud_indices_invariants() {
-    use super::stud_indices;
+    use super::timber::stud_indices;
     for length in 0u32..32 {
         for spacing in [2u32, 3, 4, 5] {
             let studs = stud_indices(length, spacing);

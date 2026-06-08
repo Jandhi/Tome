@@ -96,6 +96,9 @@ pub struct BuildingContext {
     /// shape/floor/plot eligibility gates and silently no-ops when ineligible,
     /// so it's safe to set this true unconditionally for testing.
     pub jetty: bool,
+    /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
+    /// of deriving it from the terrain under the footprint. `None` = derive.
+    pub base_y_override: Option<i32>,
 }
 
 impl BuildingContext {
@@ -110,6 +113,7 @@ impl BuildingContext {
             window_fill: culture.window_fill(),
             timber_pattern: None,
             jetty: false,
+            base_y_override: None,
         }
     }
 }

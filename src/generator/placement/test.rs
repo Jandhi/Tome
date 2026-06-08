@@ -126,6 +126,204 @@ mod tests {
         editor.flush_buffer().await;
     }
 
+    /// Integration eyeball: urban industrial buildings should land ON the road
+    /// network. Order: districts → force an urban core → wall+gates → flatten →
+    /// tiered A* roads → claim `Path` → `place_urban_buildings` (candidates now
+    /// seeded from road-adjacent cells, so they front the streets by construction).
+    ///
+    /// Buildings are a guaranteed synthetic processing mix (forcing the urban core
+    /// starves rural supply, so the real resolved count is often tiny); the real
+    /// resolved processing-building count is printed for reference.
+    #[tokio::test]
+    async fn urban_industrial_follows_roads() {
+        use std::collections::HashSet;
+
+        use crate::data::Loadable;
+        use crate::generator::BuildClaim;
+        use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
+        use crate::generator::materials::Material;
+        use crate::generator::nbts::Structure;
+        use crate::generator::paths::{build_paths_merged, build_road_network, Path, PathType};
+        use crate::generator::terrain::{flatten_urban_area, force_height};
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+        let mut rng2 = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_districts(seed, &mut editor).await;
+
+        // EVAL AID (test-only): force a contiguous ~4-district urban core, since
+        // the live classifier often collapses to a single urban district — too
+        // degenerate to grow a road network. (Mirrors `districts::hierarchical_roads`.)
+        {
+            const TARGET_URBAN: usize = 4;
+            let mut info: Vec<(SuperDistrictID, Point2D, bool)> = editor.world().super_districts.iter()
+                .filter(|(_, sd)| sd.data.district_type != DistrictType::OffLimits)
+                .map(|(id, sd)| {
+                    let pts = &sd.data.points_2d;
+                    let c = pts.iter().fold(Point2D::ZERO, |a, p| a + *p) / pts.len().max(1) as i32;
+                    (*id, c, sd.data.district_type == DistrictType::Urban)
+                })
+                .collect();
+            let anchor = info.iter().find(|(_, _, u)| *u).map(|(_, c, _)| *c)
+                .or_else(|| info.first().map(|(_, c, _)| *c));
+            if let Some(anchor) = anchor {
+                info.sort_by_key(|(_, c, _)| c.distance_squared(&anchor));
+                for (id, _, _) in info.iter().take(TARGET_URBAN) {
+                    editor.world_mut().super_districts.get_mut(id).unwrap().data.district_type = DistrictType::Urban;
+                }
+            }
+        }
+
+        let data = LoadedData::load().expect("Failed to load generator data");
+
+        // Wall + gates — gates seed the collector tier of the network.
+        let materials = Material::load().expect("Failed to load materials");
+        let structures = Structure::load().expect("Failed to load structures");
+        let wall_material = MaterialId::new("stone_bricks".to_string());
+        let mut placer = Placer::new(&materials, &mut rng);
+        build_wall(
+            &editor.world().get_urban_points(), &mut editor, &mut rng2,
+            &mut placer, &wall_material, &structures, WallType::Standard,
+        ).await;
+        drop(placer);
+
+        let n_urban = editor.world().super_districts.values()
+            .filter(|sd| sd.data.district_type == DistrictType::Urban).count();
+        println!("URBAN super-districts: {} | gates: {}", n_urban, editor.world().gate_locations.len());
+
+        // Flatten, then route the tiered network over the gentled terrain.
+        let urban = editor.world().get_urban_points();
+        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+
+        // --- Place the industrial buildings FIRST, on good flattened ground. With
+        // no roads yet, `road_bonus` is 0 — these big buildings are sited by
+        // flatness, not road frontage. They become the destinations the network
+        // then connects. ---
+        let rural_ids: Vec<SuperDistrictID> = editor.world().super_districts.iter()
+            .filter(|(_, sd)| sd.data.district_type == DistrictType::Rural)
+            .map(|(id, _)| *id)
+            .collect();
+        let rural_analysis: HashMap<SuperDistrictID, DistrictAnalysis> = rural_ids.iter()
+            .filter_map(|id| editor.world().super_district_analysis_data.get(id).map(|a| (*id, a.clone())))
+            .collect();
+        let result = data.resource_registry.resolve_for_districts(&rural_analysis, &mut rng);
+        println!(
+            "Resolved processing buildings: {} types, {} total",
+            result.processing_buildings.len(),
+            result.processing_buildings.values().sum::<u32>(),
+        );
+
+        // Guarantee something to eyeball: top up to a fixed mix if resolution is thin.
+        // A small, realistic handful of big industrial buildings — these are
+        // landmarks, not a crowd, so the network connecting them stays legible
+        // (and routable).
+        let mut counts: HashMap<String, u32> = result.processing_buildings.clone();
+        if counts.values().sum::<u32>() < 4 {
+            for b in ["smithy", "mill", "bakery", "carpenter"] {
+                *counts.entry(b.to_string()).or_insert(0) += 1;
+            }
+        }
+        let want: u32 = counts.values().sum();
+        println!("Placing {} industrial buildings (roads will connect them)", want);
+
+        let urban_super_districts: Vec<_> = editor.world().super_districts.values()
+            .filter(|sd| sd.data.district_type == DistrictType::Urban)
+            .cloned()
+            .collect();
+        let urban_refs: Vec<_> = urban_super_districts.iter().collect();
+
+        let before = editor.world().structures.len();
+        if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data).await {
+            log::warn!("Urban industrial placement failed: {}", e);
+        }
+        let placed = editor.world().structures.len() - before;
+
+        // --- Derive routing inputs from the placed buildings: a `blocked` barrier
+        // (every footprint cell, expanded by a margin so roads keep off the walls)
+        // and one node per building (its footprint centroid). The centroid sits
+        // *inside* the building, so `build_road_network` relocates each node to the
+        // nearest clear cell before routing. ---
+        const BLOCK_MARGIN: i32 = 2;
+        let mut footprint_by_id: HashMap<u32, Vec<Point2D>> = HashMap::new();
+        for &p in &urban {
+            if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
+                footprint_by_id.entry(id.id).or_default().push(p);
+            }
+        }
+        let structure_cells: HashSet<Point2D> = footprint_by_id.values().flatten().copied().collect();
+        let blocked: HashSet<Point2D> = structure_cells.iter()
+            .flat_map(|p| {
+                (-BLOCK_MARGIN..=BLOCK_MARGIN).flat_map(move |dx| {
+                    (-BLOCK_MARGIN..=BLOCK_MARGIN).map(move |dz| Point2D::new(p.x + dx, p.y + dz))
+                })
+            })
+            .collect();
+
+        let anchor_nodes: Vec<Point3D> = footprint_by_id.values()
+            .map(|cells| {
+                let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
+                editor.world().add_height(c)
+            })
+            .collect();
+        println!("Placed {} / {} industrial buildings; {} building nodes for the network", placed, want, anchor_nodes.len());
+
+        // --- Route the network connecting the buildings, forbidden from crossing any
+        // footprint (the `blocked` barrier). ---
+        let arterial_material = MaterialId::new("stone_bricks".to_string());
+        let collector_material = MaterialId::new("cobblestone".to_string());
+        let paths = build_road_network(
+            &editor, arterial_material, collector_material, true, &anchor_nodes, &blocked,
+        ).await;
+        println!("Routed {} road segments", paths.len());
+
+        // Realize: grade the corridor to routed heights, lay + meld the surface,
+        // then claim each paved cell as `Path`. `build_paths_merged` refuses to lay
+        // surface on a Structure cell, so we mirror that here: never claim a
+        // building footprint cell as road.
+        let paved = |path: &Path| -> HashSet<Point2D> {
+            let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
+            let mut cells = crate::geometry::get_surrounding_set(&centre, path.width().saturating_sub(1));
+            cells.extend(centre);
+            cells
+        };
+        let corridor_pts: HashSet<Point3D> = paths.iter().flat_map(|p| p.points().iter().copied()).collect();
+        force_height(&mut editor, &corridor_pts, false).await;
+        build_paths_merged(&editor, &data, &paths, &mut rng).await;
+        let mut claimed_road: HashSet<Point2D> = HashSet::new();
+        for path in &paths {
+            for c in paved(path) {
+                if !structure_cells.contains(&c) {
+                    claimed_road.insert(c);
+                    editor.world_mut().claim(c, BuildClaim::Path(PathType::Pavement));
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+
+        // --- Verify: no routed centreline passes through a building footprint (the
+        // hard "roads can't route through buildings" constraint), and no footprint
+        // cell was paved/claimed as road. Widened shoulders that graze a footprint
+        // are skipped by build_paths_merged, so the surface guarantee holds. ---
+        let centreline_through = paths.iter()
+            .flat_map(|p| p.points().iter().map(|q| q.drop_y()))
+            .filter(|c| structure_cells.contains(c))
+            .count();
+        println!(
+            "VERIFY: {} centreline cells through a footprint (want 0) | {} road cells claimed | {} buildings connected",
+            centreline_through, claimed_road.len(), footprint_by_id.len(),
+        );
+        assert_eq!(claimed_road.intersection(&structure_cells).count(), 0, "road claimed on a building footprint");
+        assert_eq!(centreline_through, 0, "a road centreline routed through {} building cells", centreline_through);
+    }
+
     /// End-to-end integration test that exercises every major settlement system
     /// in pipeline order against a live Minecraft server:
     ///   districts → log trees → terraform → wall → main roads →

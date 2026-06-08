@@ -14,10 +14,17 @@ impl BlockID {
         &self.0
     }
 
+    /// The id with any `minecraft:` namespace stripped. Block ids arrive from the
+    /// server (and the synthetic world) fully qualified — e.g. `minecraft:water` —
+    /// so exact-match checks below must compare against the un-namespaced name or
+    /// they silently never match.
+    fn name(&self) -> &str {
+        self.0.strip_prefix("minecraft:").unwrap_or(&self.0)
+    }
+
     pub fn is_water(&self) -> bool {
-        let id_string = &self.0;
         matches!(
-            id_string.as_str(),
+            self.name(),
             "water" | "flowing_water" | "bubble_column" | "kelp" | "kelp_plant"
         )
     }
@@ -33,8 +40,7 @@ impl BlockID {
     }
 
     pub fn is_air(&self) -> bool {
-        let id_string = &self.0;
-        matches!(id_string.as_str(), "air" | "cave_air" | "void_air")
+        matches!(self.name(), "air" | "cave_air" | "void_air")
     }
 }
 
