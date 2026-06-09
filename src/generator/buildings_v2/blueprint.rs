@@ -380,6 +380,7 @@ pub fn render_svg(blueprint: &Blueprint) -> String {
                 StairKind::Straight => "#aaa",
                 StairKind::Spiral => "#999",
                 StairKind::LShaped => "#bbb",
+                StairKind::Ladder => "#8b5a2b",
             };
             for pos in &stair.positions {
                 let sx = (pos.x - global_min_x) as f32 * CELL_SIZE + 1.0;
@@ -588,6 +589,11 @@ pub fn render_ascii(blueprint: &Blueprint) -> String {
         // Stairs: mark every cell, with the first showing an arrow toward the ascent
         for stair in &floor.stairs {
             if stair.positions.is_empty() { continue; }
+            // A ladder is a single climb-through cell — mark it 'H'.
+            if stair.kind == StairKind::Ladder {
+                put(&mut grid, stair.positions[0].x, stair.positions[0].y, 'H');
+                continue;
+            }
             let arrow = if stair.positions.len() >= 2 {
                 stair_arrow(stair.positions[0], stair.positions[1])
             } else { '/' };
