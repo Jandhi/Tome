@@ -49,6 +49,12 @@ fn find_entry_rect(rects: &[Rect2D], wall_segs: &WallSegments) -> Option<usize> 
 /// Find an archway position that doesn't conflict with stairwells.
 /// Tries the center first. If blocked, picks the wall corner (index 0 or last)
 /// that is furthest from any stair cell, then searches inward from that end.
+///
+/// Only the two cells *perpendicular* to the wall (one in each adjacent room)
+/// are checked — those are what a player steps through to use the door. A stair
+/// running *alongside* the wall doesn't block the doorway, so cells parallel to
+/// the wall are ignored; this leaves far more slots usable and avoids burying a
+/// door in a stair just because the stair sits beside the gap.
 fn find_archway_pos(
     interior_cells: &[&Point2D],
     stair_cells: &HashSet<(i32, i32)>,
@@ -59,21 +65,31 @@ fn find_archway_pos(
     }
     let center = len / 2;
 
-    let is_blocked = |idx: usize| -> bool {
-        let cell = interior_cells[idx];
-        for (dx, dz) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
-            if stair_cells.contains(&(cell.x + dx, cell.y + dz)) {
-                return true;
-            }
-        }
-        false
+    // Perpendicular approach offsets, derived from the wall's run. The wall is
+    // colinear; if x is constant it runs along z (approaches are east/west),
+    // otherwise it runs along x (approaches are north/south). A single-cell wall
+    // gives no orientation, so check all four neighbours to stay safe.
+    let perp: &[(i32, i32)] = if len < 2 {
+        &[(1, 0), (-1, 0), (0, 1), (0, -1)]
+    } else if interior_cells[0].x == interior_cells[len - 1].x {
+        &[(1, 0), (-1, 0)]
+    } else {
+        &[(0, 1), (0, -1)]
     };
 
-    if !is_blocked(center) {
+    // How many of a slot's approach cells a stair sits on (0 = fully clear).
+    let blocked_sides = |idx: usize| -> usize {
+        let cell = interior_cells[idx];
+        perp.iter()
+            .filter(|(dx, dz)| stair_cells.contains(&(cell.x + dx, cell.y + dz)))
+            .count()
+    };
+
+    if blocked_sides(center) == 0 {
         return center;
     }
 
-    // Find which corner is further from stair cells and search from that end.
+    // Distance from a slot to the nearest stair cell (larger = further away).
     let min_stair_dist = |idx: usize| -> i32 {
         let cell = interior_cells[idx];
         stair_cells.iter()
@@ -85,20 +101,27 @@ fn find_archway_pos(
     let start_dist = min_stair_dist(0);
     let end_dist = min_stair_dist(len - 1);
 
-    // Search from the corner furthest from stairs toward the other end
-    let iter: Box<dyn Iterator<Item = usize>> = if end_dist >= start_dist {
-        Box::new((0..len).rev())
+    // Search from the corner furthest from stairs toward the other end.
+    let order: Vec<usize> = if end_dist >= start_dist {
+        (0..len).rev().collect()
     } else {
-        Box::new(0..len)
+        (0..len).collect()
     };
 
-    for idx in iter {
-        if !is_blocked(idx) {
+    for &idx in &order {
+        if blocked_sides(idx) == 0 {
             return idx;
         }
     }
 
-    center
+    // No fully clear slot exists: fall back to the least-blocked one (one open
+    // side beats none), tie-broken by greatest distance from any stair — so the
+    // door ends up beside a stair at worst, never buried in it.
+    order
+        .iter()
+        .copied()
+        .min_by_key(|&idx| (blocked_sides(idx), -min_stair_dist(idx)))
+        .unwrap_or(center)
 }
 
 /// Generate rooms and place interior walls between adjacent rects.

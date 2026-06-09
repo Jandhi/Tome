@@ -12,6 +12,12 @@ pub enum StairKind {
     Straight,
     Spiral,
     LShaped,
+    /// A 1x1 vertical ladder. Fallback used only when no stair candidate keeps
+    /// the interior-door approach lanes clear (or none fits at all): a ladder
+    /// occupies a single cell, so it can never run along an approach lane the
+    /// way a flush stair does. Its single `positions` cell is walkable
+    /// (climb-through) on both the floor it starts on and the floor above.
+    Ladder,
 }
 
 /// A stairwell connecting one floor to the floor above.
@@ -105,7 +111,9 @@ impl Stairwell {
     /// extra cell — the one adjacent to positions[0] in the direction opposite
     /// the ascent (i.e. opposite positions[1]).
     pub fn bottom_approach(&self) -> Option<Point2D> {
-        if self.kind == StairKind::Straight {
+        // Straight stairs board from their flat landing; a ladder is climbed in
+        // place. Neither needs a reserved approach cell.
+        if matches!(self.kind, StairKind::Straight | StairKind::Ladder) {
             return None;
         }
         let p0 = *self.positions.first()?;

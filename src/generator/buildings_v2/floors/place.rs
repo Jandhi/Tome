@@ -178,6 +178,22 @@ pub async fn clear_attic_stair_headroom(
         }
         let base_y = frame.floor_y(sw.floor);
 
+        // A ladder is a single climb-through column: clear from just above the
+        // floor up through the attic floor (+2 headroom to emerge), so the roof
+        // doesn't seal the shaft. The ladder blocks themselves are placed later.
+        if sw.kind == StairKind::Ladder {
+            if let Some(pos) = sw.positions.first() {
+                let attic_y = frame.floor_y(sw.floor + 1);
+                for clear_y in (base_y + 1)..=(attic_y + 2) {
+                    editor.place_block_forced(
+                        &"air".into(),
+                        Point3D::new(pos.x, clear_y, pos.y),
+                    ).await;
+                }
+            }
+            continue;
+        }
+
         for (i, pos) in sw.positions.iter().enumerate() {
             let step_offset = match sw.kind {
                 StairKind::Straight => {
