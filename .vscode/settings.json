@@ -1,0 +1,4 @@
+{
+    "rust-analyzer.cargo.features": "default",
+    "rust-analyzer.files.exclude": ["target", "data", "docs"]
+}

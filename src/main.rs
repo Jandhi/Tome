@@ -105,9 +105,9 @@ async fn run_generation_once() {
 
 #[tokio::main]
 async fn main() {
-    println!("Running placement_in_districts test");
     dotenv::dotenv().ok();
     init_logger();
+    log::info!("Running placement_in_districts test");
 
     let use_visualizer = std::env::args().any(|arg| arg == "--visualize");
 
@@ -116,20 +116,20 @@ async fn main() {
         let server = visualizer::VisualizerServer::new();
         server.start().await;
         server.update_phase(visualizer::GenerationPhase::Idle);
-        println!("Visualizer running at http://localhost:3000");
-        println!("Click 'Generate' in the browser to start generation.");
+        log::info!("Visualizer running at http://localhost:3000");
+        log::info!("Click 'Generate' in the browser to start generation.");
 
         loop {
             server.wait_for_generate().await;
-            println!("Generation requested, starting...");
+            log::info!("Generation requested, starting...");
             run_generation(&server).await;
-            println!("Generation complete. Waiting for next request...");
+            log::info!("Generation complete. Waiting for next request...");
         }
     }
 
     #[cfg(not(feature = "visualizer"))]
     if use_visualizer {
-        eprintln!("Warning: --visualize flag requires the 'visualizer' feature. Rebuild with: cargo build --features visualizer");
+        log::warn!("--visualize flag requires the 'visualizer' feature. Rebuild with: cargo build --features visualizer");
     }
 
     if !use_visualizer {

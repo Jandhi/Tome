@@ -6,13 +6,15 @@ use super::{
     SuperDistrict,
     SuperDistrictID,
     district::DistrictType,
-    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_SIZE, URBAN_RELATIVE_TO_PRIME},
+    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_RELATIVE_TO_PRIME,
+        URBAN_SIZE_MIN, URBAN_SIZE_MAX, URBAN_GROWTH_CUTOFF, URBAN_GROWTH_CUTOFF_HIGH,
+        URBAN_OPTION_SCORE_MAX, RURAL_OPTION_SCORE_MAX},
     merge::{get_candidate_score, district_similarity_score},
     data::HasDistrictData
 };
 
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use log::info;
 
 pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>){
@@ -37,10 +39,10 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
     info!("Options for prime urban district: {:?}", options);
 
     let Some(prime_urban_district) = select_prime_urban_district(options, district_analysis_data) else {
-        println!("No prime urban candidate found"); //will mean no other districts are classified beyond this point
+        log::warn!("No prime urban candidate found"); //will mean no other districts are classified beyond this point
         return;
     };
-    println!("Prime urban district selected: {:?}", prime_urban_district);
+    info!("Prime urban district selected: {:?}", prime_urban_district);
 
     if let Some(district) = districts.get_mut(&prime_urban_district) {
         district.data.district_type = DistrictType::Urban;
@@ -78,10 +80,10 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
             continue
         }
         let score = superdistrict_score(superdistrict, districts);
-        if score <= 0.5 {
+        if score <= URBAN_OPTION_SCORE_MAX {
             info!("Superdistrict {:?} classified as Urban option with score {}", id, score);
             options.push(*id);
-        } else if score > 0.5 && score <= 1.5 {
+        } else if score <= RURAL_OPTION_SCORE_MAX {
             superdistrict.data.district_type = DistrictType::Rural;
             info!("Superdistrict {:?} classified as Rural with score {}", id, score);
         } else {
@@ -91,12 +93,38 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
     }
 
     info!("Options for prime urban district: {:?}", options);
-    let Some(prime_urban_district) = select_prime_urban_superdistrict(options, district_analysis_data) else {
-        println!("No prime urban candidate found");
+
+    // Primes ordered best-first. Try each in turn: if a prime cannot grow a city of at least
+    // URBAN_SIZE_MIN from qualifying neighbours, fall back to the next-best prime.
+    let primes = rank_prime_urban_superdistricts(options, district_analysis_data);
+
+    let mut city: Option<Vec<SuperDistrictID>> = None;
+    for prime in primes.iter() {
+        if let Some(grown) = try_grow_city(*prime, superdistricts, district_analysis_data) {
+            info!("Prime {:?} grew a city of size {}", prime, grown.len());
+            city = Some(grown);
+            break;
+        }
+        info!("Prime {:?} could not reach minimum city size, trying next-best prime", prime);
+    }
+
+    // Final fallback: no prime could reach the minimum, so commit the best prime alone
+    // (whatever it could anchor) rather than producing no city at all.
+    let city = city.or_else(|| {
+        primes.first().map(|p| {
+            info!("No prime reached URBAN_SIZE_MIN; committing best prime {:?} alone", p);
+            vec![*p]
+        })
+    });
+
+    let Some(city) = city else {
+        log::warn!("No prime urban candidate found");
         return;
     };
-    superdistricts.get_mut(&prime_urban_district).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
-    classify_urban_districts(prime_urban_district, superdistricts, districts, district_analysis_data);
+
+    for id in city {
+        superdistricts.get_mut(&id).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
+    }
 
     // classify remaining superdistricts as rural if they are unknown
     for district in superdistricts.values_mut() {
@@ -108,40 +136,67 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
 
 }
 
-fn classify_urban_districts(prime_urban_district: SuperDistrictID, superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, _districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
-    let mut urban_districts: Vec<SuperDistrictID> = vec![prime_urban_district];
-    let mut urban_count : u32 = 1;
-    while urban_count < URBAN_SIZE {
-        let mut options: Vec<SuperDistrictID> = Vec::new();
-        //let district_ids = superdistricts.keys().map(|id| id.clone()).collect::<Vec<SuperDistrictID>>();
-        for id in urban_districts.clone().into_iter() {
-            let neighbours = superdistricts.get(&id).expect("SuperDistrict not found").data().district_adjacency.keys()
-                .filter(|&&neighbour_id| superdistricts.get(&neighbour_id).expect("SuperDistrict not found").data().district_type == DistrictType::Unknown)
+/// Attempt to grow a city anchored at `prime` without mutating any classification.
+///
+/// Greedily adds the best adjacent unclassified superdistrict (by `get_candidate_score`)
+/// as long as it clears the relevant cutoff: the normal cutoff while below URBAN_SIZE_MIN,
+/// a higher cutoff to keep growing up to URBAN_SIZE_MAX. Returns the chosen set only if it
+/// reaches URBAN_SIZE_MIN, otherwise `None` so the caller can fall back to another prime.
+fn try_grow_city(
+    prime: SuperDistrictID,
+    superdistricts: &HashMap<SuperDistrictID, SuperDistrict>,
+    district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>,
+) -> Option<Vec<SuperDistrictID>> {
+    let mut urban: Vec<SuperDistrictID> = vec![prime];
+    let mut urban_set: HashSet<SuperDistrictID> = HashSet::from([prime]);
+
+    while (urban.len() as u32) < URBAN_SIZE_MAX {
+        // Gather candidate neighbours of the current (tentative) urban set that are still unclassified.
+        let mut candidates: Vec<SuperDistrictID> = Vec::new();
+        for id in urban.iter() {
+            let neighbours = superdistricts.get(id).expect("SuperDistrict not found").data().district_adjacency.keys()
+                .filter(|&&neighbour_id| {
+                    !urban_set.contains(&neighbour_id)
+                        && superdistricts.get(&neighbour_id).expect("SuperDistrict not found").data().district_type == DistrictType::Unknown
+                })
                 .cloned()
                 .collect::<Vec<SuperDistrictID>>();
-            options.extend(neighbours);
+            candidates.extend(neighbours);
         }
-        info!("Options for urban district classification: {:?}", options);
-        let best_candidate = options.iter()
+
+        let best = candidates.iter()
             .map(|&id| {
-                let score = get_candidate_score(&superdistricts, district_analysis_data, prime_urban_district, id, true);
+                let score = get_candidate_score(superdistricts, district_analysis_data, prime, id, true);
                 info!("Candidate {:?} has score {}", id, score);
                 (id, score)
             })
-            .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
-            .map(|(other, _score)| {
-                info!("Best candidate is {:?}", other);
-                other
-            });
-        
-        if best_candidate.is_none() {
-            info!("No more candidates found, stopping urban district classification.");
+            .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"));
+
+        let Some((candidate, score)) = best else {
+            info!("No more candidates reachable from prime {:?}, stopping growth", prime);
             break;
+        };
+
+        // Below the minimum we use the normal cutoff; beyond it a higher bar is required to keep growing.
+        let cutoff = if (urban.len() as u32) < URBAN_SIZE_MIN {
+            URBAN_GROWTH_CUTOFF
         } else {
-            superdistricts.get_mut(&best_candidate.expect("No best candidate found")).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
+            URBAN_GROWTH_CUTOFF_HIGH
+        };
+
+        if score < cutoff {
+            info!("Best candidate {:?} (score {}) below cutoff {}, stopping growth", candidate, score, cutoff);
+            break;
         }
-        urban_count += 1;
-        urban_districts.push(best_candidate.expect("No best candidate found"));
+
+        urban.push(candidate);
+        urban_set.insert(candidate);
+    }
+
+    if (urban.len() as u32) >= URBAN_SIZE_MIN {
+        Some(urban)
+    } else {
+        None
     }
 }
 
@@ -159,18 +214,18 @@ fn select_prime_urban_district(options: Vec<DistrictID>, district_analysis_data:
         })
 }
 
-fn select_prime_urban_superdistrict(options: Vec<SuperDistrictID>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) -> Option<SuperDistrictID> {
-    options.iter()
+/// Rank urban candidates best-first (lower `urban_district_score` is better) so the caller
+/// can fall back from the prime to the next-best candidate when growth fails.
+fn rank_prime_urban_superdistricts(options: Vec<SuperDistrictID>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) -> Vec<SuperDistrictID> {
+    let mut scored: Vec<(SuperDistrictID, f32)> = options.iter()
         .map(|&id| {
             let analysis_data = district_analysis_data.get(&id).expect("District analysis data not found");
-            let score = urban_district_score(analysis_data);
-            (id, score)
+            (id, urban_district_score(analysis_data))
         })
-        .min_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
-        .map(|(other, _score)| {
-            println!("Best candidate is {:?}", other);
-            other
-        })
+        .collect();
+    scored.sort_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"));
+    info!("Prime urban candidates ranked best-first: {:?}", scored);
+    scored.into_iter().map(|(id, _)| id).collect()
 }
 
 fn urban_district_score(analysis_data: &DistrictAnalysis) -> f32 {

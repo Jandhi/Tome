@@ -50,7 +50,7 @@ impl World {
             origin: point_to_chunk_coordinates(build_area.origin),
             size: point_to_chunk_coordinates(build_area.max()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
         };
-        println!("Chunk rect: {:?}", chunk_rect);
+        info!("Chunk rect: {:?}", chunk_rect);
         info!("Loading chunks...");
         let chunks = provider
             .get_chunks(
@@ -286,16 +286,16 @@ impl World {
 
     pub fn get_block(&self, mut point: Point3D) -> Option<Block> {
         point = point + self.build_area.origin;
-        info!("Getting block at point: {:?}", point);
+        //info!("Getting block at point: {:?}", point); uncomment if needed, but generates way to many lines of logs
 
         let chunk_coordinates = point_to_chunk_coordinates(point);
-        info!("Chunk coordinates: {:?}", chunk_coordinates);
+        //info!("Chunk coordinates: {:?}", chunk_coordinates);
 
         let chunk = self.chunks.get(&chunk_coordinates.drop_y())?;
-        //println!("Found chunk: {:?}", chunk);
+        //info!("Found chunk: {:?}", chunk);
 
         let section = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y)?;
-        //println!("Found section: {:?}", section);
+        //info!("Found section: {:?}", section);
 
         let block_states = section.block_states.as_ref()?;
 

@@ -98,7 +98,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
 
         let woods = superdistrict_data.biome_count().keys().into_iter()
             .map(|biome| {
-                println!("Processing biome: {:?}", biome);
+                log::info!("Processing biome: {:?}", biome);
                 BiomeWoodtype::from_biome(biome.clone())
                     .map(|wood_type| 
                         data.borrow().palettes.get(&wood_type.get_wood_palette_id())

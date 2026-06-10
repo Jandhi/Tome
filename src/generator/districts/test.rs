@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasDistrictData, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
@@ -18,6 +18,15 @@ mod tests {
             data: None,
             state: None,
         }
+    }
+
+    /// A standing oak sign whose front first line is `text`.
+    fn sign_block(text: &str) -> Block {
+        let data = format!(
+            "{{front_text:{{messages:['\"{}\"','\"\"','\"\"','\"\"']}}}}",
+            text
+        );
+        Block::new("oak_sign".into(), None, Some(data))
     }
 
     fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
@@ -206,6 +215,36 @@ mod tests {
                 }
 
             }
+        }
+
+        // Log each super-district's final type/size and snapshot its centre while we hold
+        // the borrow; drop the borrow before placing the signs.
+        let sign_info: Vec<(usize, district::DistrictType, Point2D, usize)> = editor.world()
+            .super_districts.values()
+            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.average().drop_y(), sd.data.points_2d.len()))
+            .collect();
+
+        let pole: Block = "oak_fence".into();
+        for (id, district_type, centre, size) in sign_info {
+            if centre.x < 0 || centre.y < 0 || centre.x >= build_area.size.x || centre.y >= build_area.size.z {
+                log::info!("Super-district {} final type={:?} size={} cells, centre={:?} out of bounds — no sign", id, district_type, size, centre);
+                continue;
+            }
+
+            // height_map holds absolute world Y; the editor places at coords local to the build area.
+            let surface_y = height_map[centre.x as usize][centre.y as usize];
+            let (world_x, world_z) = (centre.x + build_area.origin.x, centre.y + build_area.origin.z);
+            log::info!(
+                "Super-district {} final type={:?} size={} cells — sign at world ({}, {}, {})  /tp @s {} {} {}",
+                id, district_type, size, world_x, surface_y + 4, world_z, world_x, surface_y + 5, world_z
+            );
+
+            // A 3-tall pole so the marker pokes above terrain, with the numbered sign on top.
+            let h = surface_y - build_area.origin.y;
+            for dy in 1..=3 {
+                editor.place_block(&pole, Point3D::new(centre.x, h + dy, centre.y)).await;
+            }
+            editor.place_block(&sign_block(&id.to_string()), Point3D::new(centre.x, h + 4, centre.y)).await;
         }
 
         editor.flush_buffer().await;
