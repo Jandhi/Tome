@@ -65,7 +65,9 @@ impl log::Log for TeeLogger {
 /// Idempotent — only the first call per process installs the logger; later calls are no-ops.
 ///
 /// The level defaults to `Info` (capturing info/warn/error) and can be overridden via the
-/// `RUST_LOG` env var, e.g. `RUST_LOG=debug` or `RUST_LOG=trace`.
+/// `RUST_LOG` env var, e.g. `RUST_LOG=debug` or `RUST_LOG=trace`. Only a bare level
+/// (`off`/`error`/`warn`/`info`/`debug`/`trace`) is honoured — unlike `env_logger`, the
+/// per-module syntax (`RUST_LOG=tome=debug`) is not parsed and silently falls back to `Info`.
 ///
 /// A file is always written (including under `cargo test`). Note that a full `cargo test` run
 /// shares one global logger across parallel tests, so the file will interleave their output;
