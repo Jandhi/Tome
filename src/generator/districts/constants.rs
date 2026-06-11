@@ -2,7 +2,9 @@ pub const CHUNK_SIZE: i32 = 16;
 pub const SPAWN_DISTRICTS_RETRIES: i32 = 10;
 pub const SPAWN_DISTRICTS_MIN_DISTANCE : i32 = 5;
 pub const NUM_RECENTER : i32 = 2;
-pub const TARGET_DISTRICT_AMOUNT : u32 = 16; 
+pub const TARGET_DISTRICT_AMOUNT : u32 = 16; // Desired number of interior districts; sets the target average size S = interior_blocks / TARGET_DISTRICT_AMOUNT
+pub const DISTRICT_SIZE_LOWER_FACTOR : f32 = 0.5; // Interior districts must be at least this fraction of the target average (band floor L = 0.5*S)
+pub const DISTRICT_SIZE_UPPER_FACTOR : f32 = 1.5; // Interior merges may not push a district above this fraction of the target average (band ceiling U = 1.5*S)
 pub const OFF_LIMITS_ROUGHNESS : f32 = 6.0;
 pub const OFF_LIMITS_GRADIENT : f32 = 1.0;
 pub const URBAN_WATER_LIMIT: f32 = 0.33; // Maximum water percentage for urban districts

@@ -74,21 +74,25 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
 
     for (id, superdistrict) in superdistricts.iter_mut() {
 
+        // Size of this superdistrict: blocks = surface cells it covers, districts = constituent districts merged into it.
+        let blocks = superdistrict.data.points_2d.len();
+        let n_districts = superdistrict.districts.len();
+
         if superdistrict.data.is_border() {
             superdistrict.data.district_type = DistrictType::OffLimits;
-            info!("Superdistrict {:?} is off-limits due to being border", id);
+            info!("Superdistrict {:?} is off-limits due to being border ({} blocks, {} districts)", id, blocks, n_districts);
             continue
         }
         let score = superdistrict_score(superdistrict, districts);
         if score <= URBAN_OPTION_SCORE_MAX {
-            info!("Superdistrict {:?} classified as Urban option with score {}", id, score);
+            info!("Superdistrict {:?} classified as Urban option with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
             options.push(*id);
         } else if score <= RURAL_OPTION_SCORE_MAX {
             superdistrict.data.district_type = DistrictType::Rural;
-            info!("Superdistrict {:?} classified as Rural with score {}", id, score);
+            info!("Superdistrict {:?} classified as Rural with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
         } else {
             superdistrict.data.district_type = DistrictType::OffLimits;
-            info!("Superdistrict {:?} classified as Off-Limits with score {}", id, score);
+            info!("Superdistrict {:?} classified as Off-Limits with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
         }
     }
 
@@ -122,9 +126,23 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
         return;
     };
 
-    for id in city {
-        superdistricts.get_mut(&id).expect("SuperDistrict not found").data.district_type = DistrictType::Urban;
+    // Tally the committed city's total footprint for visibility into how large the urban core ended up.
+    let mut city_blocks = 0usize;
+    let mut city_districts = 0usize;
+    for id in &city {
+        let sd = superdistricts.get_mut(id).expect("SuperDistrict not found");
+        sd.data.district_type = DistrictType::Urban;
+        city_blocks += sd.data.points_2d.len();
+        city_districts += sd.districts.len();
+        info!(
+            "Urban superdistrict {:?} committed to city ({} blocks, {} districts)",
+            id, sd.data.points_2d.len(), sd.districts.len()
+        );
     }
+    info!(
+        "City committed: {} superdistricts, {} districts, {} blocks total",
+        city.len(), city_districts, city_blocks
+    );
 
     // classify remaining superdistricts as rural if they are unknown
     for district in superdistricts.values_mut() {
@@ -166,8 +184,11 @@ fn try_grow_city(
 
         let best = candidates.iter()
             .map(|&id| {
-                let score = get_candidate_score(superdistricts, district_analysis_data, prime, id, true);
-                info!("Candidate {:?} has score {}", id, score);
+                // Adjacency is measured against the whole current urban set (not just the prime), so
+                // candidates nestled into the city are preferred over lone tendrils — keeps the city compact.
+                let adjacency_ratio = set_adjacency_ratio(superdistricts, &urban_set, id);
+                let score = get_candidate_score(district_analysis_data, prime, id, Some(adjacency_ratio));
+                info!("Candidate {:?} has score {} (set-adjacency {:.3})", id, score, adjacency_ratio);
                 (id, score)
             })
             .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"));
@@ -198,6 +219,26 @@ fn try_grow_city(
     } else {
         None
     }
+}
+
+/// Fraction of `candidate`'s perimeter that touches the current urban set — the compactness signal for
+/// city growth. High when the candidate is enveloped by the city (concave infill), low for a district
+/// hanging off a thin edge, so growth fills in around the city instead of trailing off into whispy
+/// tendrils. Measured candidate-centric so it stays in `[0,1]` regardless of how large the city is.
+fn set_adjacency_ratio(
+    superdistricts: &HashMap<SuperDistrictID, SuperDistrict>,
+    urban_set: &HashSet<SuperDistrictID>,
+    candidate: SuperDistrictID,
+) -> f32 {
+    let sd = superdistricts.get(&candidate).expect("SuperDistrict not found");
+    let perimeter = sd.adjacencies_count();
+    if perimeter == 0 {
+        return 0.0;
+    }
+    let shared: u32 = urban_set.iter()
+        .filter_map(|member| sd.district_adjacency().get(member))
+        .sum();
+    shared as f32 / perimeter as f32
 }
 
 fn select_prime_urban_district(options: Vec<DistrictID>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>) -> Option<DistrictID> {

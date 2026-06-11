@@ -247,6 +247,37 @@ mod tests {
             editor.place_block(&sign_block(&id.to_string()), Point3D::new(centre.x, h + 4, centre.y)).await;
         }
 
+        // Verify the size band: every Urban/Rural (interior) district should be within ±50% of the
+        // interior average block count. Off-limits districts are exempt. See
+        // docs/plans/district_size_balancing.md.
+        let interior_sizes: Vec<(usize, district::DistrictType, usize)> = editor.world()
+            .super_districts.values()
+            .filter(|sd| matches!(sd.data.district_type, district::DistrictType::Urban | district::DistrictType::Rural))
+            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.points_2d.len()))
+            .collect();
+
+        if !interior_sizes.is_empty() {
+            let total: usize = interior_sizes.iter().map(|(_, _, s)| *s).sum();
+            let avg = total as f32 / interior_sizes.len() as f32;
+            let (lo, hi) = (avg * 0.5, avg * 1.5);
+            let mut out_of_band = 0usize;
+            for (id, district_type, size) in &interior_sizes {
+                let ratio = *size as f32 / avg;
+                let in_band = (*size as f32) >= lo && (*size as f32) <= hi;
+                if !in_band { out_of_band += 1; }
+                log::info!(
+                    "Band check: super-district {} type={:?} size={} avg={:.0} ratio={:.2} in_band={}",
+                    id, district_type, size, avg, ratio, in_band
+                );
+            }
+            let min = interior_sizes.iter().map(|(_, _, s)| *s).min().unwrap();
+            let max = interior_sizes.iter().map(|(_, _, s)| *s).max().unwrap();
+            log::info!(
+                "Band summary: {} interior districts, avg={:.0}, min={}, max={}, max/min={:.2}, band [{:.0}, {:.0}], {} out of band",
+                interior_sizes.len(), avg, min, max, max as f32 / min.max(1) as f32, lo, hi, out_of_band
+            );
+        }
+
         editor.flush_buffer().await;
     }
 
