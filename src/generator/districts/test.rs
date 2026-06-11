@@ -325,9 +325,7 @@ mod tests {
         use crate::generator::buildings_v2::roof::RoofStyle;
         use crate::generator::buildings_v2::roof::gable::GablePitch;
         use crate::generator::buildings_v2::footprint::SizeClass;
-        use crate::generator::city_houses::{
-            fill_interior, place_block_frontage, plot_from_block,
-        };
+        use crate::generator::city_houses::plot_from_block;
         use crate::generator::data::LoadedData;
         use crate::generator::materials::PaletteId;
         use crate::generator::paths::PathType;
@@ -428,12 +426,10 @@ mod tests {
         // here with the per-house roll.
         use crate::generator::buildings_v2::{BuildingContext, build_house};
         use crate::generator::city_houses::{
-            INTERIOR_BUFFER_CELLS, SIDE_BUFFER_CELLS, detect_frontages,
+            SIDE_BUFFER_CELLS, detect_frontages,
             detect_perimeter_frontages, rect_from_frontage, synthetic_plot_bounds,
         };
-        use crate::generator::buildings_v2::footprint::{
-            Footprint, generate_footprint,
-        };
+        use crate::generator::buildings_v2::footprint::Footprint;
         use crate::geometry::Point2D as P2;
 
         fn roll_palette(

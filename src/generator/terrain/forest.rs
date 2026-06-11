@@ -1,5 +1,4 @@
 use std::{collections::HashMap};
-use anyhow::Ok;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{data::Loadable, generator::terrain::Tree};

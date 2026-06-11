@@ -441,7 +441,7 @@ mod minecraft_tests {
 
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.unwrap();
-        let mut editor = world.get_editor();
+        let editor = world.get_editor();
 
         let world_rect = editor.world().world_rect_2d();
         let center = world_rect.midpoint();

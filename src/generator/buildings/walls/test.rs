@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
 
-    use std::env;
+    
 
-    use log::info;
+    
 
-    use crate::{editor::World, generator::{buildings::{BuildingData, Grid, build_stairs, floor::build_floor, roofs::build_roof, shape::BuildingShape, stairs::StairPlacement, walls::wall::build_walls}, data::LoadedData, materials::PaletteId, style::Style}, geometry::{Cardinal, Point3D}, http_mod::GDMCHTTPProvider, minecraft::BlockID, noise::RNG, util::{build_compass, init_logger}};
+    use crate::{editor::World, generator::{buildings::{BuildingData, Grid, shape::BuildingShape, walls::wall::build_walls}, data::LoadedData, materials::PaletteId, style::Style}, geometry::Point3D, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
     #[tokio::test]

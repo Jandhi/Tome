@@ -330,7 +330,7 @@ mod tests {
         use crate::generator::materials::Material;
         use crate::generator::nbts::Structure;
         use crate::generator::paths::{
-            build_paths_merged, build_road_network, find_blocks, Path, PathPriority, PathType,
+            build_paths_merged, build_road_network, find_blocks, Path, PathPriority,
         };
         use crate::generator::terrain::{flatten_urban_area, force_height};
 
@@ -430,7 +430,7 @@ mod tests {
             sd_ids.len()
         );
 
-        let mut counts: HashMap<String, u32> = result.processing_buildings.clone();
+        let counts: HashMap<String, u32> = result.processing_buildings.clone();
         let want: u32 = counts.values().sum();
         println!("Placing {} industrial buildings (roads will connect them)", want);
 

@@ -50,7 +50,7 @@ mod tests {
         init_logger();
 
         let world = World::new(&GDMCHTTPProvider::new()).await.expect("Failed to create world");
-        let mut editor = world.get_editor();
+        let editor = world.get_editor();
 
         let mut editor2 = World::new(&GDMCHTTPProvider::new()).await.expect("Failed to create world").get_editor();
         editor2.set_buffer_size(1);
