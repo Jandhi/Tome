@@ -8,7 +8,7 @@ pub trait AdjacencyAnalyzeable<TID> {
     fn add_edge(&mut self, point : Point3D);
 }
 
-// We do a sweep of the world in the x+ and z+ directions, checking for district adjacency
+// We do a sweep of the world in the x+ and z+ directions, checking for parcel adjacency
 pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyzeable>, height_map : &Vec<Vec<i32>>, map : &Vec<Vec<Option<TID>>>, world_rect : &Rect2D, ignore_edge_addition : bool) 
     where 
         TID: Copy + std::hash::Hash + Eq,
@@ -35,9 +35,9 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
                 continue;
             }
 
-            let neighbour_district_id = map[neighbour_point.x as usize][neighbour_point.y as usize].expect("This should be here");
+            let neighbour_parcel_id = map[neighbour_point.x as usize][neighbour_point.y as usize].expect("This should be here");
 
-            if neighbour_district_id == id {
+            if neighbour_parcel_id == id {
                 continue;
             }
 
@@ -52,8 +52,8 @@ pub fn analyze_adjacency<TID, TAnalyzeable>(objects : &mut HashMap<TID, TAnalyze
             }
 
             // Add ajacency to both regions
-            objects.get_mut(&id).expect("Could not find region with id").increment_adjacency(Some(neighbour_district_id));
-            objects.get_mut(&neighbour_district_id).expect("Could not find region with id").increment_adjacency(Some(id));
+            objects.get_mut(&id).expect("Could not find region with id").increment_adjacency(Some(neighbour_parcel_id));
+            objects.get_mut(&neighbour_parcel_id).expect("Could not find region with id").increment_adjacency(Some(id));
         }
 
         if is_edge && !ignore_edge_addition {

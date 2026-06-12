@@ -131,7 +131,7 @@ async fn frontage_pass_places_non_overlapping_houses() {
 }
 
 /// Full end-to-end settlement test using buildings_v2 + city_houses. Generates
-/// districts, partitions urban area into city blocks, paves roads (which also
+/// parcels, partitions urban area into city blocks, paves roads (which also
 /// claims `BuildClaim::Path`), then per-block runs the frontage pass followed
 /// by the interior fill. Requires a live Minecraft server with the GDMC HTTP
 /// mod.
@@ -145,7 +145,7 @@ async fn settlement_with_city_houses() {
         default_interior_size_pool, fill_interior, place_block_frontage, plot_from_block,
     };
     use crate::generator::chronicle::SettlementInfo;
-    use crate::generator::districts::generate_districts;
+    use crate::generator::parcels::generate_parcels;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
     use crate::geometry::get_edge;
@@ -160,8 +160,8 @@ async fn settlement_with_city_houses() {
 
     let mut rng = RNG::new(13);
 
-    // Districts (creates urban classification used by get_city_blocks_and_off_limits).
-    generate_districts(rng.next_i64().into(), &mut editor).await;
+    // Parcels (creates urban classification used by get_city_blocks_and_off_limits).
+    generate_parcels(rng.next_i64().into(), &mut editor).await;
 
     let data = LoadedData::load().expect("Failed to load data");
     let base_palette_id: PaletteId = "medieval_spruce".into();

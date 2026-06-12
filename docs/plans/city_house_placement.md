@@ -22,7 +22,7 @@ The pass order matters: front-row claims the prime road frontage first; the inte
 ## Pipeline order
 
 ```
-districts → walls → paths → resource buildings (placement.rs) → city houses (this plan)
+parcels → walls → paths → resource buildings (placement.rs) → city houses (this plan)
 ```
 
 `paths` **must** precede city houses so `BuildClaim::Path` cells exist for frontage detection. If we ever want to run houses before paths, the frontage detection has to fall back to "any outer perimeter of the block" (see *Open questions*).
@@ -213,7 +213,7 @@ Block at origin, frontage cells `[(5, 0), (6, 0), (7, 0)]` with `outward = North
 2. **No-road blocks.** Interior blocks with no `BuildClaim::Path` adjacency. Plan: fall back to using the block's outer perimeter as frontage. Open: should those houses' doors face outward to nothing, or face inward to a future courtyard?
 3. **Corner stations.** When two chains meet at a block corner (e.g. a north-frontage chain ends, an east-frontage chain begins), the corner cell may belong to both. Plan: assign to the longer chain. Revisit if visual artifacts appear.
 4. **Resource buildings already placed.** They claim cells via `BuildClaim::Structure` before this runs. Inherits naturally — those cells aren't in `plot.usable`. But: should the walker prefer chains *without* nearby structures, so houses cluster apart from workshops? Not for v1.
-5. **Hierarchy.** Defer to phase 2. Bias size by distance-to-block-centroid or super-district wealth.
+5. **Hierarchy.** Defer to phase 2. Bias size by distance-to-block-centroid or super-parcel wealth.
 6. **Roof style per block.** Uniform per block (one `RoofStyle` picked per block) vs per-building. Recommend uniform per block — gives streets a coherent look.
 
 ---
@@ -231,7 +231,7 @@ Block at origin, frontage cells `[(5, 0), (6, 0), (7, 0)]` with `outward = North
 
 ### Phase 2 — Polish
 - `place_doors` `preferred_facing: Option<Cardinal>` (retire synthetic plot_bounds hack)
-- Size-class hierarchy: distance-to-centroid or super-district wealth → larger near center
+- Size-class hierarchy: distance-to-centroid or super-parcel wealth → larger near center
 - Corner handling for chains meeting at block corners
 - Optional wings extending into the block (`Footprint::from_rects`)
 

@@ -7,7 +7,7 @@ use crate::{
     generator::{
         build_claim::BuildClaim,
         data::LoadedData,
-        districts::{replace_ground, SuperDistrict},
+        parcels::{replace_ground, District},
         terrain::{log_trees, smooth_terrain},
     },
     geometry::{Point2D, Point3D},
@@ -17,11 +17,11 @@ use crate::{
 
 use super::production_painter::ProductionPainter;
 
-/// Paints a production area across all unclaimed cells of `super_district` after
+/// Paints a production area across all unclaimed cells of `district` after
 /// a gathering building has been placed there. The area is claimed with
 /// `BuildClaim::ProductionArea` tied to the most-recently-placed structure on the world.
 pub async fn paint_production_area(
-    super_district: &SuperDistrict,
+    district: &District,
     painter_name: &str,
     data: &LoadedData,
     editor: &mut Editor,
@@ -42,7 +42,7 @@ pub async fn paint_production_area(
     const EDGE_BUFFER: i32 = 3;
 
     // Build a set of cells within EDGE_BUFFER blocks (Chebyshev) of any edge cell.
-    let edge_buffer: HashSet<Point2D> = super_district.data.edges.iter()
+    let edge_buffer: HashSet<Point2D> = district.data.edges.iter()
         .flat_map(|p| {
             let p2 = p.drop_y();
             (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
@@ -51,8 +51,8 @@ pub async fn paint_production_area(
         })
         .collect();
 
-    // Free cells: district interior excluding edge buffer, not yet claimed, not water.
-    let free_cells: HashSet<Point2D> = super_district.data.points_2d.iter()
+    // Free cells: parcel interior excluding edge buffer, not yet claimed, not water.
+    let free_cells: HashSet<Point2D> = district.data.points_2d.iter()
         .filter(|&&p| !edge_buffer.contains(&p))
         .filter(|&&p| !editor.world().is_claimed(p))
         .filter(|&&p| !editor.world().is_water(p))
@@ -68,9 +68,9 @@ pub async fn paint_production_area(
             paint_logging(&free_cells, percent, &structure_id, editor, rng).await;
         }
         ProductionPainter::Palettes { palettes, border_palette, irrigation, flatten_strength } => {
-            // Border cells: district interior points that fall within the edge buffer,
+            // Border cells: parcel interior points that fall within the edge buffer,
             // not yet claimed, not water.
-            let border_cells: HashSet<Point2D> = super_district.data.points_2d.iter()
+            let border_cells: HashSet<Point2D> = district.data.points_2d.iter()
                 .filter(|&&p| edge_buffer.contains(&p))
                 .filter(|&&p| !editor.world().is_claimed(p))
                 .filter(|&&p| !editor.world().is_water(p))
@@ -165,7 +165,7 @@ async fn paint_palettes(
     // Paint the border strip with its palette before handling the field interior.
     if let Some(name) = border_palette {
         if !border_cells.is_empty() {
-            if let Some(palette) = data.paint_palettes.get(&crate::generator::districts::PaintPaletteId(name.to_string())) {
+            if let Some(palette) = data.paint_palettes.get(&crate::generator::parcels::PaintPaletteId(name.to_string())) {
                 let (block_dict, block_list) = palette.to_weighted_blocks();
                 replace_ground(border_cells, &block_dict, &block_list, rng, editor, None, None, Some(false)).await;
             } else {
@@ -212,7 +212,7 @@ async fn paint_palettes(
 
     // Apply each palette in order (ground layer before crop layer).
     for palette_name in palettes {
-        let Some(palette) = data.paint_palettes.get(&crate::generator::districts::PaintPaletteId(palette_name.clone())) else {
+        let Some(palette) = data.paint_palettes.get(&crate::generator::parcels::PaintPaletteId(palette_name.clone())) else {
             warn!("paint_production_area: unknown palette '{}'", palette_name);
             continue;
         };

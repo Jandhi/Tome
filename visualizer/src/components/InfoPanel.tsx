@@ -26,8 +26,8 @@ export default function InfoPanel({ data, hoverX, hoverZ }: Props) {
 
   const height = data.heightmap?.heights[idx] ?? "?";
   const biome = data.biomes?.biomes[idx] ?? "?";
-  const district = data.districts?.districts[idx] ?? -1;
-  const districtType = data.districts?.district_types[idx] ?? "";
+  const parcel = data.parcels?.parcels[idx] ?? -1;
+  const parcelType = data.parcels?.parcel_types[idx] ?? "";
   const claim = data.claims?.claims[idx] ?? "?";
 
   return (
@@ -42,8 +42,8 @@ export default function InfoPanel({ data, hoverX, hoverZ }: Props) {
         <span>Biome:</span> <span>{biome}</span>
       </div>
       <div style={rowStyle}>
-        <span>District:</span>{" "}
-        <span>{district >= 0 ? `#${district} (${districtType})` : "none"}</span>
+        <span>Parcel:</span>{" "}
+        <span>{parcel >= 0 ? `#${parcel} (${parcelType})` : "none"}</span>
       </div>
       <div style={rowStyle}>
         <span>Claim:</span> <span>{claim}</span>

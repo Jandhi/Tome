@@ -6,13 +6,13 @@ const TYPE_COLORS: Record<string, [number, number, number]> = {
 };
 
 const BOUNDARY_ENTRIES = [
-  { label: "Super-district boundary", color: [30, 30, 30] as [number, number, number] },
+  { label: "Super-parcel boundary", color: [30, 30, 30] as [number, number, number] },
 ];
 
-export default function DistrictLegend() {
+export default function ParcelLegend() {
   return (
     <div style={panelStyle}>
-      <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Districts</h3>
+      <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Parcels</h3>
       {Object.entries(TYPE_COLORS).map(([name, color]) => (
         <div key={name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <span

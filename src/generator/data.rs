@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{data::{Loadable, load_yaml}, generator::{districts::{PaintPalette, PaintPaletteId, PaintPalettesFile}, resource_chain::ResourceRegistry, buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::FurnitureData, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
+use crate::{data::{Loadable, load_yaml}, generator::{parcels::{PaintPalette, PaintPaletteId, PaintPalettesFile}, resource_chain::ResourceRegistry, buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::FurnitureData, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
 
 #[derive(Debug)]
 pub struct LoadedData {

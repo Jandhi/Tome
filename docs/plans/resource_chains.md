@@ -2,11 +2,11 @@
 
 ## Overview
 
-A data-driven production chain system that maps Minecraft biome resources (wood, wool, honey, etc.) to finished goods via multi-step recipes. Districts produce raw resources based on their biome; the chain system resolves which goods they can manufacture.
+A data-driven production chain system that maps Minecraft biome resources (wood, wool, honey, etc.) to finished goods via multi-step recipes. Parcels produce raw resources based on their biome; the chain system resolves which goods they can manufacture.
 
-**Goal**: Give districts economic identity — a forest district smells like a sawmill, a plains district like a bakery.
+**Goal**: Give parcels economic identity — a forest parcel smells like a sawmill, a plains parcel like a bakery.
 
-**Approach**: YAML data files define resources and recipes. Rust loads them into a registry at startup. Districts query the registry to resolve viable chains from their available raw inputs.
+**Approach**: YAML data files define resources and recipes. Rust loads them into a registry at startup. Parcels query the registry to resolve viable chains from their available raw inputs.
 
 ---
 
@@ -69,6 +69,6 @@ All resource chain data lives in `data/resource_chains/`.
 ### Phases 1–3 ✅
 Data files, loading, validation, resolution algorithm, and unit tests are complete.
 
-### Phase 4: Resource chains from districts
-- [ ] Given a set of districts, populate in the registry a list of possible resources. Each District will only produce 1 type of raw resource in quantity of 2, add functionality to registry so that given an option set, it will select which raw resources are best during resource chain selection later.
-- [ ] Once registry.resolve() is called it needs to select which district produces which raw resources and each district is given that building it needs to build. Each district which produces a raw resource is given the building it requires to have to produce the raw resource.
+### Phase 4: Resource chains from parcels
+- [ ] Given a set of parcels, populate in the registry a list of possible resources. Each Parcel will only produce 1 type of raw resource in quantity of 2, add functionality to registry so that given an option set, it will select which raw resources are best during resource chain selection later.
+- [ ] Once registry.resolve() is called it needs to select which parcel produces which raw resources and each parcel is given that building it needs to build. Each parcel which produces a raw resource is given the building it requires to have to produce the raw resource.

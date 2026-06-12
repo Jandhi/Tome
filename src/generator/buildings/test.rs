@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, districts::{WallType, build_wall, generate_districts}, materials::{Material, MaterialId, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, parcels::{WallType, build_wall, generate_parcels}, materials::{Material, MaterialId, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
     #[tokio::test]
@@ -138,8 +138,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn placement_in_districts() {
-        println!("Running placement_in_districts test");
+    async fn placement_in_parcels() {
+        println!("Running placement_in_parcels test");
         dotenv::dotenv().ok();
         init_logger();
 
@@ -149,7 +149,7 @@ mod tests {
 
         let mut rng = RNG::new(32);
 
-        generate_districts(rng.next_i64().into(), &mut editor).await;
+        generate_parcels(rng.next_i64().into(), &mut editor).await;
         let mut info = SettlementInfo::new(editor.world());
 
         let data = LoadedData::load().expect("Failed to load generator data");

@@ -300,24 +300,24 @@ mod tests {
     }
 
     #[test]
-    fn assign_district_resources_respects_constraints() {
+    fn assign_parcel_resources_respects_constraints() {
         let registry = make_registry();
         let mut rng = RNG::new(42);
 
-        // District 0: only wheat (most constrained — 1 option)
-        // District 1: iron_ore or coal
-        // District 2: wood or feathers
+        // Parcel 0: only wheat (most constrained — 1 option)
+        // Parcel 1: iron_ore or coal
+        // Parcel 2: wood or feathers
         let options: HashMap<u32, Vec<String>> = [
             (0, vec!["wheat".into()]),
             (1, vec!["iron_ore".into(), "coal".into()]),
             (2, vec!["wood".into(), "feathers".into()]),
         ].into();
 
-        let assignments = registry.assign_district_resources(&options, &mut rng);
+        let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
-        assert_eq!(assignments.len(), 3, "all districts should be assigned");
+        assert_eq!(assignments.len(), 3, "all parcels should be assigned");
 
-        // Sole-option district always gets wheat with the farm building
+        // Sole-option parcel always gets wheat with the farm building
         let a0 = assignments.get(&0).unwrap();
         assert_eq!(a0.primary_resource, "wheat");
         assert_eq!(a0.building, "farm");
@@ -329,26 +329,26 @@ mod tests {
     }
 
     #[test]
-    fn assign_district_resources_prefers_diversity() {
+    fn assign_parcel_resources_prefers_diversity() {
         let registry = make_registry();
         let mut rng = RNG::new(0);
 
-        // Two districts that both could produce wood or iron_ore; they should pick different ones.
+        // Two parcels that both could produce wood or iron_ore; they should pick different ones.
         let options: HashMap<u32, Vec<String>> = [
             (0, vec!["wood".into(), "iron_ore".into()]),
             (1, vec!["wood".into(), "iron_ore".into()]),
         ].into();
 
-        let assignments = registry.assign_district_resources(&options, &mut rng);
+        let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
         assert_eq!(assignments.len(), 2);
         let r0 = &assignments[&0].primary_resource;
         let r1 = &assignments[&1].primary_resource;
-        assert_ne!(r0, r1, "districts should pick different resources when possible");
+        assert_ne!(r0, r1, "parcels should pick different resources when possible");
     }
 
     #[test]
-    fn assign_district_resources_skips_unknown_gather_resources() {
+    fn assign_parcel_resources_skips_unknown_gather_resources() {
         let registry = make_registry();
         let mut rng = RNG::new(42);
 
@@ -358,50 +358,50 @@ mod tests {
             (1, vec!["wood".into()]),
         ].into();
 
-        let assignments = registry.assign_district_resources(&options, &mut rng);
+        let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
-        // District 0 has no valid candidates and is skipped
+        // Parcel 0 has no valid candidates and is skipped
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[&1].primary_resource, "wood");
     }
 
-    /// Diagnostic test — passes a `HashMap<SuperDistrictID, DistrictAnalysis>` to
-    /// `resolve_for_districts` and prints the full settlement production report.
+    /// Diagnostic test — passes a `HashMap<DistrictID, ParcelAnalysis>` to
+    /// `resolve_for_parcels` and prints the full settlement production report.
     ///
-    /// Edit the `district_analysis` map below and run:
-    ///   cargo test district_production_report -- --ignored --nocapture
+    /// Edit the `parcel_analysis` map below and run:
+    ///   cargo test parcel_production_report -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn district_production_report() {
-        use crate::generator::districts::{SuperDistrictID, DistrictAnalysis};
+    fn parcel_production_report() {
+        use crate::generator::parcels::{DistrictID, ParcelAnalysis};
         use crate::minecraft::Biome;
 
         let registry = make_registry();
         let mut rng = RNG::new(42);
 
-        // ====== Edit districts here ======
+        // ====== Edit parcels here ======
         // `from_biome_count` takes biome → block count; biomes at ≥30% count as major.
-        let district_analysis: HashMap<SuperDistrictID, DistrictAnalysis> = [
-            (SuperDistrictID(0), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:forest"),    80), (Biome::from("minecraft:plains"), 20)].into())),
-            (SuperDistrictID(1), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:forest"),   100)].into())),
-            (SuperDistrictID(2), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
-            (SuperDistrictID(3), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:mountains"), 90), (Biome::from("minecraft:plains"), 10)].into())),
-            (SuperDistrictID(4), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:river"),    100)].into())),
-            (SuperDistrictID(5), DistrictAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
+        let parcel_analysis: HashMap<DistrictID, ParcelAnalysis> = [
+            (DistrictID(0), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),    80), (Biome::from("minecraft:plains"), 20)].into())),
+            (DistrictID(1), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),   100)].into())),
+            (DistrictID(2), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
+            (DistrictID(3), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:mountains"), 90), (Biome::from("minecraft:plains"), 10)].into())),
+            (DistrictID(4), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:river"),    100)].into())),
+            (DistrictID(5), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
         ].into();
         // =================================
 
-        let result = registry.resolve_for_districts(&district_analysis, &mut rng);
+        let result = registry.resolve_for_parcels(&parcel_analysis, &mut rng);
 
-        let mut district_ids: Vec<SuperDistrictID> = district_analysis.keys().cloned().collect();
-        district_ids.sort_by_key(|id| id.0);
+        let mut parcel_ids: Vec<DistrictID> = parcel_analysis.keys().cloned().collect();
+        parcel_ids.sort_by_key(|id| id.0);
 
         // ── Report ──────────────────────────────────────────────────────────────
-        println!("\n╔══ District Production Report ═════════════════════╗");
+        println!("\n╔══ Parcel Production Report ═════════════════════╗");
 
-        println!("║ Districts:");
-        for id in &district_ids {
-            let analysis = &district_analysis[id];
+        println!("║ Parcels:");
+        for id in &parcel_ids {
+            let analysis = &parcel_analysis[id];
             let biome_names = {
                 let mut names: Vec<&str> = analysis.major_biomes().iter()
                     .map(|b| b.as_str().strip_prefix("minecraft:").unwrap_or(b.as_str()))
@@ -409,11 +409,11 @@ mod tests {
                 names.sort();
                 names.join("+")
             };
-            if let Some(a) = result.district_assignments.get(id) {
-                println!("║   District {:>2} ({:<18}) → {} x2 [{}]",
+            if let Some(a) = result.parcel_assignments.get(id) {
+                println!("║   Parcel {:>2} ({:<18}) → {} x2 [{}]",
                     id.0, biome_names, a.primary_resource, a.building);
             } else {
-                println!("║   District {:>2} ({:<18}) → (no valid resource)", id.0, biome_names);
+                println!("║   Parcel {:>2} ({:<18}) → (no valid resource)", id.0, biome_names);
             }
         }
 
@@ -492,7 +492,7 @@ mod tests {
         // For each chain (highest priority first), allocate a proportional raw budget
         // and forward-execute its recipes. Each recipe consumes input fractionally but
         // produces FLOORED integer output — anything below 1 unit of an intermediate is
-        // lost and can't flow to the next building. Matches `resolve_for_districts`.
+        // lost and can't flow to the next building. Matches `resolve_for_parcels`.
         let mut goods_produced: Vec<(String, u32)> = Vec::new();
         let mut total_buildings: HashMap<String, u32> = HashMap::new();
         let mut intermediate_pool: HashMap<String, u32> = HashMap::new();

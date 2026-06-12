@@ -35,8 +35,8 @@ export function heightToColor(normalizedHeight: number): [number, number, number
   return HEIGHT_STOPS[HEIGHT_STOPS.length - 1].color;
 }
 
-/** Golden-angle hue distribution for district coloring */
-export function districtColor(id: number): [number, number, number] {
+/** Golden-angle hue distribution for parcel coloring */
+export function parcelColor(id: number): [number, number, number] {
   const hue = (id * 137.508) % 360;
   return hslToRgb(hue, 0.6, 0.55);
 }

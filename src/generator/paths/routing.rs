@@ -174,7 +174,7 @@ pub async fn route_path(
 /// map, so each state is settled at most once and nodes are cheap to hash.
 /// (A path-as-state search would re-expand cells once per prefix and clone the
 /// whole path per node — fine for short hops, but it blows up over the long,
-/// flat district-spacing runs the road network needs.)
+/// flat parcel-spacing runs the road network needs.)
 pub async fn route_path_with(
     editor: &Editor,
     start : Point3D,

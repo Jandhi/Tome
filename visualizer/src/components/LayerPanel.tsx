@@ -8,7 +8,7 @@ interface Props {
 const LAYER_NAMES: { key: keyof LayerConfig; label: string }[] = [
   { key: "heightmap", label: "Heightmap" },
   { key: "biomes", label: "Biomes" },
-  { key: "districts", label: "Districts" },
+  { key: "parcels", label: "Parcels" },
   { key: "buildings", label: "Buildings" },
   { key: "claims", label: "Claims" },
 ];

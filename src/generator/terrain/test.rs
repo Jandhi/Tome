@@ -6,7 +6,7 @@ mod tests {
     use log::info;
     
 
-    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::districts::plant_forest,  geometry::{Point2D, Point3D}};
+    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::parcels::plant_forest,  geometry::{Point2D, Point3D}};
 
     #[test]
     fn deserialize_tree() {

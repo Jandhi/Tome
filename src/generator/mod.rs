@@ -1,4 +1,4 @@
-pub mod districts;
+pub mod parcels;
 pub mod resource_chain;
 pub mod build_claim;
 pub mod materials;

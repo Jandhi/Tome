@@ -6,7 +6,7 @@ mod tests {
         editor::World,
         generator::{
             data::LoadedData,
-            districts::{build_wall, generate_districts, DistrictType, WallType},
+            parcels::{build_wall, generate_parcels, ParcelType, WallType},
             materials::{MaterialId, Placer},
             nbts::{Rotation, StructureType},
             placement::{
@@ -24,14 +24,14 @@ mod tests {
     };
 
     /// Change this to any resource building name to place that building in every rural
-    /// super-district. Useful for quickly eyeballing a single building + its production
+    /// super-parcel. Useful for quickly eyeballing a single building + its production
     /// area on a flat Minecraft world without changing the resource chain data.
     const OVERRIDE_BUILDING: &str = "iron_mine";
 
     /// End-to-end rural placement test with a single hardcoded building type.
     /// Identical to `rural_and_urban_placement_with_city_wall` except:
     ///   - No city wall (suited for flat worlds).
-    ///   - Every rural super-district places `OVERRIDE_BUILDING` instead of the
+    ///   - Every rural super-parcel places `OVERRIDE_BUILDING` instead of the
     ///     resource-chain-assigned building.
     ///   - No urban processing building pass.
     #[tokio::test]
@@ -47,20 +47,20 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
         let rural_analysis: HashMap<_, _> = editor
             .world()
-            .super_district_analysis_data
+            .district_analysis_data
             .iter()
             .filter(|(id, _)| {
                 editor
                     .world()
-                    .super_districts
+                    .districts
                     .get(id)
-                    .map(|sd| sd.data.district_type == DistrictType::Rural)
+                    .map(|sd| sd.data.parcel_type == ParcelType::Rural)
                     .unwrap_or(false)
             })
             .map(|(id, analysis)| (*id, analysis.clone()))
@@ -68,9 +68,9 @@ mod tests {
 
         let result = data
             .resource_registry
-            .resolve_for_districts(&rural_analysis, &mut rng);
+            .resolve_for_parcels(&rural_analysis, &mut rng);
 
-        let mut sd_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
 
         let structure_type = StructureType(OVERRIDE_BUILDING.to_string());
@@ -80,7 +80,7 @@ mod tests {
         };
 
         // Resolve the painter from the override building's own gather recipe, not from
-        // the district assignment (which would use the resource-chain's painter instead).
+        // the parcel assignment (which would use the resource-chain's painter instead).
         let override_painter: Option<String> = data.resource_registry.recipes()
             .values()
             .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING)
@@ -88,26 +88,26 @@ mod tests {
 
         let mut placed_count = 0usize;
         for sd_id in &sd_ids {
-            let assignment = &result.district_assignments[sd_id];
+            let assignment = &result.parcel_assignments[sd_id];
 
-            let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else {
                 continue;
             };
 
             log::info!(
-                "Placing '{}' (override) for resource '{}' in super-district {:?}",
+                "Placing '{}' (override) for resource '{}' in super-parcel {:?}",
                 OVERRIDE_BUILDING, assignment.primary_resource, sd_id,
             );
 
-            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &override_painter {
-                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
-                    "Failed to place '{}' in super-district {:?}: {}",
+                    "Failed to place '{}' in super-parcel {:?}: {}",
                     OVERRIDE_BUILDING, sd_id, e
                 ),
             }
@@ -121,7 +121,7 @@ mod tests {
     }
 
     /// Integration eyeball: urban industrial buildings should land ON the road
-    /// network. Order: districts → force an urban core → wall+gates → flatten →
+    /// network. Order: parcels → force an urban core → wall+gates → flatten →
     /// tiered A* roads → claim `Path` → `place_urban_buildings` (candidates now
     /// seeded from road-adjacent cells, so they front the streets by construction).
     ///
@@ -134,7 +134,7 @@ mod tests {
 
         use crate::data::Loadable;
         use crate::generator::BuildClaim;
-        use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
+        use crate::generator::parcels::{ParcelAnalysis, DistrictID};
         use crate::generator::materials::Material;
         use crate::generator::nbts::Structure;
         use crate::generator::paths::{build_paths_merged, build_road_network, Path, PathType};
@@ -150,19 +150,19 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
-        // EVAL AID (test-only): force a contiguous ~4-district urban core, since
-        // the live classifier often collapses to a single urban district — too
-        // degenerate to grow a road network. (Mirrors `districts::hierarchical_roads`.)
+        // EVAL AID (test-only): force a contiguous ~4-parcel urban core, since
+        // the live classifier often collapses to a single urban parcel — too
+        // degenerate to grow a road network. (Mirrors `parcels::hierarchical_roads`.)
         {
             const TARGET_URBAN: usize = 4;
-            let mut info: Vec<(SuperDistrictID, Point2D, bool)> = editor.world().super_districts.iter()
-                .filter(|(_, sd)| sd.data.district_type != DistrictType::OffLimits)
+            let mut info: Vec<(DistrictID, Point2D, bool)> = editor.world().districts.iter()
+                .filter(|(_, sd)| sd.data.parcel_type != ParcelType::OffLimits)
                 .map(|(id, sd)| {
                     let pts = &sd.data.points_2d;
                     let c = pts.iter().fold(Point2D::ZERO, |a, p| a + *p) / pts.len().max(1) as i32;
-                    (*id, c, sd.data.district_type == DistrictType::Urban)
+                    (*id, c, sd.data.parcel_type == ParcelType::Urban)
                 })
                 .collect();
             let anchor = info.iter().find(|(_, _, u)| *u).map(|(_, c, _)| *c)
@@ -170,7 +170,7 @@ mod tests {
             if let Some(anchor) = anchor {
                 info.sort_by_key(|(_, c, _)| c.distance_squared(&anchor));
                 for (id, _, _) in info.iter().take(TARGET_URBAN) {
-                    editor.world_mut().super_districts.get_mut(id).unwrap().data.district_type = DistrictType::Urban;
+                    editor.world_mut().districts.get_mut(id).unwrap().data.parcel_type = ParcelType::Urban;
                 }
             }
         }
@@ -188,9 +188,9 @@ mod tests {
         ).await;
         drop(placer);
 
-        let n_urban = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban).count();
-        println!("URBAN super-districts: {} | gates: {}", n_urban, editor.world().gate_locations.len());
+        let n_urban = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban).count();
+        println!("URBAN super-parcels: {} | gates: {}", n_urban, editor.world().gate_locations.len());
 
         // Flatten, then route the tiered network over the gentled terrain.
         let urban = editor.world().get_urban_points();
@@ -200,14 +200,14 @@ mod tests {
         // no roads yet, `road_bonus` is 0 — these big buildings are sited by
         // flatness, not road frontage. They become the destinations the network
         // then connects. ---
-        let rural_ids: Vec<SuperDistrictID> = editor.world().super_districts.iter()
-            .filter(|(_, sd)| sd.data.district_type == DistrictType::Rural)
+        let rural_ids: Vec<DistrictID> = editor.world().districts.iter()
+            .filter(|(_, sd)| sd.data.parcel_type == ParcelType::Rural)
             .map(|(id, _)| *id)
             .collect();
-        let rural_analysis: HashMap<SuperDistrictID, DistrictAnalysis> = rural_ids.iter()
-            .filter_map(|id| editor.world().super_district_analysis_data.get(id).map(|a| (*id, a.clone())))
+        let rural_analysis: HashMap<DistrictID, ParcelAnalysis> = rural_ids.iter()
+            .filter_map(|id| editor.world().district_analysis_data.get(id).map(|a| (*id, a.clone())))
             .collect();
-        let result = data.resource_registry.resolve_for_districts(&rural_analysis, &mut rng);
+        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
         println!(
             "Resolved processing buildings: {} types, {} total",
             result.processing_buildings.len(),
@@ -227,11 +227,11 @@ mod tests {
         let want: u32 = counts.values().sum();
         println!("Placing {} industrial buildings (roads will connect them)", want);
 
-        let urban_super_districts: Vec<_> = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban)
+        let urban_districts: Vec<_> = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban)
             .cloned()
             .collect();
-        let urban_refs: Vec<_> = urban_super_districts.iter().collect();
+        let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         let before = editor.world().structures.len();
         if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data).await {
@@ -320,13 +320,13 @@ mod tests {
 
     /// End-to-end integration test that exercises every major settlement system
     /// in pipeline order against a live Minecraft server:
-    ///   districts → log trees → terraform → wall → main roads →
+    ///   parcels → log trees → terraform → wall → main roads →
     ///   resource chain → secondary roads → buildings_v2
     #[tokio::test]
     async fn full_settlement_pipeline() {
         use crate::data::Loadable;
         use crate::generator::BuildClaim;
-        use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
+        use crate::generator::parcels::{ParcelAnalysis, DistrictID};
         use crate::generator::materials::Material;
         use crate::generator::nbts::Structure;
         use crate::generator::paths::{
@@ -340,7 +340,7 @@ mod tests {
         let mut editor = world.get_editor();
         let mut rng = RNG::new(32);
 
-        generate_districts(rng.next_i64().into(), &mut editor).await;
+        generate_parcels(rng.next_i64().into(), &mut editor).await;
         let urban = editor.world().get_urban_points();
 
         log_trees(&mut editor, urban.clone()).await;
@@ -359,41 +359,41 @@ mod tests {
         ).await;
         drop(placer);
 
-        let n_urban = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban).count();
-        println!("URBAN super-districts: {} | gates: {}", n_urban, editor.world().gate_locations.len());
+        let n_urban = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban).count();
+        println!("URBAN super-parcels: {} | gates: {}", n_urban, editor.world().gate_locations.len());
         
-        let rural_ids: Vec<SuperDistrictID> = editor.world().super_districts.iter()
-            .filter(|(_, sd)| sd.data.district_type == DistrictType::Rural)
+        let rural_ids: Vec<DistrictID> = editor.world().districts.iter()
+            .filter(|(_, sd)| sd.data.parcel_type == ParcelType::Rural)
             .map(|(id, _)| *id)
             .collect();
-        let rural_analysis: HashMap<SuperDistrictID, DistrictAnalysis> = rural_ids.iter()
-            .filter_map(|id| editor.world().super_district_analysis_data.get(id).map(|a| (*id, a.clone())))
+        let rural_analysis: HashMap<DistrictID, ParcelAnalysis> = rural_ids.iter()
+            .filter_map(|id| editor.world().district_analysis_data.get(id).map(|a| (*id, a.clone())))
             .collect();
-        let result = data.resource_registry.resolve_for_districts(&rural_analysis, &mut rng);
+        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
         println!(
             "Resolved processing buildings: {} types, {} total",
             result.processing_buildings.len(),
             result.processing_buildings.values().sum::<u32>(),
         );
 
-         // One placement per rural super-district — matches the resource chain's
-        // `district_assignments`, which is keyed by `SuperDistrictID`.
-        let mut sd_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+         // One placement per rural super-parcel — matches the resource chain's
+        // `parcel_assignments`, which is keyed by `DistrictID`.
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
 
         let mut placed_count = 0usize;
         for sd_id in &sd_ids {
-            let assignment = &result.district_assignments[sd_id];
+            let assignment = &result.parcel_assignments[sd_id];
 
-            let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else {
                 continue;
             };
 
             let structure_type = StructureType(assignment.building.clone());
             let Some(structure) = data.structures.get(&structure_type).cloned() else {
                 log::warn!(
-                    "No structure found for building '{}' assigned to super-district {:?}",
+                    "No structure found for building '{}' assigned to super-parcel {:?}",
                     assignment.building,
                     sd_id
                 );
@@ -401,23 +401,23 @@ mod tests {
             };
 
             log::info!(
-                "Placing '{}' (size {:?}) for resource '{}' in super-district {:?} (area {} cells)",
+                "Placing '{}' (size {:?}) for resource '{}' in super-parcel {:?} (area {} cells)",
                 assignment.building,
                 structure.size_xz,
                 assignment.primary_resource,
                 sd_id,
-                super_district.data.points_2d.len(),
+                district.data.points_2d.len(),
             );
 
-            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
-                    "Failed to place '{}' in super-district {:?}: {}",
+                    "Failed to place '{}' in super-parcel {:?}: {}",
                     assignment.building,
                     sd_id,
                     e
@@ -434,11 +434,11 @@ mod tests {
         let want: u32 = counts.values().sum();
         println!("Placing {} industrial buildings (roads will connect them)", want);
 
-        let urban_super_districts: Vec<_> = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban)
+        let urban_districts: Vec<_> = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban)
             .cloned()
             .collect();
-        let urban_refs: Vec<_> = urban_super_districts.iter().collect();
+        let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         let before = editor.world().structures.len();
         if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data).await {
@@ -532,12 +532,12 @@ mod tests {
         // buildings, never through them.
         barriers.extend(&blocked);
 
-        // Don't let blocks (and the parcels/alleys/houses inside them) span steep
+        // Don't let blocks (and the lots/alleys/houses inside them) span steep
         // terrain. A per-cell cliff test misses a *sustained* slope — a long
         // staircase of 1-block risers passes cell-by-cell yet climbs far. So bar
         // any cell whose local WIN-radius neighbourhood spans more than
         // MAX_LOCAL_RELIEF blocks of height; the flood fill then breaks blocks
-        // along slope lines, keeping parcels and their lanes on a flat shelf.
+        // along slope lines, keeping lots and their lanes on a flat shelf.
         const WIN: i32 = 1; // 3×3 window
         const MAX_LOCAL_RELIEF: i32 = 2;
         let steep: HashSet<Point2D> = urban.iter()
@@ -574,7 +574,7 @@ mod tests {
 
         // Per block: first reserve a frontage ribbon — a band one house deep
         // against each main road — so the long arterial/collector-facing edge
-        // stays a single continuous parcel instead of being chopped into stubs
+        // stays a single continuous lot instead of being chopped into stubs
         // by subdivision. Then subdivide only the interior with tier-3 alleys.
         // BSP cuts span the interior edge-to-edge, so an alley reaches its edge —
         // adjacent (barriers = paved) to either a main road or the ribbon.
@@ -584,34 +584,34 @@ mod tests {
         const RIBBON_DEPTH: i32 = 14;
         let mut sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
         let mut alley_band: HashSet<Point2D> = HashSet::new();
-        let mut ribbon_parcel_count = 0usize;
+        let mut ribbon_lot_count = 0usize;
         let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
-            let (mut ribbon_parcels, interior) =
-                crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
-            let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
+            let (mut ribbon_lots, interior) =
+                crate::generator::parcels::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
+            let (subs, alleys) = crate::generator::parcels::subdivide::subdivide_block(&interior, &mut rng, 24);
 
             // Connect the interior alleys to the main roads by carving through the
             // ribbon, then convert those cells from frontage ribbon to alley.
-            let ribbon_union: HashSet<Point2D> = ribbon_parcels.iter().flatten().copied().collect();
-            let connectors = crate::generator::districts::subdivide::carve_ribbon_connectors(
+            let ribbon_union: HashSet<Point2D> = ribbon_lots.iter().flatten().copied().collect();
+            let connectors = crate::generator::parcels::subdivide::carve_ribbon_connectors(
                 &ribbon_union, &alleys, &main_road_cells,
             );
             if !connectors.is_empty() {
-                for rp in &mut ribbon_parcels { rp.retain(|c| !connectors.contains(c)); }
-                ribbon_parcels.retain(|rp| !rp.is_empty());
+                for rp in &mut ribbon_lots { rp.retain(|c| !connectors.contains(c)); }
+                ribbon_lots.retain(|rp| !rp.is_empty());
             }
 
-            ribbon_parcel_count += ribbon_parcels.len();
-            for rp in &ribbon_parcels { ribbon_cells.extend(rp); }
-            sub_blocks.extend(ribbon_parcels);
+            ribbon_lot_count += ribbon_lots.len();
+            for rp in &ribbon_lots { ribbon_cells.extend(rp); }
+            sub_blocks.extend(ribbon_lots);
             alley_band.extend(&alleys);
             alley_band.extend(&connectors);
             sub_blocks.extend(subs);
         }
         println!(
-            "Subdivided into {} parcels ({} road-frontage ribbons), {} subdivider-road cells",
-            sub_blocks.len(), ribbon_parcel_count, alley_band.len(),
+            "Subdivided into {} lots ({} road-frontage ribbons), {} subdivider-road cells",
+            sub_blocks.len(), ribbon_lot_count, alley_band.len(),
         );
 
         // Assemble every road into one path list (mains + a synthesised width-1
@@ -674,8 +674,8 @@ mod tests {
         }
 
         // ---- Phase 4: hierarchical house placement ----
-        // Per parcel, walk frontage densest-tier first: arterial → collector →
-        // subdivider. The parcel's single Plot is shared across tiers, so houses
+        // Per lot, walk frontage densest-tier first: arterial → collector →
+        // subdivider. The lot's single Plot is shared across tiers, so houses
         // placed against the arterial claim the prime frontage and later tiers
         // can't overlap them. Size gradient: houses on roads, cottages on lanes.
         use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
@@ -724,7 +724,7 @@ mod tests {
         let mut tier_placed = [0usize; 3];  // houses placed per tier
         let mut tier_fail = [0usize; 3];    // build_house failures per tier
         let mut tier_short = [0usize; 3];   // chains dropped: shorter than min_front
-        let mut tier_unfit = [0usize; 3];   // slots skipped: rect didn't fit the parcel
+        let mut tier_unfit = [0usize; 3];   // slots skipped: rect didn't fit the lot
         // DEBUG: every cell detected as frontage, per tier, so we can float a
         // marker above it and see what the placement loop actually "sees".
         let mut tier_frontage: [HashSet<Point2D>; 3] = Default::default();
@@ -736,13 +736,13 @@ mod tests {
         // placement and checked for a road-slab lip afterward (we can't touch
         // `editor` inside the loop; it's borrowed by the build context).
         let mut door_thresholds: Vec<Point3D> = Vec::new();
-        for parcel in &sub_blocks {
-            if parcel.is_empty() { continue; }
-            let Some(mut plot) = plot_from_block(parcel) else { continue; };
+        for lot in &sub_blocks {
+            if lot.is_empty() { continue; }
+            let Some(mut plot) = plot_from_block(lot) else { continue; };
 
             for (ti, (band, pool)) in tiers.iter().enumerate() {
                 let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
-                for frontage in frontage_from_roads(parcel, band) {
+                for frontage in frontage_from_roads(lot, band) {
                     tier_cells[ti] += frontage.cells.len();
                     tier_frontage[ti].extend(&frontage.cells);
                     let chain_len = frontage.cells.len() as i32;
@@ -759,7 +759,7 @@ mod tests {
                         if cursor + fw > chain_len { cursor += 1; continue; }
                         let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
                         // Deepest depth (down to MIN_FIT_DEPTH) whose rect fits the
-                        // parcel — shrinks the house to hug a diagonal ribbon.
+                        // lot — shrinks the house to hug a diagonal ribbon.
                         let Some(depth) = (MIN_FIT_DEPTH..=max_depth).rev()
                             .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
                         else { tier_unfit[ti] += 1; cursor += 1; continue; };
@@ -847,7 +847,7 @@ mod tests {
                 }
             }
         }
-        println!("Placed {} buildings across {} parcels", total_buildings, sub_blocks.len());
+        println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
         println!(
             "Per-tier [frontage cells / placed / failed] — arterial: {}/{}/{}  collector: {}/{}/{}  subdivider: {}/{}/{}",
             tier_cells[0], tier_placed[0], tier_fail[0],
@@ -945,12 +945,12 @@ mod tests {
         assert_eq!(anchor_offset_for_rotation(size, origin_xz, Rotation::Thrice), (0, 3));
     }
 
-    /// End-to-end placement test: generates districts, resolves rural resource assignments,
-    /// places each rural super-district's gathering building inside one of its constituent
-    /// districts, then paints the ground by district type (Urban/Rural/OffLimits) with
-    /// distinct wool colours and marks district + super-district borders.
+    /// End-to-end placement test: generates parcels, resolves rural resource assignments,
+    /// places each rural super-parcel's gathering building inside one of its constituent
+    /// parcels, then paints the ground by parcel type (Urban/Rural/OffLimits) with
+    /// distinct wool colours and marks parcel + super-parcel borders.
     #[tokio::test]
-    async fn rural_resource_placement_paints_districts() {
+    async fn rural_resource_placement_paints_parcels() {
         init_logger();
 
         let seed = Seed(12345);
@@ -972,21 +972,21 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
-        // Only Rural super-districts produce raw resources.
+        // Only Rural super-parcels produce raw resources.
         let rural_analysis: HashMap<_, _> = editor
             .world()
-            .super_district_analysis_data
+            .district_analysis_data
             .iter()
             .filter(|(id, _)| {
                 editor
                     .world()
-                    .super_districts
+                    .districts
                     .get(id)
-                    .map(|sd| sd.data.district_type == DistrictType::Rural)
+                    .map(|sd| sd.data.parcel_type == ParcelType::Rural)
                     .unwrap_or(false)
             })
             .map(|(id, analysis)| (*id, analysis.clone()))
@@ -994,25 +994,25 @@ mod tests {
 
         let result = data
             .resource_registry
-            .resolve_for_districts(&rural_analysis, &mut rng);
+            .resolve_for_parcels(&rural_analysis, &mut rng);
 
-        // One placement per rural super-district — matches the resource chain's
-        // `district_assignments`, which is keyed by `SuperDistrictID`.
-        let mut sd_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        // One placement per rural super-parcel — matches the resource chain's
+        // `parcel_assignments`, which is keyed by `DistrictID`.
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
 
         let mut placed_count = 0usize;
         for sd_id in &sd_ids {
-            let assignment = &result.district_assignments[sd_id];
+            let assignment = &result.parcel_assignments[sd_id];
 
-            let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else {
                 continue;
             };
 
             let structure_type = StructureType(assignment.building.clone());
             let Some(structure) = data.structures.get(&structure_type).cloned() else {
                 log::warn!(
-                    "No structure found for building '{}' assigned to super-district {:?}",
+                    "No structure found for building '{}' assigned to super-parcel {:?}",
                     assignment.building,
                     sd_id
                 );
@@ -1020,23 +1020,23 @@ mod tests {
             };
 
             log::info!(
-                "Placing '{}' (size {:?}) for resource '{}' in super-district {:?} (area {} cells)",
+                "Placing '{}' (size {:?}) for resource '{}' in super-parcel {:?} (area {} cells)",
                 assignment.building,
                 structure.size_xz,
                 assignment.primary_resource,
                 sd_id,
-                super_district.data.points_2d.len(),
+                district.data.points_2d.len(),
             );
 
-            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
-                    "Failed to place '{}' in super-district {:?}: {}",
+                    "Failed to place '{}' in super-parcel {:?}: {}",
                     assignment.building,
                     sd_id,
                     e
@@ -1051,19 +1051,19 @@ mod tests {
 
         // Place processing/secondary buildings into the urban region. The resource chain
         // gives us a count per building type; placement order is randomised inside the
-        // helper. There's no fixed mapping of building → urban super-district, so we pass
+        // helper. There's no fixed mapping of building → urban super-parcel, so we pass
         // the whole urban region as one candidate pool.
-        let urban_super_districts: Vec<_> = editor
+        let urban_districts: Vec<_> = editor
             .world()
-            .super_districts
+            .districts
             .values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban)
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban)
             .cloned()
             .collect();
-        let urban_refs: Vec<_> = urban_super_districts.iter().collect();
+        let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         log::info!(
-            "Placing {} processing-building slots across {} urban super-districts",
+            "Placing {} processing-building slots across {} urban super-parcels",
             result.processing_buildings.values().sum::<u32>(),
             urban_refs.len(),
         );
@@ -1079,7 +1079,7 @@ mod tests {
             log::warn!("Urban resource placement failed: {}", e);
         }
 
-        // Paint the ground by super-district type and mark borders.
+        // Paint the ground by super-parcel type and mark borders.
         let urban_wool: Block = "blue_wool".into();
         let rural_wool: Block = "green_wool".into();
         let off_limits_wool: Block = "red_wool".into();
@@ -1094,24 +1094,24 @@ mod tests {
                     continue;
                 }
 
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
                 let district_id = editor.world().district_map[x as usize][z as usize];
+                let parcel_id = editor.world().parcel_map[x as usize][z as usize];
 
-                let Some(super_district_id) = super_district_id else { continue };
                 let Some(district_id) = district_id else { continue };
+                let Some(parcel_id) = parcel_id else { continue };
 
                 let world = editor.world();
-                let super_district_type = world
-                    .super_districts
-                    .get(&super_district_id)
-                    .map(|sd| sd.data.district_type)
-                    .unwrap_or(DistrictType::Unknown);
+                let district_type = world
+                    .districts
+                    .get(&district_id)
+                    .map(|sd| sd.data.parcel_type)
+                    .unwrap_or(ParcelType::Unknown);
 
-                let block = match super_district_type {
-                    DistrictType::Urban => &urban_wool,
-                    DistrictType::Rural => &rural_wool,
-                    DistrictType::OffLimits => &off_limits_wool,
-                    DistrictType::Unknown => &unknown_wool,
+                let block = match district_type {
+                    ParcelType::Urban => &urban_wool,
+                    ParcelType::Rural => &rural_wool,
+                    ParcelType::OffLimits => &off_limits_wool,
+                    ParcelType::Unknown => &unknown_wool,
                 };
 
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
@@ -1123,19 +1123,19 @@ mod tests {
                 let point = Point3D::new(x, height, z);
 
                 let on_super_edge = world
-                    .super_districts
-                    .get(&super_district_id)
-                    .map(|sd| sd.data.edges.contains(&point))
-                    .unwrap_or(false);
-                let on_district_edge = world
                     .districts
                     .get(&district_id)
+                    .map(|sd| sd.data.edges.contains(&point))
+                    .unwrap_or(false);
+                let on_parcel_edge = world
+                    .parcels
+                    .get(&parcel_id)
                     .map(|d| d.data.edges.contains(&point))
                     .unwrap_or(false);
 
                 if on_super_edge {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
-                } else if on_district_edge && height >= 1 {
+                } else if on_parcel_edge && height >= 1 {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
                     editor.place_block(block, Point3D::new(x, height - 1, z)).await;
                 } else {
@@ -1147,7 +1147,7 @@ mod tests {
         editor.flush_buffer().await;
     }
 
-    /// Same end-to-end flow as `rural_resource_placement_paints_districts`, but builds the
+    /// Same end-to-end flow as `rural_resource_placement_paints_parcels`, but builds the
     /// city wall *before* placing buildings. The wall claims its perimeter cells with
     /// `BuildClaim::Wall`, which causes urban placement's `rect_overlaps_claim` check to
     /// keep processing buildings off the wall — making the city border visible as a clear
@@ -1175,7 +1175,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
@@ -1198,17 +1198,17 @@ mod tests {
         )
         .await;
 
-        // Resolve resources for rural super-districts only.
+        // Resolve resources for rural super-parcels only.
         let rural_analysis: HashMap<_, _> = editor
             .world()
-            .super_district_analysis_data
+            .district_analysis_data
             .iter()
             .filter(|(id, _)| {
                 editor
                     .world()
-                    .super_districts
+                    .districts
                     .get(id)
-                    .map(|sd| sd.data.district_type == DistrictType::Rural)
+                    .map(|sd| sd.data.parcel_type == ParcelType::Rural)
                     .unwrap_or(false)
             })
             .map(|(id, analysis)| (*id, analysis.clone()))
@@ -1216,17 +1216,17 @@ mod tests {
 
         let result = data
             .resource_registry
-            .resolve_for_districts(&rural_analysis, &mut rng);
+            .resolve_for_parcels(&rural_analysis, &mut rng);
 
-        // One placement per rural super-district.
-        let mut sd_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        // One placement per rural super-parcel.
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
 
         let mut placed_count = 0usize;
         for sd_id in &sd_ids {
-            let assignment = &result.district_assignments[sd_id];
+            let assignment = &result.parcel_assignments[sd_id];
 
-            let Some(super_district) = editor.world().super_districts.get(sd_id).cloned() else {
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else {
                 continue;
             };
             let structure_type = StructureType(assignment.building.clone());
@@ -1235,11 +1235,11 @@ mod tests {
                 continue;
             };
 
-            match place_rural_building(&super_district, &structure, &mut rng, &mut editor, &data).await {
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&super_district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", assignment.building, e),
@@ -1252,17 +1252,17 @@ mod tests {
         );
 
         // Place urban processing buildings — they steer around the wall's claimed cells.
-        let urban_super_districts: Vec<_> = editor
+        let urban_districts: Vec<_> = editor
             .world()
-            .super_districts
+            .districts
             .values()
-            .filter(|sd| sd.data.district_type == DistrictType::Urban)
+            .filter(|sd| sd.data.parcel_type == ParcelType::Urban)
             .cloned()
             .collect();
-        let urban_refs: Vec<_> = urban_super_districts.iter().collect();
+        let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         log::info!(
-            "Placing {} processing-building slots across {} urban super-districts (with city wall)",
+            "Placing {} processing-building slots across {} urban super-parcels (with city wall)",
             result.processing_buildings.values().sum::<u32>(),
             urban_refs.len(),
         );
@@ -1278,7 +1278,7 @@ mod tests {
             log::warn!("Urban resource placement failed: {}", e);
         }
 
-        // Paint the ground by super-district type and mark borders. Skips claimed cells,
+        // Paint the ground by super-parcel type and mark borders. Skips claimed cells,
         // so the wall and placed buildings are visually preserved.
         let urban_wool: Block = "blue_wool".into();
         let rural_wool: Block = "green_wool".into();
@@ -1293,24 +1293,24 @@ mod tests {
                     continue;
                 }
 
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
                 let district_id = editor.world().district_map[x as usize][z as usize];
+                let parcel_id = editor.world().parcel_map[x as usize][z as usize];
 
-                let Some(super_district_id) = super_district_id else { continue };
                 let Some(district_id) = district_id else { continue };
+                let Some(parcel_id) = parcel_id else { continue };
 
                 let world = editor.world();
-                let super_district_type = world
-                    .super_districts
-                    .get(&super_district_id)
-                    .map(|sd| sd.data.district_type)
-                    .unwrap_or(DistrictType::Unknown);
+                let district_type = world
+                    .districts
+                    .get(&district_id)
+                    .map(|sd| sd.data.parcel_type)
+                    .unwrap_or(ParcelType::Unknown);
 
-                let block = match super_district_type {
-                    DistrictType::Urban => &urban_wool,
-                    DistrictType::Rural => &rural_wool,
-                    DistrictType::OffLimits => &off_limits_wool,
-                    DistrictType::Unknown => &unknown_wool,
+                let block = match district_type {
+                    ParcelType::Urban => &urban_wool,
+                    ParcelType::Rural => &rural_wool,
+                    ParcelType::OffLimits => &off_limits_wool,
+                    ParcelType::Unknown => &unknown_wool,
                 };
 
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
@@ -1320,19 +1320,19 @@ mod tests {
                 let point = Point3D::new(x, height, z);
 
                 let on_super_edge = world
-                    .super_districts
-                    .get(&super_district_id)
-                    .map(|sd| sd.data.edges.contains(&point))
-                    .unwrap_or(false);
-                let on_district_edge = world
                     .districts
                     .get(&district_id)
+                    .map(|sd| sd.data.edges.contains(&point))
+                    .unwrap_or(false);
+                let on_parcel_edge = world
+                    .parcels
+                    .get(&parcel_id)
                     .map(|d| d.data.edges.contains(&point))
                     .unwrap_or(false);
 
                 if on_super_edge {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
-                } else if on_district_edge && height >= 1 {
+                } else if on_parcel_edge && height >= 1 {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
                     editor.place_block(block, Point3D::new(x, height - 1, z)).await;
                 } else {

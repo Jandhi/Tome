@@ -1,4 +1,4 @@
-use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, districts::{build_wall, generate_districts, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, parcels::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
 pub mod geometry;
@@ -29,11 +29,11 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
     let mut editor = world.get_editor();
     let mut rng = RNG::new(32);
 
-    // === Districts ===
-    server.update_phase(visualizer::GenerationPhase::Districts);
-    generate_districts(rng.next_i64().into(), &mut editor).await;
+    // === Parcels ===
+    server.update_phase(visualizer::GenerationPhase::Parcels);
+    generate_parcels(rng.next_i64().into(), &mut editor).await;
     let mut info = SettlementInfo::new(editor.world());
-    let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Districts);
+    let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Parcels);
     server.update_snapshot(snap);
 
     // === Load data ===
@@ -85,7 +85,7 @@ async fn run_generation_once() {
     let mut editor = world.get_editor();
     let mut rng = RNG::new(32);
 
-    generate_districts(rng.next_i64().into(), &mut editor).await;
+    generate_parcels(rng.next_i64().into(), &mut editor).await;
     let mut info = SettlementInfo::new(editor.world());
 
     let data = LoadedData::load().expect("Failed to load generator data");
@@ -107,7 +107,7 @@ async fn run_generation_once() {
 async fn main() {
     dotenv::dotenv().ok();
     init_logger();
-    log::info!("Running placement_in_districts test");
+    log::info!("Running placement_in_parcels test");
 
     let use_visualizer = std::env::args().any(|arg| arg == "--visualize");
 

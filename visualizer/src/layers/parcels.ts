@@ -1,4 +1,4 @@
-import type { DistrictMapData } from "../api/types";
+import type { ParcelMapData } from "../api/types";
 
 const TYPE_COLORS: Record<string, [number, number, number]> = {
   Urban: [220, 180, 60],
@@ -11,17 +11,17 @@ function typeColor(dtype: string): [number, number, number] {
   return TYPE_COLORS[dtype] ?? TYPE_COLORS.Unknown;
 }
 
-export function renderDistricts(data: DistrictMapData): ImageData {
-  const { width, depth, districts, super_districts, district_types } = data;
+export function renderParcels(data: ParcelMapData): ImageData {
+  const { width, depth, parcels, districts, parcel_types } = data;
   const imageData = new ImageData(depth, width);
 
   // Precompute boundary info
   for (let x = 0; x < width; x++) {
     for (let z = 0; z < depth; z++) {
       const idx = x * depth + z;
-      const did = districts[idx];
-      const sid = super_districts[idx];
-      const dtype = district_types[idx];
+      const did = parcels[idx];
+      const sid = districts[idx];
+      const dtype = parcel_types[idx];
       const [r, g, b] = typeColor(dtype);
       const pixelIdx = idx * 4;
 
@@ -30,7 +30,7 @@ export function renderDistricts(data: DistrictMapData): ImageData {
         continue;
       }
 
-      // Base fill color from district type
+      // Base fill color from parcel type
       imageData.data[pixelIdx] = r;
       imageData.data[pixelIdx + 1] = g;
       imageData.data[pixelIdx + 2] = b;
@@ -42,7 +42,7 @@ export function renderDistricts(data: DistrictMapData): ImageData {
       ];
 
       let isSuperEdge = false;
-      let isDistrictEdge = false;
+      let isParcelEdge = false;
 
       for (const [nx, nz] of neighbors) {
         if (nx < 0 || nx >= width || nz < 0 || nz >= depth) {
@@ -50,24 +50,24 @@ export function renderDistricts(data: DistrictMapData): ImageData {
           continue;
         }
         const nIdx = nx * depth + nz;
-        const nSid = super_districts[nIdx];
-        const nDid = districts[nIdx];
+        const nSid = districts[nIdx];
+        const nDid = parcels[nIdx];
 
         if (nSid !== sid) {
           isSuperEdge = true;
         } else if (nDid !== did) {
-          isDistrictEdge = true;
+          isParcelEdge = true;
         }
       }
 
       if (isSuperEdge) {
-        // Thick super-district boundary — also check diagonal neighbors for thicker lines
+        // Thick super-parcel boundary — also check diagonal neighbors for thicker lines
         imageData.data[pixelIdx] = 30;
         imageData.data[pixelIdx + 1] = 30;
         imageData.data[pixelIdx + 2] = 30;
         imageData.data[pixelIdx + 3] = 230;
-      } else if (isDistrictEdge) {
-        // Thin district boundary — darken the type color
+      } else if (isParcelEdge) {
+        // Thin parcel boundary — darken the type color
         imageData.data[pixelIdx] = Math.round(r * 0.4);
         imageData.data[pixelIdx + 1] = Math.round(g * 0.4);
         imageData.data[pixelIdx + 2] = Math.round(b * 0.4);
@@ -76,12 +76,12 @@ export function renderDistricts(data: DistrictMapData): ImageData {
     }
   }
 
-  // Second pass: thicken super-district boundaries by marking pixels adjacent to them
+  // Second pass: thicken super-parcel boundaries by marking pixels adjacent to them
   const superEdge = new Uint8Array(width * depth);
   for (let x = 0; x < width; x++) {
     for (let z = 0; z < depth; z++) {
       const idx = x * depth + z;
-      const sid = super_districts[idx];
+      const sid = districts[idx];
       const neighbors: [number, number][] = [
         [x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1],
       ];
@@ -90,7 +90,7 @@ export function renderDistricts(data: DistrictMapData): ImageData {
           superEdge[idx] = 1;
           break;
         }
-        if (super_districts[nx * depth + nz] !== sid) {
+        if (districts[nx * depth + nz] !== sid) {
           superEdge[idx] = 1;
           break;
         }
@@ -98,12 +98,12 @@ export function renderDistricts(data: DistrictMapData): ImageData {
     }
   }
 
-  // Dilate super-district edges by 1 pixel for thickness
+  // Dilate super-parcel edges by 1 pixel for thickness
   for (let x = 0; x < width; x++) {
     for (let z = 0; z < depth; z++) {
       const idx = x * depth + z;
       if (superEdge[idx]) continue;
-      if (districts[idx] < 0) continue;
+      if (parcels[idx] < 0) continue;
 
       const neighbors: [number, number][] = [
         [x - 1, z], [x + 1, z], [x, z - 1], [x, z + 1],
