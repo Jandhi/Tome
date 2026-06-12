@@ -6,7 +6,7 @@ mod tests {
 
     use crate::geometry::Point3D;
     use crate::http_mod::GDMCHTTPProvider;
-    use crate::minecraft::Biome;
+    
     use crate::minecraft::Block;
     use crate::util::init_logger;
 
@@ -91,7 +91,7 @@ mod tests {
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
         let world = World::new(&provider).await.expect("Failed to create world");
 
-        let mut editor = world.get_editor();
+        let editor = world.get_editor();
 
         println!("Build area: {:?}", build_area);
         for x in 0..build_area.length() {

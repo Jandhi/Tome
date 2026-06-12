@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, districts::{WallType, build_wall, generate_districts}, materials::{Material, MaterialId, Palette, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::{build_compass, init_logger}};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, districts::{WallType, build_wall, generate_districts}, materials::{Material, MaterialId, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
     #[tokio::test]

@@ -1,5 +1,4 @@
 use std::{collections::HashMap};
-use anyhow::Ok;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}, noise::RNG};

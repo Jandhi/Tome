@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::{ai::ai::{extract_json, get_ai_message, try_ai_json}, http_mod::GDMCHTTPProvider, util::{init_logger, json_escape}};
+    use crate::{ai::ai::{extract_json, get_ai_message, try_ai_json}, http_mod::GDMCHTTPProvider, util::init_logger};
     use dotenv::dotenv;
-    use schemars::{schema_for, JsonSchema};
+    use schemars::JsonSchema;
     use serde::Serialize;
-    use serde_json::Value;
+    
 
     #[tokio::test]
     pub async fn test_ai() {

@@ -539,7 +539,7 @@ async fn build_single_class_with_signs(label: &str, size_class: SizeClass, max: 
     use crate::util::init_logger;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    
     use crate::generator::buildings_v2::{BuildCtx, build_house};
 
     init_logger();
@@ -562,7 +562,7 @@ async fn build_single_class_with_signs(label: &str, size_class: SizeClass, max: 
     let mut rng = RNG::new(seed);
     let mut plot = Plot::fully_usable(bounds);
     use crate::generator::buildings_v2::{Culture, BuildingContext};
-    use crate::generator::buildings_v2::roof::RoofStyle;
+    
     let culture = Culture::Medieval;
     let styles = culture.roof_styles();
 
@@ -690,7 +690,7 @@ async fn build_mixed_sizes_with_random_roofs() {
     use crate::util::init_logger;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    
     use crate::generator::buildings_v2::{BuildCtx, build_house};
 
     init_logger();
@@ -937,7 +937,7 @@ async fn build_furnished_desert_houses() {
     use crate::editor::World;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::util::init_logger;
-    use crate::generator::buildings_v2::roof::RoofStyle;
+    
 
     init_logger();
 
@@ -1028,7 +1028,7 @@ async fn build_furnished_desert_houses_offline() {
     use crate::editor::World;
     use crate::geometry::Rect3D;
     use crate::util::init_logger;
-    use crate::generator::buildings_v2::roof::RoofStyle;
+    
 
     init_logger();
 

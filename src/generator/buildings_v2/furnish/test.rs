@@ -9,7 +9,7 @@ use super::placement::{
     interior_rect, wall_slots, flood_fill, check_connectivity,
     placement_keeps_connectivity, is_ceiling_item, needs_wall,
     try_place_freestanding, try_place_at_wall_slot, try_place_ceiling,
-    WallSlot, PlacementResult,
+    WallSlot,
 };
 use super::block::resolve_offset;
 use super::room::{resolve_candidates, try_place_item, shuffle, DEFAULT_FILL_THRESHOLD};

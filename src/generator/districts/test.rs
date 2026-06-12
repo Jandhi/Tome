@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasDistrictData, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
@@ -18,6 +18,15 @@ mod tests {
             data: None,
             state: None,
         }
+    }
+
+    /// A standing oak sign whose front first line is `text`.
+    fn sign_block(text: &str) -> Block {
+        let data = format!(
+            "{{front_text:{{messages:['\"{}\"','\"\"','\"\"','\"\"']}}}}",
+            text
+        );
+        Block::new("oak_sign".into(), None, Some(data))
     }
 
     fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
@@ -208,6 +217,67 @@ mod tests {
             }
         }
 
+        // Log each super-district's final type/size and snapshot its centre while we hold
+        // the borrow; drop the borrow before placing the signs.
+        let sign_info: Vec<(usize, district::DistrictType, Point2D, usize)> = editor.world()
+            .super_districts.values()
+            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.average().drop_y(), sd.data.points_2d.len()))
+            .collect();
+
+        let pole: Block = "oak_fence".into();
+        for (id, district_type, centre, size) in sign_info {
+            if centre.x < 0 || centre.y < 0 || centre.x >= build_area.size.x || centre.y >= build_area.size.z {
+                log::info!("Super-district {} final type={:?} size={} cells, centre={:?} out of bounds — no sign", id, district_type, size, centre);
+                continue;
+            }
+
+            // height_map holds absolute world Y; the editor places at coords local to the build area.
+            let surface_y = height_map[centre.x as usize][centre.y as usize];
+            let (world_x, world_z) = (centre.x + build_area.origin.x, centre.y + build_area.origin.z);
+            log::info!(
+                "Super-district {} final type={:?} size={} cells — sign at world ({}, {}, {})  /tp @s {} {} {}",
+                id, district_type, size, world_x, surface_y + 4, world_z, world_x, surface_y + 5, world_z
+            );
+
+            // A 3-tall pole so the marker pokes above terrain, with the numbered sign on top.
+            let h = surface_y - build_area.origin.y;
+            for dy in 1..=3 {
+                editor.place_block(&pole, Point3D::new(centre.x, h + dy, centre.y)).await;
+            }
+            editor.place_block(&sign_block(&id.to_string()), Point3D::new(centre.x, h + 4, centre.y)).await;
+        }
+
+        // Verify the size band: every Urban/Rural (interior) district should be within ±50% of the
+        // interior average block count. Off-limits districts are exempt. See
+        // docs/plans/district_size_balancing.md.
+        let interior_sizes: Vec<(usize, district::DistrictType, usize)> = editor.world()
+            .super_districts.values()
+            .filter(|sd| matches!(sd.data.district_type, district::DistrictType::Urban | district::DistrictType::Rural))
+            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.points_2d.len()))
+            .collect();
+
+        if !interior_sizes.is_empty() {
+            let total: usize = interior_sizes.iter().map(|(_, _, s)| *s).sum();
+            let avg = total as f32 / interior_sizes.len() as f32;
+            let (lo, hi) = (avg * 0.5, avg * 1.5);
+            let mut out_of_band = 0usize;
+            for (id, district_type, size) in &interior_sizes {
+                let ratio = *size as f32 / avg;
+                let in_band = (*size as f32) >= lo && (*size as f32) <= hi;
+                if !in_band { out_of_band += 1; }
+                log::info!(
+                    "Band check: super-district {} type={:?} size={} avg={:.0} ratio={:.2} in_band={}",
+                    id, district_type, size, avg, ratio, in_band
+                );
+            }
+            let min = interior_sizes.iter().map(|(_, _, s)| *s).min().unwrap();
+            let max = interior_sizes.iter().map(|(_, _, s)| *s).max().unwrap();
+            log::info!(
+                "Band summary: {} interior districts, avg={:.0}, min={}, max={}, max/min={:.2}, band [{:.0}, {:.0}], {} out of band",
+                interior_sizes.len(), avg, min, max, max as f32 / min.max(1) as f32, lo, hi, out_of_band
+            );
+        }
+
         editor.flush_buffer().await;
     }
 
@@ -286,9 +356,7 @@ mod tests {
         use crate::generator::buildings_v2::roof::RoofStyle;
         use crate::generator::buildings_v2::roof::gable::GablePitch;
         use crate::generator::buildings_v2::footprint::SizeClass;
-        use crate::generator::city_houses::{
-            fill_interior, place_block_frontage, plot_from_block,
-        };
+        use crate::generator::city_houses::plot_from_block;
         use crate::generator::data::LoadedData;
         use crate::generator::materials::PaletteId;
         use crate::generator::paths::PathType;
@@ -389,12 +457,10 @@ mod tests {
         // here with the per-house roll.
         use crate::generator::buildings_v2::{BuildingContext, build_house};
         use crate::generator::city_houses::{
-            INTERIOR_BUFFER_CELLS, SIDE_BUFFER_CELLS, detect_frontages,
+            SIDE_BUFFER_CELLS, detect_frontages,
             detect_perimeter_frontages, rect_from_frontage, synthetic_plot_bounds,
         };
-        use crate::generator::buildings_v2::footprint::{
-            Footprint, generate_footprint,
-        };
+        use crate::generator::buildings_v2::footprint::Footprint;
         use crate::geometry::Point2D as P2;
 
         fn roll_palette(
@@ -703,7 +769,7 @@ mod tests {
             };
             let a = &result.district_assignments[id];
             println!("║   Super-District {:>3} ({:<25}) → {} x2 [{}]",
-                id.0, biome_names, a.resource, a.building);
+                id.0, biome_names, a.primary_resource, a.building);
         }
 
         println!("║");

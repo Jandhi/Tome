@@ -2,24 +2,37 @@ biome_resources:
   # Temperate
   minecraft:plains:
     - wheat
+    - wool
+    - cow
   minecraft:sunflower_plains:
     - wheat
+    - honey
+    - wool
+    - cow
   minecraft:forest:
     - wood
+    - honey
   minecraft:flower_forest:
     - wood
+    - honey
   minecraft:birch_forest:
     - wood
+    - honey
   minecraft:old_growth_birch_forest:
     - wood
+    - honey
   minecraft:dark_forest:
     - wood
+    - honey
   minecraft:swamp:
     - wood
+    - sugar_cane
   minecraft:mangrove_swamp:
     - wood
+    - sugar_cane
   minecraft:pale_garden:
     - wood
+    - honey
 
   # Warm / Tropical
   minecraft:jungle:
@@ -31,44 +44,67 @@ biome_resources:
   minecraft:bamboo_jungle:
     - wood
     - wheat
+    - sugar_cane
   minecraft:savanna:
     - wood
     - wheat
+    - wool
+    - cow
   minecraft:savanna_plateau:
     - wood
+    - wool
+    - cow
     - iron_ore
   minecraft:windswept_savanna:
     - wood
     - wheat
   minecraft:desert:
     - iron_ore
+    - coal
+    - sugar_cane
   minecraft:badlands:
     - iron_ore
+    - coal
+    - sugar_cane
+    - wool
+    - cow
   minecraft:wooded_badlands:
     - wood
     - iron_ore
+    - coal
+    - sugar_cane
   minecraft:eroded_badlands:
     - iron_ore
+    - coal
+    - sugar_cane
 
   # Cold
   minecraft:taiga:
     - wood
+    - honey
   minecraft:old_growth_pine_taiga:
     - wood
+    - honey
   minecraft:old_growth_spruce_taiga:
     - wood
+    - honey
   minecraft:windswept_hills:
     - iron_ore
+    - coal
   minecraft:windswept_gravelly_hills:
     - iron_ore
+    - coal
   minecraft:windswept_forest:
     - wood
+    - coal
     - iron_ore
 
   # Snowy / Frozen
   minecraft:snowy_plains:
     - iron_ore
     - wheat
+    - wool
+    - cow
   minecraft:ice_spikes:
     - iron_ore
   minecraft:snowy_taiga:
@@ -78,23 +114,30 @@ biome_resources:
   minecraft:grove:
     - wood
     - iron_ore
+    - coal
   minecraft:frozen_peaks:
     - iron_ore
+    - coal
   minecraft:jagged_peaks:
     - iron_ore
+    - coal
 
 
   # Mountain
   minecraft:stony_peaks:
     - iron_ore
+    - coal
   minecraft:meadow:
     - iron_ore
+    - honey
     - wheat
   minecraft:cherry_grove:
     - wood
     - iron_ore
+    - honey
   minecraft:mountains:
     - iron_ore
+    - coal
 
 
   # Ocean

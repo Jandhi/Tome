@@ -71,7 +71,7 @@ impl GDMCHTTPProvider {
 
         let command = format!("give @a written_book[written_book_content={{title:\"{}\",author:\"{}\",pages:[{}]}}]", title, author, pages_json);
 
-        println!("Command: {}", command);
+        info!("Command: {}", command);
 
         Ok(self.command(vec![command]).await?[0].clone())
     }

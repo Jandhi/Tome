@@ -171,7 +171,7 @@ pub async fn generate_chronicle(editor: &Editor, settlement_info : &mut Settleme
 
         match result {
             Result::Ok(()) => {
-                println!("Chronicle generated successfully.");
+                info!("Chronicle generated successfully.");
                 return anyhow::Ok(());
             },
             Err(e) => {

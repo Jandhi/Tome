@@ -185,7 +185,7 @@ async fn place_writes_stair_blocks_on_sloped_world() {
     use crate::editor::World;
     use crate::geometry::{Point3D, Rect3D};
     use crate::generator::buildings_v2::BuildCtx;
-    use crate::generator::buildings_v2::door_ramp::{place_door_ramps, plan_door_ramps_from_world};
+    use crate::generator::buildings_v2::door_ramp::place_door_ramps;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
 
