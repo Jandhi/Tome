@@ -9,6 +9,7 @@ use crate::{
         BuildClaim,
         data::LoadedData,
         districts::SuperDistrict,
+        materials::{Palette, Placer},
         nbts::{Rotation, Structure, StructureID, place_structure},
         terrain::{force_height, log_trees},
     },
@@ -158,7 +159,7 @@ pub async fn place_rural_building(
         structure.id.0, super_district.id, candidate.centre, candidate.direction, score.total
     );
 
-    if let Err(e) = execute_placement(candidate, rect, structure, editor, data).await {
+    if let Err(e) = execute_placement(candidate, rect, structure, editor, data, rng, None).await {
         warn!(
             "place_structure failed for '{}' in super-district {:?}: {}",
             structure.id.0, super_district.id, e
@@ -181,6 +182,7 @@ pub async fn place_urban_building(
     rng: &mut RNG,
     editor: &mut Editor,
     data: &LoadedData,
+    palette: Option<&Palette>,
 ) -> Result<()> {
     if structure.size_xz.0 <= 0 || structure.size_xz.1 <= 0 {
         warn!(
@@ -242,7 +244,7 @@ pub async fn place_urban_building(
         structure.id.0, candidate.centre, candidate.direction, score.total
     );
 
-    if let Err(e) = execute_placement(candidate, rect, structure, editor, data).await {
+    if let Err(e) = execute_placement(candidate, rect, structure, editor, data, rng, palette).await {
         warn!("place_structure failed for urban '{}': {}", structure.id.0, e);
         return Err(e);
     }
@@ -258,6 +260,10 @@ pub async fn place_urban_buildings(
     rng: &mut RNG,
     editor: &mut Editor,
     data: &LoadedData,
+    // Output palette to re-skin each structure into (e.g. desert sandstone). The
+    // structure's own `palette` field is the input; blocks are swapped role-for-
+    // role into this one. `None` places the structures with their baked blocks.
+    palette: Option<&Palette>,
 ) -> Result<()> {
     // Flatten counts into a single Vec<String> with multiplicity, then pop randomly
     // until empty. Sort for deterministic ordering before randomising.
@@ -278,7 +284,7 @@ pub async fn place_urban_buildings(
         };
 
         if let Err(e) =
-            place_urban_building(urban_super_districts, &structure, rng, editor, data).await
+            place_urban_building(urban_super_districts, &structure, rng, editor, data, palette).await
         {
             warn!("Urban placement failed for '{}': {}", building, e);
         }
@@ -417,6 +423,8 @@ async fn execute_placement(
     structure: &Structure,
     editor: &mut Editor,
     data: &LoadedData,
+    rng: &mut RNG,
+    palette: Option<&Palette>,
 ) -> Result<()> {
     let footprint_cells: Vec<Point2D> = rect.iter().collect();
 
@@ -440,17 +448,21 @@ async fn execute_placement(
         force_height(editor, &blend_points, true).await;
     }
 
-    // Step 5 — place the NBT.
+    // Step 5 — place the NBT. With an output palette, build a placer so the
+    // structure's blocks are swapped role-for-role from its baked input palette
+    // into the requested one (e.g. desert sandstone); without one, place as-is.
     let anchor_y = target_y + structure.y_offset;
     let offset = Point3D::new(candidate.centre.x, anchor_y, candidate.centre.y);
+    let mut placer_rng = rng.derive();
+    let mut placer = palette.map(|_| Placer::new(&data.materials, &mut placer_rng));
     place_structure(
         editor,
-        None,
+        placer.as_mut(),
         structure,
         offset,
         candidate.direction,
         Some(data),
-        None,
+        palette,
         false,
         false,
     )

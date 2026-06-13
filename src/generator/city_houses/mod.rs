@@ -17,7 +17,7 @@ mod test;
 
 use std::collections::HashSet;
 
-use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
+use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint_biased};
 use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseOutput, build_house};
 use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::geometry::{Point2D, Rect2D};
@@ -37,8 +37,8 @@ pub fn default_interior_size_pool() -> Vec<SizeClass> {
 }
 
 /// Cells around a placed footprint (per side) that are marked unusable so
-/// adjacent buildings don't share walls.
-pub const INTERIOR_BUFFER_CELLS: i32 = 1;
+/// adjacent buildings don't share walls. 0 = buildings may sit flush together.
+pub const INTERIOR_BUFFER_CELLS: i32 = 0;
 
 /// Greedy interior fill against whatever `plot.usable` cells remain. Rotates
 /// through `size_pool`; if a class doesn't fit, falls back to smaller classes
@@ -61,7 +61,7 @@ pub async fn fill_interior(
         let size_class = size_pool[attempt % size_pool.len()];
         attempt += 1;
 
-        let footprint = match try_generate_footprint(ctx, plot, size_class, size_pool) {
+        let footprint = match try_generate_footprint(ctx, plot, size_class, size_pool, culture.square_bias()) {
             Some(fp) => fp,
             None => break,
         };
@@ -89,14 +89,15 @@ fn try_generate_footprint(
     plot: &Plot,
     primary: SizeClass,
     size_pool: &[SizeClass],
+    square_bias: i32,
 ) -> Option<Footprint> {
-    if let Some(fp) = generate_footprint(ctx.rng, plot, &primary) {
+    if let Some(fp) = generate_footprint_biased(ctx.rng, plot, &primary, square_bias) {
         return Some(fp);
     }
     let mut fallback: Vec<SizeClass> = size_pool.iter().copied().filter(|s| *s != primary).collect();
     fallback.sort_by_key(|s| s.min_side());
     for s in fallback {
-        if let Some(fp) = generate_footprint(ctx.rng, plot, &s) {
+        if let Some(fp) = generate_footprint_biased(ctx.rng, plot, &s, square_bias) {
             return Some(fp);
         }
     }

@@ -77,6 +77,17 @@ impl Culture {
             Culture::Japanese => (0, 1),
         }
     }
+
+    /// Percent chance that each rect (core or wing) is forced square during
+    /// footprint generation. Square rects get domed roofs under the flat-roof
+    /// (desert) path — see `roof::dome`. Non-desert cultures keep their natural
+    /// aspect-ratio distribution (0 = no bias, RNG stream untouched).
+    pub fn square_bias(&self) -> i32 {
+        match self {
+            Culture::Desert => 40,
+            _ => 0,
+        }
+    }
 }
 
 /// Per-building context threaded through the pipeline. Bundles culture, size,

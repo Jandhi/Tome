@@ -43,6 +43,7 @@ fn generate_core(
     candidate: &Rect2D,
     size_class: &SizeClass,
     target_area: i32,
+    square_bias: i32,
 ) -> Option<Rect2D> {
     // Core takes less of the target area when more wings are expected
     // 0 wings: 100%, 1 wing: 50-65%, 2 wings: 40-55%, 3 wings: 35-50%
@@ -69,6 +70,16 @@ fn generate_core(
 
     width = width.min(candidate.length());
     depth = depth.min(candidate.width());
+
+    // Square bias (desert): collapse the core to a square so it can take a
+    // dome. Shrinking to the smaller side keeps it inside the candidate area;
+    // min of two odds is odd, so the result stays odd. Guarded so a zero bias
+    // never draws from the RNG and leaves other cultures' streams untouched.
+    if square_bias > 0 && rng.percent(square_bias) {
+        let s = width.min(depth);
+        width = s;
+        depth = s;
+    }
 
     if width < size_class.min_side() || depth < size_class.min_side() {
         return None;
@@ -142,6 +153,7 @@ fn attach_wing(
     core_area: i32,
     wings_left: i32,
     occupied: &[Span],
+    square_bias: i32,
 ) -> Option<(Rect2D, Span)> {
     // Wing area: 30-70% of core area, but at least min_side^2 if budget allows.
     let max_budget = if wings_left > 1 {
@@ -171,19 +183,48 @@ fn attach_wing(
     // Pick a random gap
     let &(gap_start, gap_len) = rng.choose(&gaps);
 
+    // Available depth perpendicular to this side. Computed up front so the
+    // square bias can size the wing against it (it depends only on geometry,
+    // not on the chosen wing length).
+    let max_perp = match side {
+        Side::North => core.min().y - candidate.min().y,
+        Side::South => candidate.max().y - core.max().y,
+        Side::West => core.min().x - candidate.min().x,
+        Side::East => candidate.max().x - core.max().x,
+    };
+
     // Wing length: fit within the gap, capped at 80% of full edge to keep a notch
     let max_along = gap_len.min(edge_len * 4 / 5);
     if max_along < min_side {
         return None;
     }
     let wing_along = rng.rand_i32_range(min_side, max_along + 1);
-    let wing_along = snap_odd(wing_along).min(gap_len);
+    let mut wing_along = snap_odd(wing_along).min(gap_len);
     if wing_along < min_side {
         return None;
     }
 
+    // Square bias (desert): size the wing as a square so it can take a dome,
+    // shrinking the longer axis to fit both the gap and the available depth.
+    // Snap down to odd so the square never exceeds either bound. Guarded so a
+    // zero bias never draws from the RNG.
+    let mut forced_square: Option<i32> = None;
+    if square_bias > 0 && rng.percent(square_bias) {
+        let mut s = wing_along.min(max_perp);
+        if s % 2 == 0 {
+            s -= 1;
+        }
+        if s >= min_side {
+            wing_along = s;
+            forced_square = Some(s);
+        }
+    }
+
     // Wing depth perpendicular to the edge
-    let wing_perp = snap_odd(wing_area / wing_along).max(min_side);
+    let wing_perp = match forced_square {
+        Some(s) => s,
+        None => snap_odd(wing_area / wing_along).max(min_side),
+    };
     if wing_perp < min_side {
         return None;
     }
@@ -199,14 +240,6 @@ fn attach_wing(
         (gap_len - wing_along) / 2
     };
     let offset = gap_start + offset_in_gap;
-
-    // Compute available depth on this side
-    let max_perp = match side {
-        Side::North => core.min().y - candidate.min().y,
-        Side::South => candidate.max().y - core.max().y,
-        Side::West => core.min().x - candidate.min().x,
-        Side::East => candidate.max().x - core.max().x,
-    };
 
     let wing_perp = wing_perp.min(max_perp);
     if wing_perp < min_side {
@@ -370,6 +403,7 @@ fn generate_wings(
     candidate: &Rect2D,
     size_class: &SizeClass,
     target_area: i32,
+    square_bias: i32,
 ) -> Vec<Rect2D> {
     if size_class.max_wings() == 0 {
         return vec![];
@@ -392,7 +426,7 @@ fn generate_wings(
         let spans = occupied.get(&side).map(|v| v.as_slice()).unwrap_or(&[]);
 
         let wings_left = num_wings - attempt;
-        if let Some((wing, span)) = attach_wing(rng, core, side, candidate, remaining, MIN_WING_SIDE, core.area(), wings_left, spans) {
+        if let Some((wing, span)) = attach_wing(rng, core, side, candidate, remaining, MIN_WING_SIDE, core.area(), wings_left, spans, square_bias) {
             current_area += wing.area();
             occupied.entry(side).or_default().push(span);
             wings.push(wing);
@@ -417,6 +451,7 @@ pub fn generate_layouts(
     size_class: &SizeClass,
     core_count: i32,
     wings_per_core: i32,
+    square_bias: i32,
 ) -> Option<GeneratedLayouts> {
     let candidate = find_candidate(plot, size_class)?;
 
@@ -426,7 +461,7 @@ pub fn generate_layouts(
     let mut layouts = Vec::new();
 
     for _ in 0..core_count {
-        let core = match generate_core(rng, &candidate, size_class, target_area) {
+        let core = match generate_core(rng, &candidate, size_class, target_area, square_bias) {
             Some(c) => c,
             None => continue,
         };
@@ -435,7 +470,7 @@ pub fn generate_layouts(
             layouts.push(Layout { core, wings: vec![] });
         } else {
             for _ in 0..wings_per_core {
-                let wings = generate_wings(rng, &core, &candidate, size_class, target_area);
+                let wings = generate_wings(rng, &core, &candidate, size_class, target_area, square_bias);
                 layouts.push(Layout { core, wings });
             }
         }
@@ -465,7 +500,7 @@ pub fn generate_cores(
 
     let mut cores = Vec::new();
     for _ in 0..count {
-        if let Some(core) = generate_core(rng, &candidate, size_class, target_area) {
+        if let Some(core) = generate_core(rng, &candidate, size_class, target_area, 0) {
             cores.push(core);
         }
     }
@@ -646,7 +681,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::House, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::House, 4, 3, 0).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} HOUSE layouts (target_area={}):", layouts.len(), result.target_area);
@@ -672,7 +707,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(77);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3, 0).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} TOWNHOUSE layouts (target_area={}):", layouts.len(), result.target_area);
@@ -693,7 +728,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(123);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::Manor, 3, 4).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Manor, 3, 4, 0).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} MANOR layouts (target_area={}):", layouts.len(), result.target_area);
@@ -714,7 +749,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::Cottage, 5, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Cottage, 5, 3, 0).unwrap();
         let layouts = &result.layouts;
 
         println!("Generated {} COTTAGE layouts:", layouts.len());
@@ -743,7 +778,7 @@ mod tests {
         }
 
         let mut rng = RNG::new(55);
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 4, 3, 0).unwrap();
         let layouts = &result.layouts;
 
         println!("Layouts with obstacles:");
@@ -770,7 +805,7 @@ mod tests {
         let plot = Plot::fully_usable(bounds);
         let mut rng = RNG::new(42);
 
-        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 6, 4).unwrap();
+        let result = generate_layouts(&mut rng, &plot, &SizeClass::Hall, 6, 4, 0).unwrap();
 
         // Print all scores
         println!("All layout scores (target_area={}):", result.target_area);

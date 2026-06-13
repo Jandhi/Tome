@@ -237,7 +237,7 @@ fn layout_gallery() {
         ("MANOR", SizeClass::Manor),
     ] {
         let mut rng = RNG::new(42);
-        if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
+        if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4, 0) {
             println!("\n========== {} ==========", name);
             println!("{}", render_gallery(&result.layouts, None, 4, 20, 20));
         }
@@ -257,7 +257,7 @@ fn layout_gallery_varied_seeds() {
         let mut all_layouts = Vec::new();
         for seed in [1, 17, 42, 77, 99, 123, 256, 512, 1000, 2024, 3333, 9999] {
             let mut rng = RNG::new(seed);
-            if let Some(result) = generate_layouts(&mut rng, &plot, &class, 1, 1) {
+            if let Some(result) = generate_layouts(&mut rng, &plot, &class, 1, 1, 0) {
                 if let Some(layout) = result.layouts.into_iter().next() {
                     all_layouts.push(layout);
                 }
@@ -282,7 +282,7 @@ fn select_layout_gallery() {
         let mut scores = Vec::new();
         for seed in [1, 17, 42, 77, 99, 123, 256, 512, 1000, 2024, 3333, 9999] {
             let mut rng = RNG::new(seed);
-            if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
+            if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4, 0) {
                 let mut select_rng = rng.derive();
                 if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side() * class.min_side()) {
                     let score = score_layout(&winner, result.target_area, &result.candidate);

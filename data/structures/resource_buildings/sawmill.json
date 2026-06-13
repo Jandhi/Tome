@@ -10,5 +10,6 @@
     9,
     17
   ],
-  "y_offset": 0
+  "y_offset": 0,
+  "palette": "resource_base"
 }

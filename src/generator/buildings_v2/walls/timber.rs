@@ -17,8 +17,8 @@ use super::super::pipeline::BuildCtx;
 use super::segments::{build_segments, is_inside_opening, segment_cells};
 
 /// Per-panel decorative motif laid inside a stud-bounded panel. `Empty` is a
-/// blank wattle-and-daub panel; the others place stair-block braces at the
-/// panel corners. `Pillar` is a full-height extra stud, useful as a divider
+/// blank wattle-and-daub panel; the others place full-block braces along the
+/// panel diagonals. `Pillar` is a full-height extra stud, useful as a divider
 /// inside composite sequences like `/`-`|`-`\`.
 // `Pillar`, `KRight`, and `KLeft` are wired through `place_frame` but not yet
 // emitted by `pick_panel_sequence`; kept as ready-to-use motifs.
@@ -41,7 +41,7 @@ pub enum PanelShape {
 /// studs; `Braced` adds corner knee braces on top of the studs. `Decorated`
 /// fills each stud-bounded panel with a single uniform `PanelShape` motif
 /// (one design per wall — never a mix). Braces are placed as contrasting
-/// plank stairs, not logs, so the frame reads as posts + lighter carpentry.
+/// plank blocks, not logs, so the frame reads as posts + lighter carpentry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimberPattern {
     Plain,
@@ -175,8 +175,8 @@ pub async fn place_frame(
     );
 
     // Braces (panel diagonals + corner knee braces) use a contrasting plank
-    // wood placed as stairs, so they read as lighter carpentry against the log
-    // frame instead of thickening it. Falls back to the pillar wood if the
+    // wood placed as full blocks, so they read as lighter carpentry against the
+    // log frame instead of thickening it. Falls back to the pillar wood if the
     // palette defines no plank role.
     let brace_id = palette
         .get_material(MaterialRole::PrimaryWood)
@@ -205,15 +205,6 @@ pub async fn place_frame(
         let y_axis_state: HashMap<String, String> =
             HashMap::from([("axis".to_string(), "y".to_string())]);
         let stud_state = if supports_axis { Some(&y_axis_state) } else { None };
-        // Direction of increasing cell index along this segment. Brace stairs
-        // face down-slope: a `/` (rising with idx) faces -walk_dir, a `\`
-        // (falling with idx) faces +walk_dir — the gable-rake convention.
-        let walk_dir = match seg.facing {
-            Cardinal::South => Cardinal::East,
-            Cardinal::North => Cardinal::West,
-            Cardinal::East => Cardinal::North,
-            Cardinal::West => Cardinal::South,
-        };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
 
@@ -270,7 +261,7 @@ pub async fn place_frame(
         }
 
         // Per-panel decorations: pick one uniform PanelShape for the whole
-        // segment, then place stepped plank-stair braces (and optional extra
+        // segment, then place stepped plank-block braces (and optional extra
         // pillar columns) inside each panel. Diagonals step one column and one
         // row per cell — e.g. `\` from upper-left skips the top row then walks
         // (col+1, ry-1) until it hits the bottom or right edge of the panel.
@@ -290,8 +281,8 @@ pub async fn place_frame(
                 let mid = (inner_left + inner_right) / 2;
 
                 // (col, ry, rising): rising = the diagonal ascends as the cell
-                // index increases (a `/`), so its stair faces down-slope toward
-                // -walk_dir; a falling `\` faces +walk_dir.
+                // index increases (a `/`) vs. descends (a `\`). Retained to
+                // describe the brace geometry; full-block braces ignore it.
                 let mut diagonal_braces: Vec<(u32, u32, bool)> = Vec::new();
                 let mut pillars: Vec<u32> = Vec::new();
                 match shape {
@@ -403,20 +394,15 @@ pub async fn place_frame(
                     }
                 }
 
-                for (idx, ry, rising) in diagonal_braces {
+                for (idx, ry, _rising) in diagonal_braces {
                     if (idx as usize) >= cells.len() { continue; }
                     if is_inside_opening(&seg.openings, idx, ry) { continue; }
                     let cell = cells[idx as usize];
-                    let facing = if rising { -walk_dir } else { walk_dir };
-                    let brace_state = HashMap::from([
-                        ("facing".to_string(), facing.to_string()),
-                        ("half".to_string(), "bottom".to_string()),
-                    ]);
                     brace_placer.place_block_forced(
                         editor,
                         Point3D::new(cell.x, floor_y + ry as i32, cell.y),
-                        BlockForm::Stairs,
-                        Some(&brace_state),
+                        BlockForm::Block,
+                        None,
                         None,
                     ).await;
                 }
@@ -437,11 +423,11 @@ pub async fn place_frame(
             }
         }
 
-        // Knee braces: stepped plank-stair diagonals near each segment corner,
+        // Knee braces: stepped plank-block diagonals near each segment corner,
         // just inside the corner post. Left corner gets a short `\` (falling
-        // from idx=1, faces +walk_dir), right corner gets a mirrored `/`
-        // (rising into idx=length-2, faces -walk_dir). Each brace is 2 cells
-        // long, descending from one row below the ceiling.
+        // from idx=1), right corner gets a mirrored `/` (rising into
+        // idx=length-2). Each brace is 2 cells long, descending from one row
+        // below the ceiling.
         if apply_pattern && pattern.has_corner_braces() && seg.length >= 5 && seg.height >= 3 {
             let top_ry = seg.height - 1;
             // (col, ry, rising) — see the panel-decoration braces above.
@@ -451,20 +437,15 @@ pub async fn place_frame(
                 (seg.length as u32 - 2, top_ry - 1, true),
                 (seg.length as u32 - 3, top_ry - 2, true),
             ];
-            for (idx, ry, rising) in knee_braces {
+            for (idx, ry, _rising) in knee_braces {
                 if (idx as usize) >= cells.len() { continue; }
                 if is_inside_opening(&seg.openings, idx, ry) { continue; }
                 let cell = cells[idx as usize];
-                let facing = if rising { -walk_dir } else { walk_dir };
-                let brace_state = HashMap::from([
-                    ("facing".to_string(), facing.to_string()),
-                    ("half".to_string(), "bottom".to_string()),
-                ]);
                 brace_placer.place_block_forced(
                     editor,
                     Point3D::new(cell.x, floor_y + ry as i32, cell.y),
-                    BlockForm::Stairs,
-                    Some(&brace_state),
+                    BlockForm::Block,
+                    None,
                     None,
                 ).await;
             }
@@ -587,30 +568,9 @@ pub(super) fn stud_indices(length: u32, spacing: u32) -> Vec<u32> {
     Vec::new()
 }
 
-/// Returns true if a Minecraft block of the given material id accepts an
-/// `axis` blockstate. This covers logs, stripped logs, pillars, stems,
-/// hyphae, and a handful of axis-rotatable stone blocks.
+/// Returns true if a block of the given material id accepts an `axis`
+/// blockstate. Delegates to [`BlockID::is_axis_block`] so the namespace handling
+/// and the axis-block list live in one place.
 fn material_supports_axis(id: &str) -> bool {
-    let id = id.strip_prefix("minecraft:").unwrap_or(id);
-    if id.ends_with("_log")
-        || id.ends_with("_wood")
-        || id.ends_with("_stem")
-        || id.ends_with("_hyphae")
-        || id.ends_with("_pillar")
-    {
-        return true;
-    }
-    matches!(
-        id,
-        "basalt"
-            | "polished_basalt"
-            | "deepslate"
-            | "bone_block"
-            | "bamboo_block"
-            | "stripped_bamboo_block"
-            | "muddy_mangrove_roots"
-            | "ochre_froglight"
-            | "verdant_froglight"
-            | "pearlescent_froglight"
-    )
+    crate::minecraft::BlockID::from(id).is_axis_block()
 }

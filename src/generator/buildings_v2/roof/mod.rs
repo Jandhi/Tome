@@ -8,6 +8,7 @@
 mod test;
 
 pub mod blocks;
+pub mod dome;
 pub mod gable;
 pub mod heightmap;
 

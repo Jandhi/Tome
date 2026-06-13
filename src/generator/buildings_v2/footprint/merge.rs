@@ -461,7 +461,7 @@ mod tests {
             println!("\n========== {} ==========", name);
             for seed in [1, 42, 77, 123, 256, 512] {
                 let mut rng = RNG::new(seed);
-                if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4) {
+                if let Some(result) = generate_layouts(&mut rng, &plot, &class, 4, 4, 0) {
                     let mut select_rng = rng.derive();
                     if let Some(winner) = select_layout(&mut select_rng, &result.layouts, result.target_area, &result.candidate, class.min_side() * class.min_side()) {
                         let score = score_layout(&winner, result.target_area, &result.candidate);

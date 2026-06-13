@@ -3,7 +3,7 @@ use crate::geometry::{Point2D, Point3D, Rect2D};
 use crate::noise::RNG;
 use crate::minecraft::Block;
 use crate::generator::buildings_v2::RoomType;
-use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint, find_boundaries};
+use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint, generate_footprint_biased, find_boundaries};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::frame::{Frame, generate_frame};
 use super::{assign_types_to_rooms, RoomRole, RoomPlan, Room, ConstraintMap};
@@ -566,7 +566,7 @@ async fn build_single_class_with_signs(label: &str, size_class: SizeClass, max: 
     let culture = Culture::Medieval;
     let styles = culture.roof_styles();
 
-    let footprints = fill_plot_multi(&mut rng, &mut plot, &[size_class], max);
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &[size_class], max, culture.square_bias());
     let n = footprints.len();
 
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
@@ -646,7 +646,7 @@ async fn build_single_manor() {
     let culture = Culture::Medieval;
     let pitch = culture.roof_styles()[0];
 
-    let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 1);
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 1, culture.square_bias());
     let (footprint, _) = footprints.into_iter().next().expect("no footprint generated");
 
     let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
@@ -731,7 +731,7 @@ async fn build_mixed_sizes_with_random_roofs() {
         SizeClass::Hall, SizeClass::Manor,
     ];
 
-    let footprints_with_class = fill_plot_multi(&mut rng, &mut plot, &size_classes, 40);
+    let footprints_with_class = fill_plot_multi(&mut rng, &mut plot, &size_classes, 40, 0);
     let n = footprints_with_class.len();
 
     for (i, (footprint, size_class)) in footprints_with_class.into_iter().enumerate() {
@@ -806,7 +806,7 @@ async fn run_furnished_houses_pipeline_jettied(
     let mut plot = Plot::fully_usable(bounds);
     let size_classes = [SizeClass::Cottage, SizeClass::House, SizeClass::Hall];
 
-    let footprints = fill_plot_multi(&mut rng, &mut plot, &size_classes, 12);
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &size_classes, 12, culture.square_bias());
     let n = footprints.len();
 
     let mut ctx = BuildCtx::new(editor, &data, &palette, &mut rng);
@@ -848,11 +848,12 @@ fn fill_plot_multi(
     plot: &mut Plot,
     size_classes: &[SizeClass],
     max: usize,
+    square_bias: i32,
 ) -> Vec<(Footprint, SizeClass)> {
     let mut out = Vec::new();
     for i in 0..max {
         let size_class = size_classes[i % size_classes.len()];
-        let fp = match generate_footprint(rng, plot, &size_class) {
+        let fp = match generate_footprint_biased(rng, plot, &size_class, square_bias) {
             Some(f) => f,
             None => break,
         };
@@ -1049,6 +1050,82 @@ async fn build_furnished_desert_houses_offline() {
     println!("Done — {} furnished desert buildings placed (offline)", count);
 }
 
+/// Dome regression: a desert (flat-roof) house on a square footprint must grow
+/// a dome — a stepped hemisphere rising above the wall-top deck — rather than a
+/// flat slab deck. Builds a 7×7 single-rect house and asserts the centre column
+/// has solid roof blocks well above the deck, capped by air.
+#[tokio::test]
+async fn desert_dome_built_on_square_rect_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::dome::is_dome_eligible;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(127, 127, 127));
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Desert.palette_id()).expect("palette").clone();
+
+    // A 7×7 square rect → dome-eligible (odd side, ≥ MIN_DOME_SIDE).
+    let square = Rect2D::from_points(Point2D::new(40, 40), Point2D::new(46, 46));
+    assert!(is_dome_eligible(&square), "test setup: 7×7 rect must be dome-eligible");
+    let bounds = Rect2D::from_points(Point2D::new(30, 30), Point2D::new(56, 56));
+
+    let mut rng = RNG::new(7);
+    let footprint = Footprint::from_rect(square);
+    let bctx = BuildingContext::new(Culture::Desert, SizeClass::House, RoofStyle::Flat);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds).await.expect("build_house failed");
+
+    let center = square.midpoint();
+    let roof_y = house.frame.roof_y(0);
+    let deck_y = roof_y - 2;
+
+    let at = |p: Point2D, y: i32| editor.try_get_block(Point3D::new(p.x, y, p.y));
+    let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
+    let is_prismarine = |b: &Block| b.id.as_str().contains("dark_prismarine");
+
+    // Flat prismarine layer seals the room at wall-top.
+    assert!(
+        at(center, deck_y).as_ref().map_or(false, is_prismarine),
+        "flat layer at y={deck_y} should be dark prismarine, got {:?}", at(center, deck_y),
+    );
+    // Square base course at deck_y+1 fills the whole square — including corners
+    // (the "square not circle" layer the dome sits on).
+    let corner = square.min();
+    assert!(
+        at(corner, deck_y + 1).as_ref().map_or(false, is_prismarine),
+        "square base corner at y={} should be dark prismarine, got {:?}", deck_y + 1, at(corner, deck_y + 1),
+    );
+    // But the dome curve does not reach the corner — air above the base there.
+    assert!(
+        at(corner, deck_y + 2).as_ref().map_or(true, is_air),
+        "corner should be bare above the base course, got {:?}", at(corner, deck_y + 2),
+    );
+    // A 7×7 hemisphere (r=3.5) curves up the centre column to deck_y+3, slab crown
+    // at deck_y+4.
+    let apex_y = deck_y + 3;
+    assert!(
+        at(center, apex_y).as_ref().map_or(false, is_prismarine),
+        "dome apex at y={apex_y} should be dark prismarine, got {:?}", at(center, apex_y),
+    );
+    // And the dome is finite — nothing solid well above the crown.
+    assert!(
+        at(center, deck_y + 6).as_ref().map_or(true, is_air),
+        "no roof blocks expected at y={}, got {:?}", deck_y + 6, at(center, deck_y + 6),
+    );
+
+    println!("Desert dome OK: deck_y={deck_y}, apex_y={apex_y}, center={center:?}");
+}
+
 /// Cellar regression: a Manor always rolls a cellar (size chance = always) and
 /// the synthetic world is dry, so `has_cellar` must be true and the carved
 /// volume must be present in the editor — air at the cellar floor surface and a
@@ -1147,17 +1224,21 @@ async fn pipeline_invariants_property_test() {
         3000, 4000, 5000, 6000, 7000, 8000, 9000, 12345, 54321, 98765,
     ];
 
+    use crate::generator::buildings_v2::Culture;
     let mut total_buildings = 0;
-    for &seed in &seeds {
-        // Fresh synthetic world + editor per seed so block caches and build
-        // claims from one seed don't contaminate the next.
-        let world = World::synthetic(build_area, 64);
-        let mut editor = world.get_offline_editor();
-        use crate::generator::buildings_v2::Culture;
-        total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false, Culture::Medieval).await;
+    // Sweep Medieval (gable roofs) and Desert (flat roofs + square-rect domes)
+    // so both roof families are exercised against the invariant checks.
+    for culture in [Culture::Medieval, Culture::Desert] {
+        for &seed in &seeds {
+            // Fresh synthetic world + editor per seed so block caches and build
+            // claims from one seed don't contaminate the next.
+            let world = World::synthetic(build_area, 64);
+            let mut editor = world.get_offline_editor();
+            total_buildings += run_furnished_houses_pipeline(&mut editor, bounds, seed, false, culture).await;
+        }
     }
 
-    println!("Property test: {} buildings across {} seeds, all invariants hold",
+    println!("Property test: {} buildings across {} seeds × 2 cultures, all invariants hold",
              total_buildings, seeds.len());
 }
 
@@ -1240,7 +1321,7 @@ async fn pipeline_invariants_property_test_jetty_multirect() {
         let mut editor = world.get_offline_editor();
         let mut rng = RNG::new(seed);
         let mut plot = Plot::fully_usable(bounds);
-        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor, SizeClass::Hall], 8);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor, SizeClass::Hall], 8, 0);
 
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
         for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
@@ -1314,7 +1395,7 @@ async fn manor_invariant_repro() {
         let mut editor = world.get_offline_editor();
         let mut rng = RNG::new(seed);
         let mut plot = Plot::fully_usable(bounds);
-        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 8);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 8, 0);
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
 
         for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
@@ -1348,7 +1429,7 @@ async fn manor_invariant_repro() {
         let mut editor = world.get_offline_editor();
         let mut rng = RNG::new(seed);
         let mut plot = Plot::fully_usable(bounds);
-        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 8);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor], 8, 0);
         let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
         for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
             let pitch = styles[(seed as usize + i) % styles.len()];
