@@ -1256,7 +1256,7 @@ mod tests {
         let collector_material = MaterialId::new("cobblestone".to_string());
         let paths = build_road_network(
             &editor, arterial_material, collector_material, true, &ind_nodes, &blocked, 1,
-        ).await;
+        ).await.paths;
         println!("Routed {} road segments", paths.len());
 
         // DEBUG: Phase A merge check — how many of each path's cells coincide

@@ -18,9 +18,53 @@ use crate::geometry::{CARDINALS_2D, Point2D, Point3D};
 use super::path::{Path, PathPriority};
 use super::routing::{get_path_with, RouteContext, RouteParams};
 
+/// What a road-network node represents, for labelling what each road connects.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeKind {
+    TownCentre,
+    Industry,
+    District,
+    Gate,
+}
+
+impl std::fmt::Display for NodeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            NodeKind::TownCentre => "town-centre",
+            NodeKind::Industry => "industry",
+            NodeKind::District => "district",
+            NodeKind::Gate => "gate",
+        };
+        f.write_str(s)
+    }
+}
+
+/// One edge of the abstract road graph (before A* routing curves it).
+#[derive(Debug, Clone, Copy)]
+pub struct RoadEdge {
+    /// Indices into [`RoadNetwork::nodes`].
+    pub a: usize,
+    pub b: usize,
+    /// A loop-closing shortcut rather than an MST backbone edge.
+    pub shortcut: bool,
+    /// Upgraded to the large (arterial) tier.
+    pub arterial: bool,
+}
+
+/// The routed roads plus the abstract graph they came from, so callers can
+/// overlay the underlying node/edge structure on the realized network.
+pub struct RoadNetwork {
+    pub paths: Vec<Path>,
+    /// Destination nodes (industry, district centres, gates, town centre),
+    /// deduped and relocated off footprints — the surface points the edges join.
+    pub nodes: Vec<Point3D>,
+    /// MST + shortcut edges over `nodes`.
+    pub edges: Vec<RoadEdge>,
+}
+
 /// How much longer the tree path between two nodes must be than their
 /// straight-line gap before we add a loop-closing shortcut between them.
-const SHORTCUT_DETOUR_RATIO: f64 = 3.0;
+const SHORTCUT_DETOUR_RATIO: f64 = 2.5;
 /// Cap on shortcut count, as a fraction of the node count — keeps a sprawling
 /// graph from sprouting a web of bypasses. Biggest-detour pairs win.
 const SHORTCUT_CAP_FRACTION: f64 = 1.0 / 3.0;
@@ -35,6 +79,20 @@ const BIG_CITY_MIN_NODES: usize = 18;
 /// In a big-enough city, this top fraction of edges by traffic (betweenness)
 /// are promoted from medium to large.
 const ARTERIAL_FRACTION: f64 = 1.0 / 3.0;
+
+/// A pairing of two segments at a junction must be at least this straight to be
+/// the same road: `straightness = -dot(dirA, dirB)` of the two outgoing
+/// directions, so 1.0 is a perfectly straight through-route, 0.0 a right-angle
+/// turn, negative a hairpin. We keep roads as long as possible by continuing the
+/// straightest available pair through any junction up to a right angle; only a
+/// turn sharper than ~90° (a near-reversal) starts a new road. Each segment
+/// still pairs at most once per junction, so a road never branches.
+const STROKE_MIN_STRAIGHTNESS: f64 = 0.0;
+
+/// Minimum centreline length (cells) for a road to keep a name. Shorter
+/// leftovers stay paved but go unnamed (and uncoloured) rather than cluttering
+/// the labels as their own "road".
+const MIN_ROAD_CELLS: usize = 20;
 
 /// Build the urban road network. Returns routed paths; individual edges may be
 /// absent if A* failed to find a route.
@@ -57,114 +115,32 @@ pub async fn build_road_network(
     // — edges can fail to route); 1 = exact per-cell search (no snapping,
     // threads any gap a road fits through, ~equal wall-clock in practice).
     route_step: i32,
-) -> Vec<Path> {
+) -> RoadNetwork {
     let urban = editor.world().get_urban_points();
     if urban.is_empty() {
-        return Vec::new();
+        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new() };
     }
 
-    // --- Node set: town centre (optional) + industry buildings + every urban
-    //     district centre + every gate. All lifted to the post-flatten surface.
-    //     Gates use their exact centre so the road meets the threshold. ---
-    let mut nodes: Vec<Point3D> = Vec::new();
-    if include_town_center {
-        if let Some(c) = centroid_snapped(&urban) {
-            nodes.push(editor.world().add_height(c));
-        }
-    }
-    nodes.extend_from_slice(anchor_nodes);
-    for sd in editor.world().super_districts.values() {
-        if sd.data.district_type != DistrictType::Urban {
-            continue;
-        }
-        if let Some(c) = centroid_snapped(&sd.data.points_2d) {
-            nodes.push(editor.world().add_height(c));
-        }
-    }
-    // Gates: route from the middle of the gate inward. (Paving lays the road
-    // surface across the gate/wall tiles but never cuts air into the wall — see
-    // `build_paths_merged`.) The node itself stays the gate centre.
-    let gate_count = editor.world().gate_locations.len();
-    for (gate_point, _dir) in editor.world().gate_locations.clone() {
-        nodes.push(editor.world().add_height(gate_point.drop_y()));
-    }
-
-    // Relocate any node sitting on a building footprint to the nearest clear
-    // urban cell — a route can neither start nor end on a blocked cell.
-    for node in nodes.iter_mut() {
-        if blocked.contains(&node.drop_y()) {
-            if let Some(c) = nearest_unblocked(node.drop_y(), &urban, blocked) {
-                *node = editor.world().add_height(c);
-            }
-        }
-    }
-
-    // Merge near-coincident nodes so the MST has no degenerate edges.
-    let nodes = dedup_nodes(&nodes, NODE_MERGE_DIST);
+    // Destination nodes (town centre, industry, district centres, gates),
+    // deduped and relocated off building footprints.
+    let (nodes, kinds) = assemble_nodes(editor, include_town_center, anchor_nodes, blocked, &urban);
     if nodes.len() < 2 {
-        return Vec::new();
+        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new() };
     }
 
     // --- Edges: MST backbone + capped loop-closing shortcuts. ---
     let mst = mst_edges(&nodes);
     let shortcuts = shortcut_edges(&nodes, &mst);
+    let gate_count = kinds.iter().filter(|k| **k == NodeKind::Gate).count();
     log::info!(
         "road network: {} nodes ({} gates), {} MST edges, {} shortcuts",
         nodes.len(), gate_count, mst.len(), shortcuts.len(),
     );
 
-    // --- Tier assignment by traffic. Edge betweenness on the abstract graph
-    //     (how many node-pair shortest paths cross each edge) ranks the trunks.
-    //     In a big-enough city the top `ARTERIAL_FRACTION` become large; the rest
-    //     stay medium. Small towns skip the upgrade and stay all-medium. ---
+    // Tier each edge: the busiest form a connected arterial spine (large), the
+    // rest stay medium. Small towns skip the upgrade (all-medium).
     let all_edges: Vec<(usize, usize)> = mst.iter().chain(shortcuts.iter()).copied().collect();
-    let betweenness = edge_betweenness(&nodes, &all_edges);
-    let arterial_count = if nodes.len() >= BIG_CITY_MIN_NODES {
-        ((all_edges.len() as f64) * ARTERIAL_FRACTION).round() as usize
-    } else {
-        0
-    };
-    // Edges sorted by traffic, busiest first.
-    let mut by_traffic: Vec<usize> = (0..all_edges.len()).collect();
-    by_traffic.sort_by(|&a, &b| betweenness[b].partial_cmp(&betweenness[a]).unwrap_or(std::cmp::Ordering::Equal));
-    // Grow a *connected* arterial subgraph: seed with the busiest edge, then keep
-    // adding the busiest edge that touches the arterials so far. This keeps every
-    // arterial linked into one spine instead of scattered high-traffic fragments.
-    let is_arterial: Vec<bool> = {
-        let mut v = vec![false; all_edges.len()];
-        if arterial_count > 0 {
-            let seed = by_traffic[0];
-            v[seed] = true;
-            let mut art_nodes: HashSet<usize> = HashSet::new();
-            art_nodes.insert(all_edges[seed].0);
-            art_nodes.insert(all_edges[seed].1);
-            let mut count = 1;
-            while count < arterial_count {
-                // First edge in busiest-first order that's adjacent to the spine.
-                let next = by_traffic.iter().copied().find(|&ei| {
-                    !v[ei] && {
-                        let (a, b) = all_edges[ei];
-                        art_nodes.contains(&a) || art_nodes.contains(&b)
-                    }
-                });
-                match next {
-                    Some(ei) => {
-                        v[ei] = true;
-                        art_nodes.insert(all_edges[ei].0);
-                        art_nodes.insert(all_edges[ei].1);
-                        count += 1;
-                    }
-                    None => break, // spine can't grow further (graph exhausted)
-                }
-            }
-        }
-        v
-    };
-    log::info!(
-        "road tiers: {} arterial / {} edges (city {} >= {} nodes: {})",
-        arterial_count, all_edges.len(), nodes.len(), BIG_CITY_MIN_NODES,
-        nodes.len() >= BIG_CITY_MIN_NODES,
-    );
+    let is_arterial = select_arterials(&nodes, &all_edges);
 
     // Arterials want straight, axis-aligned legs; collectors get a milder bias.
     let arterial_params = RouteParams { step: route_step, turn_weight: 6, diagonal_cost: 5, ..RouteParams::default() };
@@ -232,88 +208,171 @@ pub async fn build_road_network(
         }
     }
 
-    // Group the routed segments into named roads (strokes): edges that run
-    // roughly straight through a shared junction belong to the same road, so a
-    // long avenue keeps one identity even where side streets branch off it.
-    let stroke_of_path = group_into_roads(&nodes, &path_edges);
-    let stroke_count = stroke_of_path.iter().copied().max().map_or(0, |m| m + 1);
-    // Then merge roads that physically share most of their pavement: the route
-    // merger lets a collector run along an arterial, producing two "roads" on one
-    // street. Folding the redundant one in keeps the road count honest (and
-    // absorbs short segments that turn out to just be part of a bigger road).
-    let road_of_path = merge_overlapping_roads(&paths, &stroke_of_path);
-    let road_count = road_of_path.iter().copied().max().map_or(0, |m| m + 1);
-    for (path, &rid) in paths.iter_mut().zip(road_of_path.iter()) {
-        path.set_road_id(rid);
-    }
-    log::info!(
-        "road grouping: {} segments -> {} strokes -> {} named roads (after overlap merge)",
-        paths.len(), stroke_count, road_count,
-    );
+    // Group segments into named roads (strokes), discard short stubs, and stamp
+    // the road id onto each path (logging what each road connects).
+    name_roads(&mut paths, &path_edges, &nodes, &kinds);
 
-    paths
+    let edges = all_edges.iter().enumerate().map(|(ei, &(a, b))| RoadEdge {
+        a, b, shortcut: ei >= mst_len, arterial: is_arterial[ei],
+    }).collect();
+
+    RoadNetwork { paths, nodes, edges }
 }
 
-/// A road whose pavement is at least this fraction shared with another road is
-/// merged into it — they're the same physical street (the route merger ran one
-/// along the other).
-const ROAD_OVERLAP_MERGE: f64 = 0.5;
+/// Assemble the network's destination nodes — town centre (optional), industry
+/// buildings, urban district centres, gates — lifted to the post-flatten
+/// surface, relocated off building footprints, and deduped. Returns the kept
+/// node positions and their kinds, in sync.
+fn assemble_nodes(
+    editor: &Editor,
+    include_town_center: bool,
+    anchor_nodes: &[Point3D],
+    blocked: &HashSet<Point2D>,
+    urban: &HashSet<Point2D>,
+) -> (Vec<Point3D>, Vec<NodeKind>) {
+    let mut nodes: Vec<Point3D> = Vec::new();
+    let mut kinds: Vec<NodeKind> = Vec::new();
 
-/// Merge roads that physically overlap. Two roads sharing at least
-/// `ROAD_OVERLAP_MERGE` of the *smaller* one's paved cells are unioned. Returns a
-/// re-densified road id per path.
-fn merge_overlapping_roads(paths: &[Path], road_of_path: &[u32]) -> Vec<u32> {
-    let n_roads = road_of_path.iter().copied().max().map_or(0, |m| m + 1) as usize;
-    if n_roads == 0 {
-        return road_of_path.to_vec();
+    if include_town_center {
+        if let Some(c) = centroid_snapped(urban) {
+            nodes.push(editor.world().add_height(c));
+            kinds.push(NodeKind::TownCentre);
+        }
+    }
+    nodes.extend_from_slice(anchor_nodes);
+    kinds.extend(std::iter::repeat(NodeKind::Industry).take(anchor_nodes.len()));
+    for sd in editor.world().super_districts.values() {
+        if sd.data.district_type != DistrictType::Urban {
+            continue;
+        }
+        if let Some(c) = centroid_snapped(&sd.data.points_2d) {
+            nodes.push(editor.world().add_height(c));
+            kinds.push(NodeKind::District);
+        }
+    }
+    // Gates use their exact centre so the road meets the threshold; paving lays
+    // road surface across the gate/wall tiles without cutting into the wall.
+    for (gate_point, _dir) in editor.world().gate_locations.clone() {
+        nodes.push(editor.world().add_height(gate_point.drop_y()));
+        kinds.push(NodeKind::Gate);
     }
 
-    // Paved cells per road (centreline + width ring), unioned across its paths.
-    let mut cells: Vec<HashSet<Point2D>> = vec![HashSet::new(); n_roads];
-    for (p, &rid) in paths.iter().zip(road_of_path) {
-        let centre: HashSet<Point2D> = p.points().iter().map(|q| q.drop_y()).collect();
-        let mut paved = crate::geometry::get_surrounding_set(&centre, p.width().saturating_sub(1));
-        paved.extend(centre);
-        cells[rid as usize].extend(paved);
-    }
-
-    let mut parent: Vec<usize> = (0..n_roads).collect();
-    fn find(parent: &mut [usize], x: usize) -> usize {
-        let mut r = x;
-        while parent[r] != r { r = parent[r]; }
-        let mut cur = x;
-        while parent[cur] != r { let next = parent[cur]; parent[cur] = r; cur = next; }
-        r
-    }
-    for a in 0..n_roads {
-        for b in (a + 1)..n_roads {
-            let (la, lb) = (cells[a].len(), cells[b].len());
-            if la == 0 || lb == 0 {
-                continue;
-            }
-            let inter = cells[a].iter().filter(|c| cells[b].contains(c)).count();
-            let smaller = la.min(lb);
-            if inter as f64 / smaller as f64 >= ROAD_OVERLAP_MERGE {
-                let (ra, rb) = (find(&mut parent, a), find(&mut parent, b));
-                if ra != rb { parent[ra] = rb; }
+    // A route can neither start nor end on a blocked cell, so pull any node
+    // sitting on a footprint out to the nearest clear urban cell.
+    for node in nodes.iter_mut() {
+        if blocked.contains(&node.drop_y()) {
+            if let Some(c) = nearest_unblocked(node.drop_y(), urban, blocked) {
+                *node = editor.world().add_height(c);
             }
         }
     }
 
-    let mut root_to_id: HashMap<usize, u32> = HashMap::new();
-    let mut next = 0u32;
-    road_of_path.iter().map(|&rid| {
-        let r = find(&mut parent, rid as usize);
-        *root_to_id.entry(r).or_insert_with(|| { let v = next; next += 1; v })
-    }).collect()
+    // Merge near-coincident nodes so the MST has no degenerate edges (positions
+    // and kinds kept in sync via the surviving indices).
+    let keep = dedup_node_indices(&nodes, NODE_MERGE_DIST);
+    let kept_nodes = keep.iter().map(|&i| nodes[i]).collect();
+    let kept_kinds = keep.iter().map(|&i| kinds[i]).collect();
+    (kept_nodes, kept_kinds)
 }
 
-/// A pairing of two segments at a junction must be at least this straight to be
-/// the same road: `straightness = -dot(dirA, dirB)` of the two outgoing
-/// directions, so 1.0 is a perfectly straight through-route, 0.0 a right-angle
-/// turn. 0.7 only continues a road through bends under ~45° off straight;
-/// anything sharper starts a new road.
-const STROKE_MIN_STRAIGHTNESS: f64 = 0.7;
+/// Choose which edges are arterials (large tier). Ranks edges by graph
+/// betweenness, then — in a big-enough city — grows a *connected* arterial spine
+/// from the busiest edge outward (always adding the busiest edge that touches
+/// the spine), up to `ARTERIAL_FRACTION` of all edges. Small towns get none.
+fn select_arterials(nodes: &[Point3D], edges: &[(usize, usize)]) -> Vec<bool> {
+    let betweenness = edge_betweenness(nodes, edges);
+    let arterial_count = if nodes.len() >= BIG_CITY_MIN_NODES {
+        ((edges.len() as f64) * ARTERIAL_FRACTION).round() as usize
+    } else {
+        0
+    };
+    let mut by_traffic: Vec<usize> = (0..edges.len()).collect();
+    by_traffic.sort_by(|&a, &b| betweenness[b].partial_cmp(&betweenness[a]).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut is_arterial = vec![false; edges.len()];
+    if arterial_count > 0 {
+        let seed = by_traffic[0];
+        is_arterial[seed] = true;
+        let mut spine_nodes: HashSet<usize> = HashSet::new();
+        spine_nodes.insert(edges[seed].0);
+        spine_nodes.insert(edges[seed].1);
+        let mut count = 1;
+        while count < arterial_count {
+            // Busiest edge (in sorted order) that touches the spine so far.
+            let next = by_traffic.iter().copied().find(|&ei| {
+                !is_arterial[ei] && {
+                    let (a, b) = edges[ei];
+                    spine_nodes.contains(&a) || spine_nodes.contains(&b)
+                }
+            });
+            match next {
+                Some(ei) => {
+                    is_arterial[ei] = true;
+                    spine_nodes.insert(edges[ei].0);
+                    spine_nodes.insert(edges[ei].1);
+                    count += 1;
+                }
+                None => break, // spine can't grow further (graph exhausted)
+            }
+        }
+    }
+    log::info!(
+        "road tiers: {} arterial / {} edges (city {} >= {} nodes: {})",
+        arterial_count, edges.len(), nodes.len(), BIG_CITY_MIN_NODES,
+        nodes.len() >= BIG_CITY_MIN_NODES,
+    );
+    is_arterial
+}
+
+/// Group segments into named roads (strokes), discard stubs shorter than
+/// `MIN_ROAD_CELLS`, and stamp the surviving road id onto each path (short ones
+/// stay paved but unnamed). `path_edges` is the node pair each path spans,
+/// parallel to `paths`. Logs the count and what each road connects.
+fn name_roads(paths: &mut [Path], path_edges: &[(usize, usize)], nodes: &[Point3D], kinds: &[NodeKind]) {
+    // Strokes: at each junction the straightest pair continues as one road and
+    // everything else dead-ends, so each road is a single maximal path.
+    let stroke_of_path = group_into_roads(nodes, path_edges);
+    let stroke_count = stroke_of_path.iter().copied().max().map_or(0, |m| m + 1) as usize;
+
+    // Centreline length per stroke; roads shorter than the threshold lose their
+    // name. Survivors get re-densified ids; short ones map to None.
+    let mut centreline: Vec<usize> = vec![0; stroke_count];
+    for (p, &rid) in paths.iter().zip(stroke_of_path.iter()) {
+        centreline[rid as usize] += p.points().len();
+    }
+    let mut remap: Vec<Option<u32>> = vec![None; stroke_count];
+    let mut next = 0u32;
+    for (id, &len) in centreline.iter().enumerate() {
+        if len >= MIN_ROAD_CELLS {
+            remap[id] = Some(next);
+            next += 1;
+        }
+    }
+    for (path, &rid) in paths.iter_mut().zip(stroke_of_path.iter()) {
+        if let Some(nid) = remap[rid as usize] {
+            path.set_road_id(nid);
+        }
+    }
+    log::info!(
+        "road grouping: {} segments -> {} strokes -> {} named roads (short ones discarded)",
+        paths.len(), stroke_count, next,
+    );
+
+    // What each named road connects: the kinds of nodes its segments touch.
+    let mut road_nodes: std::collections::BTreeMap<u32, std::collections::BTreeSet<usize>> =
+        std::collections::BTreeMap::new();
+    for ((a, b), &rid) in path_edges.iter().zip(stroke_of_path.iter()) {
+        if let Some(nid) = remap[rid as usize] {
+            let set = road_nodes.entry(nid).or_default();
+            set.insert(*a);
+            set.insert(*b);
+        }
+    }
+    for (nid, ns) in &road_nodes {
+        let desc: Vec<String> = ns.iter().map(|&i| format!("{}#{}", kinds[i], i)).collect();
+        log::info!("  road {} connects: {}", nid, desc.join(", "));
+    }
+}
 
 /// Group routed segments into named roads ("strokes"). At each junction the
 /// straightest pair of segments is joined into the same road (greedily, each
@@ -548,15 +607,16 @@ fn nearest_unblocked(
         .copied()
 }
 
-/// Drop nodes that sit within `min_dist` (XZ) of an already-kept node, so the
-/// MST never builds a degenerate near-zero-length edge (e.g. an industry
-/// building whose centroid coincides with its district centre).
-fn dedup_nodes(nodes: &[Point3D], min_dist: i32) -> Vec<Point3D> {
+/// Indices of nodes to keep after dropping any that sit within `min_dist` (XZ)
+/// of an already-kept node, so the MST never builds a degenerate near-zero-length
+/// edge (e.g. an industry building whose centroid coincides with its district
+/// centre). Returns kept indices so a parallel array (kinds) can be filtered too.
+fn dedup_node_indices(nodes: &[Point3D], min_dist: i32) -> Vec<usize> {
     let min_sq = min_dist * min_dist;
-    let mut kept: Vec<Point3D> = Vec::new();
-    for &n in nodes {
-        if kept.iter().all(|k| k.drop_y().distance_squared(&n.drop_y()) > min_sq) {
-            kept.push(n);
+    let mut kept: Vec<usize> = Vec::new();
+    for (i, &n) in nodes.iter().enumerate() {
+        if kept.iter().all(|&k| nodes[k].drop_y().distance_squared(&n.drop_y()) > min_sq) {
+            kept.push(i);
         }
     }
     kept

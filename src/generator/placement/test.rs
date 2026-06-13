@@ -274,7 +274,7 @@ mod tests {
         let collector_material = MaterialId::new("cobblestone".to_string());
         let paths = build_road_network(
             &editor, arterial_material, collector_material, true, &anchor_nodes, &blocked, 1,
-        ).await;
+        ).await.paths;
         println!("Routed {} road segments", paths.len());
 
         // Realize: grade the corridor to routed heights, lay + meld the surface,
@@ -486,9 +486,10 @@ mod tests {
         // (anchor nodes) and routed around them (the `blocked` barrier). One
         // material for every tier — tiers differ by width, not surface block.
         let road_material = MaterialId::new("cobblestone".to_string());
-        let paths = build_road_network(
+        let road_network = build_road_network(
             &editor, road_material.clone(), road_material, true, &ind_nodes, &blocked, 1,
         ).await;
+        let paths = road_network.paths.clone();
         println!("Routed {} road segments", paths.len());
 
         // DEBUG: Phase A merge check — how many of each path's cells coincide
@@ -703,25 +704,35 @@ mod tests {
             PathPriority::Medium => 1,
             PathPriority::Low => 0,
         };
-        let mut label: HashMap<P2, (u8, u32, i32)> = HashMap::new(); // cell -> (tier, road_id, y)
+        // Approximate per-road footprint, so on a shared trunk the bigger road
+        // wins the cells (the main avenue keeps its colour; a smaller road only
+        // shows where it diverges) instead of two colours weaving.
+        let mut rid_size: HashMap<u32, usize> = HashMap::new();
+        for path in &all_paths {
+            if let Some(rid) = path.road_id() {
+                let span = (2 * (path.width() as usize - 1) + 1).pow(2);
+                *rid_size.entry(rid).or_insert(0) += path.points().len() * span;
+            }
+        }
+        let mut label: HashMap<P2, (u8, usize, u32, i32)> = HashMap::new(); // cell -> (tier, road_size, road_id, y)
         for path in &all_paths {
             let Some(rid) = path.road_id() else { continue; };
-            let pr = prio_rank(path.priority());
+            let key = (prio_rank(path.priority()), *rid_size.get(&rid).unwrap_or(&0));
             let r = path.width() as i32 - 1;
             for p in path.points() {
                 for dx in -r..=r {
                     for dz in -r..=r {
                         let c = P2::new(p.x + dx, p.z + dz);
-                        let e = label.entry(c).or_insert((0, rid, p.y));
-                        if pr >= e.0 {
-                            *e = (pr, rid, p.y);
+                        let e = label.entry(c).or_insert((key.0, key.1, rid, p.y));
+                        if (key.0, key.1) >= (e.0, e.1) {
+                            *e = (key.0, key.1, rid, p.y);
                         }
                     }
                 }
             }
         }
         let mut named_roads: HashSet<u32> = HashSet::new();
-        for (c, (_, rid, y)) in &label {
+        for (c, (_, _, rid, y)) in &label {
             named_roads.insert(*rid);
             let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
             editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
@@ -1076,6 +1087,9 @@ mod tests {
                             Some(crate::generator::BuildClaim::Gate) => "#6a6a6a",
                             Some(crate::generator::BuildClaim::Building(_)
                                 | crate::generator::BuildClaim::Structure(_)) => "#d9cfa3",
+                            // Pavement: named roads get recoloured on top; this
+                            // keeps discarded (unnamed) short roads visible as grey.
+                            Some(crate::generator::BuildClaim::Path(_)) => "#c4c4c4",
                             _ if editor.world().is_water(c) => "#4a6fb0",
                             _ => continue,
                         }
@@ -1087,7 +1101,7 @@ mod tests {
 
             // Road layer + per-road centroid for the id label.
             let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
-            for (c, (_, rid, _)) in &label {
+            for (c, (_, _, rid, _)) in &label {
                 let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
                     c.x - minx, c.y - minz, ROAD_SVG[*rid as usize % ROAD_SVG.len()]);
                 let e = centroid.entry(*rid).or_insert((0, 0, 0));
@@ -1099,6 +1113,31 @@ mod tests {
                     "<text x=\"{}\" y=\"{}\" font-size=\"7\" font-weight=\"bold\" fill=\"#000\" \
                      stroke=\"#fff\" stroke-width=\"0.4\" paint-order=\"stroke\" text-anchor=\"middle\">{}</text>\n",
                     sx / n, sz / n + 2, rid);
+            }
+
+            // Abstract graph overlay: the MST + shortcut edges drawn as straight
+            // thin lines between their nodes (the data structure, before A* curved
+            // it onto the terrain). Arterial edges thicker; shortcuts dashed.
+            let nx = |p: Point3D| p.x - minx;
+            let nz = |p: Point3D| p.z - minz;
+            for e in &road_network.edges {
+                let (pa, pb) = (road_network.nodes[e.a], road_network.nodes[e.b]);
+                let (sw, dash) = (
+                    if e.arterial { "1.2" } else { "0.6" },
+                    if e.shortcut { " stroke-dasharray=\"2,2\"" } else { "" },
+                );
+                let _ = write!(svg,
+                    "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#111\" \
+                     stroke-width=\"{}\" stroke-opacity=\"0.85\"{}/>\n",
+                    nx(pa), nz(pa), nx(pb), nz(pb), sw, dash);
+            }
+            for (i, p) in road_network.nodes.iter().enumerate() {
+                let _ = write!(svg,
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"1.6\" fill=\"#111\" stroke=\"#fff\" stroke-width=\"0.4\"/>\n",
+                    nx(*p), nz(*p));
+                let _ = write!(svg,
+                    "<text x=\"{}\" y=\"{}\" font-size=\"4\" fill=\"#fff\" text-anchor=\"middle\">{}</text>\n",
+                    nx(*p), nz(*p) + 1, i);
             }
             let _ = write!(svg, "</svg>\n");
 
