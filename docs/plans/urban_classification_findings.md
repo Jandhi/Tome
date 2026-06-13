@@ -280,7 +280,7 @@ re-evaluate compactness then.
 cargo test district_classification -- --nocapture
 ```
 Then read the newest `output/logs/run_*.log`; the decision trail is the
-`Tome::generator::parcels::classification` lines: `ranked best-first`, per-candidate scores,
+`Tome::generator::districts::classification` lines: `ranked best-first`, per-candidate scores,
 `below cutoff`/`No more candidates reachable`, and `grew a city of size N`. Final per-super-parcel
-type/size + sign coordinates are the `Tome::generator::parcels::test::tests` lines at the end.
+type/size + sign coordinates are the `Tome::generator::districts::test::tests` lines at the end.
 ```

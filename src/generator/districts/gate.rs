@@ -5,7 +5,7 @@ use crate::generator::nbts::{place_structure, Structure, StructureType};
 use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardinal};
 use crate::noise::RNG;
 use crate::generator::BuildClaim;
-use crate::generator::parcels::WallType;
+use crate::generator::districts::WallType;
 use log::info;
 
 

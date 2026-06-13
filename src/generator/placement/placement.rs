@@ -8,7 +8,7 @@ use crate::{
     generator::{
         BuildClaim,
         data::LoadedData,
-        parcels::District,
+        districts::District,
         nbts::{Rotation, Structure, StructureID, place_structure},
         terrain::{force_height, log_trees},
     },

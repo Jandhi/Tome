@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use log::info;
-use crate::{generator::{parcels::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
+use crate::{generator::{districts::build_wall_gate, materials::{MaterialId, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 

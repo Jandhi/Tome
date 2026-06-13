@@ -1,4 +1,4 @@
-use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, parcels::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, districts::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
 pub mod geometry;

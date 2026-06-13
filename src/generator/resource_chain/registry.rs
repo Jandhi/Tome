@@ -4,7 +4,7 @@ use std::env;
 use std::fs::File;
 use anyhow::{bail, Context};
 
-use crate::generator::parcels::{ParcelAnalysis, DistrictID};
+use crate::generator::districts::{ParcelAnalysis, DistrictID};
 use crate::generator::nbts::{Structure, StructureType};
 use crate::minecraft::Biome;
 use crate::noise::RNG;

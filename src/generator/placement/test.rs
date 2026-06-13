@@ -6,7 +6,7 @@ mod tests {
         editor::World,
         generator::{
             data::LoadedData,
-            parcels::{build_wall, generate_parcels, ParcelType, WallType},
+            districts::{build_wall, generate_parcels, ParcelType, WallType},
             materials::{MaterialId, Placer},
             nbts::{Rotation, StructureType},
             placement::{
@@ -134,7 +134,7 @@ mod tests {
 
         use crate::data::Loadable;
         use crate::generator::BuildClaim;
-        use crate::generator::parcels::{ParcelAnalysis, DistrictID};
+        use crate::generator::districts::{ParcelAnalysis, DistrictID};
         use crate::generator::materials::Material;
         use crate::generator::nbts::Structure;
         use crate::generator::paths::{build_paths_merged, build_road_network, Path, PathType};
@@ -154,7 +154,7 @@ mod tests {
 
         // EVAL AID (test-only): force a contiguous ~4-parcel urban core, since
         // the live classifier often collapses to a single urban parcel — too
-        // degenerate to grow a road network. (Mirrors `parcels::hierarchical_roads`.)
+        // degenerate to grow a road network. (Mirrors `districts::hierarchical_roads`.)
         {
             const TARGET_URBAN: usize = 4;
             let mut info: Vec<(DistrictID, Point2D, bool)> = editor.world().districts.iter()
@@ -326,7 +326,7 @@ mod tests {
     async fn full_settlement_pipeline() {
         use crate::data::Loadable;
         use crate::generator::BuildClaim;
-        use crate::generator::parcels::{ParcelAnalysis, DistrictID};
+        use crate::generator::districts::{ParcelAnalysis, DistrictID};
         use crate::generator::materials::Material;
         use crate::generator::nbts::Structure;
         use crate::generator::paths::{
@@ -588,13 +588,13 @@ mod tests {
         let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
             let (mut ribbon_lots, interior) =
-                crate::generator::parcels::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
-            let (subs, alleys) = crate::generator::parcels::subdivide::subdivide_block(&interior, &mut rng, 24);
+                crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
+            let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
 
             // Connect the interior alleys to the main roads by carving through the
             // ribbon, then convert those cells from frontage ribbon to alley.
             let ribbon_union: HashSet<Point2D> = ribbon_lots.iter().flatten().copied().collect();
-            let connectors = crate::generator::parcels::subdivide::carve_ribbon_connectors(
+            let connectors = crate::generator::districts::subdivide::carve_ribbon_connectors(
                 &ribbon_union, &alleys, &main_road_cells,
             );
             if !connectors.is_empty() {

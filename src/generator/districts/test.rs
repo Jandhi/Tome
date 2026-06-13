@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::parcels::{WallType, build_wall, HasParcelData, parcel::{self, generate_parcels}, parcel_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasParcelData, parcel::{self, generate_parcels}, parcel_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
@@ -313,7 +313,7 @@ mod tests {
         let mut total_alley_cells = 0usize;
 
         for block_cells in urban_blocks {
-            let (sub_blocks, alleys) = crate::generator::parcels::subdivide::subdivide_block(
+            let (sub_blocks, alleys) = crate::generator::districts::subdivide::subdivide_block(
                 &block_cells, &mut rng, 32,
             );
             total_sub_blocks += sub_blocks.len();
@@ -428,11 +428,11 @@ mod tests {
         for (i, inner) in interior_blocks.iter().enumerate() {
             let (sub_blocks, alleys) = if i % 2 == 0 {
                 println!("Super-parcel {}: BSP partition", i);
-                crate::generator::parcels::subdivide::subdivide_block(inner, &mut rng, 32)
+                crate::generator::districts::subdivide::subdivide_block(inner, &mut rng, 32)
             } else {
                 let sections = (inner.len() / 400).max(2);
                 println!("Super-parcel {}: voronoi partition ({} sections)", i, sections);
-                crate::generator::parcels::subdivide::voronoi_subdivide_block(inner, &mut rng, sections)
+                crate::generator::districts::subdivide::voronoi_subdivide_block(inner, &mut rng, sections)
             };
             all_sub_blocks.extend(sub_blocks);
             all_alleys.extend(alleys);
@@ -743,7 +743,7 @@ mod tests {
         let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
             .filter(|(id, _)| {
                 editor.world().districts.get(id)
-                    .map(|sd| sd.data.parcel_type == crate::generator::parcels::ParcelType::Rural)
+                    .map(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Rural)
                     .unwrap_or(false)
             })
             .map(|(id, analysis)| (*id, analysis.clone()))
@@ -1008,7 +1008,7 @@ mod tests {
 
             }
         }
-        let wall_points = crate::generator::parcels::wall::get_wall_points(&editor.world().get_urban_points(), &mut editor);
+        let wall_points = crate::generator::districts::wall::get_wall_points(&editor.world().get_urban_points(), &mut editor);
         for point in wall_points.clone() {
             let height = height_map[point.x as usize][point.y as usize] - build_area.origin.y;
             editor.place_block(&black_wool, Point3D::new(point.x, height, point.y)).await;
@@ -1133,9 +1133,9 @@ mod tests {
         // contiguous ~4-parcel urban core: keep the prime, then promote the
         // nearest non-off-limits super-parcels to Urban.
         {
-            use crate::generator::parcels::ParcelType;
+            use crate::generator::districts::ParcelType;
             const TARGET_URBAN: usize = 4;
-            let mut info: Vec<(crate::generator::parcels::DistrictID, Point2D, bool)> =
+            let mut info: Vec<(crate::generator::districts::DistrictID, Point2D, bool)> =
                 editor.world().districts.iter()
                     .filter(|(id, sd)| {
                         if sd.data.parcel_type == ParcelType::OffLimits {
@@ -1178,7 +1178,7 @@ mod tests {
         // DEBUG: how many urban super-parcels and gates did we actually get?
         {
             let n_urban = editor.world().districts.values()
-                .filter(|sd| sd.data.parcel_type == crate::generator::parcels::ParcelType::Urban)
+                .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
                 .count();
             let n_total = editor.world().districts.len();
             println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
@@ -1208,7 +1208,7 @@ mod tests {
             ind_counts.insert(b.to_string(), 1);
         }
         let urban_sds: Vec<_> = editor.world().districts.values()
-            .filter(|sd| sd.data.parcel_type == crate::generator::parcels::ParcelType::Urban)
+            .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
             .cloned()
             .collect();
         let urban_sd_refs: Vec<_> = urban_sds.iter().collect();
@@ -1362,13 +1362,13 @@ mod tests {
         let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
             let (mut ribbon_lots, interior) =
-                crate::generator::parcels::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
-            let (subs, alleys) = crate::generator::parcels::subdivide::subdivide_block(&interior, &mut rng, 24);
+                crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
+            let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
 
             // Connect the interior alleys to the main roads by carving through the
             // ribbon, then convert those cells from frontage ribbon to alley.
             let ribbon_union: HashSet<Point2D> = ribbon_lots.iter().flatten().copied().collect();
-            let connectors = crate::generator::parcels::subdivide::carve_ribbon_connectors(
+            let connectors = crate::generator::districts::subdivide::carve_ribbon_connectors(
                 &ribbon_union, &alleys, &main_road_cells,
             );
             if !connectors.is_empty() {

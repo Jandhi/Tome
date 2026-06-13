@@ -373,7 +373,7 @@ mod tests {
     #[test]
     #[ignore]
     fn parcel_production_report() {
-        use crate::generator::parcels::{DistrictID, ParcelAnalysis};
+        use crate::generator::districts::{DistrictID, ParcelAnalysis};
         use crate::minecraft::Biome;
 
         let registry = make_registry();

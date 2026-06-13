@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
-use crate::generator::parcels::ParcelType;
+use crate::generator::districts::ParcelType;
 use crate::generator::materials::MaterialId;
 use crate::geometry::{CARDINALS_2D, Point2D, Point3D};
 

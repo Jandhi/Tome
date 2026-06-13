@@ -1610,7 +1610,7 @@ async fn settlement_with_buildings_v2() {
     use crate::http_mod::GDMCHTTPProvider;
     use crate::util::init_logger;
     use crate::generator::data::LoadedData;
-    use crate::generator::parcels::generate_parcels;
+    use crate::generator::districts::generate_parcels;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::roof::RoofStyle;
     use crate::generator::buildings_v2::roof::gable::GablePitch;

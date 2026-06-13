@@ -7,7 +7,7 @@ use crate::{
     generator::{
         build_claim::BuildClaim,
         data::LoadedData,
-        parcels::{replace_ground, District},
+        districts::{replace_ground, District},
         terrain::{log_trees, smooth_terrain},
     },
     geometry::{Point2D, Point3D},
@@ -165,7 +165,7 @@ async fn paint_palettes(
     // Paint the border strip with its palette before handling the field interior.
     if let Some(name) = border_palette {
         if !border_cells.is_empty() {
-            if let Some(palette) = data.paint_palettes.get(&crate::generator::parcels::PaintPaletteId(name.to_string())) {
+            if let Some(palette) = data.paint_palettes.get(&crate::generator::districts::PaintPaletteId(name.to_string())) {
                 let (block_dict, block_list) = palette.to_weighted_blocks();
                 replace_ground(border_cells, &block_dict, &block_list, rng, editor, None, None, Some(false)).await;
             } else {
@@ -212,7 +212,7 @@ async fn paint_palettes(
 
     // Apply each palette in order (ground layer before crop layer).
     for palette_name in palettes {
-        let Some(palette) = data.paint_palettes.get(&crate::generator::parcels::PaintPaletteId(palette_name.clone())) else {
+        let Some(palette) = data.paint_palettes.get(&crate::generator::districts::PaintPaletteId(palette_name.clone())) else {
             warn!("paint_production_area: unknown palette '{}'", palette_name);
             continue;
         };

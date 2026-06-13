@@ -145,7 +145,7 @@ async fn settlement_with_city_houses() {
         default_interior_size_pool, fill_interior, place_block_frontage, plot_from_block,
     };
     use crate::generator::chronicle::SettlementInfo;
-    use crate::generator::parcels::generate_parcels;
+    use crate::generator::districts::generate_parcels;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
     use crate::geometry::get_edge;
