@@ -4,7 +4,7 @@ use log::info;
 
 use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS_2D}, noise::{Seed, RNG}};
 
-use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_parcel, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_PARCELS_MIN_DISTANCE, SPAWN_PARCELS_RETRIES}, data::{ParcelData, HasParcelData}, merge::merge_down, classification::{classify_parcels, classify_districts}, ParcelAnalysis, District, DistrictID};
+use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_parcel, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_PARCELS_MIN_DISTANCE, SPAWN_PARCELS_RETRIES}, data::{ParcelData, HasParcelData}, merge::merge_down, classification::{classify_parcels, classify_districts}, footprint::{regularize_urban_footprint, reconcile_districts_to_footprint}, ParcelAnalysis, District, DistrictID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParcelID(pub usize);
@@ -144,6 +144,15 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     // district classification
     let world = editor.world_mut();
     classify_districts(&mut world.districts, &mut world.parcels, &district_analysis_data);
+
+    // Regularize the urban footprint (smooth the wall outline) and re-vote each
+    // district's urban/rural classification against it so every downstream consumer
+    // stays consistent with "inside the wall".
+    let raw_urban = world.get_urban_points();
+    let footprint = regularize_urban_footprint(world, &raw_urban);
+    reconcile_districts_to_footprint(&mut world.districts, &footprint);
+    world.urban_footprint = Some(footprint);
+
     info!("Parcels generated successfully");
 
     //prune urban chokepoints??

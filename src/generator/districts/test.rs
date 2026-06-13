@@ -278,6 +278,24 @@ mod tests {
             );
         }
 
+        let materials = Material::load().expect("Failed to load materials");
+        let material = MaterialId::new("stone_bricks".to_string());
+
+        // Separate RNGs: the placer holds its own for its whole lifetime, so the wall
+        // builder needs an independent one (see standard_wall_with_inner).
+        let mut rng = RNG::new(seed);
+        let mut rng2 = RNG::new(seed);
+
+        let mut placer: Placer = Placer::new(
+            &materials,
+            &mut rng,
+        );
+
+        let structures = Structure::load().expect("Failed to load structures");
+        println!("Structures: {:?}", structures.keys());
+
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
+
         editor.flush_buffer().await;
     }
 

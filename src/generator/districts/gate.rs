@@ -9,9 +9,9 @@ use crate::generator::districts::WallType;
 use log::info;
 
 /// Wall points per desired gate. `N = max(1, ceil(loop_len / this))`.
-pub const GATE_TARGET_SPACING: usize = 150;
+pub const GATE_TARGET_SPACING: usize = 200;
 /// Floor on the ring distance (index distance along the loop) between two selected gates.
-pub const MIN_GATE_SPACING: usize = 100;
+pub const MIN_GATE_SPACING: usize = 120;
 /// Length of the straight wall run a gate occupies.
 pub const GATE_SIZE: i32 = 7;
 /// Extra points inspected on each side of the gate run by the flatness scoring terms.

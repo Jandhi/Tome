@@ -16,3 +16,8 @@ pub const URBAN_OPTION_SCORE_MAX: f32 = 0.75; // Max district_score to be eligib
 pub const RURAL_OPTION_SCORE_MAX: f32 = 1.5; // Max district_score to be classified Rural (above this is Off-Limits)
 pub const ADJACENCY_WEIGHT: f32 = 3.0; // Weight for adjacency in parcel comparison scoring
 pub const URBAN_RELATIVE_TO_PRIME: f32 = 0.0; // score needed exceed to be under to be urban in relation to prime parcel
+
+// Urban footprint regularization (see districts/footprint.rs).
+pub const CLOSE_RADIUS: i32 = 4; // Morphological closing radius: fills concave bays/notches up to this size
+pub const OPEN_RADIUS: i32 = 3; // Morphological opening radius: trims tendrils/peninsulas thinner than this
+pub const FOOTPRINT_RECLASSIFY_THRESHOLD: f32 = 0.5; // Fraction of a district's cells inside the footprint to count it Urban
