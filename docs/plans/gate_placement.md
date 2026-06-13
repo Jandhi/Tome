@@ -127,10 +127,15 @@ struct GateCandidate { index: usize, score: f64 }
 
 ## Constants
 
+> **Retuned after live runs.** `N` uses `ceil` (not `round`), and the spacing values were
+> tightened: the implemented 4-connected wall ring is denser than the originally-assumed
+> 8-connected path, and the planned 1000/150 left mid-size cities with too few gates. The
+> table below reflects the **shipped** values in `gate.rs`.
+
 | Constant | Value | Meaning |
 |---|---|---|
-| `GATE_TARGET_SPACING` | 1000 | Wall points per desired gate; `N = max(1, round(len / this))`. |
-| `MIN_GATE_SPACING` | 150 | Floor on ring distance between two selected gates. |
+| `GATE_TARGET_SPACING` | 200 | Wall points per desired gate; `N = max(1, ceil(len / this))`. |
+| `MIN_GATE_SPACING` | 120 | Floor on ring distance between two selected gates. |
 | `GATE_SIZE` | 7 (existing) | Length of the straight run a gate occupies. |
 | `FLATNESS_PAD` | 4 | Extra points on each side of the run inspected by the flatness terms. |
 | `STRAIGHT_RUN_CAP` | 16 | Per-side cap on the straight-run bonus. |

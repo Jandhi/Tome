@@ -9,8 +9,11 @@ use crate::generator::districts::WallType;
 use log::info;
 
 /// Wall points per desired gate. `N = max(1, ceil(loop_len / this))`.
+/// Tuned down from the plan's 1000 after live runs: the 4-connected wall ring is denser
+/// than the old 8-connected path, and 1000 left mid-size cities with too few gates.
 pub const GATE_TARGET_SPACING: usize = 200;
 /// Floor on the ring distance (index distance along the loop) between two selected gates.
+/// Tuned down from the plan's 150 to match the tighter target spacing above.
 pub const MIN_GATE_SPACING: usize = 120;
 /// Length of the straight wall run a gate occupies.
 pub const GATE_SIZE: i32 = 7;
@@ -498,18 +501,24 @@ mod tests {
 
     #[test]
     fn n_math_uses_ceil() {
-        // Spread plenty of well-separated candidates (every 200) so the spacing
-        // floor never limits the count; only the N target should.
+        // Spread plenty of well-separated candidates so the spacing floor never limits
+        // the count; only the ceil(N) target should. Derived from the constants so
+        // retuning GATE_TARGET_SPACING / MIN_GATE_SPACING can't silently break this.
+        let spacing = (2 * MIN_GATE_SPACING).max(1);
         let make = |loop_len: usize| {
-            let mut cands: Vec<GateCandidate> = (0..loop_len / 200)
-                .map(|k| cand(k * 200, (loop_len - k) as f64))
+            let mut cands: Vec<GateCandidate> = (0..loop_len / spacing)
+                .map(|k| cand(k * spacing, (loop_len - k) as f64))
                 .collect();
             select_gates(&mut cands, loop_len, true).len()
         };
-        assert_eq!(make(300), 1); // ceil(300/1000) = 1
-        assert_eq!(make(1000), 1); // ceil(1000/1000) = 1
-        assert_eq!(make(2500), 3); // ceil(2500/1000) = 3
-        assert_eq!(make(2001), 3); // ceil(2001/1000) = 3
+        // Expected = ceil(len / target), capped by how many spaced candidates exist.
+        let expect = |loop_len: usize| {
+            let n = ((loop_len as f64 / GATE_TARGET_SPACING as f64).ceil() as usize).max(1);
+            n.min(loop_len / spacing)
+        };
+        for loop_len in [300, 1000, 2500, 2001] {
+            assert_eq!(make(loop_len), expect(loop_len), "loop_len {loop_len}");
+        }
     }
 
     #[test]
