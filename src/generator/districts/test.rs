@@ -1213,7 +1213,12 @@ mod tests {
             .collect();
         let urban_sd_refs: Vec<_> = urban_sds.iter().collect();
         let n_before = editor.world().structures.len();
-        if let Err(e) = place_urban_buildings(&urban_sd_refs, &ind_counts, &mut rng, &mut editor, &data).await {
+        // Re-skin the industrial NBTs into the settlement's culture palette
+        // (their baked `resource_base` blocks → desert sandstone).
+        let ind_palette = data.palettes
+            .get(&crate::generator::buildings_v2::Culture::Desert.palette_id())
+            .expect("industry palette not found").clone();
+        if let Err(e) = place_urban_buildings(&urban_sd_refs, &ind_counts, &mut rng, &mut editor, &data, Some(&ind_palette)).await {
             log::warn!("industrial placement failed: {}", e);
         }
         println!(
@@ -1250,7 +1255,7 @@ mod tests {
         let arterial_material = MaterialId::new("stone_bricks".to_string());
         let collector_material = MaterialId::new("cobblestone".to_string());
         let paths = build_road_network(
-            &editor, arterial_material, collector_material, true, &ind_nodes, &blocked,
+            &editor, arterial_material, collector_material, true, &ind_nodes, &blocked, 1,
         ).await;
         println!("Routed {} road segments", paths.len());
 
@@ -1437,7 +1442,14 @@ mod tests {
             .map(|(c, &y)| Point3D::new(c.x, y, c.y))
             .collect();
         force_height(&mut editor, &corridor_pts, false).await;
-        build_paths_merged(&editor, &data, &all_paths, &mut rng).await;
+        // `build_paths_merged` returns the exact cells where it laid a half-step
+        // slab; we raise a house a block over a fronting slab off this set rather
+        // than reading the placed road back (the editor cache is keyed by local
+        // coords while get_block subtracts the build-area origin, so a read here
+        // returns world terrain, not the road).
+        let road_slabs: HashSet<Point3D> = build_paths_merged(&editor, &data, &all_paths, &mut rng).await;
+        let slab_y_by_cell: HashMap<Point2D, i32> =
+            road_slabs.iter().map(|p| (p.drop_y(), p.y)).collect();
 
         // Claim every paved road cell so house-foundation terraforming can't
         // touch it (blend_terrain skips `BuildClaim::Path`).
@@ -1463,18 +1475,17 @@ mod tests {
         use crate::generator::materials::{Palette, PaletteId};
         use crate::geometry::Point2D as P2;
 
-        let base_palette: Palette = data.palettes.get(&PaletteId::from("medieval_spruce"))
+        // Culture for this settlement. Desert → sandstone palette, flat roofs,
+        // and domed square rects (see buildings_v2::roof::dome).
+        let culture = Culture::Desert;
+        let base_palette: Palette = data.palettes.get(&culture.palette_id())
             .expect("base palette not found").clone();
         let wood_ids: Vec<PaletteId> = vec!["oak".into(), "spruce".into(), "dark_oak".into()];
         let stone_ids: Vec<PaletteId> = vec!["stone_bricks".into(), "cobblestone".into(), "deepslate".into()];
         let roof_ids: Vec<PaletteId> = vec![
             "acacia_wood_roof".into(), "brick_roof".into(), "oak_wood_roof".into(), "red_wood_roof".into(),
         ];
-        let pitches = [
-            RoofStyle::Gable(GablePitch::Slab),
-            RoofStyle::Gable(GablePitch::Stairs),
-            RoofStyle::Gable(GablePitch::Double),
-        ];
+        let roof_styles = culture.roof_styles();
 
         fn roll_palette(rng: &mut RNG, base: &Palette, data: &LoadedData, woods: &[PaletteId], stones: &[PaletteId], roofs: &[PaletteId]) -> Palette {
             let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
@@ -1487,10 +1498,12 @@ mod tests {
         }
         // Densest tier first; size pool per tier (houses on the main roads,
         // cottages on the back lanes).
+        // House + Hall on every tier for now (district wealth will refine this
+        // later). Slots that can't fit a Hall's wider frontage just skip.
         let tiers: [(&HashSet<Point2D>, &[SizeClass]); 3] = [
-            (&arterial_band, &[SizeClass::House]),
-            (&collector_band, &[SizeClass::House]),
-            (&alley_band, &[SizeClass::Cottage]),
+            (&arterial_band, &[SizeClass::House, SizeClass::Hall]),
+            (&collector_band, &[SizeClass::House, SizeClass::Hall]),
+            (&alley_band, &[SizeClass::House, SizeClass::Hall]),
         ];
 
         let mut total_buildings = 0usize;
@@ -1506,10 +1519,6 @@ mod tests {
         // the road and each house front, which we pave into a forecourt so the
         // unavoidable set-back on a diagonal reads as a shoulder, not bare grass.
         let mut tier_verge: [HashSet<Point2D>; 2] = Default::default();
-        // Cells just outside each placed door at floor level — collected during
-        // placement and checked for a road-slab lip afterward (we can't touch
-        // `editor` inside the loop; it's borrowed by the build context).
-        let mut door_thresholds: Vec<Point3D> = Vec::new();
         for parcel in &sub_blocks {
             if parcel.is_empty() { continue; }
             let Some(mut plot) = plot_from_block(parcel) else { continue; };
@@ -1532,15 +1541,32 @@ mod tests {
                         let max_depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
                         if cursor + fw > chain_len { cursor += 1; continue; }
                         let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
-                        // Deepest depth (down to MIN_FIT_DEPTH) whose rect fits the
-                        // parcel — shrinks the house to hug a diagonal ribbon.
-                        let Some(depth) = (MIN_FIT_DEPTH..=max_depth).rev()
+                        // Square-frontage bias: with the culture's square chance,
+                        // make the house a square (depth = front width) if it fits,
+                        // so it gets a dome. Guarded so a 0 bias never draws RNG.
+                        // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
+                        // that fits, shrinking the house to hug a diagonal ribbon.
+                        let want_square = culture.square_bias() > 0
+                            && rng.percent(culture.square_bias())
+                            && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
+                        let depth = if want_square {
+                            fw
+                        } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
                             .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
-                        else { tier_unfit[ti] += 1; cursor += 1; continue; };
+                        {
+                            d
+                        } else {
+                            tier_unfit[ti] += 1; cursor += 1; continue;
+                        };
                         let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
 
-                        let palette = roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids);
-                        let roof_style = pitches[rng.rand_i32_range(0, pitches.len() as i32) as usize];
+                        // Desert keeps a uniform sandstone palette; other cultures
+                        // roll wood/stone/roof variants per house for variety.
+                        let palette = match culture {
+                            Culture::Desert => base_palette.clone(),
+                            _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
+                        };
+                        let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
                         let plot_bounds = synthetic_plot_bounds(&rect, frontage.outward);
                         let footprint = Footprint::from_rect(rect);
                         // Align the main door with the road it faces: pin the floor
@@ -1549,19 +1575,27 @@ mod tests {
                         // keep the closest road-height hit.
                         let road_dir = P2::from(frontage.outward);
                         let base_lvl = {
-                            let mut best: Option<(i32, i32)> = None; // (dist, height)
+                            let mut best: Option<(i32, i32, P2)> = None; // (dist, height, road cell)
                             for &c in chain_slice {
                                 for step in 1..=RIBBON_DEPTH {
                                     let probe = c + P2::new(road_dir.x * step, road_dir.y * step);
                                     if let Some(&y) = road_h.get(&probe) {
-                                        if best.map_or(true, |(bd, _)| step < bd) { best = Some((step, y)); }
+                                        if best.map_or(true, |(bd, _, _)| step < bd) { best = Some((step, y, probe)); }
                                         break;
                                     }
                                 }
                             }
-                            best.map(|(_, y)| y)
+                            best.map(|(_, y, cell)| {
+                                // If the fronting road cell carries a half-step slab,
+                                // raise the floor one block above the slab so the door
+                                // steps down onto it instead of opening onto a lip.
+                                match slab_y_by_cell.get(&cell) {
+                                    Some(&slab_y) => slab_y + 1,
+                                    None => y,
+                                }
+                            })
                         };
-                        let mut bctx = BuildingContext::new(Culture::Medieval, size_class, roof_style);
+                        let mut bctx = BuildingContext::new(culture, size_class, roof_style);
                         bctx.base_y_override = base_lvl;
                         let mut bctx_editor = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
@@ -1569,28 +1603,6 @@ mod tests {
                                 plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
-                                // Collect door-threshold cells: the strip just outside
-                                // the house's road-facing wall at floor level, where a
-                                // road slab leaves a half-block lip in the doorway. We
-                                // clear those slabs after the loop (editor is borrowed
-                                // here by the build context).
-                                if let Some(sill) = base_lvl {
-                                    let rd = P2::from(frontage.outward);
-                                    let (mn, mx) = (rect.min(), rect.max());
-                                    let front: Vec<P2> = if rd.x != 0 {
-                                        let fx = if rd.x > 0 { mx.x } else { mn.x };
-                                        (mn.y..=mx.y).map(|z| P2::new(fx, z)).collect()
-                                    } else {
-                                        let fz = if rd.y > 0 { mx.y } else { mn.y };
-                                        (mn.x..=mx.x).map(|x| P2::new(x, fz)).collect()
-                                    };
-                                    for fc in front {
-                                        for step in 1..=2 {
-                                            let c = fc + P2::new(rd.x * step, rd.y * step);
-                                            door_thresholds.push(Point3D::new(c.x, sill, c.y));
-                                        }
-                                    }
-                                }
                                 // Record the verge: from each frontage cell, walk
                                 // into the block (−outward) until we reach the
                                 // house. On a straight slice this is just the
@@ -1634,31 +1646,6 @@ mod tests {
             tier_short[1], tier_unfit[1],
             tier_short[2], tier_unfit[2],
         );
-
-        // Clear road-slab lips at the collected door thresholds: a slab sitting at
-        // the door's floor level reads as an awkward half-step; replacing it with
-        // air leaves the road's full-block surface flush with the threshold. We
-        // scan a small Y window (the actual slab y drifts ±1-2 from the probed road
-        // height after smoothing) and only clear *road-material* slabs — never a
-        // house's own wooden door-ramp slab/stair.
-        let is_road_slab = |b: &Block| -> bool {
-            let id = b.id.as_str();
-            id.contains("slab")
-                && (id.contains("cobble") || id.contains("stone") || id.contains("brick")
-                    || id.contains("andesite") || id.contains("granite") || id.contains("diorite")
-                    || id.contains("gravel"))
-        };
-        let mut cleared_door_slabs = 0usize;
-        for p in &door_thresholds {
-            for dy in -2..=2 {
-                let q = Point3D::new(p.x, p.y + dy, p.z);
-                if is_road_slab(&editor.get_block(q)) {
-                    editor.place_block_forced(&"air".into(), q).await;
-                    cleared_door_slabs += 1;
-                }
-            }
-        }
-        println!("Cleared {} road-slab lips at door thresholds", cleared_door_slabs);
 
         // Pave the verge: a forecourt of the road's own material in the gap
         // between each main road and its houses, so the diagonal set-back reads
