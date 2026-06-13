@@ -8,11 +8,31 @@ use crate::{editor::Editor, generator::{BuildClaim, data::LoadedData, materials:
 /// (which would overwrite it). The A* router already steers the centreline
 /// around these; this guards the widened shoulders and endpoint-snap artefacts
 /// that can still reach back onto a footprint.
-fn road_blocked_by_claim(editor: &Editor, cell: Point2D) -> bool {
-    matches!(
-        editor.world().get_claim(cell),
-        Some(BuildClaim::Building(_) | BuildClaim::Structure(_) | BuildClaim::Wall)
-    )
+/// Flip to true to float a marker above every road cell when paving:
+/// red concrete = arterial, yellow = collector, white = alley/local, and
+/// magenta = a cell the paver skipped because a claim (building/wall) blocks
+/// it. Markers sit `DEBUG_MARKER_HEIGHT` above the road surface so the network
+/// is readable from the air even where roofs cover the streets.
+pub const DEBUG_ROAD_MARKERS: bool = true;
+const DEBUG_MARKER_HEIGHT: i32 = 20;
+
+/// How a paved cell must treat the claim already on it.
+enum PaveMode {
+    /// Free ground — clear headroom air, then lay the surface.
+    Clear,
+    /// Wall/gate tile — lay the surface across it, but DON'T clear air above
+    /// (that would gouge a notch in the wall). Lets a road meet a gate flush.
+    SurfaceOnly,
+    /// A finished building or placed structure — never touch it.
+    Skip,
+}
+
+fn pave_mode_for_claim(editor: &Editor, cell: Point2D) -> PaveMode {
+    match editor.world().get_claim(cell) {
+        Some(BuildClaim::Building(_) | BuildClaim::Structure(_)) => PaveMode::Skip,
+        Some(BuildClaim::Wall) => PaveMode::SurfaceOnly,
+        _ => PaveMode::Clear,
+    }
 }
 
 pub async fn build_path(
@@ -58,13 +78,17 @@ pub async fn build_path(
         // Force placement: the road surface often lands on a cell that already
         // holds terrain (e.g. the flatten's grass cap), and non-forced placement
         // skips equal-or-denser existing blocks — which silently drops the road,
-        // so we force. But never touch a building/structure/wall cell: skip it
-        // entirely so the road neither gouges nor overwrites it.
-        if road_blocked_by_claim(editor, *point) {
-            continue;
-        }
-        for i in 0..=3 {
-            editor.place_block_forced(&"air".into(), point3d + UP * i).await;
+        // so we force. Claim handling: skip buildings/structures entirely; on a
+        // wall/gate tile lay the surface but don't clear the air above (no
+        // gouging the wall); otherwise clear headroom and pave normally.
+        match pave_mode_for_claim(editor, *point) {
+            PaveMode::Skip => continue,
+            PaveMode::Clear => {
+                for i in 0..=3 {
+                    editor.place_block_forced(&"air".into(), point3d + UP * i).await;
+                }
+            }
+            PaveMode::SurfaceOnly => {}
         }
 
         if remainder > 0.3 {
@@ -141,14 +165,21 @@ fn smooth_road_heights(points_2d: &HashSet<Point2D>, height_by_point: &mut HashM
 /// the *whole* network so junctions blend instead of stepping, and the surface
 /// is laid in a single pass so a later road can never bury an earlier one. Where
 /// paths overlap, the lower height and the higher-priority material win.
+///
+/// Returns the set of cells (as the slab block's exact `Point3D`) where a
+/// half-step slab was laid — the half-block grade lips. Callers that align
+/// buildings to the road (e.g. seating a front door's floor) use this to raise a
+/// house a block over a fronting slab and to clear stray slab lips at doorways,
+/// without having to read the placed road back out of the editor's block cache.
 pub async fn build_paths_merged(
     editor: &Editor,
     data: &LoadedData,
     paths: &[Path],
     rng: &mut RNG,
-) {
+) -> HashSet<Point3D> {
+    let mut slab_cells: HashSet<Point3D> = HashSet::new();
     if paths.is_empty() {
-        return;
+        return slab_cells;
     }
 
     let rank = |p: PathPriority| match p {
@@ -204,19 +235,41 @@ pub async fn build_paths_merged(
         let remainder = height - int_height as f32;
         let material = material_by_point.get(point).unwrap_or(&fallback);
 
-        // Never pave over a building, a placed structure, or the town wall —
-        // skip the cell entirely so the road surface can't gouge or overwrite it.
-        if road_blocked_by_claim(editor, *point) {
-            continue;
+        let mode = pave_mode_for_claim(editor, *point);
+
+        if DEBUG_ROAD_MARKERS {
+            let marker = if matches!(mode, PaveMode::Skip) {
+                "magenta_concrete"
+            } else {
+                match rank_by_point.get(point) {
+                    Some(2) => "red_concrete",
+                    Some(1) => "yellow_concrete",
+                    _ => "white_concrete",
+                }
+            };
+            editor.place_block_forced(&marker.into(), point3d + UP * DEBUG_MARKER_HEIGHT).await;
         }
-        for i in 0..=3 {
-            editor.place_block_forced(&"air".into(), point3d + UP * i).await;
+
+        // Claim handling: skip buildings/structures; on a wall/gate tile lay the
+        // surface but don't clear air above (no gouging the wall); otherwise
+        // clear headroom and pave normally.
+        match mode {
+            PaveMode::Skip => continue,
+            PaveMode::Clear => {
+                for i in 0..=3 {
+                    editor.place_block_forced(&"air".into(), point3d + UP * i).await;
+                }
+            }
+            PaveMode::SurfaceOnly => {}
         }
 
         if remainder > 0.3 {
             placer.place_block_forced(editor, point3d, material, BlockForm::Slab, None, None).await;
+            slab_cells.insert(point3d);
         }
 
         placer.place_block_forced(editor, point3d + DOWN, material, BlockForm::Block, None, None).await;
     }
+
+    slab_cells
 }
