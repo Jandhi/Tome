@@ -61,6 +61,10 @@ pub fn order_wall_points(
     let mut wall_point_list = wall_points.iter().cloned().collect::<Vec<_>>();
     let mut ordered_vec = Vec::new();
     let mut ordered_set = HashSet::new();
+    // No wall points (e.g. a degenerate / fully-built urban region) — nothing to order.
+    if wall_point_list.is_empty() {
+        return list_of_ordered_vec;
+    }
     let mut current_point = wall_point_list.remove(0);
 
     ordered_vec.push(current_point);
