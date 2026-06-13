@@ -4,7 +4,7 @@ import type {
   HeightmapData,
   BlockMapData,
   BiomeMapData,
-  DistrictMapData,
+  ParcelMapData,
   BuildingsData,
   ClaimMapData,
   StatusResponse,
@@ -15,7 +15,7 @@ export interface MapData {
   heightmap: HeightmapData | null;
   blocks: BlockMapData | null;
   biomes: BiomeMapData | null;
-  districts: DistrictMapData | null;
+  parcels: ParcelMapData | null;
   buildings: BuildingsData | null;
   claims: ClaimMapData | null;
 }
@@ -26,7 +26,7 @@ export function useMapData() {
     heightmap: null,
     blocks: null,
     biomes: null,
-    districts: null,
+    parcels: null,
     buildings: null,
     claims: null,
   });
@@ -34,17 +34,17 @@ export function useMapData() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [status, heightmap, blocks, biomes, districts, buildings, claims] =
+    const [status, heightmap, blocks, biomes, parcels, buildings, claims] =
       await Promise.all([
         api.getStatus(),
         api.getHeightmap(),
         api.getBlocks(),
         api.getBiomes(),
-        api.getDistricts(),
+        api.getParcels(),
         api.getBuildings(),
         api.getClaims(),
       ]);
-    setData({ status, heightmap, blocks, biomes, districts, buildings, claims });
+    setData({ status, heightmap, blocks, biomes, parcels, buildings, claims });
     setLoading(false);
   }, []);
 

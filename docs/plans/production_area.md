@@ -1,12 +1,12 @@
 # Production Area — Implementation Summary
 
-Raw resource buildings (farm, woodcutter_hut, iron_mine) are placed as NBT structures. After each placement, a **production area painter** fills the remaining unclaimed space in the building's rural super-district with resource-appropriate terrain.
+Raw resource buildings (farm, woodcutter_hut, iron_mine) are placed as NBT structures. After each placement, a **production area painter** fills the remaining unclaimed space in the building's rural super-parcel with resource-appropriate terrain.
 
 ---
 
 ## System Overview
 
-The painter for each raw resource is declared as a `production_painter` field on its gather recipe in `recipes.yaml`. The painter itself is defined in `data/resource_chains/production_painters.yaml`. The painter name flows from the recipe → `DistrictResourceAssignment` → `paint_production_area()` at the call site.
+The painter for each raw resource is declared as a `production_painter` field on its gather recipe in `recipes.yaml`. The painter itself is defined in `data/resource_chains/production_painters.yaml`. The painter name flows from the recipe → `ParcelResourceAssignment` → `paint_production_area()` at the call site.
 
 ```
 recipes.yaml
@@ -28,7 +28,7 @@ data/paint_palettes/palettes.yaml
 
 ## `PaintPalette`
 
-A named, weighted list of block strings used to paint terrain. Defined in `src/generator/districts/paint_palette.rs`, exported from `src/generator/districts/mod.rs`.
+A named, weighted list of block strings used to paint terrain. Defined in `src/generator/parcels/paint_palette.rs`, exported from `src/generator/parcels/mod.rs`.
 
 ### Fields
 
@@ -76,7 +76,7 @@ Defined in `src/generator/resource_chain/production_painter.rs`. Two variants ar
 | `irrigation` | `bool` | `false` | When true, cells on a random axis/offset stripe become water channels instead of receiving the ground palette. |
 | `flatten_strength` | `f32` | `0.0` | `0.0` = no smoothing; `1.0` = 5 passes via `smooth_terrain`. |
 
-**`type: logging`** — fells a random percentage of existing trees in the district and leaves stumps. Does not plant anything or smooth terrain.
+**`type: logging`** — fells a random percentage of existing trees in the parcel and leaves stumps. Does not plant anything or smooth terrain.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -95,7 +95,7 @@ Located in `src/generator/resource_chain/production_area.rs`, exported via `src/
 
 ```rust
 pub async fn paint_production_area(
-    super_district: &SuperDistrict,
+    district: &District,
     painter_name: &str,
     data: &LoadedData,
     editor: &mut Editor,
@@ -107,8 +107,8 @@ pub async fn paint_production_area(
 
 1. Look up `painter_name` in `data.resource_registry.production_painters`. Warn and return if not found.
 2. Retrieve the `StructureID` of the just-placed building via `editor.world().structures.last()`. Warn and return if none (guards against calling before a building is placed).
-3. Build an **edge buffer**: Chebyshev neighbourhood of radius 3 around all super-district edge cells.
-4. Collect **free cells**: `super_district.data.points_2d` minus edge buffer, minus already-claimed cells, minus water cells.
+3. Build an **edge buffer**: Chebyshev neighbourhood of radius 3 around all super-parcel edge cells.
+4. Collect **free cells**: `district.data.points_2d` minus edge buffer, minus already-claimed cells, minus water cells.
 5. Return early if `free_cells` is empty.
 6. Dispatch on painter variant:
 
@@ -167,7 +167,7 @@ All cells painted by `paint_production_area` are claimed with `BuildClaim::Produ
 
 ## Call Site
 
-`paint_production_area` is called after each successful `place_rural_building` in the placement tests. For the normal resource-chain path the painter comes from `assignment.production_painter`. For the override-building test (`rural_placement_override_building`) the painter is resolved directly from the override building's own gather recipe so it always matches the placed building type, regardless of what resource was assigned to the district:
+`paint_production_area` is called after each successful `place_rural_building` in the placement tests. For the normal resource-chain path the painter comes from `assignment.production_painter`. For the override-building test (`rural_placement_override_building`) the painter is resolved directly from the override building's own gather recipe so it always matches the placed building type, regardless of what resource was assigned to the parcel:
 
 ```rust
 let override_painter: Option<String> = data.resource_registry.recipes()
@@ -182,14 +182,14 @@ let override_painter: Option<String> = data.resource_registry.recipes()
 
 | Action | Path |
 |--------|------|
-| Created | `src/generator/districts/paint_palette.rs` |
+| Created | `src/generator/parcels/paint_palette.rs` |
 | Created | `src/generator/resource_chain/production_painter.rs` |
 | Created | `src/generator/resource_chain/production_area.rs` |
 | Created | `data/paint_palettes/palettes.yaml` |
 | Created | `data/resource_chains/production_painters.yaml` |
 | Modified | `src/generator/build_claim.rs` |
 | Modified | `src/generator/terrain/terraforming.rs` |
-| Modified | `src/generator/districts/mod.rs` |
+| Modified | `src/generator/parcels/mod.rs` |
 | Modified | `src/generator/resource_chain/types.rs` |
 | Modified | `src/generator/resource_chain/registry.rs` |
 | Modified | `src/generator/resource_chain/mod.rs` |

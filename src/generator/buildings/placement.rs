@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, i32};
 
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{SuperDistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
+use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{DistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
 
 use super::BuildingID;
 
@@ -45,20 +45,20 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
         outers.insert(point);
     }
     
-    let mut block_superdistricts = vec![];
+    let mut block_districts = vec![];
     for block in city_blocks.iter() {
         let (outer, inner) = get_outer_and_inner_points(&block, 3);
         outers.extend(outer);
         
-        block_superdistricts.push(inner.iter().fold(HashMap::new(), |mut acc : HashMap::<SuperDistrictID, usize>, point| {
-            let super_district = editor.world().get_super_district_at(*point);
+        block_districts.push(inner.iter().fold(HashMap::new(), |mut acc : HashMap::<DistrictID, usize>, point| {
+            let district = editor.world().get_district_at(*point);
             
-            if let Some(district) = super_district {
-                acc.entry(district).and_modify(|e| *e += 1).or_insert(1);
+            if let Some(parcel) = district {
+                acc.entry(parcel).and_modify(|e| *e += 1).or_insert(1);
             }
             
             acc
-        }).iter().max_by_key(|(_, count)| *count).map(|(district, _)| *district).unwrap());
+        }).iter().max_by_key(|(_, count)| *count).map(|(parcel, _)| *parcel).unwrap());
 
         inners.push(inner);
     }
@@ -85,18 +85,18 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     
     
 
-    let mut superdistrict_styles : HashMap<SuperDistrictID, DistrictStyle> = HashMap::new();
-    for superdistrict_id in block_superdistricts.iter() {
-        if superdistrict_styles.contains_key(&*superdistrict_id) {
-            continue; // Already have a style for this superdistrict
+    let mut district_styles : HashMap<DistrictID, DistrictStyle> = HashMap::new();
+    for district_id in block_districts.iter() {
+        if district_styles.contains_key(&*district_id) {
+            continue; // Already have a style for this district
         }
 
-        let superdistrict_data = editor.world().super_district_analysis_data.get(superdistrict_id)
-            .expect("Super district analysis data not found");
+        let district_data = editor.world().district_analysis_data.get(district_id)
+            .expect("Super parcel analysis data not found");
 
         
 
-        let woods = superdistrict_data.biome_count().keys().into_iter()
+        let woods = district_data.biome_count().keys().into_iter()
             .map(|biome| {
                 log::info!("Processing biome: {:?}", biome);
                 BiomeWoodtype::from_biome(biome.clone())
@@ -108,7 +108,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
             .filter_map(|wood| wood)
             .collect::<Vec<_>>();
 
-        let stones = superdistrict_data.biome_count().into_iter()
+        let stones = district_data.biome_count().into_iter()
             .max_by_key(|item| item.1)
             .map(|(biome, _)| 
                 BiomeStonetype::from_biome(biome.clone())
@@ -124,7 +124,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
             )
             .unwrap();
 
-        superdistrict_styles.insert(*superdistrict_id, DistrictStyle::generate_style(rng, cores.iter().collect(), roofs.clone(), woods.clone(), stones.clone()));
+        district_styles.insert(*district_id, DistrictStyle::generate_style(rng, cores.iter().collect(), roofs.clone(), woods.clone(), stones.clone()));
     }
     
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
@@ -196,8 +196,8 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
                     }
 
                     let data_ref = &data.borrow();
-                    let palette = superdistrict_styles.get(&block_superdistricts[block_index])
-                        .expect("Super district style not found")
+                    let palette = district_styles.get(&block_districts[block_index])
+                        .expect("Super parcel style not found")
                         .generate_palette(rng);
 
                     place_building(editor, &shape, grid, set, data_ref, style, rng, &palette).await;

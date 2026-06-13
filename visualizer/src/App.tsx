@@ -7,14 +7,14 @@ import { useViewport } from "./hooks/useViewport";
 import { useMapData } from "./hooks/useMapData";
 import { useWebSocket } from "./hooks/useWebSocket";
 import BiomeLegend from "./components/BiomeLegend";
-import DistrictLegend from "./components/DistrictLegend";
+import ParcelLegend from "./components/ParcelLegend";
 import LogPanel from "./components/LogPanel";
 import { api } from "./api/client";
 
 const DEFAULT_LAYERS: LayerConfig = {
   heightmap: { visible: true, opacity: 1.0 },
   biomes: { visible: false, opacity: 0.8 },
-  districts: { visible: true, opacity: 0.5 },
+  parcels: { visible: true, opacity: 0.5 },
   buildings: { visible: true, opacity: 0.8 },
   claims: { visible: false, opacity: 0.6 },
 };
@@ -94,7 +94,7 @@ export default function App() {
         {layers.biomes.visible && data.biomes && (
           <BiomeLegend biomes={data.biomes} />
         )}
-        {layers.districts.visible && <DistrictLegend />}
+        {layers.parcels.visible && <ParcelLegend />}
       </div>
       <InfoPanel data={data} hoverX={hoverPos.x} hoverZ={hoverPos.z} />
       <LogPanel logs={logs} onClear={clearLogs} />

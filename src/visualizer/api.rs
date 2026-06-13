@@ -130,11 +130,11 @@ pub async fn get_blocks(
     }
 }
 
-pub async fn get_districts(
+pub async fn get_parcels(
     State(state): State<SharedState>,
-) -> Result<Json<DistrictMapData>, StatusCode> {
+) -> Result<Json<ParcelMapData>, StatusCode> {
     let state = state.read().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    match state.snapshot.as_ref().and_then(|s| s.districts.clone()) {
+    match state.snapshot.as_ref().and_then(|s| s.parcels.clone()) {
         Some(data) => Ok(Json(data)),
         None => Err(StatusCode::NOT_FOUND),
     }

@@ -11,7 +11,7 @@ interface Props {
 const PHASE_LABELS: Record<GenerationPhase, string> = {
   idle: "Waiting for generation...",
   refreshing: "Loading build area...",
-  districts: "Generating districts",
+  parcels: "Generating parcels",
   terrain: "Processing terrain",
   buildings: "Placing buildings",
   walls: "Building walls",

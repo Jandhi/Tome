@@ -1,6 +1,6 @@
 # Placement (`src/generator/placement/placement.rs`)
 
-Picks a spot inside a super-district, prepares the ground, places a prebuilt NBT structure, and claims its footprint. Used downstream of the resource-chain solver — once each rural super-district has been assigned a raw resource (and a gathering building) and the urban area has a list of processing buildings to host, this module turns those abstract assignments into concrete placements on the map.
+Picks a spot inside a super-parcel, prepares the ground, places a prebuilt NBT structure, and claims its footprint. Used downstream of the resource-chain solver — once each rural super-parcel has been assigned a raw resource (and a gathering building) and the urban area has a list of processing buildings to host, this module turns those abstract assignments into concrete placements on the map.
 
 The module exposes three public entry points and one set of geometry helpers; everything else is private. This doc explains the moving pieces in the order you'd read the file.
 
@@ -10,7 +10,7 @@ The module exposes three public entry points and one set of geometry helpers; ev
 
 ```rust
 pub async fn place_rural_building(
-    super_district: &SuperDistrict,
+    district: &District,
     structure: &Structure,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -18,11 +18,11 @@ pub async fn place_rural_building(
 ) -> Result<()>
 ```
 
-Places one structure inside a single (Rural) super-district. Used per-assignment from `SettlementProductionResult::district_assignments`.
+Places one structure inside a single (Rural) super-parcel. Used per-assignment from `SettlementProductionResult::parcel_assignments`.
 
 ```rust
 pub async fn place_urban_building(
-    urban_super_districts: &[&SuperDistrict],
+    urban_districts: &[&District],
     structure: &Structure,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -30,11 +30,11 @@ pub async fn place_urban_building(
 ) -> Result<()>
 ```
 
-Places one structure anywhere in the urban region — it treats *all* urban super-districts as one big candidate pool, since processing buildings have no fixed home super-district.
+Places one structure anywhere in the urban region — it treats *all* urban super-parcels as one big candidate pool, since processing buildings have no fixed home super-parcel.
 
 ```rust
 pub async fn place_urban_buildings(
-    urban_super_districts: &[&SuperDistrict],
+    urban_districts: &[&District],
     building_counts: &HashMap<String, u32>,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -52,9 +52,9 @@ Both functions return `Ok(())` whether or not a placement actually happened — 
 
 Both `place_rural_building` and `place_urban_building` follow the same shape:
 
-1. **Build the candidate pool** — interior cells = `points_2d \ edges`. Rural uses one super-district's data; urban unions every urban super-district.
+1. **Build the candidate pool** — interior cells = `points_2d \ edges`. Rural uses one super-parcel's data; urban unions every urban super-parcel.
 2. **Sample 10 random centres** (`NUM_CANDIDATES`) from the interior pool via `RNG::choose_many`. Pair each with all four `Cardinal`s — a 5×3 building facing east covers different cells than the same building facing north.
-3. **Score each candidate** — see *Scoring* below. Hard reject any with water inside the footprint, claim overlap, wall proximity, or footprint extending outside the urban/super-district `points_2d`.
+3. **Score each candidate** — see *Scoring* below. Hard reject any with water inside the footprint, claim overlap, wall proximity, or footprint extending outside the urban/super-parcel `points_2d`.
 4. **Pick the best** (lowest score) with `select_best_candidate`. If nothing survives, log a warning and return.
 5. **`execute_placement`** — clear vegetation, flatten + blend ground, run `place_structure`, claim the footprint.
 
@@ -122,7 +122,7 @@ When no roads have been generated yet, every candidate gets `road_bonus = 0` —
 
 Before scoring, `select_best_candidate` short-circuits any candidate that fails:
 
-1. `rect_inside_points` — every footprint cell must be in the bounds passed in (super-district `points_2d` for rural, the unioned urban points for urban). Catches buildings that would extend outside the assigned region.
+1. `rect_inside_points` — every footprint cell must be in the bounds passed in (super-parcel `points_2d` for rural, the unioned urban points for urban). Catches buildings that would extend outside the assigned region.
 2. `rect_overlaps_claim` — any cell already in the build-claim map. Catches overlap with previously-placed structures, the wall, paths, or buildings_v2.
 3. `rect_too_close_to_wall` — any cell within `WALL_BUFFER_RADIUS` of a `BuildClaim::Wall`. Even after claim-overlap rejection, this guarantees a visible gap between the wall and any building.
 4. `score_candidate` returning `None` — at least one cell of the footprint is water.
@@ -201,7 +201,7 @@ place_urban_buildings
 
 - The structure passed in must have a valid `size_xz` declared in its JSON sidecar. JSONs that omit it default to `(0, 0)`; placement detects this and skips with a warning rather than dividing by zero downstream.
 - The build-claim map must already contain whatever non-building features should constrain placement. In particular: build the city wall **before** placing urban buildings, so the wall's claims (and the 1-cell buffer) keep buildings off the perimeter.
-- The resource registry validates at load time that every recipe's `building` resolves to a `Structure` under `data/structures/resource_buildings/` — see `ResourceRegistry::validate_buildings`. Placement assumes that contract holds; if a structure is missing it logs a warning per affected super-district and skips.
+- The resource registry validates at load time that every recipe's `building` resolves to a `Structure` under `data/structures/resource_buildings/` — see `ResourceRegistry::validate_buildings`. Placement assumes that contract holds; if a structure is missing it logs a warning per affected super-parcel and skips.
 
 ---
 
@@ -211,5 +211,5 @@ Pure unit tests (no server):
 - `footprint_dims_*` and `anchor_offset_*` — the rotation math table above.
 
 Integration tests (require a live GDMC server):
-- `rural_resource_placement_paints_districts` — runs the full pipeline (districts → resource chain → rural placements → urban placements → ground painting) and visualises district types as wool colours.
+- `rural_resource_placement_paints_parcels` — runs the full pipeline (parcels → resource chain → rural placements → urban placements → ground painting) and visualises parcel types as wool colours.
 - `rural_and_urban_placement_with_city_wall` — same flow plus `build_wall(... StandardWithInner ...)` *before* placement, demonstrating that the wall's claims push buildings off the perimeter and the `WALL_BUFFER_RADIUS` keeps a gap.

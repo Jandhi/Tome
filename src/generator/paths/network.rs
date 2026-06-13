@@ -1,6 +1,6 @@
 //! Tiered A* road network for urban areas.
 //!
-//! Builds **arterials** (a minimum spanning tree over urban district centres,
+//! Builds **arterials** (a minimum spanning tree over urban parcel centres,
 //! optionally routed through a town centre) and **collectors** (each gate routed
 //! to the nearest backbone node). Every edge is an A* route, so roads follow
 //! terrain height. Realise the returned paths with
@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
-use crate::generator::districts::DistrictType;
+use crate::generator::districts::ParcelType;
 use crate::generator::materials::MaterialId;
 use crate::geometry::{CARDINALS_2D, Point2D, Point3D};
 
@@ -23,7 +23,7 @@ use super::routing::{get_path_with, RouteContext, RouteParams};
 ///
 /// `include_town_center` adds the urban-area centroid as an extra backbone node
 /// so the arterial tree converges through the middle (radial feel) rather than
-/// being a pure district-to-district MST.
+/// being a pure parcel-to-parcel MST.
 pub async fn build_road_network(
     editor: &Editor,
     arterial_material: MaterialId,
@@ -41,7 +41,7 @@ pub async fn build_road_network(
     // (post-flatten) surface height. When `anchor_nodes` are supplied (placed
     // buildings), they ARE the backbone — the arterials connect *them*, so the
     // network has a reason for its shape. With no anchors, fall back to one
-    // centre per urban super-district (the original centroid network).
+    // centre per urban super-parcel (the original centroid network).
     let mut backbone: Vec<Point3D> = Vec::new();
     if include_town_center {
         if let Some(c) = centroid_snapped(&urban) {
@@ -50,8 +50,8 @@ pub async fn build_road_network(
     }
     backbone.extend_from_slice(anchor_nodes);
     if anchor_nodes.is_empty() {
-        for sd in editor.world().super_districts.values() {
-            if sd.data.district_type != DistrictType::Urban {
+        for sd in editor.world().districts.values() {
+            if sd.data.parcel_type != ParcelType::Urban {
                 continue;
             }
             if let Some(c) = centroid_snapped(&sd.data.points_2d) {

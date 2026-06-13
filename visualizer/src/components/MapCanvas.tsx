@@ -3,14 +3,14 @@ import type { MapData } from "../hooks/useMapData";
 import type { Viewport } from "../hooks/useViewport";
 import { renderHeightmap } from "../layers/heightmap";
 import { renderBiomes } from "../layers/biomes";
-import { renderDistricts } from "../layers/districts";
+import { renderParcels } from "../layers/parcels";
 import { renderBuildings } from "../layers/buildings";
 import { renderClaims } from "../layers/claims";
 
 export interface LayerConfig {
   heightmap: { visible: boolean; opacity: number };
   biomes: { visible: boolean; opacity: number };
-  districts: { visible: boolean; opacity: number };
+  parcels: { visible: boolean; opacity: number };
   buildings: { visible: boolean; opacity: number };
   claims: { visible: boolean; opacity: number };
 }
@@ -63,13 +63,13 @@ export default function MapCanvas({
       result.biomes = c;
     }
 
-    if (data.districts) {
+    if (data.parcels) {
       const c = document.createElement("canvas");
       c.width = depth;
       c.height = width;
       const ctx = c.getContext("2d")!;
-      ctx.putImageData(renderDistricts(data.districts), 0, 0);
-      result.districts = c;
+      ctx.putImageData(renderParcels(data.parcels), 0, 0);
+      result.parcels = c;
     }
 
     if (data.buildings) {
@@ -115,7 +115,7 @@ export default function MapCanvas({
     const layerOrder: (keyof LayerConfig)[] = [
       "heightmap",
       "biomes",
-      "districts",
+      "parcels",
       "claims",
       "buildings",
     ];

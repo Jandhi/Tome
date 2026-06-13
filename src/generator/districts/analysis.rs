@@ -7,11 +7,11 @@ use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
 use std::collections::HashMap;
 
-use super::data::HasDistrictData;
-use super::DistrictData;
+use super::data::HasParcelData;
+use super::ParcelData;
 
 #[derive(Debug, Clone)]
-pub struct DistrictAnalysis {
+pub struct ParcelAnalysis {
     count : usize,
     roughness: f32,
     water_percentage: f32,
@@ -22,12 +22,12 @@ pub struct DistrictAnalysis {
 }
 
 
-impl DistrictAnalysis {
-    /// Construct a `DistrictAnalysis` from a biome distribution. All other fields
-    /// (roughness, water, etc.) are zeroed. Useful for testing and synthetic districts.
+impl ParcelAnalysis {
+    /// Construct a `ParcelAnalysis` from a biome distribution. All other fields
+    /// (roughness, water, etc.) are zeroed. Useful for testing and synthetic parcels.
     pub fn from_biome_count(biome_count: HashMap<Biome, u32>) -> Self {
         let count = biome_count.values().sum::<u32>() as usize;
-        DistrictAnalysis {
+        ParcelAnalysis {
             count: count.max(1),
             roughness: 0.0,
             water_percentage: 0.0,
@@ -38,7 +38,7 @@ impl DistrictAnalysis {
         }
     }
 
-    /// Returns all biomes that make up at least 30% of this district.
+    /// Returns all biomes that make up at least 30% of this parcel.
     pub fn major_biomes(&self) -> Vec<&Biome> {
         self.biome_count.iter()
             .filter(|(_, &count)| count as f32 / self.count as f32 >= 0.30)
@@ -79,7 +79,7 @@ impl DistrictAnalysis {
     }
 }
 
-pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor: &Editor) -> DistrictAnalysis {
+pub async fn analyze_parcel<'a, TID : 'a>(area: &ParcelData<TID>, editor: &Editor) -> ParcelAnalysis {
     let average = area.average();
     let average_height = average.y;
     let number_of_points = area.points().len() as f32;
@@ -127,7 +127,7 @@ pub async fn analyze_district<'a, TID : 'a>(area: &DistrictData<TID>, editor: &E
     }
 
     let num_points = if number_of_points == 0.0 { 1.0 } else { number_of_points };
-    DistrictAnalysis {
+    ParcelAnalysis {
         count: area.points().len(),
         roughness: (root_mean_square_height / num_points).sqrt(),
         gradient: neighbour_height_sum / num_points,

@@ -33,8 +33,8 @@ cargo run                                       # Needs live server
 ## Layout
 
 - `src/main.rs` — entry point, declares all top-level modules (no `lib.rs`)
-- `src/editor/` — `Editor` (block writes, RefCell interior mutability) and `World` (heightmaps, chunks, districts, build claims)
-- `src/generator/` — districts, buildings, buildings_v2, materials, terrain, paths, nbts, chronicle, style
+- `src/editor/` — `Editor` (block writes, RefCell interior mutability) and `World` (heightmaps, chunks, parcels, build claims)
+- `src/generator/` — parcels, buildings, buildings_v2, materials, terrain, paths, nbts, chronicle, style
 - `src/geometry/` — Point2D, Point3D, Rect2D, Rect3D, Cardinal, Voronoi
 - `src/minecraft/` — Block, BlockID, BlockForm, Chunk, Biome
 - `src/http_mod/` — async GDMC HTTP client (reqwest + retry)
@@ -63,7 +63,7 @@ SizeClass controls shape: Cottage (small, 1 floor), House (1-2 floors), Hall (2-
 
 ## Settlement Pipeline
 
-`generate_districts()` → `get_city_blocks_and_off_limits()` (Voronoi partition of urban area) → per-block building placement. City block inner points become a `Plot` for buildings_v2.
+`generate_parcels()` → `get_city_blocks_and_off_limits()` (Voronoi partition of urban area) → per-block building placement. City block inner points become a `Plot` for buildings_v2.
 
 ## Palette Merging
 

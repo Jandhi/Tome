@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasDistrictData, district::{self, generate_districts}, district_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasParcelData, parcel::{self, generate_parcels}, parcel_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
 
@@ -29,17 +29,17 @@ mod tests {
         Block::new("oak_sign".into(), None, Some(data))
     }
 
-    fn get_block_for_district_type(district_type: district::DistrictType) -> Block {
-        match district_type {
-            district::DistrictType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
-            district::DistrictType::Rural => Block { id: "green_wool".into(), data: None, state: None },
-            district::DistrictType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+    fn get_block_for_parcel_type(parcel_type: parcel::ParcelType) -> Block {
+        match parcel_type {
+            parcel::ParcelType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
+            parcel::ParcelType::Rural => Block { id: "green_wool".into(), data: None, state: None },
+            parcel::ParcelType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
             _ => Block { id: "bedrock".into(), data: None, state: None }, // Default case for unknown types
         }
     }
 
     #[tokio::test]
-    async fn district_test() {
+    async fn parcel_test() {
         init_logger();
 
         // Initialize the test data
@@ -54,7 +54,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
         let glass = Block {
             id: "glass".into(),
             data: None,
@@ -63,20 +63,20 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let district_id = editor.world_mut().district_map[x as usize][z as usize];
+                let parcel_id = editor.world_mut().parcel_map[x as usize][z as usize];
 
-                let Some(district_id) = district_id else {
+                let Some(parcel_id) = parcel_id else {
                     continue;
                 };
                 
 
-                let block = get_block_for_id(district_id.0 as usize);
+                let block = get_block_for_id(parcel_id.0 as usize);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
                 //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
-                if let Some(district) = editor.world_mut().districts.get(&district_id) {
+                if let Some(parcel) = editor.world_mut().parcels.get(&parcel_id) {
                     
-                    if district.data.edges.contains(&point) {
+                    if parcel.data.edges.contains(&point) {
                         editor.place_block(&glass, Point3D::new(x, height , z)).await;
                         editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
                     } else {
@@ -90,7 +90,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn superdistrict_test() {
+    async fn district_test() {
         init_logger();
         println!("hello");
 
@@ -105,7 +105,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
 
         let glass = Block {
             id: "glass".into(),
@@ -120,28 +120,28 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = editor.world_mut().super_district_map[x as usize][z as usize];
                 let district_id = editor.world_mut().district_map[x as usize][z as usize];
+                let parcel_id = editor.world_mut().parcel_map[x as usize][z as usize];
 
+                let Some(parcel_id) = parcel_id else {
+                    continue;
+                };
                 let Some(district_id) = district_id else {
                     continue;
                 };
-                let Some(super_district_id) = super_district_id else {
-                    continue;
-                };
 
-                let block = get_block_for_id(super_district_id.0 as usize);
+                let block = get_block_for_id(district_id.0 as usize);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let World {districts,super_districts, .. } = editor.world_mut();
+                let World {parcels,districts, .. } = editor.world_mut();
 
-                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = districts.get(&district_id).expect("Failed to get district");
-                if super_district.data.edges.contains(&point) {
+                let district = districts.get(&district_id).expect("Failed to get super parcel");
+                let parcel = parcels.get(&parcel_id).expect("Failed to get parcel");
+                if district.data.edges.contains(&point) {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
                 }
-                else if district.data.edges.contains(&point) {
+                else if parcel.data.edges.contains(&point) {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
                     editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
                 }
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn superdistrict_classification() {
+    async fn district_classification() {
         init_logger();
 
         // Initialize the test data
@@ -171,7 +171,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
         let glass = Block {
             id: "glass".into(),
             data: None,
@@ -185,28 +185,28 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = editor.world_mut().super_district_map[x as usize][z as usize];
                 let district_id = editor.world_mut().district_map[x as usize][z as usize];
+                let parcel_id = editor.world_mut().parcel_map[x as usize][z as usize];
 
+                let Some(parcel_id) = parcel_id else {
+                    continue;
+                };
                 let Some(district_id) = district_id else {
                     continue;
                 };
-                let Some(super_district_id) = super_district_id else {
-                    continue;
-                };
 
-                let block = get_block_for_district_type(editor.world_mut().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_parcel_type(editor.world_mut().districts.get(&district_id).expect("Failed to get parcel").data.parcel_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
 
-                let World {districts,super_districts, .. } = editor.world_mut();
-                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = districts.get(&district_id).expect("Failed to get district");
+                let World {parcels,districts, .. } = editor.world_mut();
+                let district = districts.get(&district_id).expect("Failed to get super parcel");
+                let parcel = parcels.get(&parcel_id).expect("Failed to get parcel");
 
-                if super_district.data.edges.contains(&point) {
+                if district.data.edges.contains(&point) {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
                 }
-                else if district.data.edges.contains(&point) {
+                else if parcel.data.edges.contains(&point) {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
                     editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
                 }
@@ -217,17 +217,17 @@ mod tests {
             }
         }
 
-        // Log each super-district's final type/size and snapshot its centre while we hold
+        // Log each super-parcel's final type/size and snapshot its centre while we hold
         // the borrow; drop the borrow before placing the signs.
-        let sign_info: Vec<(usize, district::DistrictType, Point2D, usize)> = editor.world()
-            .super_districts.values()
-            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.average().drop_y(), sd.data.points_2d.len()))
+        let sign_info: Vec<(usize, parcel::ParcelType, Point2D, usize)> = editor.world()
+            .districts.values()
+            .map(|sd| (sd.id().0, sd.data.parcel_type, sd.data.average().drop_y(), sd.data.points_2d.len()))
             .collect();
 
         let pole: Block = "oak_fence".into();
-        for (id, district_type, centre, size) in sign_info {
+        for (id, parcel_type, centre, size) in sign_info {
             if centre.x < 0 || centre.y < 0 || centre.x >= build_area.size.x || centre.y >= build_area.size.z {
-                log::info!("Super-district {} final type={:?} size={} cells, centre={:?} out of bounds — no sign", id, district_type, size, centre);
+                log::info!("Super-parcel {} final type={:?} size={} cells, centre={:?} out of bounds — no sign", id, parcel_type, size, centre);
                 continue;
             }
 
@@ -235,8 +235,8 @@ mod tests {
             let surface_y = height_map[centre.x as usize][centre.y as usize];
             let (world_x, world_z) = (centre.x + build_area.origin.x, centre.y + build_area.origin.z);
             log::info!(
-                "Super-district {} final type={:?} size={} cells — sign at world ({}, {}, {})  /tp @s {} {} {}",
-                id, district_type, size, world_x, surface_y + 4, world_z, world_x, surface_y + 5, world_z
+                "Super-parcel {} final type={:?} size={} cells — sign at world ({}, {}, {})  /tp @s {} {} {}",
+                id, parcel_type, size, world_x, surface_y + 4, world_z, world_x, surface_y + 5, world_z
             );
 
             // A 3-tall pole so the marker pokes above terrain, with the numbered sign on top.
@@ -247,13 +247,13 @@ mod tests {
             editor.place_block(&sign_block(&id.to_string()), Point3D::new(centre.x, h + 4, centre.y)).await;
         }
 
-        // Verify the size band: every Urban/Rural (interior) district should be within ±50% of the
-        // interior average block count. Off-limits districts are exempt. See
-        // docs/plans/district_size_balancing.md.
-        let interior_sizes: Vec<(usize, district::DistrictType, usize)> = editor.world()
-            .super_districts.values()
-            .filter(|sd| matches!(sd.data.district_type, district::DistrictType::Urban | district::DistrictType::Rural))
-            .map(|sd| (sd.id().0, sd.data.district_type, sd.data.points_2d.len()))
+        // Verify the size band: every Urban/Rural (interior) parcel should be within ±50% of the
+        // interior average block count. Off-limits parcels are exempt. See
+        // docs/plans/parcel_size_balancing.md.
+        let interior_sizes: Vec<(usize, parcel::ParcelType, usize)> = editor.world()
+            .districts.values()
+            .filter(|sd| matches!(sd.data.parcel_type, parcel::ParcelType::Urban | parcel::ParcelType::Rural))
+            .map(|sd| (sd.id().0, sd.data.parcel_type, sd.data.points_2d.len()))
             .collect();
 
         if !interior_sizes.is_empty() {
@@ -261,19 +261,19 @@ mod tests {
             let avg = total as f32 / interior_sizes.len() as f32;
             let (lo, hi) = (avg * 0.5, avg * 1.5);
             let mut out_of_band = 0usize;
-            for (id, district_type, size) in &interior_sizes {
+            for (id, parcel_type, size) in &interior_sizes {
                 let ratio = *size as f32 / avg;
                 let in_band = (*size as f32) >= lo && (*size as f32) <= hi;
                 if !in_band { out_of_band += 1; }
                 log::info!(
-                    "Band check: super-district {} type={:?} size={} avg={:.0} ratio={:.2} in_band={}",
-                    id, district_type, size, avg, ratio, in_band
+                    "Band check: super-parcel {} type={:?} size={} avg={:.0} ratio={:.2} in_band={}",
+                    id, parcel_type, size, avg, ratio, in_band
                 );
             }
             let min = interior_sizes.iter().map(|(_, _, s)| *s).min().unwrap();
             let max = interior_sizes.iter().map(|(_, _, s)| *s).max().unwrap();
             log::info!(
-                "Band summary: {} interior districts, avg={:.0}, min={}, max={}, max/min={:.2}, band [{:.0}, {:.0}], {} out of band",
+                "Band summary: {} interior parcels, avg={:.0}, min={}, max={}, max/min={:.2}, band [{:.0}, {:.0}], {} out of band",
                 interior_sizes.len(), avg, min, max, max as f32 / min.max(1) as f32, lo, hi, out_of_band
             );
         }
@@ -295,16 +295,16 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
 
-        // Snapshot the cell-sets of every urban super-district while we hold a borrow,
+        // Snapshot the cell-sets of every urban super-parcel while we hold a borrow,
         // then drop the borrow before touching the editor again.
-        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == district::DistrictType::Urban)
+        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == parcel::ParcelType::Urban)
             .map(|sd| sd.data.points_2d.clone())
             .collect();
 
-        println!("Subdividing {} urban super-districts", urban_blocks.len());
+        println!("Subdividing {} urban super-parcels", urban_blocks.len());
 
         let alley_block = Block { id: "polished_andesite".into(), data: None, state: None };
 
@@ -344,7 +344,7 @@ mod tests {
         editor.flush_buffer().await;
     }
 
-    /// Subdivide urban super-districts as in `subdivide_urban_test`, then mark
+    /// Subdivide urban super-parcels as in `subdivide_urban_test`, then mark
     /// the alley cells as `BuildClaim::Path` and run the buildings_v2 +
     /// city_houses frontage/interior fill on each sub-block. Used to judge how
     /// well subdivision sizing produces buildable sub-blocks. Requires a live
@@ -372,15 +372,15 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
 
-        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == district::DistrictType::Urban)
+        let urban_blocks: Vec<HashSet<Point2D>> = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == parcel::ParcelType::Urban)
             .map(|sd| sd.data.points_2d.clone())
             .collect();
-        println!("Subdividing {} urban super-districts", urban_blocks.len());
+        println!("Subdividing {} urban super-parcels", urban_blocks.len());
 
-        // Take a 2-cell-thick ring at the edge of each urban super-district as
+        // Take a 2-cell-thick ring at the edge of each urban super-parcel as
         // the perimeter road. The interior cells are what we actually subdivide.
         let mut perimeter_roads: HashSet<Point2D> = HashSet::new();
         let mut interior_blocks: Vec<HashSet<Point2D>> = Vec::new();
@@ -420,18 +420,18 @@ mod tests {
         let frontage_pool = vec![SizeClass::House];
         let interior_pool = vec![SizeClass::House];
 
-        // Subdivide the INTERIOR of each urban super-district, alternating
+        // Subdivide the INTERIOR of each urban super-parcel, alternating
         // between BSP (axis-aligned cuts) and voronoi (organic partitions) so
-        // adjacent districts visually compare the two patterns.
+        // adjacent parcels visually compare the two patterns.
         let mut all_sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
         let mut all_alleys: HashSet<Point2D> = HashSet::new();
         for (i, inner) in interior_blocks.iter().enumerate() {
             let (sub_blocks, alleys) = if i % 2 == 0 {
-                println!("Super-district {}: BSP partition", i);
+                println!("Super-parcel {}: BSP partition", i);
                 crate::generator::districts::subdivide::subdivide_block(inner, &mut rng, 32)
             } else {
                 let sections = (inner.len() / 400).max(2);
-                println!("Super-district {}: voronoi partition ({} sections)", i, sections);
+                println!("Super-parcel {}: voronoi partition ({} sections)", i, sections);
                 crate::generator::districts::subdivide::voronoi_subdivide_block(inner, &mut rng, sections)
             };
             all_sub_blocks.extend(sub_blocks);
@@ -628,7 +628,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn district_classification() {
+    async fn parcel_classification() {
         init_logger();
 
         // Initialize the test data
@@ -643,7 +643,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
         let glass = Block {
             id: "glass".into(),
             data: None,
@@ -652,20 +652,20 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let district_id = editor.world_mut().district_map[x as usize][z as usize];
+                let parcel_id = editor.world_mut().parcel_map[x as usize][z as usize];
 
-                let Some(district_id) = district_id else {
+                let Some(parcel_id) = parcel_id else {
                     continue;
                 };
                 
 
-                let block = get_block_for_district_type(editor.world_mut().districts.get(&district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_parcel_type(editor.world_mut().parcels.get(&parcel_id).expect("Failed to get parcel").data.parcel_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
                 let point = Point3D::new(x, height, z);
                 //editor.place_block(&block, Point3D::new(x, height - build_area.origin.y, z)).await;
-                if let Some(district) = editor.world_mut().districts.get(&district_id) {
+                if let Some(parcel) = editor.world_mut().parcels.get(&parcel_id) {
                     
-                    if district.data.edges.contains(&point) {
+                    if parcel.data.edges.contains(&point) {
                         editor.place_block(&glass, Point3D::new(x, height , z)).await;
                         editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
                     } else {
@@ -679,7 +679,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn district_classification_district_points() {
+    async fn parcel_classification_parcel_points() {
         init_logger();
 
         // Initialize the test data
@@ -693,23 +693,23 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
         let glass = Block {
             id: "glass".into(),
             data: None,
             state: None,
         };
 
-        // Collect district ids and their points to avoid multiple mutable borrows
-        let district_points: Vec<_> = {
+        // Collect parcel ids and their points to avoid multiple mutable borrows
+        let parcel_points: Vec<_> = {
             let world = editor.world_mut();
-            world.districts.iter().map(|(district_id, district)| {
-                (*district_id, district.data.district_type, district.data.points.clone(), district.data.edges.clone())
+            world.parcels.iter().map(|(parcel_id, parcel)| {
+                (*parcel_id, parcel.data.parcel_type, parcel.data.points.clone(), parcel.data.edges.clone())
             }).collect()
         };
 
-        for (_district_id, district_type, points, edges) in district_points {
-            let block = get_block_for_district_type(district_type);
+        for (_parcel_id, parcel_type, points, edges) in parcel_points {
+            let block = get_block_for_parcel_type(parcel_type);
             for point in points.iter() {
                 if edges.contains(point) {
                     editor.place_block(&glass, *point).await;
@@ -724,7 +724,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn district_resource_production_report() {
+    async fn parcel_resource_production_report() {
         init_logger();
 
         let seed = Seed(12345);
@@ -734,32 +734,32 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let registry = crate::generator::resource_chain::ResourceRegistry::load()
             .expect("Failed to load resource registry");
 
-        // Only Rural super-districts produce raw resources.
-        let rural_analysis: HashMap<_, _> = editor.world().super_district_analysis_data.iter()
+        // Only Rural super-parcels produce raw resources.
+        let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
             .filter(|(id, _)| {
-                editor.world().super_districts.get(id)
-                    .map(|sd| sd.data.district_type == crate::generator::districts::DistrictType::Rural)
+                editor.world().districts.get(id)
+                    .map(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Rural)
                     .unwrap_or(false)
             })
             .map(|(id, analysis)| (*id, analysis.clone()))
             .collect();
 
-        let result = registry.resolve_for_districts(&rural_analysis, &mut rng);
+        let result = registry.resolve_for_parcels(&rural_analysis, &mut rng);
 
-        // Sort producing super-district IDs for display.
-        let mut producing_ids: Vec<_> = result.district_assignments.keys().cloned().collect();
+        // Sort producing super-parcel IDs for display.
+        let mut producing_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         producing_ids.sort_by_key(|id| id.0);
 
-        println!("\n╔══ District Resource Production Report ════════════╗");
+        println!("\n╔══ Parcel Resource Production Report ════════════╗");
 
-        println!("║ Producing Super-Districts ({} rural of {} total):", producing_ids.len(), editor.world().super_district_analysis_data.len());
+        println!("║ Producing Super-Parcels ({} rural of {} total):", producing_ids.len(), editor.world().district_analysis_data.len());
         for id in &producing_ids {
-            let analysis = &editor.world().super_district_analysis_data[id];
+            let analysis = &editor.world().district_analysis_data[id];
             let biome_names = {
                 let mut names: Vec<&str> = analysis.major_biomes().iter()
                     .map(|b| b.as_str().strip_prefix("minecraft:").unwrap_or(b.as_str()))
@@ -767,8 +767,8 @@ mod tests {
                 names.sort();
                 names.join("+")
             };
-            let a = &result.district_assignments[id];
-            println!("║   Super-District {:>3} ({:<25}) → {} x2 [{}]",
+            let a = &result.parcel_assignments[id];
+            println!("║   Super-Parcel {:>3} ({:<25}) → {} x2 [{}]",
                 id.0, biome_names, a.primary_resource, a.building);
         }
 
@@ -815,7 +815,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn district_replace_ground() {
+    async fn parcel_replace_ground() {
         init_logger();
 
         // Initialize the test data
@@ -829,7 +829,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
 
         let block_vec : Vec<Block> = vec![
             "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
@@ -866,7 +866,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn district_replace_ground_smooth() {
+    async fn parcel_replace_ground_smooth() {
         init_logger();
 
         // Initialize the test data
@@ -880,7 +880,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        let _districts = generate_districts(seed, &mut editor).await;
+        let _parcels = generate_parcels(seed, &mut editor).await;
 
         let block_vec : Vec<Block> = vec![
             "stone".into(), "cobblestone".into(), "stone_bricks".into(), "andesite".into(), "gravel".into(),
@@ -952,7 +952,7 @@ mod tests {
 
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
          let glass = Block {
             id: "glass".into(),
@@ -977,28 +977,28 @@ mod tests {
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
-                let super_district_id = editor.world().super_district_map[x as usize][z as usize];
                 let district_id = editor.world().district_map[x as usize][z as usize];
+                let parcel_id = editor.world().parcel_map[x as usize][z as usize];
 
+                let Some(parcel_id) = parcel_id else {
+                    continue;
+                };
                 let Some(district_id) = district_id else {
                     continue;
                 };
-                let Some(super_district_id) = super_district_id else {
-                    continue;
-                };
 
-                let block = get_block_for_district_type(editor.world().super_districts.get(&super_district_id).expect("Failed to get district").data.district_type);
+                let block = get_block_for_parcel_type(editor.world().districts.get(&district_id).expect("Failed to get parcel").data.parcel_type);
                 let height = height_map[x as usize][z as usize] - build_area.origin.y - 1;
                 let point = Point3D::new(x, height + 1, z);
 
-                let World {districts,super_districts, .. } = editor.world();
-                let super_district = super_districts.get(&super_district_id).expect("Failed to get super district");
-                let district = districts.get(&district_id).expect("Failed to get district");
+                let World {parcels,districts, .. } = editor.world();
+                let district = districts.get(&district_id).expect("Failed to get super parcel");
+                let parcel = parcels.get(&parcel_id).expect("Failed to get parcel");
 
-                if super_district.data.edges.contains(&point) {
+                if district.data.edges.contains(&point) {
                     editor.place_block(&bedrock, Point3D::new(x, height, z)).await;
                 }
-                else if district.data.edges.contains(&point) {
+                else if parcel.data.edges.contains(&point) {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
                     editor.place_block(&block, Point3D::new(x, height - 1, z)).await;
                 }
@@ -1034,7 +1034,7 @@ mod tests {
         
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("oak_planks".to_string());
@@ -1062,7 +1062,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("stone_bricks".to_string());
@@ -1090,7 +1090,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.unwrap();
         let mut editor = world.get_editor();
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         let materials = Material::load().expect("Failed to load materials");
         let material = MaterialId::new("stone_bricks".to_string());
@@ -1108,7 +1108,7 @@ mod tests {
     }
 
     /// Prototype: feathered urban flatten + tiered A* road network.
-    /// districts -> wall+gates -> flatten -> arterials(MST)+collectors(gates) -> build_path.
+    /// parcels -> wall+gates -> flatten -> arterials(MST)+collectors(gates) -> build_path.
     #[tokio::test]
     async fn hierarchical_roads() {
         use crate::generator::data::LoadedData;
@@ -1125,25 +1125,25 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
 
-        generate_districts(seed, &mut editor).await;
+        generate_parcels(seed, &mut editor).await;
 
         // EVAL AID (test-only): the live server hands out a different build area
         // each run, and the urban classifier frequently collapses to a single
-        // district — too degenerate to evaluate the road network. Force a
-        // contiguous ~4-district urban core: keep the prime, then promote the
-        // nearest non-off-limits super-districts to Urban.
+        // parcel — too degenerate to evaluate the road network. Force a
+        // contiguous ~4-parcel urban core: keep the prime, then promote the
+        // nearest non-off-limits super-parcels to Urban.
         {
-            use crate::generator::districts::DistrictType;
+            use crate::generator::districts::ParcelType;
             const TARGET_URBAN: usize = 4;
-            let mut info: Vec<(crate::generator::districts::SuperDistrictID, Point2D, bool)> =
-                editor.world().super_districts.iter()
+            let mut info: Vec<(crate::generator::districts::DistrictID, Point2D, bool)> =
+                editor.world().districts.iter()
                     .filter(|(id, sd)| {
-                        if sd.data.district_type == DistrictType::OffLimits {
+                        if sd.data.parcel_type == ParcelType::OffLimits {
                             return false;
                         }
-                        // Never force a water-heavy district urban — it would build the
+                        // Never force a water-heavy parcel urban — it would build the
                         // town on a lake. (Matches URBAN_WATER_LIMIT in classification.)
-                        let water = editor.world().super_district_analysis_data
+                        let water = editor.world().district_analysis_data
                             .get(id)
                             .map_or(0.0, |a| a.water_percentage());
                         water <= 0.33
@@ -1151,7 +1151,7 @@ mod tests {
                     .map(|(id, sd)| {
                         let pts = &sd.data.points_2d;
                         let c = pts.iter().fold(Point2D::ZERO, |a, p| a + *p) / pts.len().max(1) as i32;
-                        (*id, c, sd.data.district_type == DistrictType::Urban)
+                        (*id, c, sd.data.parcel_type == ParcelType::Urban)
                     })
                     .collect();
             let anchor = info.iter().find(|(_, _, u)| *u).map(|(_, c, _)| *c)
@@ -1159,7 +1159,7 @@ mod tests {
             if let Some(anchor) = anchor {
                 info.sort_by_key(|(_, c, _)| c.distance_squared(&anchor));
                 for (id, _, _) in info.iter().take(TARGET_URBAN) {
-                    editor.world_mut().super_districts.get_mut(id).unwrap().data.district_type = DistrictType::Urban;
+                    editor.world_mut().districts.get_mut(id).unwrap().data.parcel_type = ParcelType::Urban;
                 }
             }
         }
@@ -1175,13 +1175,13 @@ mod tests {
         ).await;
         drop(placer);
 
-        // DEBUG: how many urban super-districts and gates did we actually get?
+        // DEBUG: how many urban super-parcels and gates did we actually get?
         {
-            let n_urban = editor.world().super_districts.values()
-                .filter(|sd| sd.data.district_type == crate::generator::districts::DistrictType::Urban)
+            let n_urban = editor.world().districts.values()
+                .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
                 .count();
-            let n_total = editor.world().super_districts.len();
-            println!("URBAN super-districts: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
+            let n_total = editor.world().districts.len();
+            println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
         }
 
         // Phase 1 — feathered urban flatten.
@@ -1199,7 +1199,7 @@ mod tests {
         // roads yet → sited by flatness). They become the destinations the arterial
         // network connects, plus a `blocked` barrier so nothing — roads, the
         // subdivision, alleys, or houses — ever runs through them. (Fixed set here;
-        // the resource chain's `resolve_for_districts` can supply the real mix later.)
+        // the resource chain's `resolve_for_parcels` can supply the real mix later.)
         use crate::generator::BuildClaim;
         use crate::generator::placement::place_urban_buildings;
 
@@ -1207,8 +1207,8 @@ mod tests {
         for b in ["smithy", "mill", "bakery", "carpenter", "tannery", "weaver"] {
             ind_counts.insert(b.to_string(), 1);
         }
-        let urban_sds: Vec<_> = editor.world().super_districts.values()
-            .filter(|sd| sd.data.district_type == crate::generator::districts::DistrictType::Urban)
+        let urban_sds: Vec<_> = editor.world().districts.values()
+            .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
             .cloned()
             .collect();
         let urban_sd_refs: Vec<_> = urban_sds.iter().collect();
@@ -1306,12 +1306,12 @@ mod tests {
         // buildings, never through them.
         barriers.extend(&blocked);
 
-        // Don't let blocks (and the parcels/alleys/houses inside them) span steep
+        // Don't let blocks (and the lots/alleys/houses inside them) span steep
         // terrain. A per-cell cliff test misses a *sustained* slope — a long
         // staircase of 1-block risers passes cell-by-cell yet climbs far. So bar
         // any cell whose local WIN-radius neighbourhood spans more than
         // MAX_LOCAL_RELIEF blocks of height; the flood fill then breaks blocks
-        // along slope lines, keeping parcels and their lanes on a flat shelf.
+        // along slope lines, keeping lots and their lanes on a flat shelf.
         const WIN: i32 = 1; // 3×3 window
         const MAX_LOCAL_RELIEF: i32 = 2;
         let steep: HashSet<Point2D> = urban.iter()
@@ -1348,7 +1348,7 @@ mod tests {
 
         // Per block: first reserve a frontage ribbon — a band one house deep
         // against each main road — so the long arterial/collector-facing edge
-        // stays a single continuous parcel instead of being chopped into stubs
+        // stays a single continuous lot instead of being chopped into stubs
         // by subdivision. Then subdivide only the interior with tier-3 alleys.
         // BSP cuts span the interior edge-to-edge, so an alley reaches its edge —
         // adjacent (barriers = paved) to either a main road or the ribbon.
@@ -1358,34 +1358,34 @@ mod tests {
         const RIBBON_DEPTH: i32 = 14;
         let mut sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
         let mut alley_band: HashSet<Point2D> = HashSet::new();
-        let mut ribbon_parcel_count = 0usize;
+        let mut ribbon_lot_count = 0usize;
         let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
-            let (mut ribbon_parcels, interior) =
+            let (mut ribbon_lots, interior) =
                 crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
             let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
 
             // Connect the interior alleys to the main roads by carving through the
             // ribbon, then convert those cells from frontage ribbon to alley.
-            let ribbon_union: HashSet<Point2D> = ribbon_parcels.iter().flatten().copied().collect();
+            let ribbon_union: HashSet<Point2D> = ribbon_lots.iter().flatten().copied().collect();
             let connectors = crate::generator::districts::subdivide::carve_ribbon_connectors(
                 &ribbon_union, &alleys, &main_road_cells,
             );
             if !connectors.is_empty() {
-                for rp in &mut ribbon_parcels { rp.retain(|c| !connectors.contains(c)); }
-                ribbon_parcels.retain(|rp| !rp.is_empty());
+                for rp in &mut ribbon_lots { rp.retain(|c| !connectors.contains(c)); }
+                ribbon_lots.retain(|rp| !rp.is_empty());
             }
 
-            ribbon_parcel_count += ribbon_parcels.len();
-            for rp in &ribbon_parcels { ribbon_cells.extend(rp); }
-            sub_blocks.extend(ribbon_parcels);
+            ribbon_lot_count += ribbon_lots.len();
+            for rp in &ribbon_lots { ribbon_cells.extend(rp); }
+            sub_blocks.extend(ribbon_lots);
             alley_band.extend(&alleys);
             alley_band.extend(&connectors);
             sub_blocks.extend(subs);
         }
         println!(
-            "Subdivided into {} parcels ({} road-frontage ribbons), {} subdivider-road cells",
-            sub_blocks.len(), ribbon_parcel_count, alley_band.len(),
+            "Subdivided into {} lots ({} road-frontage ribbons), {} subdivider-road cells",
+            sub_blocks.len(), ribbon_lot_count, alley_band.len(),
         );
 
         // Assemble every road into one path list (mains + a synthesised width-1
@@ -1448,8 +1448,8 @@ mod tests {
         }
 
         // ---- Phase 4: hierarchical house placement ----
-        // Per parcel, walk frontage densest-tier first: arterial → collector →
-        // subdivider. The parcel's single Plot is shared across tiers, so houses
+        // Per lot, walk frontage densest-tier first: arterial → collector →
+        // subdivider. The lot's single Plot is shared across tiers, so houses
         // placed against the arterial claim the prime frontage and later tiers
         // can't overlap them. Size gradient: houses on roads, cottages on lanes.
         use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
@@ -1498,7 +1498,7 @@ mod tests {
         let mut tier_placed = [0usize; 3];  // houses placed per tier
         let mut tier_fail = [0usize; 3];    // build_house failures per tier
         let mut tier_short = [0usize; 3];   // chains dropped: shorter than min_front
-        let mut tier_unfit = [0usize; 3];   // slots skipped: rect didn't fit the parcel
+        let mut tier_unfit = [0usize; 3];   // slots skipped: rect didn't fit the lot
         // DEBUG: every cell detected as frontage, per tier, so we can float a
         // marker above it and see what the placement loop actually "sees".
         let mut tier_frontage: [HashSet<Point2D>; 3] = Default::default();
@@ -1510,13 +1510,13 @@ mod tests {
         // placement and checked for a road-slab lip afterward (we can't touch
         // `editor` inside the loop; it's borrowed by the build context).
         let mut door_thresholds: Vec<Point3D> = Vec::new();
-        for parcel in &sub_blocks {
-            if parcel.is_empty() { continue; }
-            let Some(mut plot) = plot_from_block(parcel) else { continue; };
+        for lot in &sub_blocks {
+            if lot.is_empty() { continue; }
+            let Some(mut plot) = plot_from_block(lot) else { continue; };
 
             for (ti, (band, pool)) in tiers.iter().enumerate() {
                 let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
-                for frontage in frontage_from_roads(parcel, band) {
+                for frontage in frontage_from_roads(lot, band) {
                     tier_cells[ti] += frontage.cells.len();
                     tier_frontage[ti].extend(&frontage.cells);
                     let chain_len = frontage.cells.len() as i32;
@@ -1533,7 +1533,7 @@ mod tests {
                         if cursor + fw > chain_len { cursor += 1; continue; }
                         let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
                         // Deepest depth (down to MIN_FIT_DEPTH) whose rect fits the
-                        // parcel — shrinks the house to hug a diagonal ribbon.
+                        // lot — shrinks the house to hug a diagonal ribbon.
                         let Some(depth) = (MIN_FIT_DEPTH..=max_depth).rev()
                             .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
                         else { tier_unfit[ti] += 1; cursor += 1; continue; };
@@ -1621,7 +1621,7 @@ mod tests {
                 }
             }
         }
-        println!("Placed {} buildings across {} parcels", total_buildings, sub_blocks.len());
+        println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
         println!(
             "Per-tier [frontage cells / placed / failed] — arterial: {}/{}/{}  collector: {}/{}/{}  subdivider: {}/{}/{}",
             tier_cells[0], tier_placed[0], tier_fail[0],

@@ -7,7 +7,7 @@ Plan drafted 2026-06-06. Branch: `jd/placement`.
 Roads today have no hierarchy. There are two disconnected road systems:
 
 - **A\*-routed paths** (`paths/routing.rs` + `paths/building.rs`) — terrain-aware, priority→width baked in (`PathPriority::{Low,Medium,High}` → width `{1,2,3}`), but only used for point-to-point routing, not the urban grid.
-- **Partition-derived roads** (the settlement grid) — no hierarchy at all. Legacy `place_buildings` gives every Voronoi block the same 3-cell perimeter ring; the new `subdivide` flow hardcodes every alley to 2 wide (`subdivide.rs:81`) regardless of depth. A top-level district split and a leaf plot split produce identically-wide roads.
+- **Partition-derived roads** (the settlement grid) — no hierarchy at all. Legacy `place_buildings` gives every Voronoi block the same 3-cell perimeter ring; the new `subdivide` flow hardcodes every alley to 2 wide (`subdivide.rs:81`) regardless of depth. A top-level parcel split and a leaf plot split produce identically-wide roads.
 
 We want **large > medium > small roads with decreasing density**, and roads that **respect terrain height** (the partitioner is pure-2D and terrain-blind; the post-hoc pave pass just drapes a straight alley over whatever cliff it crosses).
 
@@ -37,7 +37,7 @@ Sparse (mod-4) is **correct for tiers 1–2** (perf, straightness, allowed earth
 
 Decision for this prototype: keep **sparse (`step=4`) for v1 arterials** — at route time the ground is freshly flattened and no buildings exist yet, so the two things per-tile buys (terrain faithfulness, claim-dodging) don't bite. But **build the A\* step-parameterized now** so "normal A\* in the city / sparse outside" is the same function with a different `step` (+ per-tier cost weights), not two algorithms.
 
-The current A\* node state is the **entire `Vec<Point3D>` path**, and `closed_set` dedupes whole paths, not cells — survivable at mod-4 over short hops, but it would explode at `step=1` over district spacing. So the `(cell, incoming_dir)` + `came_from` state refactor is **deferred** to when we add the local/subdivision tier that actually needs `step=1`.
+The current A\* node state is the **entire `Vec<Point3D>` path**, and `closed_set` dedupes whole paths, not cells — survivable at mod-4 over short hops, but it would explode at `step=1` over parcel spacing. So the `(cell, incoming_dir)` + `came_from` state refactor is **deferred** to when we add the local/subdivision tier that actually needs `step=1`.
 
 ---
 
@@ -61,12 +61,12 @@ pub async fn flatten_urban_area(editor: &mut Editor, urban: &HashSet<Point2D>,
 
 ### Phase 2 — `build_road_network` (new, `generator/paths/network.rs`)
 **Center-finding:**
-- **District centers:** per urban super-district, centroid of `data.points_2d`, snapped to nearest member cell (concave-safe), then `add_height` (post-flatten y).
+- **Parcel centers:** per urban super-parcel, centroid of `data.points_2d`, snapped to nearest member cell (concave-safe), then `add_height` (post-flatten y).
 - **Town center:** centroid of all urban points, snapped. *(Toggle — include as a backbone node for the radial feel.)*
 - **Gate nodes:** each `gate_locations` entry stepped a few cells inward along its `Cardinal`.
 
 **Graph + tiers:**
-- **Tier 1 — arterials** (`PathPriority::High`, width 3): MST (straight-line distance) over {town center} ∪ {district centers}.
+- **Tier 1 — arterials** (`PathPriority::High`, width 3): MST (straight-line distance) over {town center} ∪ {parcel centers}.
 - **Tier 2 — collectors** (`PathPriority::Medium`, width 2): each gate → nearest backbone node.
 - Route each edge with `get_path(editor, start, end, priority, material, no-op callback)`; `None` → log + skip (partial connectivity OK for v1). Returns `Vec<Path>`.
 
@@ -74,7 +74,7 @@ pub async fn flatten_urban_area(editor: &mut Editor, urban: &HashSet<Point2D>,
 - `build_path` per routed `Path` (reuses slab-smoothing + widening). Phase 1 handles broad grading; `build_path` handles the road surface. **Gap (later):** `build_path` doesn't blend shoulders — fine on flattened ground.
 
 ### Phase 4 — test harness
-- New `#[tokio::test]` `hierarchical_roads` modeled on the existing live-server setup (`placement/test.rs` / `districts/test.rs`): world → districts → super-districts → walls + gates (populates `gate_locations`) → `flatten_urban_area` → `build_road_network` → `build_path` per `Path` → `flush_buffer`. Inspect via the visualizer snapshot.
+- New `#[tokio::test]` `hierarchical_roads` modeled on the existing live-server setup (`placement/test.rs` / `parcels/test.rs`): world → parcels → super-parcels → walls + gates (populates `gate_locations`) → `flatten_urban_area` → `build_road_network` → `build_path` per `Path` → `flush_buffer`. Inspect via the visualizer snapshot.
 
 ---
 
@@ -88,7 +88,7 @@ pub async fn flatten_urban_area(editor: &mut Editor, urban: &HashSet<Point2D>,
 | A\* `step` | 4 | Sparse for v1; `1` for the future local tier. |
 | Tier 1 width / priority | 3 / High | Arterial backbone. |
 | Tier 2 width / priority | 2 / Medium | Gate spurs. |
-| Town-center node | toggle | Radial hub vs pure district-to-district MST. |
+| Town-center node | toggle | Radial hub vs pure parcel-to-parcel MST. |
 
 ---
 
@@ -105,25 +105,25 @@ pub async fn flatten_urban_area(editor: &mut Editor, urban: &HashSet<Point2D>,
 ## Progress — full pipeline slice (2026-06-06)
 
 Everything below is wired into the live-server test `hierarchical_roads` in
-`src/generator/districts/test.rs`
+`src/generator/parcels/test.rs`
 (`cargo test --bin Tome hierarchical_roads -- --nocapture --test-threads=1`).
 
 ### Working end-to-end
-1. `generate_districts` → **EVAL AID** (test-only) forces a contiguous ~4-district
+1. `generate_parcels` → **EVAL AID** (test-only) forces a contiguous ~4-parcel
    urban core, because the live build area varies per run and the classifier
-   often collapses to 1 district (too degenerate to evaluate).
+   often collapses to 1 parcel (too degenerate to evaluate).
 2. Wall + gates → feathered `flatten_urban_area`.
 3. **Tiered A\* roads** (`build_road_network`): arterials (MST over backbone) +
    collectors (gate → nearest network).
 4. **`find_blocks`** — flood fill (4-connected) of urban − paved-roads − wall.
-5. **`subdivide_block`** (max_dim 24) per block → parcels + alley (tier-3) cells.
+5. **`subdivide_block`** (max_dim 24) per block → lots + alley (tier-3) cells.
 6. **Build ALL roads together** at the end (mains + a synthesised width-1 alley
    `Path`) via one `build_paths_merged` pass → connect + meld.
-7. **Hierarchical placement**: per parcel, shared `Plot` walked
+7. **Hierarchical placement**: per lot, shared `Plot` walked
    arterial → collector → subdivider; gold gets first claim, later tiers can't
    overlap. Houses on roads, cottages on lanes; per-house palette/roof rolls.
 
-Last run: 5 districts, 15 gates, 20 roads, 14 blocks, 169 parcels,
+Last run: 5 parcels, 15 gates, 20 roads, 14 blocks, 169 lots,
 **317 buildings**, ~70s.
 
 ### Code added/changed
@@ -146,7 +146,7 @@ Last run: 5 districts, 15 gates, 20 roads, 14 blocks, 169 parcels,
 ### RESOLVED (2026-06-07): gold/red frontage barely used
 Per-tier diagnostic was: `arterial 760 cells / 8 placed / 0 failed · collector
 1735 / 10 / 0 · subdivider 5767 / 299 / 0`. **0 failures ⇒ not being attempted.**
-Subdivision fragmented the main-road-facing edge: most parcels were interior
+Subdivision fragmented the main-road-facing edge: most lots were interior
 (touch only alleys); the few touching an arterial/collector did so along a short
 edge, so those frontage chains fell below the min house front-width and were
 skipped.
@@ -154,9 +154,9 @@ skipped.
 **Fix shipped:** `subdivide::reserve_road_ribbon(block, main_roads, depth)` peels
 a frontage ribbon (`RIBBON_DEPTH = 10`, fits the deepest House) off each block
 *before* subdividing — multi-source BFS inward from cells fronting a main road,
-returning the ribbon's connected components as parcels + the leftover interior.
+returning the ribbon's connected components as lots + the leftover interior.
 The `hierarchical_roads` test now reserves ribbons, then subdivides only the
-interior. Ribbon parcels keep the full-length arterial/collector edge intact, so
+interior. Ribbon lots keep the full-length arterial/collector edge intact, so
 the densest-tier-first placement loop fills them first. Unit-tested in
 `subdivide::tests` (depth band, no-road no-op, L-shaped corner = one component).
 **Live re-run pending** to confirm the per-tier placement counts shift onto
@@ -186,7 +186,7 @@ can't tile a staircased band. Fixes shipped:
   into a forecourt of the road's own material (arterial stone-brick, collector
   cobblestone) — walk from each frontage cell into the block until it meets the house.
 
-Last run: 8 blocks, 85 parcels, **246 buildings** (arterial 51 / collector 68 /
+Last run: 8 blocks, 85 lots, **246 buildings** (arterial 51 / collector 68 /
 subdivider 127), 1006 verge cells paved.
 
 **Residual:** axis-aligned houses on a true 45° street are inherently set back by
@@ -194,11 +194,11 @@ subdivider 127), 1006 verge cells paved.
 footprints, which the rect-based house generator (frame/walls/roof) can't take yet.
 
 ### Other open / cleanup
-- Interior fill disabled (frontage-only; parcel backs empty).
+- Interior fill disabled (frontage-only; lot backs empty).
 - Radius-1 robustness (deferred): guarantee junction connectivity + deterministic
   arterial merges (currently mod-4-alignment dependent).
 - Strip debug scaffolding before graduating: per-run prints, gold/redstone
-  markers, the `EVAL AID` forced-districts block.
+  markers, the `EVAL AID` forced-parcels block.
 - Graduate the flow out of the test into the real settlement pipeline.
 - Knobs: `subdivide_block` max_dim, tier size pools, `SIDE_BUFFER_CELLS`,
   `HEURISTIC_WEIGHT` (×10, still greedy — could lower now the search is bounded).

@@ -14,7 +14,7 @@ pub struct SettlementInfo {
 
 impl SettlementInfo {
     pub fn new(world : &World) -> Self {
-        let mut biomes_by_count = world.district_analysis_data.iter()
+        let mut biomes_by_count = world.parcel_analysis_data.iter()
                 .map(|(_, data)| data.biome_count())
                 .flatten()
                 .fold(HashMap::new(), |mut value, (biome, count)| {

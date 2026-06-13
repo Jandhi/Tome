@@ -1,65 +1,65 @@
 
 use super::{
+    Parcel,
+    ParcelID,
+    ParcelAnalysis,
     District,
     DistrictID,
-    DistrictAnalysis,
-    SuperDistrict,
-    SuperDistrictID,
-    district::DistrictType,
+    parcel::ParcelType,
     constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_RELATIVE_TO_PRIME,
         URBAN_SIZE_MIN, URBAN_SIZE_MAX, URBAN_GROWTH_CUTOFF, URBAN_GROWTH_CUTOFF_HIGH,
         URBAN_OPTION_SCORE_MAX, RURAL_OPTION_SCORE_MAX},
-    merge::{get_candidate_score, district_similarity_score},
-    data::HasDistrictData
+    merge::{get_candidate_score, parcel_similarity_score},
+    data::HasParcelData
 };
 
 
 use std::collections::{HashMap, HashSet};
 use log::info;
 
-pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>){
+pub fn classify_parcels<'a>(parcels: & mut HashMap<ParcelID, Parcel>, parcel_analysis_data: &HashMap<ParcelID, ParcelAnalysis>){
     
-    let mut options: Vec<DistrictID> = Vec::new(); // Placeholder for options to choose from
+    let mut options: Vec<ParcelID> = Vec::new(); // Placeholder for options to choose from
 
-    for (id, district) in districts.iter_mut() {
-        let analysis_data = district_analysis_data.get(id).expect("District analysis data not found");
+    for (id, parcel) in parcels.iter_mut() {
+        let analysis_data = parcel_analysis_data.get(id).expect("Parcel analysis data not found");
 
-        if district.data.is_border() || analysis_data.roughness() > OFF_LIMITS_ROUGHNESS || analysis_data.gradient() > OFF_LIMITS_GRADIENT {
-            district.data.district_type = DistrictType::OffLimits;
-            info!("District {:?} is off-limits due to roughness or gradient", id);
+        if parcel.data.is_border() || analysis_data.roughness() > OFF_LIMITS_ROUGHNESS || analysis_data.gradient() > OFF_LIMITS_GRADIENT {
+            parcel.data.parcel_type = ParcelType::OffLimits;
+            info!("Parcel {:?} is off-limits due to roughness or gradient", id);
             continue
         }
-        info!("District {:?} has data {:?}", id, analysis_data);
-        if analysis_data.water_percentage() <= URBAN_WATER_LIMIT && district.data.district_type == DistrictType::Unknown {
+        info!("Parcel {:?} has data {:?}", id, analysis_data);
+        if analysis_data.water_percentage() <= URBAN_WATER_LIMIT && parcel.data.parcel_type == ParcelType::Unknown {
             options.push(*id);
-        } else if analysis_data.water_percentage() > URBAN_WATER_LIMIT && district.data.district_type == DistrictType::Unknown{
-            district.data.district_type = DistrictType::Rural;
+        } else if analysis_data.water_percentage() > URBAN_WATER_LIMIT && parcel.data.parcel_type == ParcelType::Unknown{
+            parcel.data.parcel_type = ParcelType::Rural;
         }
     }
-    info!("Options for prime urban district: {:?}", options);
+    info!("Options for prime urban parcel: {:?}", options);
 
-    let Some(prime_urban_district) = select_prime_urban_district(options, district_analysis_data) else {
-        log::warn!("No prime urban candidate found"); //will mean no other districts are classified beyond this point
+    let Some(prime_urban_parcel) = select_prime_urban_parcel(options, parcel_analysis_data) else {
+        log::warn!("No prime urban candidate found"); //will mean no other parcels are classified beyond this point
         return;
     };
-    info!("Prime urban district selected: {:?}", prime_urban_district);
+    info!("Prime urban parcel selected: {:?}", prime_urban_parcel);
 
-    if let Some(district) = districts.get_mut(&prime_urban_district) {
-        district.data.district_type = DistrictType::Urban;
+    if let Some(parcel) = parcels.get_mut(&prime_urban_parcel) {
+        parcel.data.parcel_type = ParcelType::Urban;
     } else {
-        panic!("District not found");
+        panic!("Parcel not found");
     }
-    let district_ids = districts.keys().map(|id| id.clone()).collect::<Vec<DistrictID>>();
-    for id in district_ids.iter() {
-        let district = districts.get_mut(id).expect("District not found");
-        if district.data.district_type == DistrictType::Unknown {
-            let score = district_similarity_score(district_analysis_data, prime_urban_district, *id);
+    let parcel_ids = parcels.keys().map(|id| id.clone()).collect::<Vec<ParcelID>>();
+    for id in parcel_ids.iter() {
+        let parcel = parcels.get_mut(id).expect("Parcel not found");
+        if parcel.data.parcel_type == ParcelType::Unknown {
+            let score = parcel_similarity_score(parcel_analysis_data, prime_urban_parcel, *id);
             if score > URBAN_RELATIVE_TO_PRIME {
-                district.data.district_type = DistrictType::Urban;
-                info!("District {:?} classified as Urban with score {}", id, score);
+                parcel.data.parcel_type = ParcelType::Urban;
+                info!("Parcel {:?} classified as Urban with score {}", id, score);
             } else {
-                district.data.district_type = DistrictType::Rural;
-                info!("District {:?} classified as Off-Limits with score {}", id, score);
+                parcel.data.parcel_type = ParcelType::Rural;
+                info!("Parcel {:?} classified as Off-Limits with score {}", id, score);
             }
         }
         
@@ -67,44 +67,44 @@ pub fn classify_districts<'a>(districts: & mut HashMap<DistrictID, District>, di
     
 }
 
-pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID, SuperDistrict>, districts: &mut HashMap<DistrictID, District>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) {
-    // This function will classify superdistricts based on their districts
+pub fn classify_districts<'a>(districts: &mut HashMap<DistrictID, District>, parcels: &mut HashMap<ParcelID, Parcel>, parcel_analysis_data: &HashMap<DistrictID, ParcelAnalysis>) {
+    // This function will classify districts based on their parcels
 
-    let mut options: Vec<SuperDistrictID> = Vec::new(); // Placeholder for options to choose from
+    let mut options: Vec<DistrictID> = Vec::new(); // Placeholder for options to choose from
 
-    for (id, superdistrict) in superdistricts.iter_mut() {
+    for (id, district) in districts.iter_mut() {
 
-        // Size of this superdistrict: blocks = surface cells it covers, districts = constituent districts merged into it.
-        let blocks = superdistrict.data.points_2d.len();
-        let n_districts = superdistrict.districts.len();
+        // Size of this district: blocks = surface cells it covers, parcels = constituent parcels merged into it.
+        let blocks = district.data.points_2d.len();
+        let n_parcels = district.parcels.len();
 
-        if superdistrict.data.is_border() {
-            superdistrict.data.district_type = DistrictType::OffLimits;
-            info!("Superdistrict {:?} is off-limits due to being border ({} blocks, {} districts)", id, blocks, n_districts);
+        if district.data.is_border() {
+            district.data.parcel_type = ParcelType::OffLimits;
+            info!("District {:?} is off-limits due to being border ({} blocks, {} parcels)", id, blocks, n_parcels);
             continue
         }
-        let score = superdistrict_score(superdistrict, districts);
+        let score = district_score(district, parcels);
         if score <= URBAN_OPTION_SCORE_MAX {
-            info!("Superdistrict {:?} classified as Urban option with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
+            info!("District {:?} classified as Urban option with score {} ({} blocks, {} parcels)", id, score, blocks, n_parcels);
             options.push(*id);
         } else if score <= RURAL_OPTION_SCORE_MAX {
-            superdistrict.data.district_type = DistrictType::Rural;
-            info!("Superdistrict {:?} classified as Rural with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
+            district.data.parcel_type = ParcelType::Rural;
+            info!("District {:?} classified as Rural with score {} ({} blocks, {} parcels)", id, score, blocks, n_parcels);
         } else {
-            superdistrict.data.district_type = DistrictType::OffLimits;
-            info!("Superdistrict {:?} classified as Off-Limits with score {} ({} blocks, {} districts)", id, score, blocks, n_districts);
+            district.data.parcel_type = ParcelType::OffLimits;
+            info!("District {:?} classified as Off-Limits with score {} ({} blocks, {} parcels)", id, score, blocks, n_parcels);
         }
     }
 
-    info!("Options for prime urban district: {:?}", options);
+    info!("Options for prime urban parcel: {:?}", options);
 
     // Primes ordered best-first. Try each in turn: if a prime cannot grow a city of at least
     // URBAN_SIZE_MIN from qualifying neighbours, fall back to the next-best prime.
-    let primes = rank_prime_urban_superdistricts(options, district_analysis_data);
+    let primes = rank_prime_urban_districts(options, parcel_analysis_data);
 
-    let mut city: Option<Vec<SuperDistrictID>> = None;
+    let mut city: Option<Vec<DistrictID>> = None;
     for prime in primes.iter() {
-        if let Some(grown) = try_grow_city(*prime, superdistricts, district_analysis_data) {
+        if let Some(grown) = try_grow_city(*prime, districts, parcel_analysis_data) {
             info!("Prime {:?} grew a city of size {}", prime, grown.len());
             city = Some(grown);
             break;
@@ -128,26 +128,26 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
 
     // Tally the committed city's total footprint for visibility into how large the urban core ended up.
     let mut city_blocks = 0usize;
-    let mut city_districts = 0usize;
+    let mut city_parcels = 0usize;
     for id in &city {
-        let sd = superdistricts.get_mut(id).expect("SuperDistrict not found");
-        sd.data.district_type = DistrictType::Urban;
+        let sd = districts.get_mut(id).expect("District not found");
+        sd.data.parcel_type = ParcelType::Urban;
         city_blocks += sd.data.points_2d.len();
-        city_districts += sd.districts.len();
+        city_parcels += sd.parcels.len();
         info!(
-            "Urban superdistrict {:?} committed to city ({} blocks, {} districts)",
-            id, sd.data.points_2d.len(), sd.districts.len()
+            "Urban district {:?} committed to city ({} blocks, {} parcels)",
+            id, sd.data.points_2d.len(), sd.parcels.len()
         );
     }
     info!(
-        "City committed: {} superdistricts, {} districts, {} blocks total",
-        city.len(), city_districts, city_blocks
+        "City committed: {} districts, {} parcels, {} blocks total",
+        city.len(), city_parcels, city_blocks
     );
 
-    // classify remaining superdistricts as rural if they are unknown
-    for district in superdistricts.values_mut() {
-        if district.data.district_type == DistrictType::Unknown {
-            district.data.district_type = DistrictType::Rural;
+    // classify remaining districts as rural if they are unknown
+    for parcel in districts.values_mut() {
+        if parcel.data.parcel_type == ParcelType::Unknown {
+            parcel.data.parcel_type = ParcelType::Rural;
         }
     }
 
@@ -156,29 +156,29 @@ pub fn classify_superdistricts<'a>(superdistricts: &mut HashMap<SuperDistrictID,
 
 /// Attempt to grow a city anchored at `prime` without mutating any classification.
 ///
-/// Greedily adds the best adjacent unclassified superdistrict (by `get_candidate_score`)
+/// Greedily adds the best adjacent unclassified district (by `get_candidate_score`)
 /// as long as it clears the relevant cutoff: the normal cutoff while below URBAN_SIZE_MIN,
 /// a higher cutoff to keep growing up to URBAN_SIZE_MAX. Returns the chosen set only if it
 /// reaches URBAN_SIZE_MIN, otherwise `None` so the caller can fall back to another prime.
 fn try_grow_city(
-    prime: SuperDistrictID,
-    superdistricts: &HashMap<SuperDistrictID, SuperDistrict>,
-    district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>,
-) -> Option<Vec<SuperDistrictID>> {
-    let mut urban: Vec<SuperDistrictID> = vec![prime];
-    let mut urban_set: HashSet<SuperDistrictID> = HashSet::from([prime]);
+    prime: DistrictID,
+    districts: &HashMap<DistrictID, District>,
+    parcel_analysis_data: &HashMap<DistrictID, ParcelAnalysis>,
+) -> Option<Vec<DistrictID>> {
+    let mut urban: Vec<DistrictID> = vec![prime];
+    let mut urban_set: HashSet<DistrictID> = HashSet::from([prime]);
 
     while (urban.len() as u32) < URBAN_SIZE_MAX {
         // Gather candidate neighbours of the current (tentative) urban set that are still unclassified.
-        let mut candidates: Vec<SuperDistrictID> = Vec::new();
+        let mut candidates: Vec<DistrictID> = Vec::new();
         for id in urban.iter() {
-            let neighbours = superdistricts.get(id).expect("SuperDistrict not found").data().district_adjacency.keys()
+            let neighbours = districts.get(id).expect("District not found").data().parcel_adjacency.keys()
                 .filter(|&&neighbour_id| {
                     !urban_set.contains(&neighbour_id)
-                        && superdistricts.get(&neighbour_id).expect("SuperDistrict not found").data().district_type == DistrictType::Unknown
+                        && districts.get(&neighbour_id).expect("District not found").data().parcel_type == ParcelType::Unknown
                 })
                 .cloned()
-                .collect::<Vec<SuperDistrictID>>();
+                .collect::<Vec<DistrictID>>();
             candidates.extend(neighbours);
         }
 
@@ -186,8 +186,8 @@ fn try_grow_city(
             .map(|&id| {
                 // Adjacency is measured against the whole current urban set (not just the prime), so
                 // candidates nestled into the city are preferred over lone tendrils — keeps the city compact.
-                let adjacency_ratio = set_adjacency_ratio(superdistricts, &urban_set, id);
-                let score = get_candidate_score(district_analysis_data, prime, id, Some(adjacency_ratio));
+                let adjacency_ratio = set_adjacency_ratio(districts, &urban_set, id);
+                let score = get_candidate_score(parcel_analysis_data, prime, id, Some(adjacency_ratio));
                 info!("Candidate {:?} has score {} (set-adjacency {:.3})", id, score, adjacency_ratio);
                 (id, score)
             })
@@ -222,30 +222,30 @@ fn try_grow_city(
 }
 
 /// Fraction of `candidate`'s perimeter that touches the current urban set — the compactness signal for
-/// city growth. High when the candidate is enveloped by the city (concave infill), low for a district
+/// city growth. High when the candidate is enveloped by the city (concave infill), low for a parcel
 /// hanging off a thin edge, so growth fills in around the city instead of trailing off into whispy
 /// tendrils. Measured candidate-centric so it stays in `[0,1]` regardless of how large the city is.
 fn set_adjacency_ratio(
-    superdistricts: &HashMap<SuperDistrictID, SuperDistrict>,
-    urban_set: &HashSet<SuperDistrictID>,
-    candidate: SuperDistrictID,
+    districts: &HashMap<DistrictID, District>,
+    urban_set: &HashSet<DistrictID>,
+    candidate: DistrictID,
 ) -> f32 {
-    let sd = superdistricts.get(&candidate).expect("SuperDistrict not found");
+    let sd = districts.get(&candidate).expect("District not found");
     let perimeter = sd.adjacencies_count();
     if perimeter == 0 {
         return 0.0;
     }
     let shared: u32 = urban_set.iter()
-        .filter_map(|member| sd.district_adjacency().get(member))
+        .filter_map(|member| sd.parcel_adjacency().get(member))
         .sum();
     shared as f32 / perimeter as f32
 }
 
-fn select_prime_urban_district(options: Vec<DistrictID>, district_analysis_data: &HashMap<DistrictID, DistrictAnalysis>) -> Option<DistrictID> {
+fn select_prime_urban_parcel(options: Vec<ParcelID>, parcel_analysis_data: &HashMap<ParcelID, ParcelAnalysis>) -> Option<ParcelID> {
     options.iter()
         .map(|&id| {
-            let analysis_data = district_analysis_data.get(&id).expect("District analysis data not found");
-            let score = urban_district_score(analysis_data);
+            let analysis_data = parcel_analysis_data.get(&id).expect("Parcel analysis data not found");
+            let score = urban_parcel_score(analysis_data);
             (id, score)
         })
         .min_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
@@ -255,13 +255,13 @@ fn select_prime_urban_district(options: Vec<DistrictID>, district_analysis_data:
         })
 }
 
-/// Rank urban candidates best-first (lower `urban_district_score` is better) so the caller
+/// Rank urban candidates best-first (lower `urban_parcel_score` is better) so the caller
 /// can fall back from the prime to the next-best candidate when growth fails.
-fn rank_prime_urban_superdistricts(options: Vec<SuperDistrictID>, district_analysis_data: &HashMap<SuperDistrictID, DistrictAnalysis>) -> Vec<SuperDistrictID> {
-    let mut scored: Vec<(SuperDistrictID, f32)> = options.iter()
+fn rank_prime_urban_districts(options: Vec<DistrictID>, parcel_analysis_data: &HashMap<DistrictID, ParcelAnalysis>) -> Vec<DistrictID> {
+    let mut scored: Vec<(DistrictID, f32)> = options.iter()
         .map(|&id| {
-            let analysis_data = district_analysis_data.get(&id).expect("District analysis data not found");
-            (id, urban_district_score(analysis_data))
+            let analysis_data = parcel_analysis_data.get(&id).expect("Parcel analysis data not found");
+            (id, urban_parcel_score(analysis_data))
         })
         .collect();
     scored.sort_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"));
@@ -269,8 +269,8 @@ fn rank_prime_urban_superdistricts(options: Vec<SuperDistrictID>, district_analy
     scored.into_iter().map(|(id, _)| id).collect()
 }
 
-fn urban_district_score(analysis_data: &DistrictAnalysis) -> f32 {
-    // Calculate a score based on the analysis data for urban districts
+fn urban_parcel_score(analysis_data: &ParcelAnalysis) -> f32 {
+    // Calculate a score based on the analysis data for urban parcels
     let water_score = analysis_data.water_percentage();
     let forest_score = analysis_data.forested_percentage();
     let gradient_score = analysis_data.gradient() / 3.0;
@@ -279,16 +279,16 @@ fn urban_district_score(analysis_data: &DistrictAnalysis) -> f32 {
     water_score + forest_score + gradient_score + roughness_score
 }
 
-fn superdistrict_score(superdistrict: &SuperDistrict, districts: &mut HashMap<DistrictID, District>) -> f32 {
-    let sub_types = superdistrict.get_subtypes(districts);
+fn district_score(district: &District, parcels: &mut HashMap<ParcelID, Parcel>) -> f32 {
+    let sub_types = district.get_subtypes(parcels);
     return sub_types.iter()
-        .map(|(district_type, count)| {
-            match district_type {
-                DistrictType::Urban => *count as f32 * 0.0,
-                DistrictType::Rural => *count as f32 * 1.0,
-                DistrictType::OffLimits => *count as f32 * 2.0,
+        .map(|(parcel_type, count)| {
+            match parcel_type {
+                ParcelType::Urban => *count as f32 * 0.0,
+                ParcelType::Rural => *count as f32 * 1.0,
+                ParcelType::OffLimits => *count as f32 * 2.0,
                 _ => 2.0,
             }
         })
-        .sum::<f32>() / superdistrict.districts().len() as f32
+        .sum::<f32>() / district.parcels().len() as f32
 }
