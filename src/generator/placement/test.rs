@@ -1066,6 +1066,10 @@ mod tests {
                 | crate::generator::BuildClaim::Structure(_)
                 | crate::generator::BuildClaim::Gate)
         )).collect();
+        let already: usize = door_cells.iter().filter(|&&d| {
+            road_cells.contains(&d) || d.neighbours().iter().any(|n| road_cells.contains(n))
+        }).count();
+        println!("Door entrances: {} ({} already on/beside a road)", door_cells.len(), already);
         let connected = crate::generator::paths::connect_doors_to_roads(
             &editor, &data, &door_cells, &urban, &road_cells, &blocked_for_paths,
             MaterialId::new("sandstone".to_string()), &mut rng,
