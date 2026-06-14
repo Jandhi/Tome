@@ -85,3 +85,11 @@ studio:
 study:
   required: [bookshelf]
   optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet, lectern, potted_plant]
+
+# Flat-roof terrace (desert). Decorated by decorate_rooftops, not a real room.
+# A low fill threshold keeps the deck airy — a shaded spot to sit and sleep,
+# not a packed storeroom. The canopy is the centrepiece; the rest is optional.
+roof_terrace:
+  fill_threshold: 0.4
+  required: [roof_canopy]
+  optional: [roof_bedroll, carpet, carpet, bench, chair, table, roof_lamp, potted_plant, vase]

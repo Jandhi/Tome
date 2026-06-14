@@ -22,7 +22,7 @@ use super::foundation::place_foundation;
 use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
-use super::furnish::furnish_rooms;
+use super::furnish::{decorate_rooftops, furnish_rooms};
 use super::{BuildingContext, Culture};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
@@ -182,6 +182,12 @@ pub async fn build_house(
 
 
     furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
+
+    // Flat roofs are open terraces — decorate the deck (shade, seating, plants)
+    // once the interior is furnished. Keeps the ladder exit clear.
+    if matches!(roof_style, RoofStyle::Flat) {
+        decorate_rooftops(ctx, &frame, roof_ladder_wall).await;
+    }
 
     check_building_invariants(&frame, &room_plan, &floor_plan)?;
 

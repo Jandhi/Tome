@@ -1684,6 +1684,24 @@ mod tests {
         }
         println!("Paved {} verge cells (arterial {} + collector {})", verge_total, tier_verge[0].len(), tier_verge[1].len());
 
+        // Street lighting: run last, after houses have claimed their cells, so
+        // lamps line every road's verge without landing on a building. The city
+        // generator picks the lantern type city-wide.
+        let city_rect = editor.world().world_rect_2d();
+        let city_centre = (city_rect.origin + city_rect.max()) / 2;
+        let cold = {
+            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = n.name();
+            n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+        };
+        let street_lantern: crate::minecraft::Block = if cold {
+            "minecraft:soul_lantern".into()
+        } else {
+            "minecraft:lantern".into()
+        };
+        let lamps = crate::generator::paths::place_street_lights(&editor, &all_paths, &street_lantern).await;
+        println!("Placed {} street lamps", lamps.len());
+
         editor.flush_buffer().await;
     }
 }

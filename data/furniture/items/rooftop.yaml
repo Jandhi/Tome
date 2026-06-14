@@ -1,0 +1,61 @@
+# Rooftop terrace furniture for flat (desert) roofs. Placed by decorate_rooftops
+# onto the open deck, with the parapet acting as the wall. Offsets follow the
+# usual convention: blocks are [along, up(y), away], constraints are [along, away].
+# Low-profile pieces read best against the 1-block parapet.
+
+# ---------------------------------------------------------------------------
+# Shade — the terrace centrepiece. Four fence posts carry a wool canopy two
+# blocks up, so the deck stays walkable underneath (canopy blocks sit in the
+# `ceiling` layer and don't claim the floor). 3×3 footprint; large decks only.
+# ---------------------------------------------------------------------------
+roof_canopy:
+  unique: true
+  min_room_area: 16
+  weight: 3.0
+  blocks:
+    # Corner posts (2 tall).
+    - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 0, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 1, 2], layer: ground, swap: wood }
+    # Canopy roof (wool, 3×3 at y=2). Ceiling layer so the deck stays walkable.
+    - { block: "minecraft:white_wool", offset: [0, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [2, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [0, 2, 1], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 2, 1], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [2, 2, 1], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [0, 2, 2], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 2, 2], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [2, 2, 2], layer: ceiling, swap: color }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [2, 0], constraint: blocked_reachable }
+    - { offset: [0, 2], constraint: blocked_reachable }
+    - { offset: [2, 2], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Sleeping mat — a carpet bedroll with a hay bolster for a headrest. Sleeping
+# in the cool night air is the whole point of a desert terrace. 1×2.
+# ---------------------------------------------------------------------------
+roof_bedroll:
+  blocks:
+    - { block: "minecraft:hay_block",    offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:white_carpet", offset: [0, 0, 1], layer: ground, swap: color, walkable: true }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Terrace lamp — a short fence post topped with a lantern, for night light.
+# ---------------------------------------------------------------------------
+roof_lamp:
+  blocks:
+    - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:lantern",   offset: [0, 2, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }

@@ -16,7 +16,9 @@ mod block;
 mod loot;
 mod placement;
 mod room;
+mod roof;
 mod types;
 
+pub use roof::decorate_rooftops;
 pub use room::furnish_rooms;
 pub use types::{BlockLayer, CellConstraint, FacingMode};

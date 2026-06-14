@@ -687,14 +687,9 @@ mod tests {
         // Road-label viz: each named road (stroke) gets a wool colour, floated
         // two blocks above the debug tier markers. Segments grouped into one road
         // share a colour, so a long avenue reads as one ribbon even where side
-        // streets branch. Alleys (no road_id) are unlabelled.
-        const WOOL_COLORS: [&str; 16] = [
-            "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
-            "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
-            "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
-            "brown_wool", "green_wool", "red_wool", "black_wool",
-        ];
-        const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
+        // streets branch. Alleys (no road_id) are unlabelled. The `label` map is
+        // computed unconditionally because the SVG town map below reuses it; only
+        // the in-world wool placement is gated.
         // One label per cell so roads sharing pavement (a collector merged onto an
         // arterial) don't braid two colors over one street: the higher tier wins
         // the shared cells, and a road only shows its own colour where it diverges.
@@ -731,13 +726,25 @@ mod tests {
                 }
             }
         }
-        let mut named_roads: HashSet<u32> = HashSet::new();
-        for (c, (_, _, rid, y)) in &label {
-            named_roads.insert(*rid);
-            let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
-            editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
+        // In-world wool ribbons — disabled for now. Flip `DEBUG_ROAD_WOOL` to
+        // restore them; the SVG town map is unaffected either way.
+        const DEBUG_ROAD_WOOL: bool = false;
+        if DEBUG_ROAD_WOOL {
+            const WOOL_COLORS: [&str; 16] = [
+                "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+                "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+                "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+                "brown_wool", "green_wool", "red_wool", "black_wool",
+            ];
+            const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
+            let mut named_roads: HashSet<u32> = HashSet::new();
+            for (c, (_, _, rid, y)) in &label {
+                named_roads.insert(*rid);
+                let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
+                editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
+            }
+            println!("Labelled {} named roads", named_roads.len());
         }
-        println!("Labelled {} named roads", named_roads.len());
 
         // ---- Phase 4: hierarchical house placement ----
         // Per lot, walk frontage densest-tier first: arterial → collector →
@@ -1147,6 +1154,24 @@ mod tests {
                 Err(e) => println!("Failed to write town.svg: {}", e),
             }
         }
+
+        // Street lighting: run last, after houses have claimed their cells, so
+        // lamps line every road's verge without landing on a building. The city
+        // generator picks the lantern type city-wide.
+        let city_rect = editor.world().world_rect_2d();
+        let city_centre = (city_rect.origin + city_rect.max()) / 2;
+        let cold = {
+            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = n.name();
+            n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+        };
+        let street_lantern: crate::minecraft::Block = if cold {
+            "minecraft:soul_lantern".into()
+        } else {
+            "minecraft:lantern".into()
+        };
+        let lamps = crate::generator::paths::place_street_lights(&editor, &all_paths, &street_lantern).await;
+        println!("Placed {} street lamps", lamps.len());
 
         editor.flush_buffer().await;
 

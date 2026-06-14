@@ -13,7 +13,7 @@ use crate::{editor::Editor, generator::{BuildClaim, data::LoadedData, materials:
 /// magenta = a cell the paver skipped because a claim (building/wall) blocks
 /// it. Markers sit `DEBUG_MARKER_HEIGHT` above the road surface so the network
 /// is readable from the air even where roofs cover the streets.
-pub const DEBUG_ROAD_MARKERS: bool = true;
+pub const DEBUG_ROAD_MARKERS: bool = false;
 const DEBUG_MARKER_HEIGHT: i32 = 20;
 
 /// How a paved cell must treat the claim already on it.
