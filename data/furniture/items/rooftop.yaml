@@ -178,15 +178,15 @@ roof_pergola:
     - { block: "minecraft:oak_fence", offset: [2, 0, 2], layer: ground, swap: wood }
     - { block: "minecraft:oak_fence", offset: [2, 1, 2], layer: ground, swap: wood }
     # Slatted roof (trapdoors laid flat at the top).
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 0], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 0], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 0], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 1], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 1], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 1], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 2], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 2], layer: ceiling, swap: wood }
-    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 2], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [0, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [1, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [2, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [0, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [1, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [2, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [0, 2, 2], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [1, 2, 2], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=bottom,open=false,facing=north]", offset: [2, 2, 2], layer: ceiling, swap: wood }
   constraints:
     - { offset: [0, 0], constraint: blocked_reachable }
     - { offset: [2, 0], constraint: blocked_reachable }
