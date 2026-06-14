@@ -3,7 +3,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::env;
 
-    use crate::minecraft::Biome;
+    use crate::minecraft::{Biome, Block};
     use crate::noise::RNG;
 
     use super::super::registry::{load_yaml, ResourceRegistry};
@@ -363,6 +363,192 @@ mod tests {
         // Parcel 0 has no valid candidates and is skipped
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[&1].primary_resource, "wood");
+    }
+
+    /// Regression guard for the resource-chain cap logic: a settlement of all-plains
+    /// rural parcels must NOT collapse to a single resource. Plains offers wheat, wool
+    /// and cow; the cap loop used to ban over-supplied resources outright, which
+    /// cascaded until only wool survived. Now caps limit per-resource parcel *counts*
+    /// (never below 1), so every biome-supported resource keeps at least one parcel.
+    #[test]
+    fn plains_parcels_stay_diverse() {
+        use crate::generator::districts::DistrictID;
+        use crate::minecraft::Biome;
+
+        let registry = make_registry();
+
+        // Try several seeds so we don't rely on a single lucky RNG stream.
+        for seed in [12345, 1, 7, 99, 2024] {
+            let mut rng = RNG::new(seed);
+            let parcels: HashMap<DistrictID, crate::generator::districts::ParcelAnalysis> = (0..12)
+                .map(|i| (
+                    DistrictID(i),
+                    crate::generator::districts::ParcelAnalysis::from_biome_count(
+                        [(Biome::from("minecraft:plains"), 100)].into(),
+                    ),
+                ))
+                .collect();
+
+            let result = registry.resolve_for_parcels(&parcels, &mut rng);
+
+            let mut counts: HashMap<String, u32> = HashMap::new();
+            for a in result.parcel_assignments.values() {
+                *counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
+            }
+
+            assert_eq!(result.parcel_assignments.len(), 12, "all parcels assigned (seed {})", seed);
+            // All three plains resources should be represented, each at least once.
+            for r in ["wheat", "wool", "cow"] {
+                assert!(counts.get(r).copied().unwrap_or(0) >= 1,
+                    "expected at least one '{}' parcel on plains, got {:?} (seed {})", r, counts, seed);
+            }
+        }
+    }
+
+    /// Wool color used to paint a district for a given raw resource. Each raw
+    /// resource gets a stable, distinct color so adjacent districts read clearly.
+    /// Unmapped resources fall back to a deterministic color by name length.
+    fn colour_id_for_resource(resource: &str) -> &'static str {
+        match resource {
+            "wood" => "brown_wool",
+            "wheat" => "yellow_wool",
+            "iron_ore" => "light_gray_wool",
+            "coal" => "black_wool",
+            "honey" => "orange_wool",
+            "beeswax" => "white_wool",
+            "wool" => "pink_wool",
+            "sugar_cane" => "lime_wool",
+            "cow" => "magenta_wool",
+            other => {
+                // Deterministic fallback for any resource not explicitly mapped.
+                const FALLBACK: [&str; 4] = ["cyan_wool", "purple_wool", "green_wool", "light_blue_wool"];
+                FALLBACK[other.len() % FALLBACK.len()]
+            }
+        }
+    }
+
+    /// Wool block painted on a district for a given raw resource.
+    fn block_for_resource(resource: &str) -> Block {
+        Block { id: colour_id_for_resource(resource).into(), data: None, state: None }
+    }
+
+    /// End-to-end visual test (requires a live Minecraft server).
+    ///
+    /// Runs districting (`generate_parcels`), computes the resource chain over the
+    /// rural districts (`resolve_for_parcels`), then paints every district:
+    ///   - Rural    → a wool color keyed to its assigned raw resource
+    ///   - Urban    → blue wool
+    ///   - OffLimits → red wool
+    /// District edges are capped with glass so boundaries stay legible.
+    ///
+    /// Run with:
+    ///   cargo test colour_districts_by_resource -- --nocapture
+    #[tokio::test]
+    async fn colour_districts_by_resource() {
+        use crate::editor::World;
+        use crate::generator::districts::{generate_parcels, ParcelType};
+        use crate::geometry::Point3D;
+        use crate::http_mod::{GDMCHTTPProvider, HeightMapType};
+        use crate::noise::Seed;
+        use crate::util::init_logger;
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider
+            .get_heightmap(
+                build_area.origin.x,
+                build_area.origin.z,
+                build_area.size.x,
+                build_area.size.z,
+                HeightMapType::MotionBlockingNoPlants,
+            )
+            .await
+            .expect("Failed to get heightmap");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_parcels(seed, &mut editor).await;
+
+        // ── Resource chain over rural districts ──────────────────────────────
+        // Only rural districts produce raw resources, so feed just those into
+        // the resolver (matching `parcel_resource_production_report`).
+        let registry = ResourceRegistry::load().expect("Failed to load resource registry");
+        let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
+            .filter(|(id, _)| {
+                editor.world().districts.get(id)
+                    .map(|d| d.data.parcel_type == ParcelType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+
+        let result = registry.resolve_for_parcels(&rural_analysis, &mut rng);
+
+        // Snapshot each district's type and (for rural) its assigned resource so we
+        // don't hold a borrow on the world while painting through the editor.
+        let district_color: HashMap<_, _> = editor.world().districts.iter()
+            .map(|(id, d)| {
+                let block = match d.data.parcel_type {
+                    ParcelType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
+                    ParcelType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+                    ParcelType::Rural => match result.parcel_assignments.get(id) {
+                        Some(a) => block_for_resource(&a.primary_resource),
+                        // Rural district with no assignable resource — fall back to gray.
+                        None => Block { id: "gray_wool".into(), data: None, state: None },
+                    },
+                    ParcelType::Unknown => Block { id: "bedrock".into(), data: None, state: None },
+                };
+                (*id, block)
+            })
+            .collect();
+
+        let glass = Block { id: "glass".into(), data: None, state: None };
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let Some(district_id) = editor.world().district_map[x as usize][z as usize] else {
+                    continue;
+                };
+
+                let block = district_color.get(&district_id).expect("district color");
+                let height = height_map[x as usize][z as usize] - build_area.origin.y;
+                let point = Point3D::new(x, height, z);
+
+                let on_edge = editor.world().districts.get(&district_id)
+                    .map(|d| d.data.edges.contains(&point))
+                    .unwrap_or(false);
+
+                if on_edge {
+                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                    editor.place_block(block, Point3D::new(x, height - 1, z)).await;
+                } else {
+                    editor.place_block(block, Point3D::new(x, height, z)).await;
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+
+        // ── Legend ───────────────────────────────────────────────────────────
+        println!("\n╔══ District Color Legend ════════════════════════╗");
+        println!("║ Urban     → blue_wool");
+        println!("║ OffLimits → red_wool");
+        println!("║ Rural     → keyed by raw resource:");
+        let mut assigned: Vec<(&String, &'static str)> = result.parcel_assignments.values()
+            .map(|a| (&a.primary_resource, colour_id_for_resource(&a.primary_resource)))
+            .collect();
+        assigned.sort();
+        assigned.dedup();
+        for (resource, color) in &assigned {
+            println!("║   {:<12} → {}", resource, color);
+        }
+        println!("╚═════════════════════════════════════════════════╝\n");
     }
 
     /// Diagnostic test — passes a `HashMap<DistrictID, ParcelAnalysis>` to

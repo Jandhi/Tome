@@ -395,27 +395,27 @@ impl ResourceRegistry {
         //   - finished good output  ≥ FINISHED_GOOD_CAP → cap all raw inputs feeding that good
         //   - intermediate leftover ≥ INTERMEDIATE_CAP  → cap all raw inputs feeding that good
         // Repeat until stable (up to 10 iterations).
-        let mut capped: HashSet<String> = HashSet::new();
+        // Iteratively limit how many parcels may gather each over-supplied resource.
+        // Banning a resource outright cascades: the survivors absorb its freed parcels,
+        // overshoot in turn, and get banned too, until only the least-efficient chain
+        // survives (e.g. plains collapsing entirely to wool). Instead we cap the *number
+        // of parcels* assigned to each resource, never below 1, so every biome-supported
+        // resource keeps at least one parcel while overproduction is still reined in.
+        let mut quota: HashMap<String, usize> = HashMap::new();
         for _ in 0..10 {
-            let filtered: HashMap<DistrictID, Vec<String>> = base_options.iter()
-                .map(|(id, candidates)| {
-                    let filtered: Vec<String> = candidates.iter()
-                        .filter(|r| !capped.contains(*r))
-                        .cloned()
-                        .collect();
-                    // Fall back to all candidates if filtering leaves nothing.
-                    let chosen = if filtered.is_empty() { candidates.clone() } else { filtered };
-                    (*id, chosen)
-                })
-                .collect();
-
-            let trial_assignments = self.assign_parcel_resources(&filtered, &mut rng.derive());
+            let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &mut rng.derive());
 
             // Compute trial supply, crediting all gather recipe outputs (handles multi-output
             // recipes like gather_bees which produces both honey and beeswax).
             let mut trial_supply: HashMap<String, u32> = HashMap::new();
             for (_, a) in &trial_assignments {
                 self.credit_gather_supply(&a.primary_resource, &mut trial_supply);
+            }
+
+            // How many parcels each resource currently occupies — the basis for scaling quotas.
+            let mut trial_counts: HashMap<String, usize> = HashMap::new();
+            for a in trial_assignments.values() {
+                *trial_counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
             }
 
             // Run chain allocation on trial supply via the same forward-execution model
@@ -442,66 +442,54 @@ impl ResourceRegistry {
                 .filter(|(_, q)| *q > 0)
                 .collect();
 
-            let mut newly_capped: Vec<String> = Vec::new();
+            let mut changed = false;
 
-            // Raw surplus ≥ RAW_SURPLUS_CAP → cap that raw resource directly.
-            for (r, &qty) in &trial_remaining {
-                if qty >= RAW_SURPLUS_CAP as f32 && !capped.contains(r) {
-                    newly_capped.push(r.clone());
-                }
-            }
-
-            // Finished good ≥ FINISHED_GOOD_CAP → cap all raw inputs feeding it.
+            // Finished good ≥ cap or intermediate leftover ≥ cap → scale down the parcel
+            // count of each raw input feeding it so output lands near the cap (floored at 1).
+            let mut over_outputs: Vec<(String, u32, u32)> = Vec::new();
             for (good, units) in &trial_finished {
-                if *units >= FINISHED_GOOD_CAP {
-                    if let Some(cost) = self.raw_cost(good) {
-                        for raw in cost.keys() {
-                            if !capped.contains(raw) {
-                                newly_capped.push(raw.clone());
-                            }
-                        }
+                if *units >= FINISHED_GOOD_CAP { over_outputs.push((good.clone(), *units, FINISHED_GOOD_CAP)); }
+            }
+            for (interm, units) in &trial_intermediates {
+                if *units >= INTERMEDIATE_CAP { over_outputs.push((interm.clone(), *units, INTERMEDIATE_CAP)); }
+            }
+            for (good, units, cap) in over_outputs {
+                let Some(cost) = self.raw_cost(&good) else { continue };
+                for raw in cost.keys() {
+                    let parcels_now = trial_counts.get(raw).copied().unwrap_or(0);
+                    if parcels_now == 0 { continue; }
+                    let target = (((parcels_now as f32) * (cap as f32) / (units as f32)).floor() as usize).max(1);
+                    let existing = quota.get(raw).copied().unwrap_or(usize::MAX);
+                    if target < existing {
+                        quota.insert(raw.clone(), target);
+                        changed = true;
                     }
                 }
             }
 
-            // Intermediate leftover ≥ INTERMEDIATE_CAP → cap all raw inputs feeding it.
-            for (intermediate, units) in &trial_intermediates {
-                if *units >= INTERMEDIATE_CAP {
-                    if let Some(cost) = self.raw_cost(intermediate) {
-                        for raw in cost.keys() {
-                            if !capped.contains(raw) {
-                                newly_capped.push(raw.clone());
-                            }
-                        }
-                    }
+            // Raw surplus ≥ cap → trim that resource's parcel count by one (floored at 1).
+            for (r, &qty) in &trial_remaining {
+                if qty < RAW_SURPLUS_CAP as f32 { continue; }
+                let parcels_now = trial_counts.get(r).copied().unwrap_or(0);
+                if parcels_now <= 1 { continue; }
+                let target = parcels_now - 1;
+                let existing = quota.get(r).copied().unwrap_or(usize::MAX);
+                if target < existing {
+                    quota.insert(r.clone(), target);
+                    changed = true;
                 }
             }
 
-            newly_capped.sort();
-            newly_capped.dedup();
-
-            if newly_capped.is_empty() {
+            if !changed {
                 break;
             }
-            capped.extend(newly_capped);
         }
 
-        // Final filtered options and real assignment.
-        let options: HashMap<DistrictID, Vec<String>> = base_options.iter()
-            .map(|(id, candidates)| {
-                let filtered: Vec<String> = candidates.iter()
-                    .filter(|r| !capped.contains(*r))
-                    .cloned()
-                    .collect();
-                let chosen = if filtered.is_empty() { candidates.clone() } else { filtered };
-                (*id, chosen)
-            })
-            .collect();
-
         // Each super-parcel is assigned exactly one gather recipe (identified by its
-        // primary resource). The primary output is credited at 2 units; co-products from
-        // multi-output recipes (e.g. gather_bees → honey + beeswax) are scaled proportionally.
-        let parcel_assignments = self.assign_parcel_resources(&options, rng);
+        // primary resource), respecting the per-resource parcel quotas computed above.
+        // The primary output is credited at 2 units; co-products from multi-output recipes
+        // (e.g. gather_bees → honey + beeswax) are scaled proportionally.
+        let parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, rng);
 
         let mut supply: HashMap<String, u32> = HashMap::new();
         let mut gather_buildings: HashMap<String, u32> = HashMap::new();
@@ -559,14 +547,20 @@ impl ResourceRegistry {
         intermediate_leftovers.sort_by_key(|(r, _)| r.clone());
         leftover_goods.extend(intermediate_leftovers);
 
-        SettlementProductionResult {
+        let result = SettlementProductionResult {
             parcel_assignments,
             supply,
             finished_goods,
             leftover_goods,
             gather_buildings,
             processing_buildings,
-        }
+        };
+
+        // Log the full chain so multiple generation runs can be compared via the logs.
+        // Each section is prefixed with `[resource-chain]` for easy grepping/filtering.
+        log_settlement_production(&result, parcel_analysis.len());
+
+        result
     }
 
     /// For each entry in `options` (a parcel ID paired with its candidate raw resources from
@@ -590,6 +584,22 @@ impl ResourceRegistry {
         options: &HashMap<ID, Vec<String>>,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
+        self.assign_parcel_resources_quota(options, &HashMap::new(), rng)
+    }
+
+    /// Like [`assign_parcel_resources`], but caps how many parcels may be assigned each
+    /// resource. `max_parcels` maps resource → maximum parcel count (absent = unlimited).
+    ///
+    /// When every candidate a parcel could take has already hit its quota, the quota is
+    /// ignored *for that parcel* so it still receives an assignment — this is the
+    /// diversity floor that prevents an over-supplied resource from being eliminated
+    /// entirely (see the cap loop in `resolve_for_parcels`).
+    fn assign_parcel_resources_quota<ID: Eq + Hash + Clone>(
+        &self,
+        options: &HashMap<ID, Vec<String>>,
+        max_parcels: &HashMap<String, usize>,
+        rng: &mut RNG,
+    ) -> HashMap<ID, ParcelResourceAssignment> {
         // Filter each parcel's candidates to those with a known gather building,
         // then sort most-constrained first.
         let mut parcels: Vec<(ID, Vec<String>)> = options.iter()
@@ -604,6 +614,7 @@ impl ResourceRegistry {
         parcels.sort_by_key(|(_, candidates)| candidates.len());
 
         let mut assigned_set: HashSet<String> = HashSet::new();
+        let mut assigned_count: HashMap<String, usize> = HashMap::new();
         let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::new();
 
         for (id, candidates) in parcels {
@@ -611,13 +622,28 @@ impl ResourceRegistry {
                 continue;
             }
 
+            // Prefer candidates still under their quota; only if all are exhausted do we
+            // fall back to the full candidate list, so no parcel is left unassigned.
+            let under_quota: Vec<&String> = candidates.iter()
+                .filter(|r| {
+                    let used = assigned_count.get(*r).copied().unwrap_or(0);
+                    let cap = max_parcels.get(*r).copied().unwrap_or(usize::MAX);
+                    used < cap
+                })
+                .collect();
+            let pool: Vec<&String> = if under_quota.is_empty() {
+                candidates.iter().collect()
+            } else {
+                under_quota
+            };
+
             // Pre-score all candidates so rng is called once per candidate.
-            let scored: Vec<(String, i64)> = candidates.iter()
+            let scored: Vec<(String, i64)> = pool.iter()
                 .map(|r| {
                     let value = self.resource_value_score(r) as i64;
-                    let novelty: i64 = if !assigned_set.contains(r) { 1000 } else { 0 };
+                    let novelty: i64 = if !assigned_set.contains(*r) { 1000 } else { 0 };
                     let jitter = rng.rand_i32(100) as i64;
-                    (r.clone(), novelty + value + jitter)
+                    ((*r).clone(), novelty + value + jitter)
                 })
                 .collect();
 
@@ -626,6 +652,7 @@ impl ResourceRegistry {
             let building = recipe.building.clone();
             let production_painter = recipe.production_painter.clone();
             assigned_set.insert(resource.clone());
+            *assigned_count.entry(resource.clone()).or_insert(0) += 1;
             result.insert(id, ParcelResourceAssignment { primary_resource: resource, building, production_painter });
         }
 
@@ -1071,4 +1098,52 @@ fn compute_raw_cost_for(
 
     memo.insert(resource_id.to_string(), cost.clone());
     cost
+}
+
+/// Emit a full, sorted dump of a settlement's production result to the log so that
+/// multiple generation runs can be compared after the fact. Every line is prefixed
+/// with `[resource-chain]` for easy `grep`/log-filter analysis. Logged at `info`.
+fn log_settlement_production(result: &SettlementProductionResult, total_parcels: usize) {
+    log::info!(
+        "[resource-chain] settlement production: {} producing parcels of {} total",
+        result.parcel_assignments.len(), total_parcels,
+    );
+
+    // Per-parcel assignments, sorted by district id for stable diffing across runs.
+    let mut assignments: Vec<(&DistrictID, &ParcelResourceAssignment)> =
+        result.parcel_assignments.iter().collect();
+    assignments.sort_by_key(|(id, _)| id.0);
+    for (id, a) in assignments {
+        log::info!(
+            "[resource-chain]   parcel {:>3} -> {} [{}]",
+            id.0, a.primary_resource, a.building,
+        );
+    }
+
+    let log_counts = |label: &str, map: &HashMap<String, u32>| {
+        let mut items: Vec<(&String, &u32)> = map.iter().collect();
+        items.sort_by(|(an, ac), (bn, bc)| bc.cmp(ac).then(an.cmp(bn)));
+        if items.is_empty() {
+            log::info!("[resource-chain]   {}: (none)", label);
+        }
+        for (name, count) in items {
+            log::info!("[resource-chain]   {}: {} x{}", label, name, count);
+        }
+    };
+    let log_pairs = |label: &str, pairs: &[(String, u32)]| {
+        let mut items: Vec<&(String, u32)> = pairs.iter().collect();
+        items.sort_by(|(an, ac), (bn, bc)| bc.cmp(ac).then(an.cmp(bn)));
+        if items.is_empty() {
+            log::info!("[resource-chain]   {}: (none)", label);
+        }
+        for (name, count) in items {
+            log::info!("[resource-chain]   {}: {} x{}", label, name, count);
+        }
+    };
+
+    log_counts("supply", &result.supply);
+    log_pairs("finished_good", &result.finished_goods);
+    log_pairs("leftover", &result.leftover_goods);
+    log_counts("gather_building", &result.gather_buildings);
+    log_counts("processing_building", &result.processing_buildings);
 }
