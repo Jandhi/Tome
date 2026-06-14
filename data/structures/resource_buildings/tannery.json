@@ -1,6 +1,6 @@
 {
   "id": "tannery",
-  "y_offset": 0,
+  "y_offset": -1,
   "path": "data/structures/resource_buildings/tannery.nbt",
   "origin": {
     "x": 5,
