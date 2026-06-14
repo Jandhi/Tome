@@ -5,7 +5,6 @@ use crate::generator::BuildClaim;
 use crate::generator::buildings_v2::footprint::Footprint;
 use crate::generator::buildings_v2::pipeline::BuildCtx;
 use crate::geometry::{Point2D, Point3D};
-use crate::minecraft::Block;
 
 /// How many blocks outward from the footprint edge to blend terrain.
 const BLEND_RADIUS: i32 = 5;
@@ -77,27 +76,12 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
                 continue;
             }
 
-            // Keep the blended cap in the natural surface material: grass stays
-            // grass, sand stays sand, stone stays stone. Only grassy ground gets
-            // a dirt body + grass cap; every other surface is filled and capped
-            // with itself, so the blend never paints foreign grass over rock or
-            // sand. Snow is re-laid on top.
+            // Keep the blended cap in the natural surface material; gravity
+            // surfaces (sand/gravel) get a solid sandstone/stone body so the cap
+            // rests on a base and can't fall. (See `terraform_layers`.)
             let surface = ctx.editor.world().get_ground_block(point).clone();
-            let s = surface.id.as_str();
-            let is_snow = s.contains("snow");
-            let is_grassy = s.contains("grass_block")
-                || s.contains("dirt")
-                || s.contains("podzol")
-                || s.contains("mycelium");
-
-            let (fill, top) = if is_grassy || is_snow {
-                (
-                    Block::from_id("minecraft:dirt".into()),
-                    Block::from_id("minecraft:grass_block".into()),
-                )
-            } else {
-                (surface.clone(), surface.clone())
-            };
+            let is_snow = surface.id.as_str().contains("snow");
+            let (fill, top) = crate::generator::terrain::terraform_layers(&surface);
 
             // Convert the old surface to fill material since it's being buried.
             ctx.editor.place_block(&fill, point.add_y(terrain_y - 1)).await;

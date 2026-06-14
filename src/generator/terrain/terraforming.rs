@@ -81,6 +81,34 @@ fn boundary_distance(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
     dist
 }
 
+/// Choose the (subsurface fill, surface cap) blocks for terraforming a column,
+/// given the natural surface block. Grassy ground gets a dirt body + grass cap.
+/// Gravity surfaces (sand, red sand, gravel) get a SOLID rock body (sandstone /
+/// red sandstone / stone) under the loose cap, so the single top layer rests on
+/// a base and can't fall — and it matches real desert geology (sand on
+/// sandstone). Everything else (stone, terracotta, …) is stable and is filled
+/// and capped with itself. Snow folds into the grassy case; callers re-lay the
+/// snow layer on top.
+pub fn terraform_layers(surface: &Block) -> (Block, Block) {
+    let s = surface.id.as_str();
+    if s.contains("snow")
+        || s.contains("grass_block")
+        || s.contains("dirt")
+        || s.contains("podzol")
+        || s.contains("mycelium")
+    {
+        (Block::from_id("minecraft:dirt".into()), Block::from_id("minecraft:grass_block".into()))
+    } else if s.contains("red_sand") && !s.contains("sandstone") {
+        (Block::from_id("minecraft:red_sandstone".into()), surface.clone())
+    } else if s.contains("sand") && !s.contains("sandstone") {
+        (Block::from_id("minecraft:sandstone".into()), surface.clone())
+    } else if s.contains("gravel") {
+        (Block::from_id("minecraft:stone".into()), surface.clone())
+    } else {
+        (surface.clone(), surface.clone())
+    }
+}
+
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     // Only the points we actually terraform may be written back to the
     // heightmap. Asserting heights for skipped water cells would make the map
@@ -111,21 +139,13 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
 
         // Keep the terraformed cap in the natural surface material: grass stays
         // grass, sand stays sand, stone stays stone. Only genuinely grassy
-        // ground gets a dirt body under a grass cap; every other surface (sand,
-        // stone, gravel, terracotta, …) is filled and capped with itself, so we
-        // never paint foreign grass over rock or sand. Snow is re-laid on top.
+        // ground gets a dirt body under a grass cap; every other surface is
+        // capped with itself, so we never paint foreign grass over rock or sand.
+        // Gravity surfaces (sand/gravel) get a SOLID subsurface (sandstone/
+        // stone) so the cap has a base and can't fall. Snow is re-laid on top.
         let surface = editor.world().get_ground_block(xz).clone();
-        let s = surface.id.as_str();
-        let is_snow = s.contains("snow");
-        let is_grassy = s.contains("grass_block")
-            || s.contains("dirt")
-            || s.contains("podzol")
-            || s.contains("mycelium");
-        let (fill, top) = if is_grassy || is_snow {
-            (Block::from_id("minecraft:dirt".into()), Block::from_id("minecraft:grass_block".into()))
-        } else {
-            (surface.clone(), surface.clone())
-        };
+        let (fill, top) = terraform_layers(&surface);
+        let is_snow = surface.id.as_str().contains("snow");
 
         if target_y > terrain_y {
             // Raise: subsurface fill from the old surface up to the new top.
