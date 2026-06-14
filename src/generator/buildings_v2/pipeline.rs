@@ -23,7 +23,7 @@ use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
 use super::furnish::furnish_rooms;
-use super::BuildingContext;
+use super::{BuildingContext, Culture};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
 use super::roof::{place_roof, place_roof_ladder};
@@ -123,8 +123,13 @@ pub async fn build_house(
     // Resolve the timber pattern now that the frame is known — auto-pick
     // filters out patterns whose studs wouldn't fit the longest wall segment.
     // Use a derived RNG so adding the auto-pick path doesn't shift the main
-    // stream that rooms/furnish later draw from.
+    // stream that rooms/furnish later draw from. Decorative timber framing is a
+    // Medieval feature; other cultures keep the plain skeleton (baseline corner
+    // posts + crossbeams only).
     let timber_pattern = bctx.timber_pattern.unwrap_or_else(|| {
+        if bctx.culture != Culture::Medieval {
+            return TimberPattern::Plain;
+        }
         let max_seg_len = wall_segs.segments.iter()
             .map(|s| s.length.max(0) as u32)
             .max()

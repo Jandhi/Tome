@@ -8,6 +8,7 @@ use crate::minecraft::{Block, BlockForm};
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
+use super::dome::{is_dome_eligible, place_dome};
 use super::heightmap::RoofHeightmap;
 use super::top_floor_rects;
 
@@ -66,13 +67,20 @@ pub(super) async fn place_flat_roof(
         _ => ParapetStyle::SlabTopped,
     };
 
-    // Map each point to the roof_y of the tallest rect containing it.
+    // Map each point to the roof_y of the tallest rect containing it, and track
+    // which cells belong to a dome. A dome is its own enclosed structure, so a
+    // flat rect walls off (parapets) against a dome at the *same* height — but a
+    // *taller* dome already has its own wall, so the flat rect leaves that edge
+    // open and butts against the wall instead.
     let mut point_roof_y: std::collections::HashMap<Point2D, i32> = std::collections::HashMap::new();
+    let mut dome_cells: std::collections::HashSet<Point2D> = std::collections::HashSet::new();
     for i in 0..rects.len() {
         let ry = frame.roof_y(i);
+        let is_dome = is_dome_eligible(&rects[i]);
         for point in rects[i].iter() {
             let entry = point_roof_y.entry(point).or_insert(ry);
             if ry > *entry { *entry = ry; }
+            if is_dome { dome_cells.insert(point); }
         }
     }
 
@@ -84,6 +92,12 @@ pub(super) async fn place_flat_roof(
     for i in 0..rects.len() {
         let rect = &rects[i];
         let roof_y = frame.roof_y(i);
+
+        // Square rects get a dome instead of the flat deck + parapet.
+        if is_dome_eligible(rect) {
+            place_dome(editor, rect, roof_y - 2).await;
+            continue;
+        }
 
         for point in rect.iter() {
             // Roof surface: full block replaces where the ceiling would be
@@ -106,7 +120,9 @@ pub(super) async fn place_flat_roof(
             let needs_parapet = neighbors.iter().any(|n| {
                 match point_roof_y.get(n) {
                     None => true,
-                    Some(&ny) => ny < roof_y,
+                    // Lower neighbour, or a same-height dome (its own structure).
+                    // A taller dome (ny > roof_y) is left open — its wall divides.
+                    Some(&ny) => ny < roof_y || (ny == roof_y && dome_cells.contains(n)),
                 }
             });
 
@@ -213,9 +229,15 @@ pub async fn place_roof_ladder(
     let rects = top_floor_rects(frame);
     let rects = &rects[..];
 
-    let tallest_rect_idx = (0..rects.len())
+    // Climb onto the tallest *flat* rect. Domed rects have no walkable terrace,
+    // so they're excluded; if every top rect is a dome there's nowhere to go.
+    let tallest_rect_idx = match (0..rects.len())
+        .filter(|&i| !is_dome_eligible(&rects[i]))
         .max_by_key(|&i| frame.floor_counts()[i])
-        .unwrap_or(0);
+    {
+        Some(i) => i,
+        None => return None,
+    };
     let tallest_rect = &rects[tallest_rect_idx];
     let roof_y = frame.roof_y(tallest_rect_idx);
     let top_floor = frame.floor_counts()[tallest_rect_idx] - 1;

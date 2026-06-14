@@ -82,11 +82,24 @@ fn boundary_distance(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
 }
 
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
+    // Only the points we actually terraform may be written back to the
+    // heightmap. Asserting heights for skipped water cells would make the map
+    // claim land that was never built — downstream consumers (e.g. the wall's
+    // ground fill) would then float above the real water surface.
+    let mut updated: HashSet<Point3D> = HashSet::new();
     for point in points {
         let xz = point.drop_y();
         if editor.world().is_water(xz) && skip_water {
             continue;
         }
+        // Never grade a built wall cell: a road corridor's width ring can reach
+        // the solid wall beside a gate, and clearing air down to road level there
+        // would punch a hole through the wall. Gate openings (claimed `Gate`) are
+        // still graded so the road passes through them flush.
+        if matches!(editor.world().get_claim(xz), Some(crate::generator::BuildClaim::Wall)) {
+            continue;
+        }
+        updated.insert(*point);
 
         // Heightmap convention (see World::new / blend_terrain): the surface
         // value is the first air block; the top solid sits at `value - 1`.
@@ -132,7 +145,7 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         }
     }
 
-    editor.world_mut().set_heights(points);
+    editor.world_mut().set_heights(&updated);
 }
 
 /// Smooths terrain over `points` using repeated wide-radius neighbour averaging

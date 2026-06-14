@@ -349,7 +349,20 @@ pub fn phantom_wall_cells(rects: &[Rect2D]) -> Vec<Point2D> {
 /// Full footprint generation pipeline: generate layouts, score/select, merge into polygon.
 /// Returns `None` if no valid building fits the plot.
 pub fn generate_footprint(rng: &mut RNG, plot: &Plot, size_class: &SizeClass) -> Option<Footprint> {
-    let result = generate::generate_layouts(rng, plot, size_class, 5, 4)?;
+    generate_footprint_biased(rng, plot, size_class, 0)
+}
+
+/// Like [`generate_footprint`] but biases each rect (core + wings) toward a
+/// square with the given percent chance. Square rects get domed roofs under the
+/// flat-roof (desert) path — see `roof::dome`. A `square_bias` of 0 is identical
+/// to `generate_footprint` and leaves the RNG stream untouched.
+pub fn generate_footprint_biased(
+    rng: &mut RNG,
+    plot: &Plot,
+    size_class: &SizeClass,
+    square_bias: i32,
+) -> Option<Footprint> {
+    let result = generate::generate_layouts(rng, plot, size_class, 5, 4, square_bias)?;
     let mut select_rng = rng.derive();
     let min_area = size_class.min_side() * size_class.min_side();
     let winner = generate::select_layout(

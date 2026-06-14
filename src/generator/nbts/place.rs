@@ -4,7 +4,7 @@ use anyhow::Ok;
 use flate2::read::GzDecoder;
 use log::info;
 
-use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Palette, PaletteSwapResult, Placer}, nbts::{Rotation, Structure, meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::{Cardinal, Point3D}, minecraft::Block};
+use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Palette, PaletteSwapResult, Placer}, nbts::{Rotation, Structure, meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockForm}};
 
 /// Convert a block's stored NBT compound into the SNBT string the editor
 /// sends to the server. Empty compounds carry no real data and are dropped.
@@ -107,21 +107,34 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
 
             match swap {
                 PaletteSwapResult::Block(id) => {
+                    // A log carries an `axis`; if the swapped-in block isn't
+                    // axis-rotatable, drop the axis so the server doesn't reject
+                    // the placement (logs silently vanishing).
+                    let mut state = palette_data.properties.clone();
+                    if !id.is_axis_block() {
+                        if let Some(s) = state.as_mut() { s.remove("axis"); }
+                    }
                     let block = (-transform.rotation).apply_to_block(Block{
                         id,
-                        state: palette_data.properties.clone(),
+                        state,
                         data, // Now contains the SNBT string if data exists
                     });
 
                     editor.place_block(&block, transform.apply(pos)).await;
                 },
                 PaletteSwapResult::Material(material_id, form) => {
+                    // Only log/wood/pillar forms keep an axis; for any other form
+                    // (e.g. a log swapped into a sandstone block) drop it.
+                    let mut state = palette_data.properties.clone();
+                    if !matches!(form, BlockForm::Log | BlockForm::Wood | BlockForm::Pillar) {
+                        if let Some(s) = state.as_mut() { s.remove("axis"); }
+                    }
                     let block = (-transform.rotation).apply_to_block(Block{
                         id: Default::default(),
-                        state: palette_data.properties.clone(),
+                        state,
                         data, // Now contains the SNBT string if data exists
                     });
-                    
+
                     placer.place_block(
                         editor,
                         transform.apply(pos),
