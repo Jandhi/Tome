@@ -30,84 +30,176 @@ pub fn get_wall_points(
     wall_points
 }
 
-fn find_wall_neighbour(point: Point2D, wall_points: &HashSet<Point2D>, ordered_set: &HashSet<Point2D>) -> Option<Point2D> {
-    // checking neighbours in a specific order to ensure consistent ordering
-    let directions = [
-        Point2D { x: -1, y: 0 },
-        Point2D { x: 0, y: -1 },
-        Point2D { x: -1, y: -1 },
-        Point2D { x: -1, y: 1 },
-        Point2D { x: 1, y: -1 },
-        Point2D { x: 1, y: 0 },
-        Point2D { x: 0, y: 1 },
-        Point2D { x: 1, y: 1 },
-    ];
+/// Connected components of `region` under 4-connectivity.
+pub(crate) fn connected_components(region: &HashSet<Point2D>) -> Vec<HashSet<Point2D>> {
+    let mut remaining = region.clone();
+    let mut components = Vec::new();
 
-    // Check all neighbours of the point in the wall points
-    for direction in directions.iter() {
-        let neighbour = point + *direction;
-        if !ordered_set.contains(&neighbour) && wall_points.contains(&neighbour) {
-            return Some(neighbour);
+    while let Some(&start) = remaining.iter().next() {
+        remaining.remove(&start);
+        let mut component = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(point) = stack.pop() {
+            component.insert(point);
+            for dir in CARDINALS_2D {
+                let neighbour = point + dir;
+                if remaining.remove(&neighbour) {
+                    stack.push(neighbour);
+                }
+            }
         }
+        components.push(component);
     }
-    None
+
+    components
 }
 
-pub fn order_wall_points(
-    wall_points: & HashSet<Point2D>,
-) -> Vec<Vec<Point2D>> {
-    let mut list_of_ordered_vec = Vec::new();
-
-    let mut wall_point_list = wall_points.iter().cloned().collect::<Vec<_>>();
-    let mut ordered_vec = Vec::new();
-    let mut ordered_set = HashSet::new();
-    let mut current_point = wall_point_list.remove(0);
-
-    ordered_vec.push(current_point);
-    ordered_set.insert(current_point);
-
-    let mut reverse_check = false;
-
-    while wall_point_list.len() > 0 {
-        let next_wall_point = find_wall_neighbour(current_point, wall_points, &ordered_set);
-        if next_wall_point.is_none() {
-            // If no next point is found, we need to reverse the direction
-            if reverse_check {
-                info!("Failed to find a neighbour");
-                if ordered_vec.len() > 20 {
-                    // Killing small wall structures, shouldnt really need to be here since those small urban sections shouldnt happen
-                    list_of_ordered_vec.push(ordered_vec.clone());
-                }
-                ordered_vec.clear();
-                current_point = wall_point_list.remove(0);
-                ordered_vec.push(current_point);
-                ordered_set.insert(current_point);
-                break; // If we already reversed, we are done
-            } else {
-                info!("Reversing wall");
-                reverse_check = true;
-                // Reverse the order of the ordered_vec
-                ordered_vec.reverse();
-                current_point = ordered_vec.first().cloned().unwrap();
-                continue; 
-            }
-        
-        } else {
-            wall_point_list.retain(|p| *p != next_wall_point.unwrap());
-            ordered_vec.push(current_point);
-            ordered_set.insert(current_point);
-            current_point = next_wall_point.unwrap();
-        }
+/// Moore-neighbour boundary tracing of a single connected `region`. Returns the
+/// outer-boundary cells in order, walking the contour clockwise from the
+/// top-left-most cell. The result is 8-connected (it takes diagonal steps at
+/// convex corners — `densify_loop` closes those into a 4-connected ring).
+///
+/// Robust where the old greedy walk was not: it follows the contour by the
+/// standard backtrack rule, so it never cuts across an inside corner and never
+/// strands cells.
+fn moore_trace(region: &HashSet<Point2D>) -> Vec<Point2D> {
+    // The 8 Moore-neighbour offsets in clockwise order, starting due West.
+    const CW: [Point2D; 8] = [
+        Point2D { x: -1, y: 0 },  // W
+        Point2D { x: -1, y: -1 }, // NW
+        Point2D { x: 0, y: -1 },  // N
+        Point2D { x: 1, y: -1 },  // NE
+        Point2D { x: 1, y: 0 },   // E
+        Point2D { x: 1, y: 1 },   // SE
+        Point2D { x: 0, y: 1 },   // S
+        Point2D { x: -1, y: 1 },  // SW
+    ];
+    fn cw_index(offset: Point2D) -> usize {
+        CW.iter().position(|&c| c == offset).expect("offset must be a Moore neighbour")
     }
 
-    list_of_ordered_vec.push(ordered_vec);
-    list_of_ordered_vec
+    // Top-most row, then left-most cell in it: a guaranteed convex corner whose
+    // West neighbour is empty, so we can enter it from the West.
+    let start = *region.iter().min_by_key(|p| (p.y, p.x)).unwrap();
+    let mut contour = vec![start];
+    if region.len() == 1 {
+        return contour;
+    }
+
+    let mut current = start;
+    // The (empty) cell we "came from"; West of the start is empty by construction.
+    let mut backtrack = Point2D { x: start.x - 1, y: start.y };
+
+    // Safety cap: a contour can revisit cells (spikes) but is bounded well under this.
+    let max_steps = region.len() * 8 + 8;
+    for _ in 0..max_steps {
+        let start_idx = cw_index(backtrack - current);
+        let mut prev_cell = backtrack; // last empty cell examined before a hit
+        let mut next = None;
+        for k in 1..=8 {
+            let cand = current + CW[(start_idx + k) % 8];
+            if region.contains(&cand) {
+                next = Some((cand, prev_cell));
+                break;
+            }
+            prev_cell = cand;
+        }
+        let (cell, new_backtrack) = match next {
+            Some(v) => v,
+            None => break, // isolated cell — unreachable for len > 1
+        };
+        if cell == start {
+            break; // closed the loop
+        }
+        contour.push(cell);
+        current = cell;
+        backtrack = new_backtrack;
+    }
+
+    contour
+}
+
+/// Convert an 8-connected contour into a 4-connected ring by inserting the
+/// "elbow" cell at every diagonal step, so the built wall has no diagonal seam
+/// holes.
+///
+/// Prefers the elbow that lies *outside* the region, so the wall stays a single
+/// outer ring and the cell one step inward is left free for the walkway — rather
+/// than pulling the ring inward (which made the wall top 2 cells thick at corners
+/// and stole the walkway cell). Falls back to an in-region elbow, then to the
+/// horizontal one, for the rare bare diagonal staircase where both sides are open.
+fn densify_loop(contour: &[Point2D], region: &HashSet<Point2D>) -> Vec<Point2D> {
+    let n = contour.len();
+    let mut dense = Vec::with_capacity(n);
+    for i in 0..n {
+        let cur = contour[i];
+        dense.push(cur);
+        let next = contour[(i + 1) % n];
+        let d = next - cur;
+        if d.x != 0 && d.y != 0 {
+            let horizontal = Point2D { x: cur.x + d.x, y: cur.y };
+            let vertical = Point2D { x: cur.x, y: cur.y + d.y };
+            if !region.contains(&horizontal) {
+                dense.push(horizontal);
+            } else if !region.contains(&vertical) {
+                dense.push(vertical);
+            } else {
+                dense.push(horizontal);
+            }
+        }
+    }
+    dense
+}
+
+/// Order the wall ring(s) for a filled urban `region`: one closed, 4-connected
+/// loop per connected component. Replaces the old greedy traversal that could
+/// discard whole arcs (holes) and leave diagonal seams.
+pub fn trace_wall_loops(region: &HashSet<Point2D>) -> Vec<Vec<Point2D>> {
+    // Drop degenerate specks — too small to be a meaningful walled section.
+    const MIN_WALL_LOOP: usize = 12;
+
+    let mut loops = Vec::new();
+    for component in connected_components(region) {
+        if component.len() < MIN_WALL_LOOP {
+            continue;
+        }
+        let contour = moore_trace(&component);
+        let dense = densify_loop(&contour, &component);
+        if dense.len() >= 3 {
+            loops.push(dense);
+        }
+    }
+    loops
+}
+
+/// True if `cell` sits on the outer face of the wall: it has a 4-neighbour that is
+/// neither inside the city (`region`) nor part of the wall `ring`. Only these cells
+/// get a parapet stair — the inner cells of a diagonal staircase (real boundary
+/// cells now fronted by an outside filler cell) are fully enclosed by city + ring,
+/// so they read as walkway instead, leaving a single clean outer stair line.
+fn parapet_is_outer(cell: Point2D, region: &HashSet<Point2D>, ring: &HashSet<Point2D>) -> bool {
+    CARDINALS_2D.iter().any(|&d| {
+        let nb = cell + d;
+        !region.contains(&nb) && !ring.contains(&nb)
+    })
 }
 
 pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, wall_type: WallType) {
-    let wall_points = get_wall_points(urban_points, editor);
-    info!("[Wall] Found {} wall points", wall_points.len());
-    let ordered_wall_points = order_wall_points(&wall_points);
+    let ordered_wall_points = trace_wall_loops(urban_points);
+    let total_points: usize = ordered_wall_points.iter().map(|loop_| loop_.len()).sum();
+    info!(
+        "[Wall] Traced {} wall loop(s), {} wall points total",
+        ordered_wall_points.len(),
+        total_points
+    );
+
+    // Claim every cell of every ring up front so building placement steers clear of
+    // the whole wall, not just the loop currently being built.
+    for wall_loop in &ordered_wall_points {
+        for &point in wall_loop {
+            editor.world_mut().claim(point, BuildClaim::Wall);
+        }
+    }
 
     for wall_point_list in ordered_wall_points {
         if wall_type == WallType::Standard {
@@ -167,7 +259,8 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
-    let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
+    let wall_set: HashSet<Point2D> = wall_points.iter().cloned().collect();
+    let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
 
     let mut walkway_points = Vec::<Point2D>::new();
     let mut walkway_heights: HashMap<Point2D, i32> = HashMap::new();
@@ -182,15 +275,27 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
                 // If it's a water wall, we place blocks in the water
                 fill_water(point.drop_y(), editor, material_placer, material_id).await;
             }
-            for y in editor.world().get_height_at(point.drop_y())..=point.y {
+            // Outer-face cells carry the full-height wall (and a parapet stair below);
+            // the inner cells of a diagonal staircase top out one slab lower so they
+            // sit flush with the walkway behind them instead of jutting up as a block.
+            let is_outer = parapet_is_outer(point.drop_y(), urban_points, &wall_set);
+            let column_top = if is_outer { point.y } else { point.y - 1 };
+            for y in editor.world().get_height_at(point.drop_y())..=column_top {
                 let new_point = Point3D { x: point.x, y, z: point.z };
                 material_placer.place_block(editor, new_point, material_id, BlockForm::Block, None, None).await;
+            }
+            if !is_outer {
+                material_placer.place_block(editor, Point3D { x: point.x, y: point.y, z: point.z }, material_id, BlockForm::Slab, None, None).await;
             }
             if directions.len() > 0 {
                 previous_dir = directions[0];
             }
-            let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
-            material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
+            // Parapet cap: a stair lip only on outer-face cells. Inner staircase cells
+            // were already dropped a slab above and read as walkway, so they get no cap.
+            if is_outer {
+                let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+                material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
+            }
         
             for dir in directions.iter() {
                 let mut height_modifier = 0;
@@ -246,7 +351,8 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
-    let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &HashSet::from_iter(wall_points.iter().cloned()), urban_points), editor);
+    let wall_set: HashSet<Point2D> = wall_points.iter().cloned().collect();
+    let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
 
     let mut walkway_points = Vec::<Point2D>::new();
     let mut walkway_heights: HashMap<Point2D, i32> = HashMap::new();
@@ -272,15 +378,27 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
                 // If it's a water wall, we place blocks in the water
                 fill_water(point.drop_y(), editor, material_placer, material_id).await;
             }
-            for y in editor.world().get_height_at(point.drop_y())..=point.y {
+            // Outer-face cells carry the full-height wall (and a parapet stair below);
+            // the inner cells of a diagonal staircase top out one slab lower so they
+            // sit flush with the walkway behind them instead of jutting up as a block.
+            let is_outer = parapet_is_outer(point.drop_y(), urban_points, &wall_set);
+            let column_top = if is_outer { point.y } else { point.y - 1 };
+            for y in editor.world().get_height_at(point.drop_y())..=column_top {
                 let new_point = Point3D { x: point.x, y, z: point.z };
                 material_placer.place_block(editor, new_point, material_id, BlockForm::Block, None, None).await;
+            }
+            if !is_outer {
+                material_placer.place_block(editor, Point3D { x: point.x, y: point.y, z: point.z }, material_id, BlockForm::Slab, None, None).await;
             }
             if directions.len() > 0 {
                 previous_dir = directions[0];
             }
-            let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
-            material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
+            // Parapet cap: a stair lip only on outer-face cells. Inner staircase cells
+            // were already dropped a slab above and read as walkway, so they get no cap.
+            if is_outer {
+                let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+                material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
+            }
         
             for dir in directions.iter() {
                 let mut height_modifier = 0;
@@ -741,5 +859,89 @@ mod tests {
         for i in 1..tops.len() {
             assert!(tops[i] >= tops[i - 1] - MAX_STEP);
         }
+    }
+
+    // ---- wall-ring tracing ----
+
+    /// A solid axis-aligned rectangle of cells [x0,x1) × [z0,z1).
+    fn filled_rect(x0: i32, z0: i32, x1: i32, z1: i32) -> HashSet<Point2D> {
+        let mut set = HashSet::new();
+        for x in x0..x1 {
+            for z in z0..z1 {
+                set.insert(Point2D::new(x, z));
+            }
+        }
+        set
+    }
+
+    /// Every consecutive pair (including the wrap) is 4-adjacent — i.e. the ring
+    /// has no diagonal seam.
+    fn assert_four_connected_ring(loop_: &[Point2D]) {
+        let n = loop_.len();
+        for i in 0..n {
+            let a = loop_[i];
+            let b = loop_[(i + 1) % n];
+            let d = (a.x - b.x).abs() + (a.y - b.y).abs();
+            assert_eq!(d, 1, "non-4-connected step {a:?} -> {b:?}");
+        }
+    }
+
+    #[test]
+    fn rectangle_traces_one_closed_4connected_loop() {
+        let region = filled_rect(0, 0, 10, 6);
+        let loops = trace_wall_loops(&region);
+        assert_eq!(loops.len(), 1, "a solid rectangle is one ring");
+        let ring = &loops[0];
+        assert_four_connected_ring(ring);
+        // The boundary of a 10×6 rectangle is its perimeter cells: 2*(10+6) - 4 = 28.
+        let unique: HashSet<_> = ring.iter().cloned().collect();
+        assert_eq!(unique.len(), 28, "ring should be exactly the perimeter cells");
+        // Every traced cell is inside the region (no spurious outside cells here).
+        assert!(ring.iter().all(|p| region.contains(p)));
+    }
+
+    #[test]
+    fn no_boundary_cell_is_dropped() {
+        // The old greedy walk discarded arcs on a dead end; assert every edge cell
+        // of the region appears in some traced loop.
+        let region = filled_rect(0, 0, 14, 9);
+        let edge = get_edge(&region);
+        let traced: HashSet<Point2D> =
+            trace_wall_loops(&region).into_iter().flatten().collect();
+        for e in &edge {
+            assert!(traced.contains(e), "edge cell {e:?} was dropped from the wall ring");
+        }
+    }
+
+    #[test]
+    fn diagonal_corner_is_seam_filled() {
+        // An L / staircase region forces a diagonal step in the raw contour; the
+        // densified ring must still be fully 4-connected (Bug 3).
+        let mut region = filled_rect(0, 0, 8, 8);
+        // Carve a stepped notch out of a corner to create diagonal boundary runs.
+        region.remove(&Point2D::new(7, 0));
+        region.remove(&Point2D::new(7, 1));
+        region.remove(&Point2D::new(6, 0));
+        let loops = trace_wall_loops(&region);
+        assert_eq!(loops.len(), 1);
+        assert_four_connected_ring(&loops[0]);
+    }
+
+    #[test]
+    fn separate_blobs_become_separate_loops() {
+        let mut region = filled_rect(0, 0, 8, 8);
+        region.extend(filled_rect(20, 20, 28, 28));
+        let loops = trace_wall_loops(&region);
+        assert_eq!(loops.len(), 2, "two disjoint blobs -> two rings");
+        for ring in &loops {
+            assert_four_connected_ring(ring);
+        }
+    }
+
+    #[test]
+    fn tiny_specks_are_dropped() {
+        // A lone 2×2 blob is below MIN_WALL_LOOP and should not yield a ring.
+        let region = filled_rect(0, 0, 2, 2);
+        assert!(trace_wall_loops(&region).is_empty());
     }
 }

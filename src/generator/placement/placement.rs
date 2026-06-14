@@ -122,11 +122,13 @@ pub async fn place_rural_building(
     let edge_2d: HashSet<Point2D> =
         district.data.edges.iter().map(|p| p.drop_y()).collect();
 
+    // Exclude cells inside the regularized wall footprint: a district can vote Rural
+    // yet still own a few cells the closing pass pulled inside the wall.
     let interior: Vec<Point2D> = district
         .data
         .points_2d
         .iter()
-        .filter(|p| !edge_2d.contains(p))
+        .filter(|p| !edge_2d.contains(p) && !editor.world().is_urban(**p))
         .copied()
         .collect();
 
@@ -194,9 +196,12 @@ pub async fn place_urban_building(
         return Ok(());
     }
 
+    // Restrict to cells actually inside the regularized wall footprint: a district can
+    // vote Urban yet still own a few cells the opening pass trimmed outside the wall.
     let urban_points: HashSet<Point2D> = urban_districts
         .iter()
         .flat_map(|sd| sd.data.points_2d.iter().copied())
+        .filter(|p| editor.world().is_urban(*p))
         .collect();
     let urban_edges: HashSet<Point2D> = urban_districts
         .iter()

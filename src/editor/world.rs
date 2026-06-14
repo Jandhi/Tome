@@ -22,6 +22,9 @@ pub struct World {
     pub buildings : Vec<BuildingData>,
     pub structures : Vec<StructureID>,
     pub gate_locations : Vec<(Point3D, Cardinal)>,
+    /// Regularized "inside the wall" cell set. When `Some`, `get_urban_points`
+    /// returns it instead of the raw district union (see districts/footprint.rs).
+    pub urban_footprint : Option<HashSet<Point2D>>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -98,6 +101,7 @@ impl World {
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,
@@ -159,6 +163,7 @@ impl World {
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            urban_footprint: None,
             ground_height_map,
             ground_block_map,
             ocean_floor_height_map,
@@ -237,6 +242,14 @@ impl World {
             self.ground_height_map[point.x as usize][point.z as usize] = point.y;
             self.ocean_floor_height_map[point.x as usize][point.z as usize] = point.y;
         }
+    }
+
+    /// Test-only: mark a surface cell as water so `is_water` reports it. Used by the
+    /// footprint terrain-clip tests on a synthetic world.
+    #[cfg(test)]
+    pub fn set_water_for_test(&mut self, point : Point2D) {
+        self.ground_block_map[point.x as usize][point.y as usize] =
+            Block::new("minecraft:water".into(), None, None);
     }
 
     // Get height without counting water
@@ -387,10 +400,25 @@ impl World {
         }
     }
 
-    pub fn get_urban_points(&self) -> HashSet<Point2D> { // BUG, doesnt get all points for some reason a handful of points are missing
+    /// The "inside the wall" cell set. Once the urban footprint has been
+    /// regularized (see districts/footprint.rs) this returns that footprint;
+    /// otherwise it falls back to the raw union of `Urban`-classified districts.
+    pub fn get_urban_points(&self) -> HashSet<Point2D> {
+        if let Some(footprint) = &self.urban_footprint {
+            return footprint.clone();
+        }
         self.iter_points_2d()
-            .filter(|&point| self.get_parcel_type(point).expect("Failed to get parcel type") == ParcelType::Urban)
+            .filter(|&point| self.get_parcel_type(point) == Some(ParcelType::Urban))
             .collect()
+    }
+
+    /// Whether `point` is inside the urban area / city wall. Uses the regularized
+    /// footprint when present, else the district classification.
+    pub fn is_urban(&self, point: Point2D) -> bool {
+        match &self.urban_footprint {
+            Some(footprint) => footprint.contains(&point),
+            None => self.get_parcel_type(point) == Some(ParcelType::Urban),
+        }
     }
 
     pub fn get_parcel_type(&self, point: Point2D) -> Option<ParcelType> {
