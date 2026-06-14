@@ -90,6 +90,20 @@ study:
 # A low fill threshold keeps the deck airy — a shaded spot to sit and sleep,
 # not a packed storeroom. The canopy is the centrepiece; the rest is optional.
 roof_terrace:
-  fill_threshold: 0.4
-  required: [roof_canopy]
-  optional: [roof_bedroll, carpet, carpet, bench, chair, table, roof_lamp, potted_plant, vase]
+  fill_threshold: 0.45
+  required: [roof_shade]
+  optional:
+    - roof_bedroll
+    - roof_planter
+    - carpet
+    - carpet
+    - bench
+    - chair
+    - table
+    - roof_lamp
+    - roof_brazier
+    - roof_jars
+    - roof_water_trough
+    - potted_plant
+    - vase
+    - barrel

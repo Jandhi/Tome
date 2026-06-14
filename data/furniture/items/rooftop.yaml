@@ -10,6 +10,7 @@
 # ---------------------------------------------------------------------------
 roof_canopy:
   unique: true
+  tags: [roof_shade]
   min_room_area: 16
   weight: 3.0
   blocks:
@@ -57,5 +58,72 @@ roof_lamp:
     - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
     - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
     - { block: "minecraft:lantern",   offset: [0, 2, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Parasol — a single-post umbrella for decks too small for the 3×3 canopy.
+# Shares the `roof_shade` tag (so a roof gets one shade), but with weight 1 it
+# loses to the canopy wherever the canopy fits; on small decks it's the only
+# shade left. Plus-shaped wool canopy at the top, deck walkable beneath.
+# ---------------------------------------------------------------------------
+roof_parasol:
+  unique: true
+  tags: [roof_shade]
+  min_room_area: 9
+  weight: 1.0
+  blocks:
+    - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 2, 0], layer: ground, swap: wood }
+    - { block: "minecraft:white_wool", offset: [0, 3, 0],  layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 3, 0],  layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [-1, 3, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [0, 3, 1],  layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [0, 3, -1], layer: ceiling, swap: color }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Brazier — a fire pit on a low pedestal. Light, warmth and a smoke plume on
+# the skyline. Sandstone base + lit campfire.
+# ---------------------------------------------------------------------------
+roof_brazier:
+  blocks:
+    - { block: "minecraft:cut_sandstone", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:campfire",      offset: [0, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Pottery cluster — a pair of decorated pots, distinct from the single `vase`.
+# ---------------------------------------------------------------------------
+roof_jars:
+  blocks:
+    - { block: "minecraft:decorated_pot",      offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:decorated_pot",      offset: [0, 0, 1], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [0, 1], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Planter — a raised bed with a flowering azalea shrub (a leaf bush, so it
+# stays put on the deck unlike loose plants). 2 blocks tall.
+# ---------------------------------------------------------------------------
+roof_planter:
+  blocks:
+    - { block: "minecraft:oak_planks",        offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:flowering_azalea",  offset: [0, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# ---------------------------------------------------------------------------
+# Water trough — a cut-sandstone basin holding a cauldron of water against the
+# parapet. Reads as a rooftop water store.
+# ---------------------------------------------------------------------------
+roof_water_trough:
+  unique: true
+  blocks:
+    - { block: "minecraft:water_cauldron[level=3]", offset: [0, 0, 0], layer: ground }
   constraints:
     - { offset: [0, 0], constraint: blocked_reachable }
