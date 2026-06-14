@@ -95,6 +95,7 @@ roof_terrace:
   optional:
     - roof_bedroll
     - roof_planter
+    - roof_palm
     - carpet
     - carpet
     - bench
@@ -102,8 +103,12 @@ roof_terrace:
     - table
     - roof_lamp
     - roof_brazier
+    - roof_chimney
     - roof_jars
+    - roof_amphora
     - roof_water_trough
+    - roof_laundry
+    - roof_woodpile
     - potted_plant
     - vase
     - barrel

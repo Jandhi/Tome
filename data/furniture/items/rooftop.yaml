@@ -127,3 +127,131 @@ roof_water_trough:
     - { block: "minecraft:water_cauldron[level=3]", offset: [0, 0, 0], layer: ground }
   constraints:
     - { offset: [0, 0], constraint: blocked_reachable }
+
+# ===========================================================================
+# More variety — extra shade silhouettes, skyline pieces, greenery, storage.
+# ===========================================================================
+
+# Awning — a freestanding lean-to: tall back posts, short front posts, a wool
+# fabric stepping down from back (y2) to front (y1). A different shade
+# silhouette from the flat canopy; shares the `roof_shade` tag. 3×2.
+roof_awning:
+  unique: true
+  tags: [roof_shade]
+  min_room_area: 12
+  weight: 1.5
+  blocks:
+    # Back posts (2 tall) and front posts (1 tall).
+    - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 0, 1], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 1], layer: ground, swap: wood }
+    # Fabric: high row at the back (y2), stepping down at the front (y1).
+    - { block: "minecraft:white_wool", offset: [0, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [2, 2, 0], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [0, 1, 1], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [1, 1, 1], layer: ceiling, swap: color }
+    - { block: "minecraft:white_wool", offset: [2, 1, 1], layer: ceiling, swap: color }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [2, 0], constraint: blocked_reachable }
+    - { offset: [0, 1], constraint: blocked_reachable }
+    - { offset: [2, 1], constraint: blocked_reachable }
+
+# Pergola — like the canopy but roofed with open trapdoor slats for dappled
+# shade instead of solid wool. Another `roof_shade` option. 3×3.
+roof_pergola:
+  unique: true
+  tags: [roof_shade]
+  min_room_area: 16
+  weight: 1.5
+  blocks:
+    - { block: "minecraft:oak_fence", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 0, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [0, 1, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 0, 2], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence", offset: [2, 1, 2], layer: ground, swap: wood }
+    # Slatted roof (trapdoors laid flat at the top).
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 1], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [0, 2, 2], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [1, 2, 2], layer: ceiling, swap: wood }
+    - { block: "minecraft:oak_trapdoor[half=top,open=false,facing=north]", offset: [2, 2, 2], layer: ceiling, swap: wood }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [2, 0], constraint: blocked_reachable }
+    - { offset: [0, 2], constraint: blocked_reachable }
+    - { offset: [2, 2], constraint: blocked_reachable }
+
+# Chimney — a sandstone stack with a campfire on top: a real smoke plume and a
+# tall silhouette on the skyline.
+roof_chimney:
+  unique: true
+  blocks:
+    - { block: "minecraft:chiseled_sandstone", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:chiseled_sandstone", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:chiseled_sandstone", offset: [0, 2, 0], layer: ground }
+    - { block: "minecraft:campfire",           offset: [0, 3, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# Amphora — a tall storage jar raised on a short pedestal.
+roof_amphora:
+  blocks:
+    - { block: "minecraft:oak_fence",     offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:decorated_pot", offset: [0, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# Potted palm — a small tree centrepiece: a short trunk with a leafy crown that
+# spreads overhead (ceiling layer, so you walk beneath it). Leaves are
+# `persistent` so they don't decay.
+roof_palm:
+  unique: true
+  min_room_area: 9
+  weight: 1.5
+  blocks:
+    - { block: "minecraft:jungle_log",                 offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:jungle_log",                 offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:jungle_leaves[persistent=true]", offset: [0, 2, 0],  layer: ceiling }
+    - { block: "minecraft:jungle_leaves[persistent=true]", offset: [1, 2, 0],  layer: ceiling }
+    - { block: "minecraft:jungle_leaves[persistent=true]", offset: [-1, 2, 0], layer: ceiling }
+    - { block: "minecraft:jungle_leaves[persistent=true]", offset: [0, 2, 1],  layer: ceiling }
+    - { block: "minecraft:jungle_leaves[persistent=true]", offset: [0, 2, -1], layer: ceiling }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+
+# Laundry line — sheets hung between two posts to dry in the sun. 3×1.
+roof_laundry:
+  blocks:
+    - { block: "minecraft:oak_fence",  offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [0, 2, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [2, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [2, 2, 0], layer: ground, swap: wood }
+    - { block: "minecraft:oak_fence",  offset: [1, 2, 0], layer: ceiling, swap: wood }
+    - { block: "minecraft:white_wool", offset: [1, 1, 0], layer: ceiling, swap: color }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [2, 0], constraint: blocked_reachable }
+
+# Woodpile — a small stack of logs for the brazier.
+roof_woodpile:
+  blocks:
+    - { block: "minecraft:oak_log[axis=x]", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:oak_log[axis=x]", offset: [0, 0, 1], layer: ground }
+    - { block: "minecraft:oak_log[axis=x]", offset: [0, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [0, 1], constraint: blocked_reachable }
