@@ -41,9 +41,16 @@ pub async fn decorate_rooftops(
     frame: &Frame,
     roof_ladder_wall: Option<(i32, i32)>,
 ) {
+    let mut pick_rng = ctx.rng.derive();
+
+    // Leave roughly a third of roofs bare — an empty deck is part of the
+    // variety, and a street where every roof is dressed reads as busy.
+    if pick_rng.rand_i32_range(0, 3) == 0 {
+        return;
+    }
+
     // Pick one rooftop theme for the whole building so its deck(s) read as a
     // single, coherent space.
-    let mut pick_rng = ctx.rng.derive();
     let key = ROOF_ROOM_KEYS[pick_rng.rand_i32_range(0, ROOF_ROOM_KEYS.len() as i32) as usize];
     let room_list = match ctx.data.furniture.rooms.get(key) {
         Some(list) => list,

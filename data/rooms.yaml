@@ -161,9 +161,9 @@ roof_workshop:
     - roof_shade
     - roof_amphora
 
-# Storage roof — packed with goods.
+# Storage roof — a few goods stacked up, not a packed warehouse.
 roof_storage:
-  fill_threshold: 0.6
+  fill_threshold: 0.4
   required: [barrel]
   optional:
     - crate
