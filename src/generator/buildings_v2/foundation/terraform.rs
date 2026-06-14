@@ -77,23 +77,26 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
                 continue;
             }
 
+            // Keep the blended cap in the natural surface material: grass stays
+            // grass, sand stays sand, stone stays stone. Only grassy ground gets
+            // a dirt body + grass cap; every other surface is filled and capped
+            // with itself, so the blend never paints foreign grass over rock or
+            // sand. Snow is re-laid on top.
             let surface = ctx.editor.world().get_ground_block(point).clone();
-            let is_snow = surface.id.as_str().contains("snow");
-            let is_sandy = {
-                let s = surface.id.as_str();
-                s.contains("sand") || s.contains("sandstone")
-            };
+            let s = surface.id.as_str();
+            let is_snow = s.contains("snow");
+            let is_grassy = s.contains("grass_block")
+                || s.contains("dirt")
+                || s.contains("podzol")
+                || s.contains("mycelium");
 
-            let (fill, top) = if is_sandy {
-                (
-                    Block::from_id("minecraft:sand".into()),
-                    Block::from_id("minecraft:sand".into()),
-                )
-            } else {
+            let (fill, top) = if is_grassy || is_snow {
                 (
                     Block::from_id("minecraft:dirt".into()),
                     Block::from_id("minecraft:grass_block".into()),
                 )
+            } else {
+                (surface.clone(), surface.clone())
             };
 
             // Convert the old surface to fill material since it's being buried.

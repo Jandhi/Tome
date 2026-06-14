@@ -109,20 +109,22 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
             continue;
         }
 
-        // Material choice mirrors foundation `blend_terrain`: dirt+grass for
-        // normal ground, sand for sandy ground, snow re-capped on top. We sample
-        // the ground block only to *detect* the surface type — the placed top is
-        // a literal block, since the sampled cell isn't reliably solid.
+        // Keep the terraformed cap in the natural surface material: grass stays
+        // grass, sand stays sand, stone stays stone. Only genuinely grassy
+        // ground gets a dirt body under a grass cap; every other surface (sand,
+        // stone, gravel, terracotta, …) is filled and capped with itself, so we
+        // never paint foreign grass over rock or sand. Snow is re-laid on top.
         let surface = editor.world().get_ground_block(xz).clone();
-        let is_snow = surface.id.as_str().contains("snow");
-        let is_sandy = {
-            let s = surface.id.as_str();
-            s.contains("sand") || s.contains("sandstone")
-        };
-        let (fill, top) = if is_sandy {
-            (Block::from_id("minecraft:sand".into()), Block::from_id("minecraft:sand".into()))
-        } else {
+        let s = surface.id.as_str();
+        let is_snow = s.contains("snow");
+        let is_grassy = s.contains("grass_block")
+            || s.contains("dirt")
+            || s.contains("podzol")
+            || s.contains("mycelium");
+        let (fill, top) = if is_grassy || is_snow {
             (Block::from_id("minecraft:dirt".into()), Block::from_id("minecraft:grass_block".into()))
+        } else {
+            (surface.clone(), surface.clone())
         };
 
         if target_y > terrain_y {
