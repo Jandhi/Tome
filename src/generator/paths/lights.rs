@@ -16,7 +16,7 @@ use super::path::Path;
 
 /// Arc-length distance between consecutive lamps along a road. Lamps alternate
 /// sides each interval, so a single side sees a lamp roughly every `2 * SPACING`.
-const SPACING: f64 = 7.0;
+const SPACING: f64 = 10.0;
 
 /// Two lamps closer than this (squared XZ distance) are treated as the same
 /// spot — kills clustering where paths overlap or merge at junctions.
