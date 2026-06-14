@@ -485,7 +485,8 @@ mod tests {
         // Phase 2 — tiered A* road network, connecting the industrial buildings
         // (anchor nodes) and routed around them (the `blocked` barrier). One
         // material for every tier — tiers differ by width, not surface block.
-        let road_material = MaterialId::new("cobblestone".to_string());
+        // Desert settlement: sandstone-paved roads.
+        let road_material = MaterialId::new("sandstone".to_string());
         let road_network = build_road_network(
             &editor, road_material.clone(), road_material, true, &ind_nodes, &blocked, 1,
         ).await;
@@ -991,8 +992,8 @@ mod tests {
         // shoulder. Painted at the live ground top (h-1), matching the
         // post-flatten/foundation surface. One material for every tier.
         let verge_blocks = [
-            Block { id: "cobblestone".into(), data: None, state: None },
-            Block { id: "cobblestone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
         ];
         let mut verge_total = 0usize;
         for (ti, cells) in tier_verge.iter().enumerate() {
@@ -1029,7 +1030,7 @@ mod tests {
             alley_band.len(), connectors.len(), full_alleys.len(),
         );
         let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c)).collect();
-        let alley_path = Path::new(alley_pts, 1, MaterialId::new("cobblestone".to_string()), PathPriority::Low);
+        let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
         build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
         for c in &full_alleys {
             editor.world_mut().claim(*c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
