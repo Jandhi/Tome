@@ -34,6 +34,13 @@ struct GateCandidate {
     score: f64,
 }
 
+/// Number of gates targeted for a wall loop of `loop_len` points: one per *started*
+/// `GATE_TARGET_SPACING` points, at least one. Single source of truth for `N` so the
+/// selection loop and the logging can't drift.
+fn target_gate_count(loop_len: usize) -> usize {
+    ((loop_len as f64 / GATE_TARGET_SPACING as f64).ceil() as usize).max(1)
+}
+
 pub async fn build_wall_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
@@ -78,12 +85,11 @@ pub async fn build_wall_gate(
 
     // Phase 2 — select up to N with a spacing floor.
     let closed = loop_is_closed(wall_points);
-    let target = ((loop_len as f64 / GATE_TARGET_SPACING as f64).ceil() as usize).max(1);
-    let best_score = candidates
-        .iter()
-        .map(|c| c.score)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let target = target_gate_count(loop_len);
+    let candidate_count = candidates.len();
     let selected = select_gates(&mut candidates, loop_len, closed);
+    // `select_gates` sorts `candidates` by score desc, so the best is now first.
+    let best_score = candidates.first().map(|c| c.score).unwrap_or(0.0);
 
     info!(
         "[Gate] {} wall loop: len={} closed={} target={} candidates={} selected={} (best_score={:.1})",
@@ -91,9 +97,9 @@ pub async fn build_wall_gate(
         loop_len,
         closed,
         target,
-        candidates.len(),
+        candidate_count,
         selected.len(),
-        if candidates.is_empty() { 0.0 } else { best_score },
+        best_score,
     );
     if selected.len() < target {
         info!(
@@ -101,7 +107,7 @@ pub async fn build_wall_gate(
             wall_type,
             selected.len(),
             target,
-            candidates.len(),
+            candidate_count,
         );
     }
 
@@ -167,6 +173,13 @@ fn gate_candidates(
                 Some(dir) => dir,
                 None => continue,
             };
+            // The wide gate opens two cells inward of the wall line (see
+            // `place_wide_gate`); the run water-check above only covers the wall cells,
+            // so reject when that threshold itself sits over water.
+            let opening = enh[i + 3].0.drop_y() + Point2D::from(direction) * 2;
+            if editor.world().is_water(opening) {
+                continue;
+            }
             let mut blocked = false;
             for a in i..i + GATE_SIZE as usize {
                 let inner_wall_point = enh[a].0.drop_y() + Point2D::from(direction) * 5;
@@ -266,7 +279,7 @@ fn straight_run_extent(wall_points: &Vec<Point3D>, i: usize) -> i32 {
 /// distance floor of `MIN_GATE_SPACING` between selected gates. Returns selected
 /// indices in loop order.
 fn select_gates(candidates: &mut Vec<GateCandidate>, loop_len: usize, closed: bool) -> Vec<usize> {
-    let n = ((loop_len as f64 / GATE_TARGET_SPACING as f64).ceil() as usize).max(1);
+    let n = target_gate_count(loop_len);
 
     // Sort by score desc; stable tie-break by ascending index.
     candidates.sort_by(|a, b| {

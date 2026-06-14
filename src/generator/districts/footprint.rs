@@ -183,13 +183,16 @@ pub fn regularize_urban_footprint(world: &World, raw_urban: &HashSet<Point2D>) -
     );
 
     // Straightness readout: how much simpler the traced outline got. Fewer loops and,
-    // above all, fewer turns mean a straighter, less blobby wall.
-    let (raw_loops, raw_perimeter, raw_turns) = outline_metrics(raw_urban);
-    let (fp_loops, fp_perimeter, fp_turns) = outline_metrics(&footprint);
-    info!(
-        "[Footprint] Outline: loops {}->{}, perimeter {}->{}, turns {}->{}",
-        raw_loops, fp_loops, raw_perimeter, fp_perimeter, raw_turns, fp_turns
-    );
+    // above all, fewer turns mean a straighter, less blobby wall. Re-tracing the raw
+    // noisy region is the expensive case, so only do it when Info logging is on.
+    if log::log_enabled!(log::Level::Info) {
+        let (raw_loops, raw_perimeter, raw_turns) = outline_metrics(raw_urban);
+        let (fp_loops, fp_perimeter, fp_turns) = outline_metrics(&footprint);
+        info!(
+            "[Footprint] Outline: loops {}->{}, perimeter {}->{}, turns {}->{}",
+            raw_loops, fp_loops, raw_perimeter, fp_perimeter, raw_turns, fp_turns
+        );
+    }
 
     footprint
 }
