@@ -6,6 +6,14 @@ pub struct ResourceDef {
     pub name: String,
     pub category: String,
     pub tier: u8,
+    /// How strongly this resource wants flat terrain, in `[0,1]` (tweakable per
+    /// resource in `resources.yaml`). Crop fields and grazing pastures (wheat, cows)
+    /// need terrain we can flatten cheaply, so they set a high value; the parcel
+    /// assignment scales its rough/steep-terrain penalty by this weight to keep them
+    /// off parcels that would need heavy post-placement terraforming.
+    /// `0.0` (the default) means terrain-agnostic; `1.0` means a full penalty.
+    #[serde(default)]
+    pub flat_terrain: f32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -70,6 +70,48 @@ mod tests {
         assert!(chains.producible.contains("arrows"), "flint + feathers = arrows");
     }
 
+    /// Regression for the broken-iron-chain bug (run 20260614_111106): iron_ore and coal
+    /// were gathered but no wood, yet the chain rigidly took the alphabetically-first
+    /// `charcoal` smelting recipe (which needs wood), so the chain's budget collapsed to
+    /// zero and all the iron + coal were wasted. Chain construction is now availability
+    /// aware: with no wood, smelting must route through the `coal` recipes.
+    #[test]
+    fn iron_chain_routes_through_coal_when_no_wood() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+        let available: HashSet<String> = ["iron_ore", "coal"].iter().map(|s| s.to_string()).collect();
+
+        let plan = registry.select_production(&available, &mut rng);
+        let tools = plan.chains.iter().find(|c| c.finished_good == "tools")
+            .expect("tools should be producible from iron_ore + coal");
+
+        assert!(tools.recipe_ids.iter().any(|r| r == "iron_ore_coal_to_ingot"),
+            "smelting should use the coal recipe, got {:?}", tools.recipe_ids);
+        assert!(!tools.recipe_ids.iter().any(|r| r.contains("charcoal")),
+            "must not use the charcoal path when wood is absent, got {:?}", tools.recipe_ids);
+        // The cost the executor budgets against must be expressed in the fuel actually used.
+        assert!(tools.raw_cost.get("coal").copied().unwrap_or(0.0) > 0.0,
+            "tools raw_cost should include coal, got {:?}", tools.raw_cost);
+        assert!(!tools.raw_cost.contains_key("wood"),
+            "tools raw_cost should not reference wood, got {:?}", tools.raw_cost);
+    }
+
+    /// Companion to the above: when wood *is* available the charcoal smelting path is
+    /// still preferred (it sorts first), so this change doesn't disturb the common case.
+    #[test]
+    fn iron_chain_prefers_charcoal_when_wood_present() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+        let available: HashSet<String> = ["iron_ore", "wood"].iter().map(|s| s.to_string()).collect();
+
+        let plan = registry.select_production(&available, &mut rng);
+        let tools = plan.chains.iter().find(|c| c.finished_good == "tools")
+            .expect("tools should be producible from iron_ore + wood");
+
+        assert!(tools.recipe_ids.iter().any(|r| r == "iron_ore_charcoal_to_ingot"),
+            "with wood present, smelting should use the charcoal recipe, got {:?}", tools.recipe_ids);
+    }
+
     #[test]
     fn raw_cost_furniture() {
         let registry = make_registry();

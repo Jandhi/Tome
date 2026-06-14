@@ -12,6 +12,38 @@ use crate::noise::RNG;
 use super::production_painter::{ProductionPainter, ProductionPaintersFile};
 use super::types::{BiomeResourcesFile, ParcelResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
 
+/// A flat-terrain resource is dropped from a parcel's candidate set when
+/// `ruggedness * flat_terrain_weight` exceeds this limit. It gates *validity* (whether
+/// wheat is even an option on this parcel), not score — rougher terrain simply offers
+/// fewer crop/pasture options, and a parcel left with no valid option is skipped.
+/// At this limit (0.5): wheat (weight 1.0) drops once ruggedness passes 0.5; a more
+/// tolerant pasture (weight 0.7) survives up to ruggedness ≈ 0.71.
+const FLAT_TERRAIN_RUGGEDNESS_LIMIT: f32 = 0.5;
+
+/// Roughness/gradient at or above which a parcel is treated as maximally rugged
+/// (ruggedness saturates to 1.0). Deliberately below the districts' off-limits thresholds
+/// (roughness 6.0, gradient 1.0) because the cost of terraforming a field climbs well
+/// before a parcel is rejected outright.
+const FLAT_TERRAIN_MAX_ROUGHNESS: f32 = 4.0;
+const FLAT_TERRAIN_MAX_GRADIENT: f32 = 0.6;
+
+/// Score penalty per prior assignment a candidate already has *beyond the least-used
+/// option available to the same parcel*. Discourages over-representing one resource —
+/// e.g. introducing a 3rd wheat when wool and cow each have only one — while never
+/// penalising a parcel whose sole option is already common (a lone candidate is its own
+/// minimum, so it takes zero balance penalty). Sized to dominate the jitter (0..99) and
+/// value spread so a one-unit imbalance reliably tips the choice toward the rarer option.
+const RESOURCE_BALANCE_PENALTY: i64 = 300;
+
+/// Normalised ruggedness in `[0,1]` used to decide whether flat-terrain resources remain
+/// valid options for a parcel. Combines roughness and gradient, taking whichever is worse,
+/// each scaled against the point past which flattening a field becomes prohibitive.
+pub fn parcel_ruggedness(analysis: &ParcelAnalysis) -> f32 {
+    let roughness = analysis.roughness() / FLAT_TERRAIN_MAX_ROUGHNESS;
+    let gradient = analysis.gradient() / FLAT_TERRAIN_MAX_GRADIENT;
+    roughness.max(gradient).clamp(0.0, 1.0)
+}
+
 pub struct ChainSelection {
     /// The tier-2 good at the end of this chain.
     pub finished_good: String,
@@ -29,6 +61,11 @@ pub struct ChainSelection {
     pub intermediates: HashSet<String>,
     /// Number of distinct recipes in the chain.
     pub depth: usize,
+    /// Raw input cost to produce 1 unit of the finished good, resolved against the
+    /// supply available when the chain was selected — so it matches the recipe variants
+    /// actually chosen (e.g. the coal smelting path when no wood was gathered). May
+    /// differ from the registry's canonical precomputed `raw_cost`.
+    pub raw_cost: HashMap<String, f32>,
 }
 
 pub struct ProductionPlan {
@@ -281,7 +318,7 @@ impl ResourceRegistry {
         let mut chains_with_jitter: Vec<(ChainSelection, i64)> = resolved.producible.iter()
             .filter(|id| self.resources.get(*id).map(|r| r.tier == 2).unwrap_or(false))
             .map(|id| {
-                let chain = self.trace_chain(id);
+                let chain = self.trace_chain(id, &resolved.producible);
                 let jitter = rng.next_i64();
                 (chain, jitter)
             })
@@ -306,18 +343,20 @@ impl ResourceRegistry {
         ProductionPlan { chains, building_run_cost }
     }
 
-    /// Traces the full dependency chain for a finished good, collecting
-    /// all recipe IDs and raw inputs recursively.
-    fn trace_chain(&self, finished_good: &str) -> ChainSelection {
+    /// Traces the full dependency chain for a finished good, collecting all recipe IDs
+    /// and raw inputs recursively. Recipe variants are chosen against `producible` (the
+    /// supply-reachable set), so a good resolves through whichever recipe its inputs can
+    /// actually satisfy — e.g. the coal smelting path when no wood was gathered.
+    fn trace_chain(&self, finished_good: &str, producible: &HashSet<String>) -> ChainSelection {
         let mut recipe_ids: Vec<String> = Vec::new();
         let mut raw_inputs: HashSet<String> = HashSet::new();
 
-        self.trace_resource(finished_good, &mut recipe_ids, &mut raw_inputs);
+        self.trace_resource(finished_good, producible, &mut recipe_ids, &mut raw_inputs);
 
         // Compute buildings needed per 1 unit of finished good, accounting for
         // recipe batch sizes (e.g. 1 arrow run → 8 arrows = 0.125 buildings per arrow).
         let mut recipe_runs: HashMap<String, f32> = HashMap::new();
-        self.compute_recipe_runs(finished_good, 1.0, &mut recipe_runs);
+        self.compute_recipe_runs(finished_good, 1.0, producible, &mut recipe_runs);
 
         let mut building_run_cost: HashMap<String, f32> = HashMap::new();
         for (recipe_id, runs) in &recipe_runs {
@@ -332,6 +371,10 @@ impl ResourceRegistry {
 
         let depth = recipe_ids.len();
 
+        // Cost resolved through the same producible-aware recipe choices as the chain
+        // above, so `execute_chain`'s budget matches the recipes it will actually fire.
+        let raw_cost = self.chain_raw_cost(finished_good, producible);
+
         ChainSelection {
             finished_good: finished_good.to_string(),
             recipe_ids,
@@ -339,6 +382,7 @@ impl ResourceRegistry {
             raw_inputs,
             intermediates,
             depth,
+            raw_cost,
         }
     }
 
@@ -348,9 +392,10 @@ impl ResourceRegistry {
         &self,
         resource_id: &str,
         needed_per_unit: f32,
+        producible: &HashSet<String>,
         recipe_runs: &mut HashMap<String, f32>,
     ) {
-        let Some(recipe_id) = self.produced_by.get(resource_id).and_then(|v| v.first()) else {
+        let Some(recipe_id) = self.choose_producer(resource_id, producible) else {
             return; // raw input — no recipe
         };
         let recipe = &self.recipes[recipe_id];
@@ -358,7 +403,7 @@ impl ResourceRegistry {
         let runs_per_unit = needed_per_unit / output_qty;
         *recipe_runs.entry(recipe_id.clone()).or_insert(0.0) += runs_per_unit;
         for (input_id, &input_qty) in &recipe.inputs {
-            self.compute_recipe_runs(input_id, runs_per_unit * input_qty as f32, recipe_runs);
+            self.compute_recipe_runs(input_id, runs_per_unit * input_qty as f32, producible, recipe_runs);
         }
     }
 
@@ -389,6 +434,25 @@ impl ResourceRegistry {
             })
             .collect();
 
+        // Per-parcel ruggedness, used to steer flat-terrain resources (crops/pastures)
+        // away from rough or steep parcels we'd otherwise have to terraform heavily.
+        let ruggedness: HashMap<DistrictID, f32> = parcel_analysis.iter()
+            .map(|(id, analysis)| (*id, parcel_ruggedness(analysis)))
+            .collect();
+
+        // Log the terrain inputs to the flat-terrain penalty so a test run can measure its
+        // impact. Sorted by district id for stable diffing across runs.
+        let mut rugged_rows: Vec<(&DistrictID, &ParcelAnalysis, f32)> = parcel_analysis.iter()
+            .map(|(id, a)| (id, a, ruggedness[id]))
+            .collect();
+        rugged_rows.sort_by_key(|(id, _, _)| id.0);
+        for (id, a, rugged) in &rugged_rows {
+            log::info!(
+                "[resource-chain]   ruggedness parcel {:>3} -> {:.3} (roughness {:.2} / {:.1}, gradient {:.2} / {:.1})",
+                id.0, rugged, a.roughness(), FLAT_TERRAIN_MAX_ROUGHNESS, a.gradient(), FLAT_TERRAIN_MAX_GRADIENT,
+            );
+        }
+
         // Iteratively cap over-supplied resources: run a trial assignment, simulate the full
         // production pipeline, and remove resources that would generate excess goods.
         //   - raw resource surplus  ≥ RAW_SURPLUS_CAP  → cap that raw resource directly
@@ -403,7 +467,7 @@ impl ResourceRegistry {
         // resource keeps at least one parcel while overproduction is still reined in.
         let mut quota: HashMap<String, usize> = HashMap::new();
         for _ in 0..10 {
-            let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &mut rng.derive());
+            let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, false, &mut rng.derive());
 
             // Compute trial supply, crediting all gather recipe outputs (handles multi-output
             // recipes like gather_bees which produces both honey and beeswax).
@@ -489,7 +553,7 @@ impl ResourceRegistry {
         // primary resource), respecting the per-resource parcel quotas computed above.
         // The primary output is credited at 2 units; co-products from multi-output recipes
         // (e.g. gather_bees → honey + beeswax) are scaled proportionally.
-        let parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, rng);
+        let parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, true, rng);
 
         let mut supply: HashMap<String, u32> = HashMap::new();
         let mut gather_buildings: HashMap<String, u32> = HashMap::new();
@@ -567,24 +631,29 @@ impl ResourceRegistry {
     /// its biome), selects exactly one raw resource per parcel and returns the corresponding
     /// gathering building.
     ///
-    /// **Selection strategy** — most-constrained parcels (fewest valid candidates) are
-    /// resolved first. For each parcel, candidates are scored by:
+    /// **Selection strategy** — a parcel's candidates are first restricted to the ones its
+    /// terrain can host (flat-terrain crops/pastures drop out on rough ground), then the
+    /// most-constrained parcels (fewest valid candidates) are resolved first. For each
+    /// parcel the surviving candidates are scored by:
     ///   1. Novelty — +1000 if the resource has not yet been assigned to any other parcel,
     ///      encouraging diversity across the settlement.
     ///   2. Value — the number of tier-2 finished goods that require this resource somewhere
     ///      in their production chain (higher = feeds more goods).
     ///   3. Jitter — a small random nudge so repeated calls with the same biome mix produce
     ///      varied towns.
+    ///   4. Balance penalty — a candidate is docked for each prior assignment it has beyond
+    ///      the rarest option available to this parcel, discouraging over-representation
+    ///      (see [`assign_parcel_resources_quota`]).
     ///
-    /// Parcels whose candidates have no known gather recipe are skipped.
-    /// Input is a `HashMap` so each ID is structurally guaranteed to appear at most once,
-    /// ensuring every parcel receives exactly one resource assignment.
-    pub fn assign_parcel_resources<ID: Eq + Hash + Clone>(
+    /// Parcels whose candidates have no known gather recipe — or whose options are all ruled
+    /// out by terrain — are skipped, so a parcel receives *at most* one assignment, not
+    /// always one. Input is a `HashMap` so each ID is guaranteed to appear at most once.
+    pub fn assign_parcel_resources<ID: Eq + Hash + Clone + std::fmt::Debug>(
         &self,
         options: &HashMap<ID, Vec<String>>,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
-        self.assign_parcel_resources_quota(options, &HashMap::new(), rng)
+        self.assign_parcel_resources_quota(options, &HashMap::new(), &HashMap::new(), false, rng)
     }
 
     /// Like [`assign_parcel_resources`], but caps how many parcels may be assigned each
@@ -594,36 +663,67 @@ impl ResourceRegistry {
     /// ignored *for that parcel* so it still receives an assignment — this is the
     /// diversity floor that prevents an over-supplied resource from being eliminated
     /// entirely (see the cap loop in `resolve_for_parcels`).
-    fn assign_parcel_resources_quota<ID: Eq + Hash + Clone>(
+    ///
+    /// `ruggedness` maps each parcel to its normalised terrain ruggedness in `[0,1]`
+    /// (absent = 0.0). It gates *which resources are valid* for a parcel rather than scoring
+    /// them: flat-terrain resources (crops/pastures) are removed from the candidate set once
+    /// the parcel is too rough for them (see `terrain_allows`). A parcel left with no valid
+    /// option — e.g. an all-flat-terrain biome on very rough ground — is skipped, so some
+    /// rural districts may end up with no resource at all.
+    ///
+    /// When `log_decisions` is set, each parcel's outcome — the resources terrain ruled out,
+    /// the chosen resource, and any over-representation balance penalties — is logged at
+    /// `info` so a test run can measure the impact. The trial passes in `resolve_for_parcels`
+    /// leave it off to avoid 10× duplicate noise.
+    fn assign_parcel_resources_quota<ID: Eq + Hash + Clone + std::fmt::Debug>(
         &self,
         options: &HashMap<ID, Vec<String>>,
         max_parcels: &HashMap<String, usize>,
+        ruggedness: &HashMap<ID, f32>,
+        log_decisions: bool,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
-        // Filter each parcel's candidates to those with a known gather building,
-        // then sort most-constrained first.
-        let mut parcels: Vec<(ID, Vec<String>)> = options.iter()
+        // Filter each parcel's candidates to those with a known gather building AND whose
+        // flat-terrain requirement the parcel's terrain can satisfy (crops/pastures drop out
+        // on rough ground — see `terrain_allows`). We keep the rejected-for-terrain list per
+        // parcel only so the decision log can show what the terrain ruled out. Then sort
+        // most-constrained first.
+        let mut parcels: Vec<(ID, Vec<String>, Vec<String>)> = options.iter()
             .map(|(id, candidates)| {
-                let valid: Vec<String> = candidates.iter()
-                    .filter(|r| self.gather_building(r).is_some())
+                let rugged = ruggedness.get(id).copied().unwrap_or(0.0);
+                let gatherable = candidates.iter()
+                    .filter(|r| self.gather_building(r).is_some());
+                let (valid, excluded_terrain): (Vec<String>, Vec<String>) = gatherable
                     .cloned()
-                    .collect();
-                (id.clone(), valid)
+                    .partition(|r| self.terrain_allows(r, rugged));
+                (id.clone(), valid, excluded_terrain)
             })
             .collect();
-        parcels.sort_by_key(|(_, candidates)| candidates.len());
+        parcels.sort_by_key(|(_, candidates, _)| candidates.len());
 
         let mut assigned_set: HashSet<String> = HashSet::new();
         let mut assigned_count: HashMap<String, usize> = HashMap::new();
         let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::new();
 
-        for (id, candidates) in parcels {
+        for (id, candidates, excluded_terrain) in parcels {
+            let parcel_rugged = ruggedness.get(&id).copied().unwrap_or(0.0);
+            let excluded_str = if excluded_terrain.is_empty() { "none".to_string() } else { excluded_terrain.join(", ") };
+
             if candidates.is_empty() {
+                // No option survives (no gather building, or terrain ruled them all out) —
+                // leave this rural district unproduced.
+                if log_decisions {
+                    log::info!(
+                        "[resource-chain]   pick parcel {:?} -> (none) (ruggedness {:.3}); terrain-excluded: {}",
+                        id, parcel_rugged, excluded_str,
+                    );
+                }
                 continue;
             }
 
             // Prefer candidates still under their quota; only if all are exhausted do we
-            // fall back to the full candidate list, so no parcel is left unassigned.
+            // fall back to the full candidate list, so the quota alone never starves a
+            // parcel of its (terrain-valid) options.
             let under_quota: Vec<&String> = candidates.iter()
                 .filter(|r| {
                     let used = assigned_count.get(*r).copied().unwrap_or(0);
@@ -637,17 +737,56 @@ impl ResourceRegistry {
                 under_quota
             };
 
+            // Least-used count among this parcel's options — the baseline the balance
+            // penalty is measured against, so a candidate is only docked for being *more*
+            // common than the rarest alternative available here.
+            let min_count = pool.iter()
+                .map(|r| assigned_count.get(*r).copied().unwrap_or(0))
+                .min()
+                .unwrap_or(0);
+
             // Pre-score all candidates so rng is called once per candidate.
-            let scored: Vec<(String, i64)> = pool.iter()
+            // Each tuple is (resource, total_score, balance_penalty) — the penalty is kept
+            // separately so it can be surfaced in the decision log.
+            let scored: Vec<(String, i64, i64)> = pool.iter()
                 .map(|r| {
                     let value = self.resource_value_score(r) as i64;
                     let novelty: i64 = if !assigned_set.contains(*r) { 1000 } else { 0 };
                     let jitter = rng.rand_i32(100) as i64;
-                    ((*r).clone(), novelty + value + jitter)
+                    let count = assigned_count.get(*r).copied().unwrap_or(0);
+                    let balance_penalty = -((count.saturating_sub(min_count) as i64) * RESOURCE_BALANCE_PENALTY);
+                    ((*r).clone(), novelty + value + jitter + balance_penalty, balance_penalty)
                 })
                 .collect();
 
-            let (resource, _) = scored.into_iter().max_by_key(|(_, s)| *s).unwrap();
+            let (resource, winning_score, _) = scored.iter()
+                .max_by_key(|(_, score, _)| *score)
+                .cloned()
+                .unwrap();
+
+            // Defensive: a sub-zero best score means nothing here is worth gathering — skip.
+            let skipped = winning_score < 0;
+
+            if log_decisions {
+                // Candidates docked for over-representation, so the balance pressure is visible.
+                let mut penalised: Vec<String> = scored.iter()
+                    .filter(|(_, _, penalty)| *penalty != 0)
+                    .map(|(r, _, penalty)| format!("{} ({})", r, penalty))
+                    .collect();
+                penalised.sort();
+                let penalised = if penalised.is_empty() { "none".to_string() } else { penalised.join(", ") };
+                let outcome = if skipped { format!("(none — best was {} at {})", resource, winning_score) }
+                              else { format!("{} (score {})", resource, winning_score) };
+                log::info!(
+                    "[resource-chain]   pick parcel {:?} -> {} (ruggedness {:.3}); terrain-excluded: {}; balance penalties: {}",
+                    id, outcome, parcel_rugged, excluded_str, penalised,
+                );
+            }
+
+            if skipped {
+                continue;
+            }
+
             let recipe = self.gather_recipe(&resource).unwrap();
             let building = recipe.building.clone();
             let production_painter = recipe.production_painter.clone();
@@ -681,6 +820,21 @@ impl ResourceRegistry {
     /// it with no inputs. Returns `None` if no such recipe exists.
     fn gather_building(&self, resource_id: &str) -> Option<&str> {
         self.gather_recipe(resource_id).map(|r| r.building.as_str())
+    }
+
+    /// How strongly a raw resource wants flat terrain, in `[0,1]` (see
+    /// `ResourceDef::flat_terrain`). Higher values mean crops/pastures we'd rather not
+    /// place on rough ground. Unknown resources are treated as terrain-agnostic (0.0).
+    fn flat_terrain_weight(&self, resource_id: &str) -> f32 {
+        self.resources.get(resource_id).map(|r| r.flat_terrain).unwrap_or(0.0)
+    }
+
+    /// Whether a parcel of the given `ruggedness` (`[0,1]`) can host this resource.
+    /// Terrain-agnostic resources (weight 0) are always allowed; flat-terrain resources
+    /// drop out once `ruggedness * weight` passes `FLAT_TERRAIN_RUGGEDNESS_LIMIT`, so
+    /// rougher ground simply offers fewer crop/pasture options.
+    fn terrain_allows(&self, resource_id: &str, ruggedness: f32) -> bool {
+        ruggedness * self.flat_terrain_weight(resource_id) <= FLAT_TERRAIN_RUGGEDNESS_LIMIT
     }
 
     /// Scores a raw resource by how many tier-2 finished goods require it anywhere
@@ -839,10 +993,12 @@ impl ResourceRegistry {
         chain: &ChainSelection,
         remaining: &mut HashMap<String, f32>,
     ) -> (u32, HashMap<String, u32>, HashMap<String, u32>) {
-        let cost = match self.raw_cost(&chain.finished_good) {
-            Some(c) => c.clone(),
-            None => return (0, HashMap::new(), HashMap::new()),
-        };
+        // Use the chain's own availability-aware cost (matching the recipe variants it
+        // will fire below), not the registry's canonical first-recipe cost.
+        if chain.raw_cost.is_empty() {
+            return (0, HashMap::new(), HashMap::new());
+        }
+        let cost = chain.raw_cost.clone();
 
         // Fractional finished-good units the chain's raw inputs support.
         let raw_units_f = cost.iter()
@@ -907,11 +1063,12 @@ impl ResourceRegistry {
     fn trace_resource(
         &self,
         resource_id: &str,
+        producible: &HashSet<String>,
         recipe_ids: &mut Vec<String>,
         raw_inputs: &mut HashSet<String>,
     ) {
-        // Use the first (canonical) producer for chain tracing
-        match self.produced_by.get(resource_id).and_then(|v| v.first()) {
+        // Pick the producer whose inputs are actually reachable from the current supply.
+        match self.choose_producer(resource_id, producible) {
             None => {
                 raw_inputs.insert(resource_id.to_string());
             }
@@ -927,10 +1084,51 @@ impl ResourceRegistry {
                     let mut inputs: Vec<String> = recipe.inputs.keys().cloned().collect();
                     inputs.sort();
                     for input in inputs {
-                        self.trace_resource(&input, recipe_ids, raw_inputs);
+                        self.trace_resource(&input, producible, recipe_ids, raw_inputs);
                     }
                     recipe_ids.push(recipe_id.clone());
                 }
+            }
+        }
+    }
+
+    /// Among the recipes that produce `resource_id`, returns the first (in deterministic
+    /// sorted order) whose inputs are *all* in `producible`, falling back to the first
+    /// producer if none qualify, and `None` if the resource has no producer (a raw input).
+    ///
+    /// This is what makes chain construction availability-aware: `iron_ingot` resolves
+    /// through the coal recipe when wood — and therefore charcoal — was never gathered,
+    /// instead of rigidly taking the alphabetically-first charcoal recipe and stranding
+    /// the mined iron and coal. Gather recipes have no inputs, so they always qualify.
+    fn choose_producer<'a>(&'a self, resource_id: &str, producible: &HashSet<String>) -> Option<&'a String> {
+        let producers = self.produced_by.get(resource_id)?;
+        producers.iter()
+            .find(|rid| self.recipes[*rid].inputs.keys().all(|i| producible.contains(i)))
+            .or_else(|| producers.first())
+    }
+
+    /// Availability-aware raw cost: like the registry's precomputed `raw_cost`, but
+    /// resolves recipe variants against `producible` (via [`choose_producer`]) so the
+    /// cost matches the chain `trace_chain` actually builds. Used for budget allocation
+    /// in `execute_chain`.
+    fn chain_raw_cost(&self, resource_id: &str, producible: &HashSet<String>) -> HashMap<String, f32> {
+        match self.choose_producer(resource_id, producible) {
+            // Raw input (no producer) or gather recipe (no inputs): cost is itself.
+            None => HashMap::from([(resource_id.to_string(), 1.0)]),
+            Some(recipe_id) if self.recipes[recipe_id].inputs.is_empty() => {
+                HashMap::from([(resource_id.to_string(), 1.0)])
+            }
+            Some(recipe_id) => {
+                let recipe = &self.recipes[recipe_id];
+                let output_qty = recipe.outputs[resource_id] as f32;
+                let mut total: HashMap<String, f32> = HashMap::new();
+                for (input_id, &input_qty) in &recipe.inputs {
+                    let scale = input_qty as f32 / output_qty;
+                    for (raw, qty) in self.chain_raw_cost(input_id, producible) {
+                        *total.entry(raw).or_insert(0.0) += qty * scale;
+                    }
+                }
+                total
             }
         }
     }

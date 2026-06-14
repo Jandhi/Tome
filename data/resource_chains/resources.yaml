@@ -1,3 +1,33 @@
+# Resource definitions for the production / resource-chain system.
+# Each entry is keyed by its resource id (e.g. `wheat`) with these fields:
+#
+#   name:         Human-readable label used in logs and graphs.
+#   category:     Loose grouping (forest, crop, mineral, animal, food, metal, knowledge).
+#   tier:         0 = raw (gathered from the land), 1 = intermediate (crafted from raws),
+#                 2 = finished good (final product). Only tier-0 resources are gathered on
+#                 rural parcels, so `flat_terrain` only applies to them.
+#   flat_terrain: Optional, default 0.0. How strongly this raw resource needs flat ground,
+#                 in [0,1]. Crops and pastures become fields we flatten after placing them,
+#                 so on rough terrain they are removed from a parcel's options entirely.
+#                 This is a VALIDITY gate, not a score nudge: it decides whether (e.g.) wheat
+#                 is even a candidate for a parcel, never just how attractive it is.
+#
+#   How flat_terrain maps to Minecraft terrain:
+#     Each rural parcel gets a "ruggedness" score in [0,1] from its measured heightmap:
+#       ruggedness = max(roughness / 4.0, gradient / 0.6), clamped to [0,1]
+#         - gradient  = average height step, in blocks, between a cell and its N/S/E/W
+#                       neighbours. ~0.6 blocks per step (a steady hillside) saturates to 1.0.
+#         - roughness = RMS height deviation, in blocks, from the parcel's mean height.
+#                       ~4 blocks of spread saturates to 1.0.
+#     A resource is a valid option for a parcel only while:
+#       ruggedness * flat_terrain <= 0.5   (the FLAT_TERRAIN_RUGGEDNESS_LIMIT in registry.rs)
+#     Past that the resource is dropped; a parcel left with no valid option grows nothing.
+#
+#   So in practice (with the 0.5 limit):
+#     1.0  -> strictest: drops out once ruggedness passes 0.5 (~2 blocks of spread, or a
+#             ~0.3-block/step slope) — e.g. wheat fields, sugar cane.
+#     0.7  -> more tolerant: survives until ruggedness ~0.71 — e.g. cow/sheep pasture.
+#     0.0  -> terrain-agnostic, valid anywhere — forests, mines, apiaries (the default).
 resources:
   # --- Raw (tier 0) ---
   wood:
@@ -8,6 +38,7 @@ resources:
     name: Wheat
     category: crop
     tier: 0
+    flat_terrain: 1.0   # crop field — wants flat, cheaply-terraformable ground
   iron_ore:
     name: Iron Ore
     category: mineral
@@ -28,14 +59,17 @@ resources:
     name: Wool
     category: animal
     tier: 0
+    flat_terrain: 0.7   # grazing pasture — prefers flat, tolerates some slope
   sugar_cane:
     name: Sugar Cane
     category: crop
     tier: 0
+    flat_terrain: 1.0   # crop field — wants flat, cheaply-terraformable ground
   cow:
     name: Cow
     category: animal
     tier: 0
+    flat_terrain: 0.7   # grazing pasture — prefers flat, tolerates some slope
 
   # --- Intermediate (tier 1) ---
   planks:
