@@ -86,37 +86,108 @@ study:
   required: [bookshelf]
   optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet, lectern, potted_plant]
 
-# Flat-roof terrace (desert). Decorated by decorate_rooftops, not a real room.
-# A low fill threshold keeps the deck airy — a shaded spot to sit and sleep,
-# not a packed storeroom. The canopy is the centrepiece; the rest is optional.
-roof_terrace:
+# Flat-roof themes (desert). decorate_rooftops picks ONE of these per building
+# so neighbouring roofs read as different spaces. These aren't real rooms — the
+# parapet acts as the wall and there's no ceiling. Keep fill thresholds modest
+# (working roofs a touch denser) so decks stay legible from the air.
+
+# Living terrace — a shaded spot to relax.
+roof_lounge:
   fill_threshold: 0.45
   required: [roof_shade]
   optional:
     - roof_bedroll
-    - roof_planter
-    - roof_palm
+    - roof_hammock
     - carpet
     - carpet
+    - roof_rug_runner
     - bench
     - chair
     - table
     - roof_lamp
+    - roof_palm
+    - vase
+    - potted_plant
+    - roof_laundry
+
+# Roof garden — greenery and water.
+roof_garden:
+  fill_threshold: 0.5
+  required: [roof_shade]
+  optional:
+    - roof_planter
+    - roof_palm
+    - roof_cactus_row
+    - potted_plant
+    - potted_plant
+    - roof_water_trough
+    - vase
+    - carpet
+    - roof_lamp
+    - bench
+    - roof_jars
+
+# Open-air kitchen — cooking and food stores.
+roof_kitchen:
+  fill_threshold: 0.5
+  required: [roof_tandoor]
+  optional:
     - roof_brazier
     - roof_chimney
-    - roof_tandoor
-    - roof_jars
-    - roof_amphora
-    - roof_water_trough
-    - roof_laundry
     - roof_woodpile
-    - roof_cactus_row
-    - roof_hammock
-    - roof_grindstone
-    - roof_rug_runner
-    - potted_plant
-    - vase
+    - roof_water_trough
     - barrel
     - crate
+    - roof_jars
+    - roof_amphora
+    - roof_lamp
+    - table
+    - roof_shade
     - sack_pile
-    - loom
+
+# Workshop — crafting on the roof.
+roof_workshop:
+  fill_threshold: 0.55
+  required: [loom]
+  optional:
+    - roof_grindstone
+    - crate
+    - sack_pile
+    - barrel
+    - roof_woodpile
+    - roof_lamp
+    - table
+    - vase
+    - roof_shade
+    - roof_amphora
+
+# Storage roof — packed with goods.
+roof_storage:
+  fill_threshold: 0.6
+  required: [barrel]
+  optional:
+    - crate
+    - sack_pile
+    - barrel
+    - crate
+    - roof_amphora
+    - roof_jars
+    - roof_woodpile
+    - roof_water_trough
+    - roof_lamp
+
+# Sleeping deck — bedouin-style, sleep in the cool night air.
+roof_sleeping:
+  fill_threshold: 0.45
+  required: [roof_shade]
+  optional:
+    - roof_bedroll
+    - roof_bedroll
+    - roof_hammock
+    - carpet
+    - roof_rug_runner
+    - roof_lamp
+    - roof_brazier
+    - roof_jars
+    - potted_plant
+    - roof_laundry

@@ -19,8 +19,17 @@ use super::super::roof::dome::is_dome_eligible;
 use super::super::roof::top_floor_rects;
 use super::super::rooms::{CellState, ConstraintMap};
 
-/// The rooms.yaml entry that lists rooftop terrace furniture.
-const ROOF_ROOM_KEY: &str = "roof_terrace";
+/// The rooms.yaml entries a flat roof can be furnished as. One is chosen at
+/// random per building, so neighbouring roofs read as different spaces — a
+/// garden, a lounge, an open-air kitchen, etc.
+const ROOF_ROOM_KEYS: [&str; 6] = [
+    "roof_lounge",
+    "roof_garden",
+    "roof_kitchen",
+    "roof_workshop",
+    "roof_storage",
+    "roof_sleeping",
+];
 
 /// Decorate every flat-roof deck in a building with terrace furniture.
 ///
@@ -32,7 +41,11 @@ pub async fn decorate_rooftops(
     frame: &Frame,
     roof_ladder_wall: Option<(i32, i32)>,
 ) {
-    let room_list = match ctx.data.furniture.rooms.get(ROOF_ROOM_KEY) {
+    // Pick one rooftop theme for the whole building so its deck(s) read as a
+    // single, coherent space.
+    let mut pick_rng = ctx.rng.derive();
+    let key = ROOF_ROOM_KEYS[pick_rng.rand_i32_range(0, ROOF_ROOM_KEYS.len() as i32) as usize];
+    let room_list = match ctx.data.furniture.rooms.get(key) {
         Some(list) => list,
         None => return,
     };
