@@ -194,7 +194,9 @@ mod tests {
 
         // Flatten, then route the tiered network over the gentled terrain.
         let urban = editor.world().get_urban_points();
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         // --- Place the industrial buildings FIRST, on good flattened ground. With
         // no roads yet, `road_bonus` is 0 — these big buildings are sited by
@@ -344,7 +346,9 @@ mod tests {
         let urban = editor.world().get_urban_points();
 
         log_trees(&mut editor, urban.clone()).await;
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
         // Wall + gates — gates seed the collector tier of the network.

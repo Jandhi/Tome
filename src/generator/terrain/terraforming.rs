@@ -171,6 +171,22 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         if is_snow {
             editor.place_block_forced(&surface, point.with_y(target_y)).await;
         }
+
+        // When we're terraforming through water (skip_water = false, e.g. the
+        // city flatten), clear any water still standing above the new surface so
+        // the settlement has no awkward leftover puddles. Scan up from the
+        // surface until the water stops.
+        if !skip_water {
+            let mut y = target_y;
+            while editor
+                .world()
+                .get_block(point.with_y(y))
+                .is_some_and(|b| b.id.is_water())
+            {
+                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+                y += 1;
+            }
+        }
     }
 
     editor.world_mut().set_heights(&updated);
