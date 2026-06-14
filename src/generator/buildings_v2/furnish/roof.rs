@@ -11,6 +11,7 @@
 
 use crate::editor::Editor;
 use crate::geometry::{Point2D, Rect2D};
+use crate::minecraft::Color;
 
 use super::room::furnish_interior;
 use super::super::frame::Frame;
@@ -29,6 +30,21 @@ const ROOF_ROOM_KEYS: [&str; 6] = [
     "roof_workshop",
     "roof_storage",
     "roof_sleeping",
+];
+
+/// Fabric colours a roof's textiles (awnings, canopies, carpets, bedrolls) can
+/// take. One is chosen per building and swapped in for `swap: color` blocks, so
+/// roofs aren't all the palette's default red — warm canvas tones with a few
+/// dyed accents, all plausible for sun-bleached desert cloth.
+const ROOF_FABRIC_COLORS: [Color; 8] = [
+    Color::White,
+    Color::Orange,
+    Color::Yellow,
+    Color::Red,
+    Color::Brown,
+    Color::LightBlue,
+    Color::Cyan,
+    Color::Magenta,
 ];
 
 /// Decorate every flat-roof deck in a building with terrace furniture.
@@ -61,7 +77,13 @@ pub async fn decorate_rooftops(
     let items = &ctx.data.furniture.items;
     let materials = &ctx.data.materials;
     let loot = &ctx.data.furniture.loot;
-    let palette = ctx.palette;
+
+    // Give this building's roof textiles their own fabric colour instead of the
+    // palette's default, so a street of roofs isn't all one shade.
+    let fabric = ROOF_FABRIC_COLORS[pick_rng.rand_i32_range(0, ROOF_FABRIC_COLORS.len() as i32) as usize];
+    let mut roof_palette = ctx.palette.clone();
+    roof_palette.primary_color = Some(fabric);
+    let palette = &roof_palette;
 
     let rects = top_floor_rects(frame);
     for (i, rect) in rects.iter().enumerate() {
