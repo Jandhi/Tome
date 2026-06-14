@@ -908,18 +908,9 @@ mod tests {
                                 plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
-                                // Collect ground-floor door exterior cells (one
-                                // out from the door) for door->road connectors.
-                                for (seg, opening) in out.wall_segs.doors() {
-                                    if seg.floor != 0 { continue; }
-                                    let cells = crate::generator::buildings_v2::walls::segment_cells(seg);
-                                    let out_dir: P2 = seg.facing.into();
-                                    for dx in 0..opening.width {
-                                        if let Some(&c) = cells.get((opening.offset + dx) as usize) {
-                                            door_cells.push(c + out_dir);
-                                        }
-                                    }
-                                }
+                                // Real door entrances (bottom of ramp, if any),
+                                // saved by the pipeline, for door->road connectors.
+                                door_cells.extend(out.door_entrances.iter().copied());
                                 // Collect door-threshold cells: the strip just outside
                                 // the house's road-facing wall at floor level, where a
                                 // road slab leaves a half-block lip in the doorway. We
