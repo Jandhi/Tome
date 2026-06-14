@@ -23,6 +23,7 @@ use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
 use super::furnish::{decorate_rooftops, furnish_rooms};
+use super::exterior::decorate_exterior_walls;
 use super::{BuildingContext, Culture};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
@@ -188,6 +189,10 @@ pub async fn build_house(
     if matches!(roof_style, RoofStyle::Flat) {
         decorate_rooftops(ctx, &frame, roof_ladder_wall).await;
     }
+
+    // A few sparse props against the outside walls (barrels, pots, …) so the
+    // house reads as lived-in. Skips doors, roads, and claimed cells.
+    decorate_exterior_walls(ctx, &footprint, &wall_segs).await;
 
     check_building_invariants(&frame, &room_plan, &floor_plan)?;
 
