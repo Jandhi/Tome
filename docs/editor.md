@@ -23,9 +23,9 @@ pub struct World {
     // Chunk data
     pub chunks: HashMap<(i32, i32), Chunk>,
 
-    // District information
+    // Parcel information
+    pub parcel_map: Vec<Vec<Option<ParcelID>>>,
     pub district_map: Vec<Vec<Option<DistrictID>>>,
-    pub super_district_map: Vec<Vec<Option<SuperDistrictID>>>,
 
     // Build tracking
     pub build_claims: Vec<Vec<BuildClaim>>,

@@ -7,7 +7,7 @@ use serde::Deserialize;
 pub enum ProductionPainter {
     Palettes {
         palettes: Vec<String>,
-        /// Palette painted on the 3-block border strip around the district edge, if any.
+        /// Palette painted on the 3-block border strip around the parcel edge, if any.
         #[serde(default)]
         border_palette: Option<String>,
         #[serde(default)]

@@ -2,47 +2,47 @@ use std::collections::{HashMap, HashSet};
 
 use crate::geometry::{Point2D, Point3D};
 
-use super::district::DistrictType;
+use super::parcel::ParcelType;
 
 
 #[derive(Debug, Clone)]
-pub struct DistrictData<TID> {
+pub struct ParcelData<TID> {
     pub origin: Point3D,
     pub is_border: bool,
     pub points: HashSet<Point3D>,
     pub points_2d: HashSet<Point2D>,
     pub edges : HashSet<Point3D>,
     pub sum: Point3D,
-    pub district_type: DistrictType,
-    pub district_adjacency : HashMap<TID, u32>,
+    pub parcel_type: ParcelType,
+    pub parcel_adjacency : HashMap<TID, u32>,
     pub adjacencies_count : u32,
 }
 
-impl<TID> DistrictData<TID> {
+impl<TID> ParcelData<TID> {
     pub fn empty() -> Self {
-        DistrictData {
+        ParcelData {
             origin: Point3D::default(),
             is_border: false,
             points: HashSet::new(),
             points_2d: HashSet::new(),
             edges: HashSet::new(),
             sum: Point3D::default(),
-            district_type: DistrictType::Unknown,
-            district_adjacency: HashMap::new(),
+            parcel_type: ParcelType::Unknown,
+            parcel_adjacency: HashMap::new(),
             adjacencies_count: 0,
         }
     }
 
     pub fn new(origin: Point3D) -> Self {
-        let mut data = DistrictData {
+        let mut data = ParcelData {
             origin,
             is_border: false,
             points: HashSet::new(),
             points_2d: HashSet::new(),
             edges: HashSet::new(),
             sum: origin,
-            district_type: DistrictType::Unknown,
-            district_adjacency: HashMap::new(),
+            parcel_type: ParcelType::Unknown,
+            parcel_adjacency: HashMap::new(),
             adjacencies_count: 0,
         };
 
@@ -53,8 +53,8 @@ impl<TID> DistrictData<TID> {
     }
 }
 
-pub trait HasDistrictData<'a, TID : 'a> {
-    fn data(&'a self) -> &'a DistrictData<TID>;
+pub trait HasParcelData<'a, TID : 'a> {
+    fn data(&'a self) -> &'a ParcelData<TID>;
 
     fn origin(&'a self) -> Point3D {
         self.data().origin
@@ -76,8 +76,8 @@ pub trait HasDistrictData<'a, TID : 'a> {
         self.data().sum
     }
 
-    fn district_type(&'a self) -> DistrictType {
-        self.data().district_type
+    fn parcel_type(&'a self) -> ParcelType {
+        self.data().parcel_type
     }   
 
     fn average(&'a self) -> Point3D {
@@ -95,8 +95,8 @@ pub trait HasDistrictData<'a, TID : 'a> {
         &self.data().edges
     }
 
-    fn district_adjacency(&'a self) -> &'a HashMap<TID, u32> {
-        &self.data().district_adjacency
+    fn parcel_adjacency(&'a self) -> &'a HashMap<TID, u32> {
+        &self.data().parcel_adjacency
     }
 
     fn adjacencies_count(&'a self) -> u32 {
@@ -104,8 +104,8 @@ pub trait HasDistrictData<'a, TID : 'a> {
     }
 }
 
-impl<'a, TID : 'a> HasDistrictData<'a, TID> for DistrictData<TID> {
-    fn data(&self) -> &DistrictData<TID> {
+impl<'a, TID : 'a> HasParcelData<'a, TID> for ParcelData<TID> {
+    fn data(&self) -> &ParcelData<TID> {
         self
     }
 }

@@ -101,19 +101,18 @@ pub fn init_logger() {
     });
 }
 
-/// Create the per-run log file under `LOG_DIR`, returning its path and handle.
-/// Returns `None` (logging falls back to terminal-only) if the file can't be created.
+/// Create the per-run log file under `LOG_DIR/<YYYY-MM-DD>/`, returning its path and handle.
+/// Grouping by day keeps the log directory tidy across many runs. Returns `None` (logging
+/// falls back to terminal-only) if the file can't be created.
 fn open_log_file() -> Option<(PathBuf, File)> {
-    let dir = PathBuf::from(LOG_DIR);
+    let now = chrono::Local::now();
+    let dir = PathBuf::from(LOG_DIR).join(now.format("%Y-%m-%d").to_string());
     if let Err(err) = create_dir_all(&dir) {
         println!("Failed to create log directory {:?}: {}", dir, err);
         return None;
     }
 
-    let path = dir.join(format!(
-        "run_{}.log",
-        chrono::Local::now().format("%Y%m%d_%H%M%S")
-    ));
+    let path = dir.join(format!("run_{}.log", now.format("%Y%m%d_%H%M%S")));
     match File::create(&path) {
         Ok(file) => Some((path, file)),
         Err(err) => {

@@ -64,44 +64,44 @@ pub fn extract_biomes(world: &World) -> BiomeMapData {
     }
 }
 
-pub fn extract_districts(world: &World) -> DistrictMapData {
+pub fn extract_parcels(world: &World) -> ParcelMapData {
     let width = world.size().x as usize;
     let depth = world.size().z as usize;
 
+    let mut parcels = vec![-1i32; width * depth];
     let mut districts = vec![-1i32; width * depth];
-    let mut super_districts = vec![-1i32; width * depth];
-    let mut district_types = vec![String::new(); width * depth];
+    let mut parcel_types = vec![String::new(); width * depth];
 
     for x in 0..width {
         for z in 0..depth {
-            if let Some(did) = world.district_map[x][z] {
-                districts[x * depth + z] = did.0 as i32;
+            if let Some(did) = world.parcel_map[x][z] {
+                parcels[x * depth + z] = did.0 as i32;
             }
-            if let Some(sid) = world.super_district_map[x][z] {
-                super_districts[x * depth + z] = sid.0 as i32;
-                if let Some(sd) = world.super_districts.get(&sid) {
-                    district_types[x * depth + z] = format!("{:?}", sd.data.district_type);
+            if let Some(sid) = world.district_map[x][z] {
+                districts[x * depth + z] = sid.0 as i32;
+                if let Some(sd) = world.districts.get(&sid) {
+                    parcel_types[x * depth + z] = format!("{:?}", sd.data.parcel_type);
                 }
             }
         }
     }
 
-    let mut district_info: Vec<DistrictInfo> = world
-        .districts
+    let mut parcel_info: Vec<ParcelInfo> = world
+        .parcels
         .values()
         .map(|d| {
             let dtype = world
-                .super_district_map
+                .district_map
                 .get(d.data.origin.x as usize)
                 .and_then(|row| row.get(d.data.origin.z as usize))
                 .and_then(|sid| sid.as_ref())
-                .and_then(|sid| world.super_districts.get(sid))
-                .map(|sd| format!("{:?}", sd.data.district_type))
+                .and_then(|sid| world.districts.get(sid))
+                .map(|sd| format!("{:?}", sd.data.parcel_type))
                 .unwrap_or_else(|| "Unknown".to_string());
 
-            DistrictInfo {
+            ParcelInfo {
                 id: d.id.0,
-                district_type: dtype,
+                parcel_type: dtype,
                 is_border: d.data.is_border,
                 size: d.data.points_2d.len(),
                 origin_x: d.data.origin.x,
@@ -109,15 +109,15 @@ pub fn extract_districts(world: &World) -> DistrictMapData {
             }
         })
         .collect();
-    district_info.sort_by_key(|d| d.id);
+    parcel_info.sort_by_key(|d| d.id);
 
-    DistrictMapData {
+    ParcelMapData {
         width,
         depth,
+        parcels,
         districts,
-        super_districts,
-        district_types,
-        district_info,
+        parcel_types,
+        parcel_info,
     }
 }
 
@@ -237,7 +237,7 @@ pub fn extract_full_snapshot(world: &World, phase: &GenerationPhase) -> WorldSna
         heightmap: Some(extract_heightmap(world)),
         blocks: Some(extract_blocks(world)),
         biomes: Some(extract_biomes(world)),
-        districts: Some(extract_districts(world)),
+        parcels: Some(extract_parcels(world)),
         buildings: Some(extract_buildings(world)),
         claims: Some(extract_claims(world)),
     }

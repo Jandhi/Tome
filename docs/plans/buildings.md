@@ -31,7 +31,7 @@ struct Plot {
 ```
 
 The rectangular bounds keep layout math simple and match Minecraft's block grid. The usable
-mask allows upstream systems (districts, terrain analysis) to mark out obstacles like water,
+mask allows upstream systems (parcels, terrain analysis) to mark out obstacles like water,
 cliffs, trees, or neighboring buildings without needing to compute a clean polygon boundary.
 
 ```

@@ -1,10 +1,10 @@
 # Building System
 
-The building system generates and places individual structures within urban districts. It handles everything from footprint placement to interior construction.
+The building system generates and places individual structures within urban parcels. It handles everything from footprint placement to interior construction.
 
 ## Overview
 
-Buildings are procedurally generated within urban districts using a multi-stage pipeline that creates foundations, walls, floors, roofs, and interiors.
+Buildings are procedurally generated within urban parcels using a multi-stage pipeline that creates foundations, walls, floors, roofs, and interiors.
 
 ## Data Structures
 
@@ -23,7 +23,7 @@ pub struct BuildingData {
     pub id: BuildingID,
     pub origin: Point3D,           // Bottom corner
     pub bounds: Rect3D,            // 3D bounding box
-    pub super_district: SuperDistrictID,
+    pub district: DistrictID,
     pub building_type: BuildingType,
     pub floors: Vec<FloorData>,
     pub entrance: Point3D,
@@ -53,10 +53,10 @@ pub struct FloorData {
 
 ### 1. City Block Creation
 
-Urban districts are subdivided into city blocks using secondary Voronoi partitioning:
+Urban parcels are subdivided into city blocks using secondary Voronoi partitioning:
 
 ```rust
-create_city_blocks(district) -> Vec<CityBlock>
+create_city_blocks(parcel) -> Vec<CityBlock>
 ```
 
 City blocks group buildings that share common access and infrastructure.
@@ -248,9 +248,9 @@ Tall buildings have additional considerations:
 ## Example Usage
 
 ```rust
-// Place all buildings in urban districts
-for super_district in urban_super_districts {
-    let city_blocks = create_city_blocks(&super_district);
+// Place all buildings in urban parcels
+for district in urban_districts {
+    let city_blocks = create_city_blocks(&district);
 
     for block in city_blocks {
         let buildings = place_on_grid(&block, &templates);
@@ -285,7 +285,7 @@ Building generation parameters:
 The settlement can have defensive walls:
 
 ```rust
-generate_walls(urban_super_districts, editor) -> ()
+generate_walls(urban_districts, editor) -> ()
 ```
 
 **Wall Components:**
@@ -294,4 +294,4 @@ generate_walls(urban_super_districts, editor) -> ()
 - Gates for entry points
 - Walkways on top
 
-Gates are positioned based on district border analysis and path routing needs.
+Gates are positioned based on parcel border analysis and path routing needs.

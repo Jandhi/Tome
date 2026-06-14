@@ -4,13 +4,13 @@ use std::env;
 use std::fs::File;
 use anyhow::{bail, Context};
 
-use crate::generator::districts::{DistrictAnalysis, SuperDistrictID};
+use crate::generator::districts::{ParcelAnalysis, DistrictID};
 use crate::generator::nbts::{Structure, StructureType};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
 use super::production_painter::{ProductionPainter, ProductionPaintersFile};
-use super::types::{BiomeResourcesFile, DistrictResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
+use super::types::{BiomeResourcesFile, ParcelResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
 
 pub struct ChainSelection {
     /// The tier-2 good at the end of this chain.
@@ -39,17 +39,17 @@ pub struct ProductionPlan {
     pub building_run_cost: HashMap<String, f32>,
 }
 
-/// Full production result for a settlement derived from a set of districts.
+/// Full production result for a settlement derived from a set of parcels.
 pub struct SettlementProductionResult {
-    /// The resource each district will gather and the building it needs to do so.
-    pub district_assignments: HashMap<SuperDistrictID, DistrictResourceAssignment>,
-    /// Total raw resource supply available (resource → quantity, 2 per producing district).
+    /// The resource each parcel will gather and the building it needs to do so.
+    pub parcel_assignments: HashMap<DistrictID, ParcelResourceAssignment>,
+    /// Total raw resource supply available (resource → quantity, 2 per producing parcel).
     pub supply: HashMap<String, u32>,
     /// Finished goods produced after allocating supply across chains, in priority order.
     pub finished_goods: Vec<(String, u32)>,
     /// Raw and intermediate goods left over after chain allocation.
     pub leftover_goods: Vec<(String, u32)>,
-    /// Gathering buildings required across all districts (building type → count).
+    /// Gathering buildings required across all parcels (building type → count).
     pub gather_buildings: HashMap<String, u32>,
     /// Processing buildings required, scaled by units of finished goods produced.
     pub processing_buildings: HashMap<String, u32>,
@@ -362,13 +362,13 @@ impl ResourceRegistry {
         }
     }
 
-    /// Given a map of district analyses, resolves the full production picture for the settlement:
-    /// selects one raw resource per district (based on major biomes), allocates supply across
-    /// production chains, and returns per-district building assignments alongside the complete
+    /// Given a map of parcel analyses, resolves the full production picture for the settlement:
+    /// selects one raw resource per parcel (based on major biomes), allocates supply across
+    /// production chains, and returns per-parcel building assignments alongside the complete
     /// building and goods summary.
-    pub fn resolve_for_districts(
+    pub fn resolve_for_parcels(
         &self,
-        district_analysis: &HashMap<SuperDistrictID, DistrictAnalysis>,
+        parcel_analysis: &HashMap<DistrictID, ParcelAnalysis>,
         rng: &mut RNG,
     ) -> SettlementProductionResult {
         // caps to prevent extreme overproduction of certain goods that would skew the settlement's production profile
@@ -376,8 +376,8 @@ impl ResourceRegistry {
         const INTERMEDIATE_CAP: u32 = 10;
         const FINISHED_GOOD_CAP: u32 = 15;
 
-        // Build candidate resource lists from each district's major biomes (≥30%).
-        let base_options: HashMap<SuperDistrictID, Vec<String>> = district_analysis.iter()
+        // Build candidate resource lists from each parcel's major biomes (≥30%).
+        let base_options: HashMap<DistrictID, Vec<String>> = parcel_analysis.iter()
             .map(|(id, analysis)| {
                 let mut candidates: Vec<String> = analysis.major_biomes().iter()
                     .flat_map(|biome| self.resources_for_biome(biome))
@@ -397,7 +397,7 @@ impl ResourceRegistry {
         // Repeat until stable (up to 10 iterations).
         let mut capped: HashSet<String> = HashSet::new();
         for _ in 0..10 {
-            let filtered: HashMap<SuperDistrictID, Vec<String>> = base_options.iter()
+            let filtered: HashMap<DistrictID, Vec<String>> = base_options.iter()
                 .map(|(id, candidates)| {
                     let filtered: Vec<String> = candidates.iter()
                         .filter(|r| !capped.contains(*r))
@@ -409,7 +409,7 @@ impl ResourceRegistry {
                 })
                 .collect();
 
-            let trial_assignments = self.assign_district_resources(&filtered, &mut rng.derive());
+            let trial_assignments = self.assign_parcel_resources(&filtered, &mut rng.derive());
 
             // Compute trial supply, crediting all gather recipe outputs (handles multi-output
             // recipes like gather_bees which produces both honey and beeswax).
@@ -487,7 +487,7 @@ impl ResourceRegistry {
         }
 
         // Final filtered options and real assignment.
-        let options: HashMap<SuperDistrictID, Vec<String>> = base_options.iter()
+        let options: HashMap<DistrictID, Vec<String>> = base_options.iter()
             .map(|(id, candidates)| {
                 let filtered: Vec<String> = candidates.iter()
                     .filter(|r| !capped.contains(*r))
@@ -498,14 +498,14 @@ impl ResourceRegistry {
             })
             .collect();
 
-        // Each super-district is assigned exactly one gather recipe (identified by its
+        // Each super-parcel is assigned exactly one gather recipe (identified by its
         // primary resource). The primary output is credited at 2 units; co-products from
         // multi-output recipes (e.g. gather_bees → honey + beeswax) are scaled proportionally.
-        let district_assignments = self.assign_district_resources(&options, rng);
+        let parcel_assignments = self.assign_parcel_resources(&options, rng);
 
         let mut supply: HashMap<String, u32> = HashMap::new();
         let mut gather_buildings: HashMap<String, u32> = HashMap::new();
-        for (_, a) in &district_assignments {
+        for (_, a) in &parcel_assignments {
             self.credit_gather_supply(&a.primary_resource, &mut supply);
             *gather_buildings.entry(a.building.clone()).or_insert(0) += 1;
         }
@@ -560,7 +560,7 @@ impl ResourceRegistry {
         leftover_goods.extend(intermediate_leftovers);
 
         SettlementProductionResult {
-            district_assignments,
+            parcel_assignments,
             supply,
             finished_goods,
             leftover_goods,
@@ -569,30 +569,30 @@ impl ResourceRegistry {
         }
     }
 
-    /// For each entry in `options` (a district ID paired with its candidate raw resources from
-    /// its biome), selects exactly one raw resource per district and returns the corresponding
+    /// For each entry in `options` (a parcel ID paired with its candidate raw resources from
+    /// its biome), selects exactly one raw resource per parcel and returns the corresponding
     /// gathering building.
     ///
-    /// **Selection strategy** — most-constrained districts (fewest valid candidates) are
-    /// resolved first. For each district, candidates are scored by:
-    ///   1. Novelty — +1000 if the resource has not yet been assigned to any other district,
+    /// **Selection strategy** — most-constrained parcels (fewest valid candidates) are
+    /// resolved first. For each parcel, candidates are scored by:
+    ///   1. Novelty — +1000 if the resource has not yet been assigned to any other parcel,
     ///      encouraging diversity across the settlement.
     ///   2. Value — the number of tier-2 finished goods that require this resource somewhere
     ///      in their production chain (higher = feeds more goods).
     ///   3. Jitter — a small random nudge so repeated calls with the same biome mix produce
     ///      varied towns.
     ///
-    /// Districts whose candidates have no known gather recipe are skipped.
+    /// Parcels whose candidates have no known gather recipe are skipped.
     /// Input is a `HashMap` so each ID is structurally guaranteed to appear at most once,
-    /// ensuring every district receives exactly one resource assignment.
-    pub fn assign_district_resources<ID: Eq + Hash + Clone>(
+    /// ensuring every parcel receives exactly one resource assignment.
+    pub fn assign_parcel_resources<ID: Eq + Hash + Clone>(
         &self,
         options: &HashMap<ID, Vec<String>>,
         rng: &mut RNG,
-    ) -> HashMap<ID, DistrictResourceAssignment> {
-        // Filter each district's candidates to those with a known gather building,
+    ) -> HashMap<ID, ParcelResourceAssignment> {
+        // Filter each parcel's candidates to those with a known gather building,
         // then sort most-constrained first.
-        let mut districts: Vec<(ID, Vec<String>)> = options.iter()
+        let mut parcels: Vec<(ID, Vec<String>)> = options.iter()
             .map(|(id, candidates)| {
                 let valid: Vec<String> = candidates.iter()
                     .filter(|r| self.gather_building(r).is_some())
@@ -601,12 +601,12 @@ impl ResourceRegistry {
                 (id.clone(), valid)
             })
             .collect();
-        districts.sort_by_key(|(_, candidates)| candidates.len());
+        parcels.sort_by_key(|(_, candidates)| candidates.len());
 
         let mut assigned_set: HashSet<String> = HashSet::new();
-        let mut result: HashMap<ID, DistrictResourceAssignment> = HashMap::new();
+        let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::new();
 
-        for (id, candidates) in districts {
+        for (id, candidates) in parcels {
             if candidates.is_empty() {
                 continue;
             }
@@ -626,14 +626,14 @@ impl ResourceRegistry {
             let building = recipe.building.clone();
             let production_painter = recipe.production_painter.clone();
             assigned_set.insert(resource.clone());
-            result.insert(id, DistrictResourceAssignment { primary_resource: resource, building, production_painter });
+            result.insert(id, ParcelResourceAssignment { primary_resource: resource, building, production_painter });
         }
 
         result
     }
 
     /// Credits all outputs of the gather recipe for `primary_resource` into `supply`.
-    /// The primary output is credited at 2 units (the fixed per-district convention).
+    /// The primary output is credited at 2 units (the fixed per-parcel convention).
     /// Co-products are scaled proportionally: `(co_qty / primary_qty) * 2`, rounded.
     /// Falls back to crediting only the primary at +2 if the recipe is not found.
     fn credit_gather_supply(&self, primary_resource: &str, supply: &mut HashMap<String, u32>) {

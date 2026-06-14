@@ -15,8 +15,8 @@ use crate::{
 /// frontage chains (the whole point of the road hierarchy). The leftover
 /// `interior` is what gets subdivided into back lots served by alleys.
 ///
-/// Returns `(ribbon_parcels, interior)`. `ribbon_parcels` is the ribbon split
-/// into connected components (each a buildable parcel); `interior` is the block
+/// Returns `(ribbon_lots, interior)`. `ribbon_lots` is the ribbon split
+/// into connected components (each a buildable lot); `interior` is the block
 /// minus the ribbon. If no block cell touches a `main_road` cell, the ribbon is
 /// empty and the whole block comes back as `interior`.
 ///
@@ -416,12 +416,12 @@ mod tests {
         let block = rect_block(0, 9, 5, 14);
         let road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 4)).collect();
 
-        let (parcels, interior) = reserve_road_ribbon(&block, &road, 3);
+        let (lots, interior) = reserve_road_ribbon(&block, &road, 3);
 
-        // One contiguous ribbon parcel, 3 rows deep (z = 5,6,7) × 10 wide.
-        assert_eq!(parcels.len(), 1);
-        assert_eq!(parcels[0].len(), 30);
-        assert!(parcels[0].iter().all(|p| (5..=7).contains(&p.y)));
+        // One contiguous ribbon lot, 3 rows deep (z = 5,6,7) × 10 wide.
+        assert_eq!(lots.len(), 1);
+        assert_eq!(lots[0].len(), 30);
+        assert!(lots[0].iter().all(|p| (5..=7).contains(&p.y)));
         // Interior is the remaining 7 rows.
         assert_eq!(interior.len(), 70);
         assert!(interior.iter().all(|p| (8..=14).contains(&p.y)));
@@ -432,9 +432,9 @@ mod tests {
         let block = rect_block(0, 9, 0, 9);
         let road: HashSet<Point2D> = HashSet::new();
 
-        let (parcels, interior) = reserve_road_ribbon(&block, &road, 5);
+        let (lots, interior) = reserve_road_ribbon(&block, &road, 5);
 
-        assert!(parcels.is_empty());
+        assert!(lots.is_empty());
         assert_eq!(interior, block);
     }
 
@@ -477,7 +477,7 @@ mod tests {
         let mut road: HashSet<Point2D> = (0..=9).map(|x| Point2D::new(x, 4)).collect();
         road.extend((5..=14).map(|z| Point2D::new(-1, z)));
 
-        let (parcels, _interior) = reserve_road_ribbon(&block, &road, 2);
-        assert_eq!(parcels.len(), 1, "L-shaped ribbon should be one component");
+        let (lots, _interior) = reserve_road_ribbon(&block, &road, 2);
+        assert_eq!(lots.len(), 1, "L-shaped ribbon should be one component");
     }
 }

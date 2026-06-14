@@ -81,7 +81,7 @@ impl VisualizerServer {
             .route("/api/heightmap", get(get_heightmap))
             .route("/api/blocks", get(get_blocks))
             .route("/api/biomes", get(get_biomes))
-            .route("/api/districts", get(get_districts))
+            .route("/api/parcels", get(get_parcels))
             .route("/api/buildings", get(get_buildings))
             .route("/api/claims", get(get_claims))
             .route("/api/logs", get(get_logs))

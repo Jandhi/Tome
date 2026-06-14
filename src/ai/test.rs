@@ -72,30 +72,27 @@ mod tests {
         }
 
         let user = r#"Generate a minecraft book with a title, author, and 10 pages of content, about redstone.
-            Only use color formatting or bold for keywords or titles. Leave most of the body text in plain format.
+
+            Formatting rules — follow exactly:
+            - Body text is PLAIN by default: no color, no bold, no italics. This is true for the vast majority of the text.
+            - A page may open with a short heading that is bold (bold only, never colored).
+            - Color at most ONE word or short phrase per page, and only for a genuinely important name or concept. Most pages should have NO colored text at all. Treat color like rare rubrication in an old manuscript, not a highlighter.
+            - Never write "Keyword:" labels, glossaries, or lists of highlighted terms.
+            - When in doubt, leave text plain.
+
             DO NOT USE § codes with section symbols
             DO NOT USE UNICODE ESCAPE CODES
             Instead do formatting using json elements."#;
         let book: Book = try_ai_json::<Book>(user).await.expect("Failed to parse AI response");
 
         let pages: Vec<String> = book.pages.iter().map(|page| {
-            let mut components = page.iter();
-            if let Some(first) = components.next() {
-                let mut first_obj = serde_json::to_value(first).unwrap();
-                if let Some(first_map) = first_obj.as_object_mut() {
-                    let extra: Vec<serde_json::Value> = components
-                        .map(|t| serde_json::to_value(t).unwrap())
-                        .collect();
-                    if !extra.is_empty() {
-                        first_map.insert("extra".to_string(), serde_json::Value::Array(extra));
-                    }
-                }
-
-                // Serialize and escape as a JSON string
-                format!("'{}'", (&first_obj.to_string().replace("\'", "\\\'"))).replace("\n", "\\\\n").replace("\\n", "\\\\n")
-            } else {
-                "\"\"".to_string() // Empty string for blank pages
-            }
+            // Neutral empty root + all components as `extra`, so a bold heading
+            // doesn't inherit down into the body. Bare SNBT compound renders as
+            // formatted text (a quoted string would print the JSON literally).
+            let extra: Vec<serde_json::Value> = page.iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect();
+            serde_json::json!({ "text": "", "extra": extra }).to_string()
         }).collect();
         let page_refs = pages.iter().map(|s| s.as_str()).collect::<Vec<_>>();
         let book = provider.give_player_book(&page_refs, &book.title, &book.author)

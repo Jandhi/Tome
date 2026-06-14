@@ -22,7 +22,7 @@ This document describes the high-level architecture of Tome and how its componen
          ┌──────────────────────────┐
          │  GENERATOR SUBSYSTEMS    │
          ├──────────────────────────┤
-         │  • Districts             │
+         │  • Parcels             │
          │  • Buildings             │
          │  • Materials & Palettes  │
          │  • Terrain               │
@@ -68,7 +68,7 @@ Represents the Minecraft world state including:
 
 - **Heightmaps** - Ground level, ocean floor, motion-blocking
 - **Chunks** - Stored NBT data from Minecraft
-- **District Maps** - 2D arrays mapping coordinates to districts
+- **Parcel Maps** - 2D arrays mapping coordinates to parcels
 - **Build Claims** - Tracks ownership of each block location
 
 ### Editor (`src/editor/editor.rs`)
@@ -82,7 +82,7 @@ The main interface for modifying the world:
 
 ## Generator Subsystems
 
-### Districts (`src/generator/districts/`)
+### Parcels (`src/generator/parcels/`)
 
 Divides the build area into zones using Voronoi partitioning.
 
@@ -93,7 +93,7 @@ Divides the build area into zones using Voronoi partitioning.
 
 ### Buildings (`src/generator/buildings/`)
 
-Places and constructs buildings within urban districts.
+Places and constructs buildings within urban parcels.
 
 **Pipeline:**
 1. City block creation (Voronoi clustering)
@@ -131,7 +131,7 @@ Generates walkways and roads.
 **Algorithms:**
 - A* pathfinding considering terrain cost
 - Building-to-building routing
-- District connection
+- Parcel connection
 
 ### NBT Structures (`src/generator/nbts/`)
 

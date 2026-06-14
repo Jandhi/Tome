@@ -14,7 +14,7 @@ pub struct SettlementInfo {
 
 impl SettlementInfo {
     pub fn new(world : &World) -> Self {
-        let mut biomes_by_count = world.district_analysis_data.iter()
+        let mut biomes_by_count = world.parcel_analysis_data.iter()
                 .map(|(_, data)| data.biome_count())
                 .flatten()
                 .fold(HashMap::new(), |mut value, (biome, count)| {
@@ -118,35 +118,30 @@ struct Book {
 
 pub async fn give_player_book(editor : &Editor, instruction : &str) -> anyhow::Result<()> {
     let user = &format!(r#"{}.
-            Use Color and Bold ONLY for KEYWORDS. Most of the body should not be colored or bolded. Leave most of the body text in plain format.
-            Please limit the title and author to less than 32 characters each.
-            DO NOT USE § codes with section symbols
-            DO NOT USE UNICODE ESCAPE CODES
-            Instead do formatting using json elements."#, instruction);
+
+            Formatting rules — follow exactly:
+            - Body text is PLAIN by default: no color, no bold, no italics. This is true for the vast majority of the text.
+            - A page may open with a short heading that is bold (bold only, never colored).
+            - Color at most ONE word or short phrase per page, and only for a genuinely important name or concept. Most pages should have NO colored text at all. Treat color like rare rubrication in an old manuscript, not a highlighter.
+            - Never write "Keyword:" labels, glossaries, or lists of highlighted terms.
+            - When in doubt, leave text plain.
+
+            Keep the title and author under 32 characters each.
+            Do NOT use § section codes or unicode escape codes — format only using the JSON elements."#, instruction);
     let book: Book = try_ai_json::<Book>(user).await
         .ok_or_else(|| anyhow::anyhow!("Failed to get or parse AI response for book"))?;
 
     let pages: Vec<String> = book.pages.iter().map(|page| {
-            let mut components = page.iter();
-            if let Some(first) = components.next() {
-                let mut first_obj = serde_json::to_value(first).unwrap();
-                if let Some(first_map) = first_obj.as_object_mut() {
-                    let extra: Vec<serde_json::Value> = components
-                        .map(|t| serde_json::to_value(t).unwrap())
-                        .collect();
-                    if !extra.is_empty() {
-                        first_map.insert("extra".to_string(), serde_json::Value::Array(extra));
-                    }
-                }
-
-                // Serialize and escape as a JSON string
-                format!("'{}'", (&first_obj.to_string().replace("\'", "\\\'")))
-                    .replace("\n", "\\\\n")
-                    .replace("\\n", "\\\\n") // Only double escaped newlines allowed
-                    .replace("\\\"", "\"") // We don't want to escape quotes
-            } else {
-                "\"\"".to_string() // Empty string for blank pages
-            }
+            // Wrap every component under a NEUTRAL empty root, so each keeps its
+            // own formatting. (If we promoted the first component to the root, its
+            // bold/color would inherit down into every `extra` child — turning a
+            // bold heading into a wholly-bold page.) The result is a bare SNBT
+            // compound; a text component is valid SNBT, so the component-format
+            // book parses it as formatted text rather than printing raw JSON.
+            let extra: Vec<serde_json::Value> = page.iter()
+                .map(|t| serde_json::to_value(t).unwrap())
+                .collect();
+            serde_json::json!({ "text": "", "extra": extra }).to_string()
         }).collect();
     let page_refs = pages.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     if let Err(e) = editor.give_player_book(&page_refs, &book.title, &book.author).await {
@@ -175,11 +170,6 @@ pub async fn generate_chronicle(editor: &Editor, settlement_info : &mut Settleme
                 return anyhow::Ok(());
             },
             Err(e) => {
-                if format!("{:?}", e).contains("sequence, expected a string") {
-                    info!("Chronicle generated successfully.");
-                    return Ok(());
-                }
-                
                 error!("Error generating chronicle: {:?}, retrying", e);
             }
         }

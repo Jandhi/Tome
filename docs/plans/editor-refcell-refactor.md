@@ -236,7 +236,7 @@ impl Drop for Editor {
    - src/generator/buildings/*.rs
    - src/generator/terrain/*.rs
    - src/generator/paths/*.rs
-   - src/generator/districts/*.rs
+   - src/generator/parcels/*.rs
    - src/generator/nbts/*.rs
    - src/main.rs
 

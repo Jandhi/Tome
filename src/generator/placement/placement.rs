@@ -8,7 +8,7 @@ use crate::{
     generator::{
         BuildClaim,
         data::LoadedData,
-        districts::SuperDistrict,
+        districts::District,
         materials::{Palette, Placer},
         nbts::{Rotation, Structure, StructureID, place_structure},
         terrain::{force_height, log_trees},
@@ -27,7 +27,7 @@ pub const ROAD_SEARCH_RADIUS: i32 = 8;
 /// Chebyshev distance of a built road (`BuildClaim::Path`). A candidate seeded
 /// here fronts a street *by construction*, rather than merely being nudged
 /// toward one by `road_bonus`. Falls back to the full interior when no road is
-/// near (roads not built yet, or a district with none routed through it).
+/// near (roads not built yet, or a parcel with none routed through it).
 pub const ROAD_SEED_RADIUS: i32 = 6;
 /// Minimum distance (in cells) a placed building's footprint must keep from any
 /// `BuildClaim::Wall` cell. Guarantees a visible gap between buildings and the city wall.
@@ -97,16 +97,16 @@ pub fn footprint_rect(structure: &Structure, candidate: Candidate) -> Rect2D {
     }
 }
 
-/// Public entry point. Picks a spot inside `super_district`, prepares the ground,
+/// Public entry point. Picks a spot inside `district`, prepares the ground,
 /// places the structure, and claims the footprint. Returns `Ok(())` whether
 /// a placement happened or the function bailed out due to no viable site —
 /// the failure case is logged but not error-propagated.
 ///
-/// Operates at the super-district level to match the resource chain's assignment
-/// granularity (`SettlementProductionResult::district_assignments` is keyed by
-/// `SuperDistrictID`).
+/// Operates at the super-parcel level to match the resource chain's assignment
+/// granularity (`SettlementProductionResult::parcel_assignments` is keyed by
+/// `DistrictID`).
 pub async fn place_rural_building(
-    super_district: &SuperDistrict,
+    district: &District,
     structure: &Structure,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -114,27 +114,29 @@ pub async fn place_rural_building(
 ) -> Result<()> {
     if structure.size_xz.0 <= 0 || structure.size_xz.1 <= 0 {
         warn!(
-            "Structure '{}' has invalid size {:?}; skipping placement for super-district {:?}",
-            structure.id.0, structure.size_xz, super_district.id
+            "Structure '{}' has invalid size {:?}; skipping placement for super-parcel {:?}",
+            structure.id.0, structure.size_xz, district.id
         );
         return Ok(());
     }
 
     let edge_2d: HashSet<Point2D> =
-        super_district.data.edges.iter().map(|p| p.drop_y()).collect();
+        district.data.edges.iter().map(|p| p.drop_y()).collect();
 
-    let interior: Vec<Point2D> = super_district
+    // Exclude cells inside the regularized wall footprint: a district can vote Rural
+    // yet still own a few cells the closing pass pulled inside the wall.
+    let interior: Vec<Point2D> = district
         .data
         .points_2d
         .iter()
-        .filter(|p| !edge_2d.contains(p))
+        .filter(|p| !edge_2d.contains(p) && !editor.world().is_urban(**p))
         .copied()
         .collect();
 
     if interior.is_empty() {
         warn!(
-            "Super-district {:?} has no interior cells for placement of '{}'",
-            super_district.id, structure.id.0
+            "Super-parcel {:?} has no interior cells for placement of '{}'",
+            district.id, structure.id.0
         );
         return Ok(());
     }
@@ -145,24 +147,24 @@ pub async fn place_rural_building(
         .copied()
         .collect();
 
-    let best = select_best_candidate(&centres, &super_district.data.points_2d, structure, editor, rng);
+    let best = select_best_candidate(&centres, &district.data.points_2d, structure, editor, rng);
     let Some((candidate, score, rect)) = best else {
         warn!(
-            "No viable placement for '{}' in super-district {:?}",
-            structure.id.0, super_district.id
+            "No viable placement for '{}' in super-parcel {:?}",
+            structure.id.0, district.id
         );
         return Ok(());
     };
 
     info!(
-        "Placing '{}' in super-district {:?} at {:?} facing {:?} (score {:.2})",
-        structure.id.0, super_district.id, candidate.centre, candidate.direction, score.total
+        "Placing '{}' in super-parcel {:?} at {:?} facing {:?} (score {:.2})",
+        structure.id.0, district.id, candidate.centre, candidate.direction, score.total
     );
 
     if let Err(e) = execute_placement(candidate, rect, structure, editor, data, rng, None).await {
         warn!(
-            "place_structure failed for '{}' in super-district {:?}: {}",
-            structure.id.0, super_district.id, e
+            "place_structure failed for '{}' in super-parcel {:?}: {}",
+            structure.id.0, district.id, e
         );
         return Err(e);
     }
@@ -171,13 +173,13 @@ pub async fn place_rural_building(
 
 /// Places a single processing/secondary building somewhere in the urban region.
 ///
-/// The urban region is the union of all urban super-districts' footprints — there is
-/// no fixed mapping of building type to a specific urban super-district, so we treat
+/// The urban region is the union of all urban super-parcels' footprints — there is
+/// no fixed mapping of building type to a specific urban super-parcel, so we treat
 /// the whole area as one candidate pool. Picks 10 random interior centres × 4 cardinals,
 /// scores by flatness + water/edge proximity + road proximity (same scorer as
 /// `place_rural_building`), then places the best.
 pub async fn place_urban_building(
-    urban_super_districts: &[&SuperDistrict],
+    urban_districts: &[&District],
     structure: &Structure,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -191,16 +193,19 @@ pub async fn place_urban_building(
         );
         return Ok(());
     }
-    if urban_super_districts.is_empty() {
-        warn!("No urban super-districts available; skipping placement of '{}'", structure.id.0);
+    if urban_districts.is_empty() {
+        warn!("No urban super-parcels available; skipping placement of '{}'", structure.id.0);
         return Ok(());
     }
 
-    let urban_points: HashSet<Point2D> = urban_super_districts
+    // Restrict to cells actually inside the regularized wall footprint: a district can
+    // vote Urban yet still own a few cells the opening pass trimmed outside the wall.
+    let urban_points: HashSet<Point2D> = urban_districts
         .iter()
         .flat_map(|sd| sd.data.points_2d.iter().copied())
+        .filter(|p| editor.world().is_urban(*p))
         .collect();
-    let urban_edges: HashSet<Point2D> = urban_super_districts
+    let urban_edges: HashSet<Point2D> = urban_districts
         .iter()
         .flat_map(|sd| sd.data.edges.iter().map(|p| p.drop_y()))
         .collect();
@@ -255,7 +260,7 @@ pub async fn place_urban_building(
 /// the urban region. Buildings are visited one-by-one in a random order — each placement
 /// claims its footprint, so subsequent placements steer around what's already been built.
 pub async fn place_urban_buildings(
-    urban_super_districts: &[&SuperDistrict],
+    urban_districts: &[&District],
     building_counts: &std::collections::HashMap<String, u32>,
     rng: &mut RNG,
     editor: &mut Editor,
@@ -284,7 +289,7 @@ pub async fn place_urban_buildings(
         };
 
         if let Err(e) =
-            place_urban_building(urban_super_districts, &structure, rng, editor, data, palette).await
+            place_urban_building(urban_districts, &structure, rng, editor, data, palette).await
         {
             warn!("Urban placement failed for '{}': {}", building, e);
         }
@@ -560,7 +565,7 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
 }
 
 fn edge_proximity_penalty(rect: &Rect2D, editor: &Editor) -> f32 {
-    // The cheapest proxy for "near a district edge" is "near the world edge or
+    // The cheapest proxy for "near a parcel edge" is "near the world edge or
     // near a non-claimable cell". We approximate by scanning outward up to
     // ROAD_SEARCH_RADIUS+BLEND_RADIUS for an out-of-bounds cell.
     let world = editor.world();

@@ -1,14 +1,14 @@
-# District Subdivision + Frontage Houses
+# Parcel Subdivision + Frontage Houses
 
 Session log: 2026-05-24. Branch: `jd/placement` (with stair-door fix touching `buildings_v2`).
 
-The goal of the day was to make urban super-districts more amenable to road-frontage house placement: every cell should be within reach of a road, and the road network should look like a medieval town instead of voronoi blobs. Houses were threaded back in to judge whether sub-block sizing was actually buildable.
+The goal of the day was to make urban super-parcels more amenable to road-frontage house placement: every cell should be within reach of a road, and the road network should look like a medieval town instead of voronoi blobs. Houses were threaded back in to judge whether sub-block sizing was actually buildable.
 
 ---
 
 ## What got built
 
-### `src/generator/districts/subdivide.rs` — recursive BSP partitioner
+### `src/generator/parcels/subdivide.rs` — recursive BSP partitioner
 
 Takes a `HashSet<Point2D>` of cells and returns `(Vec<HashSet<Point2D>>, HashSet<Point2D>)` — sub-blocks + alley cells.
 
@@ -20,13 +20,13 @@ Takes a `HashSet<Point2D>` of cells and returns `(Vec<HashSet<Point2D>>, HashSet
 
 Sibling `voronoi_subdivide_block(cells, rng, sections)` wraps the existing `voronoi_fill_with_recenter` and derives 2-wide alleys by marking any cell whose cardinal neighbour belongs to a different section.
 
-### `src/generator/districts/test.rs::subdivide_urban_with_houses`
+### `src/generator/parcels/test.rs::subdivide_urban_with_houses`
 
 Live-server viz/integration test. Pipeline:
 
-1. `generate_districts` → filter `DistrictType::Urban` super-districts.
-2. For each urban SD: take a 2-cell perimeter ring as the district road (`get_outer_and_inner_points(_, 2)`), subdivide the interior.
-3. **Mix strategies:** alternate `subdivide_block` (BSP) and `voronoi_subdivide_block` per super-district so adjacent districts visually compare the two patterns.
+1. `generate_parcels` → filter `ParcelType::Urban` super-parcels.
+2. For each urban SD: take a 2-cell perimeter ring as the parcel road (`get_outer_and_inner_points(_, 2)`), subdivide the interior.
+3. **Mix strategies:** alternate `subdivide_block` (BSP) and `voronoi_subdivide_block` per super-parcel so adjacent parcels visually compare the two patterns.
 4. Claim every road cell (perimeter + alleys) as `BuildClaim::Path(PathType::Pavement)` so the frontage walker treats them as roads.
 5. Paint road cells as polished_andesite, **one Y below** ground (sunken path).
 6. For each sub-block: run the frontage pass only (interior fill currently commented out — see "Tuning").
@@ -78,8 +78,8 @@ Hardcoded in the test, easy to vary:
 - **No min-spacing enforcement between alleys.** The BSP recursion naturally avoids placing close-together cuts because the stop condition kicks in once dims drop below `max_dim`. But voronoi gives no such guarantee.
 - **Frontage walker on irregular sub-blocks.** The walker assumes a clear road-adjacent chain. Voronoi sub-blocks have wiggly perimeters — chains break at concave points and we may want a fallback (or use `detect_perimeter_frontages` more aggressively).
 - **Re-enable interior fill** with a sensible size class and density once frontage looks right.
-- **`max_dim` tuning per super-district** — wealthier/denser super-districts could get smaller `max_dim` for tighter blocks.
-- **City-wide consistency** — currently every SD picks wood/stone/roof per *building*. Could anchor a wealthier "stone manor" district vs a poorer "wattle cottage" district.
+- **`max_dim` tuning per super-parcel** — wealthier/denser super-parcels could get smaller `max_dim` for tighter blocks.
+- **City-wide consistency** — currently every SD picks wood/stone/roof per *building*. Could anchor a wealthier "stone manor" parcel vs a poorer "wattle cottage" parcel.
 
 ---
 

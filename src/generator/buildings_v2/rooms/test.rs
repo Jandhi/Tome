@@ -1683,7 +1683,7 @@ async fn build_jetty_manors_halls_live() {
     println!("Done — manor/hall jetty grid placed live");
 }
 
-/// Generates districts, partitions urban area into city blocks, then fills each block
+/// Generates parcels, partitions urban area into city blocks, then fills each block
 /// with buildings_v2 buildings of mixed sizes and randomized roof materials.
 #[tokio::test]
 async fn settlement_with_buildings_v2() {
@@ -1691,7 +1691,7 @@ async fn settlement_with_buildings_v2() {
     use crate::http_mod::GDMCHTTPProvider;
     use crate::util::init_logger;
     use crate::generator::data::LoadedData;
-    use crate::generator::districts::generate_districts;
+    use crate::generator::districts::generate_parcels;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::roof::RoofStyle;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
@@ -1707,8 +1707,8 @@ async fn settlement_with_buildings_v2() {
 
     let mut rng = RNG::new(13);
 
-    // Step 1: Generate districts (creates urban/rural classification)
-    generate_districts(rng.next_i64().into(), &mut editor).await;
+    // Step 1: Generate parcels (creates urban/rural classification)
+    generate_parcels(rng.next_i64().into(), &mut editor).await;
 
     let data = LoadedData::load().expect("Failed to load data");
     let base_palette_id: PaletteId = "medieval_spruce".into();

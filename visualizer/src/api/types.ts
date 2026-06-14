@@ -1,7 +1,7 @@
 export type GenerationPhase =
   | "idle"
   | "refreshing"
-  | "districts"
+  | "parcels"
   | "terrain"
   | "buildings"
   | "walls"
@@ -39,22 +39,22 @@ export interface BiomeMapData {
   biomes: string[];
 }
 
-export interface DistrictInfo {
+export interface ParcelInfo {
   id: number;
-  district_type: string;
+  parcel_type: string;
   is_border: boolean;
   size: number;
   origin_x: number;
   origin_z: number;
 }
 
-export interface DistrictMapData {
+export interface ParcelMapData {
   width: number;
   depth: number;
+  parcels: number[];
   districts: number[];
-  super_districts: number[];
-  district_types: string[];
-  district_info: DistrictInfo[];
+  parcel_types: string[];
+  parcel_info: ParcelInfo[];
 }
 
 export interface BuildingInfo {
@@ -84,7 +84,7 @@ export interface WorldSnapshot {
   heightmap: HeightmapData | null;
   blocks: BlockMapData | null;
   biomes: BiomeMapData | null;
-  districts: DistrictMapData | null;
+  parcels: ParcelMapData | null;
   buildings: BuildingsData | null;
   claims: ClaimMapData | null;
 }

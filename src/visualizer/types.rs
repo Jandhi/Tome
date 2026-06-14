@@ -6,7 +6,7 @@ use serde_derive::Serialize;
 pub enum GenerationPhase {
     Idle,
     Refreshing,
-    Districts,
+    Parcels,
     Terrain,
     Buildings,
     Walls,
@@ -64,21 +64,21 @@ pub struct BiomeMapData {
     pub biomes: Vec<String>,
 }
 
-/// District map data — flat row-major, None encoded as -1
+/// Parcel map data — flat row-major, None encoded as -1
 #[derive(Debug, Clone, Serialize)]
-pub struct DistrictMapData {
+pub struct ParcelMapData {
     pub width: usize,
     pub depth: usize,
+    pub parcels: Vec<i32>,
     pub districts: Vec<i32>,
-    pub super_districts: Vec<i32>,
-    pub district_types: Vec<String>,
-    pub district_info: Vec<DistrictInfo>,
+    pub parcel_types: Vec<String>,
+    pub parcel_info: Vec<ParcelInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct DistrictInfo {
+pub struct ParcelInfo {
     pub id: usize,
-    pub district_type: String,
+    pub parcel_type: String,
     pub is_border: bool,
     pub size: usize,
     pub origin_x: i32,
@@ -127,7 +127,7 @@ pub struct WorldSnapshot {
     pub heightmap: Option<HeightmapData>,
     pub blocks: Option<BlockMapData>,
     pub biomes: Option<BiomeMapData>,
-    pub districts: Option<DistrictMapData>,
+    pub parcels: Option<ParcelMapData>,
     pub buildings: Option<BuildingsData>,
     pub claims: Option<ClaimMapData>,
 }

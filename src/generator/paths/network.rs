@@ -1,6 +1,6 @@
 //! Tiered A* road network for urban areas.
 //!
-//! Builds **arterials** (a minimum spanning tree over urban district centres,
+//! Builds **arterials** (a minimum spanning tree over urban parcel centres,
 //! optionally routed through a town centre) and **collectors** (each gate routed
 //! to the nearest backbone node). Every edge is an A* route, so roads follow
 //! terrain height. Realise the returned paths with
@@ -11,7 +11,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
-use crate::generator::districts::DistrictType;
+use crate::generator::districts::ParcelType;
 use crate::generator::materials::MaterialId;
 use crate::geometry::{CARDINALS_2D, Point2D, Point3D};
 
@@ -241,8 +241,8 @@ fn assemble_nodes(
     }
     nodes.extend_from_slice(anchor_nodes);
     kinds.extend(std::iter::repeat(NodeKind::Industry).take(anchor_nodes.len()));
-    for sd in editor.world().super_districts.values() {
-        if sd.data.district_type != DistrictType::Urban {
+    for sd in editor.world().districts.values() {
+        if sd.data.parcel_type != ParcelType::Urban {
             continue;
         }
         if let Some(c) = centroid_snapped(&sd.data.points_2d) {

@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{District, DistrictAnalysis, DistrictID, DistrictType, SuperDistrict, SuperDistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
 
 use super::Editor;
 
@@ -13,15 +13,18 @@ const CHUNK_SIZE : i32 = 16;
 #[derive(Debug)]
 pub struct World {
     pub build_area : Rect3D,
+    pub parcels : HashMap<ParcelID, Parcel>,
+    pub parcel_analysis_data : HashMap<ParcelID, ParcelAnalysis>,
+    pub district_analysis_data : HashMap<DistrictID, ParcelAnalysis>,
     pub districts : HashMap<DistrictID, District>,
-    pub district_analysis_data : HashMap<DistrictID, DistrictAnalysis>,
-    pub super_district_analysis_data : HashMap<SuperDistrictID, DistrictAnalysis>,
-    pub super_districts : HashMap<SuperDistrictID, SuperDistrict>,
+    pub parcel_map : Vec<Vec<Option<ParcelID>>>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
-    pub super_district_map : Vec<Vec<Option<SuperDistrictID>>>,
     pub buildings : Vec<BuildingData>,
     pub structures : Vec<StructureID>,
     pub gate_locations : Vec<(Point3D, Cardinal)>,
+    /// Regularized "inside the wall" cell set. When `Some`, `get_urban_points`
+    /// returns it instead of the raw district union (see districts/footprint.rs).
+    pub urban_footprint : Option<HashSet<Point2D>>,
 
     ground_height_map : Vec<Vec<i32>>,
     ground_block_map : Vec<Vec<Block>>,
@@ -43,8 +46,8 @@ impl World {
         );
         let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
 
+        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
         let district_map = vec![vec![None; size_z_usize]; size_x_usize];
-        let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
 
         let chunk_rect = Rect3D {
             origin: point_to_chunk_coordinates(build_area.origin),
@@ -91,13 +94,14 @@ impl World {
 
         let mut world = World {
             build_area,
+            parcels: HashMap::new(),
             districts: HashMap::new(),
-            super_districts: HashMap::new(),
+            parcel_map,
             district_map,
-            super_district_map,
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
             motion_blocking_height_map,
@@ -105,8 +109,8 @@ impl World {
             chunks,
             ground_biome_map,
             ground_block_map,
+            parcel_analysis_data: HashMap::new(),
             district_analysis_data: HashMap::new(),
-            super_district_analysis_data: HashMap::new(),
         };
 
         let y_offset = build_area.origin.y;
@@ -145,20 +149,21 @@ impl World {
         let ground_block_map = vec![vec![Block::new("minecraft:grass_block".into(), None, None); size_z_usize]; size_x_usize];
         let ground_biome_map = vec![vec![Biome::unknown(); size_z_usize]; size_x_usize];
         let build_claim_map = vec![vec![BuildClaim::None; size_z_usize]; size_x_usize];
+        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
         let district_map = vec![vec![None; size_z_usize]; size_x_usize];
-        let super_district_map = vec![vec![None; size_z_usize]; size_x_usize];
 
         World {
             build_area,
+            parcels: HashMap::new(),
+            parcel_analysis_data: HashMap::new(),
             districts: HashMap::new(),
             district_analysis_data: HashMap::new(),
-            super_districts: HashMap::new(),
-            super_district_analysis_data: HashMap::new(),
+            parcel_map,
             district_map,
-            super_district_map,
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            urban_footprint: None,
             ground_height_map,
             ground_block_map,
             ocean_floor_height_map,
@@ -239,6 +244,14 @@ impl World {
         }
     }
 
+    /// Test-only: mark a surface cell as water so `is_water` reports it. Used by the
+    /// footprint terrain-clip tests on a synthetic world.
+    #[cfg(test)]
+    pub fn set_water_for_test(&mut self, point : Point2D) {
+        self.ground_block_map[point.x as usize][point.y as usize] =
+            Block::new("minecraft:water".into(), None, None);
+    }
+
     // Get height without counting water
     pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
         let x = (point.x as usize).min(self.ocean_floor_height_map.len() - 1);
@@ -258,12 +271,12 @@ impl World {
         self.get_biome(point_3d).expect("Failed to get biome at point")
     }
 
-    pub fn get_district_at(&self, point : Point2D) -> Option<DistrictID> {
-        self.district_map[point.x as usize][point.y as usize]
+    pub fn get_parcel_at(&self, point : Point2D) -> Option<ParcelID> {
+        self.parcel_map[point.x as usize][point.y as usize]
     }
 
-    pub fn get_super_district_at(&self, point : Point2D) -> Option<SuperDistrictID> {
-        self.super_district_map[point.x as usize][point.y as usize]
+    pub fn get_district_at(&self, point : Point2D) -> Option<DistrictID> {
+        self.district_map[point.x as usize][point.y as usize]
     }   
 
     pub fn add_height(&self, point : Point2D) -> Point3D {
@@ -387,28 +400,43 @@ impl World {
         }
     }
 
-    pub fn get_urban_points(&self) -> HashSet<Point2D> { // BUG, doesnt get all points for some reason a handful of points are missing
+    /// The "inside the wall" cell set. Once the urban footprint has been
+    /// regularized (see districts/footprint.rs) this returns that footprint;
+    /// otherwise it falls back to the raw union of `Urban`-classified districts.
+    pub fn get_urban_points(&self) -> HashSet<Point2D> {
+        if let Some(footprint) = &self.urban_footprint {
+            return footprint.clone();
+        }
         self.iter_points_2d()
-            .filter(|&point| self.get_district_type(point).expect("Failed to get district type") == DistrictType::Urban)
+            .filter(|&point| self.get_parcel_type(point) == Some(ParcelType::Urban))
             .collect()
     }
 
-    pub fn get_district_type(&self, point: Point2D) -> Option<DistrictType> {
-        self.get_super_district_at(point).and_then(|district_id| {
-            self.super_districts.get(&district_id).map(|district| district.data.district_type)
+    /// Whether `point` is inside the urban area / city wall. Uses the regularized
+    /// footprint when present, else the district classification.
+    pub fn is_urban(&self, point: Point2D) -> bool {
+        match &self.urban_footprint {
+            Some(footprint) => footprint.contains(&point),
+            None => self.get_parcel_type(point) == Some(ParcelType::Urban),
+        }
+    }
+
+    pub fn get_parcel_type(&self, point: Point2D) -> Option<ParcelType> {
+        self.get_district_at(point).and_then(|parcel_id| {
+            self.districts.get(&parcel_id).map(|parcel| parcel.data.parcel_type)
         })
     }
 
-    pub fn get_urban_districts(&self) -> Vec<&District> {
-        let World { districts, super_districts, super_district_map, .. } = self;
+    pub fn get_urban_parcels(&self) -> Vec<&Parcel> {
+        let World { parcels, districts, district_map, .. } = self;
 
-        districts.values()
-            .filter(|district| {
-                let origin = district.data.origin.drop_y();
-                let super_district_id = super_district_map[origin.x as usize][origin.y as usize];
-                if let Some(super_district_id) = super_district_id {
-                    if let Some(super_district) = super_districts.get(&super_district_id) {
-                        return super_district.data.district_type == DistrictType::Urban;
+        parcels.values()
+            .filter(|parcel| {
+                let origin = parcel.data.origin.drop_y();
+                let district_id = district_map[origin.x as usize][origin.y as usize];
+                if let Some(district_id) = district_id {
+                    if let Some(district) = districts.get(&district_id) {
+                        return district.data.parcel_type == ParcelType::Urban;
                     }
                 }
 
