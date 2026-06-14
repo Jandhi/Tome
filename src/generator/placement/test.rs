@@ -813,6 +813,8 @@ mod tests {
         // placement and checked for a road-slab lip afterward (we can't touch
         // `editor` inside the loop; it's borrowed by the build context).
         let mut door_thresholds: Vec<Point3D> = Vec::new();
+        // Ground-floor door exterior cells, for door->road connector paths.
+        let mut door_cells: Vec<P2> = Vec::new();
         for lot in &sub_blocks {
             if lot.is_empty() { continue; }
             let Some(mut plot) = plot_from_block(lot) else { continue; };
@@ -902,10 +904,22 @@ mod tests {
                         bctx.base_y_override = base_lvl;
                         let mut bctx_editor = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                            Ok(_) => {
+                            Ok(out) => {
                                 plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
+                                // Collect ground-floor door exterior cells (one
+                                // out from the door) for door->road connectors.
+                                for (seg, opening) in out.wall_segs.doors() {
+                                    if seg.floor != 0 { continue; }
+                                    let cells = crate::generator::buildings_v2::walls::segment_cells(seg);
+                                    let out_dir: P2 = seg.facing.into();
+                                    for dx in 0..opening.width {
+                                        if let Some(&c) = cells.get((opening.offset + dx) as usize) {
+                                            door_cells.push(c + out_dir);
+                                        }
+                                    }
+                                }
                                 // Collect door-threshold cells: the strip just outside
                                 // the house's road-facing wall at floor level, where a
                                 // road slab leaves a half-block lip in the doorway. We
@@ -1051,6 +1065,21 @@ mod tests {
             .filter(|c| urban.contains(c))
             .collect();
         let road_pct = 100.0 * road_cells.len() as f32 / urban.len().max(1) as f32;
+
+        // Door->road connectors: any door not already on/beside a road gets a
+        // 1-wide sandstone path A*'d to the nearest road, routed around buildings.
+        let blocked_for_paths: HashSet<P2> = urban.iter().copied().filter(|&c| matches!(
+            editor.world().get_claim(c),
+            Some(crate::generator::BuildClaim::Building(_)
+                | crate::generator::BuildClaim::Wall
+                | crate::generator::BuildClaim::Structure(_)
+                | crate::generator::BuildClaim::Gate)
+        )).collect();
+        let connected = crate::generator::paths::connect_doors_to_roads(
+            &editor, &data, &door_cells, &urban, &road_cells, &blocked_for_paths,
+            MaterialId::new("sandstone".to_string()), &mut rng,
+        ).await;
+        println!("Connected {} doors to roads", connected);
         println!(
             "SUMMARY: {} industrial + {} rural resource buildings, {} houses | \
              road surface {} / {} urban cells ({:.1}%)",
