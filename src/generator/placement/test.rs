@@ -194,7 +194,9 @@ mod tests {
 
         // Flatten, then route the tiered network over the gentled terrain.
         let urban = editor.world().get_urban_points();
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         // --- Place the industrial buildings FIRST, on good flattened ground. With
         // no roads yet, `road_bonus` is 0 — these big buildings are sited by
@@ -344,7 +346,9 @@ mod tests {
         let urban = editor.world().get_urban_points();
 
         log_trees(&mut editor, urban.clone()).await;
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
         // Wall + gates — gates seed the collector tier of the network.
@@ -485,7 +489,8 @@ mod tests {
         // Phase 2 — tiered A* road network, connecting the industrial buildings
         // (anchor nodes) and routed around them (the `blocked` barrier). One
         // material for every tier — tiers differ by width, not surface block.
-        let road_material = MaterialId::new("cobblestone".to_string());
+        // Desert settlement: sandstone-paved roads.
+        let road_material = MaterialId::new("sandstone".to_string());
         let road_network = build_road_network(
             &editor, road_material.clone(), road_material, true, &ind_nodes, &blocked, 1,
         ).await;
@@ -687,14 +692,9 @@ mod tests {
         // Road-label viz: each named road (stroke) gets a wool colour, floated
         // two blocks above the debug tier markers. Segments grouped into one road
         // share a colour, so a long avenue reads as one ribbon even where side
-        // streets branch. Alleys (no road_id) are unlabelled.
-        const WOOL_COLORS: [&str; 16] = [
-            "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
-            "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
-            "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
-            "brown_wool", "green_wool", "red_wool", "black_wool",
-        ];
-        const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
+        // streets branch. Alleys (no road_id) are unlabelled. The `label` map is
+        // computed unconditionally because the SVG town map below reuses it; only
+        // the in-world wool placement is gated.
         // One label per cell so roads sharing pavement (a collector merged onto an
         // arterial) don't braid two colors over one street: the higher tier wins
         // the shared cells, and a road only shows its own colour where it diverges.
@@ -731,13 +731,25 @@ mod tests {
                 }
             }
         }
-        let mut named_roads: HashSet<u32> = HashSet::new();
-        for (c, (_, _, rid, y)) in &label {
-            named_roads.insert(*rid);
-            let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
-            editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
+        // In-world wool ribbons — disabled for now. Flip `DEBUG_ROAD_WOOL` to
+        // restore them; the SVG town map is unaffected either way.
+        const DEBUG_ROAD_WOOL: bool = false;
+        if DEBUG_ROAD_WOOL {
+            const WOOL_COLORS: [&str; 16] = [
+                "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+                "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+                "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+                "brown_wool", "green_wool", "red_wool", "black_wool",
+            ];
+            const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
+            let mut named_roads: HashSet<u32> = HashSet::new();
+            for (c, (_, _, rid, y)) in &label {
+                named_roads.insert(*rid);
+                let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
+                editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
+            }
+            println!("Labelled {} named roads", named_roads.len());
         }
-        println!("Labelled {} named roads", named_roads.len());
 
         // ---- Phase 4: hierarchical house placement ----
         // Per lot, walk frontage densest-tier first: arterial → collector →
@@ -801,6 +813,8 @@ mod tests {
         // placement and checked for a road-slab lip afterward (we can't touch
         // `editor` inside the loop; it's borrowed by the build context).
         let mut door_thresholds: Vec<Point3D> = Vec::new();
+        // Ground-floor door exterior cells, for door->road connector paths.
+        let mut door_cells: Vec<P2> = Vec::new();
         for lot in &sub_blocks {
             if lot.is_empty() { continue; }
             let Some(mut plot) = plot_from_block(lot) else { continue; };
@@ -890,10 +904,13 @@ mod tests {
                         bctx.base_y_override = base_lvl;
                         let mut bctx_editor = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                            Ok(_) => {
+                            Ok(out) => {
                                 plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
+                                // Real door entrances (bottom of ramp, if any),
+                                // saved by the pipeline, for door->road connectors.
+                                door_cells.extend(out.door_entrances.iter().copied());
                                 // Collect door-threshold cells: the strip just outside
                                 // the house's road-facing wall at floor level, where a
                                 // road slab leaves a half-block lip in the doorway. We
@@ -984,8 +1001,8 @@ mod tests {
         // shoulder. Painted at the live ground top (h-1), matching the
         // post-flatten/foundation surface. One material for every tier.
         let verge_blocks = [
-            Block { id: "cobblestone".into(), data: None, state: None },
-            Block { id: "cobblestone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
         ];
         let mut verge_total = 0usize;
         for (ti, cells) in tier_verge.iter().enumerate() {
@@ -1022,7 +1039,7 @@ mod tests {
             alley_band.len(), connectors.len(), full_alleys.len(),
         );
         let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c)).collect();
-        let alley_path = Path::new(alley_pts, 1, MaterialId::new("cobblestone".to_string()), PathPriority::Low);
+        let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
         build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
         for c in &full_alleys {
             editor.world_mut().claim(*c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
@@ -1039,6 +1056,25 @@ mod tests {
             .filter(|c| urban.contains(c))
             .collect();
         let road_pct = 100.0 * road_cells.len() as f32 / urban.len().max(1) as f32;
+
+        // Door->road connectors: any door not already on/beside a road gets a
+        // 1-wide sandstone path A*'d to the nearest road, routed around buildings.
+        let blocked_for_paths: HashSet<P2> = urban.iter().copied().filter(|&c| matches!(
+            editor.world().get_claim(c),
+            Some(crate::generator::BuildClaim::Building(_)
+                | crate::generator::BuildClaim::Wall
+                | crate::generator::BuildClaim::Structure(_)
+                | crate::generator::BuildClaim::Gate)
+        )).collect();
+        let already: usize = door_cells.iter().filter(|&&d| {
+            road_cells.contains(&d) || d.neighbours().iter().any(|n| road_cells.contains(n))
+        }).count();
+        println!("Door entrances: {} ({} already on/beside a road)", door_cells.len(), already);
+        let connected = crate::generator::paths::connect_doors_to_roads(
+            &editor, &data, &door_cells, &urban, &road_cells, &blocked_for_paths,
+            MaterialId::new("sandstone".to_string()), &mut rng,
+        ).await;
+        println!("Connected {} doors to roads", connected);
         println!(
             "SUMMARY: {} industrial + {} rural resource buildings, {} houses | \
              road surface {} / {} urban cells ({:.1}%)",
@@ -1147,6 +1183,24 @@ mod tests {
                 Err(e) => println!("Failed to write town.svg: {}", e),
             }
         }
+
+        // Street lighting: run last, after houses have claimed their cells, so
+        // lamps line every road's verge without landing on a building. The city
+        // generator picks the lantern type city-wide.
+        let city_rect = editor.world().world_rect_2d();
+        let city_centre = (city_rect.origin + city_rect.max()) / 2;
+        let cold = {
+            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = n.name();
+            n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+        };
+        let street_lantern: crate::minecraft::Block = if cold {
+            "minecraft:soul_lantern".into()
+        } else {
+            "minecraft:lantern".into()
+        };
+        let lamps = crate::generator::paths::place_street_lights(&editor, &all_paths, &street_lantern).await;
+        println!("Placed {} street lamps", lamps.len());
 
         editor.flush_buffer().await;
 

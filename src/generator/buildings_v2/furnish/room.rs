@@ -157,13 +157,6 @@ pub(super) async fn furnish_room(
     } else {
         frame.ceiling_y(room.floor)
     };
-    let mut slots = wall_slots(&interior);
-    shuffle(&mut slots, rng);
-
-    let mut open_cells: Vec<(i32, i32)> = interior.iter().map(|p| (p.x, p.y)).collect();
-    shuffle(&mut open_cells, rng);
-
-    let room_area = interior.area();
     let is_attic = room.role == RoomRole::Attic;
     // Only attics have a sloped roof above the room — flat-ceiling rooms get
     // None and skip the per-cell clearance check entirely.
@@ -172,15 +165,52 @@ pub(super) async fn furnish_room(
     } else {
         None
     };
+
+    let placed = furnish_interior(
+        editor, &interior, &mut room.constraints, room_list, items,
+        floor_y, ceiling_y, roof_clearance.as_ref(), is_attic,
+        palette, materials, loot_tables, rng,
+    ).await;
+    room.furniture.extend(placed);
+}
+
+/// Furnish an arbitrary interior rect against a (pre-seeded) constraint map
+/// from a room furniture list. Shared by [`furnish_room`] (interior rooms) and
+/// rooftop terrace decoration: the caller supplies the geometry (interior,
+/// floor/ceiling Y, optional roof clearance) and gets back the placed items.
+pub(super) async fn furnish_interior(
+    editor: &Editor,
+    interior: &Rect2D,
+    constraints: &mut ConstraintMap,
+    room_list: &RoomFurnitureList,
+    items: &HashMap<String, Furniture>,
+    floor_y: i32,
+    ceiling_y: i32,
+    roof_clearance: Option<&RoofClearance<'_>>,
+    is_attic: bool,
+    palette: &Palette,
+    materials: &HashMap<MaterialId, Material>,
+    loot_tables: &HashMap<String, LootTable>,
+    rng: &mut RNG,
+) -> Vec<PlacedFurniture> {
+    let mut placed: Vec<PlacedFurniture> = Vec::new();
+
+    let mut slots = wall_slots(interior);
+    shuffle(&mut slots, rng);
+
+    let mut open_cells: Vec<(i32, i32)> = interior.iter().map(|p| (p.x, p.y)).collect();
+    shuffle(&mut open_cells, rng);
+
+    let room_area = interior.area();
     let mut placed_tags: HashSet<String> = HashSet::new();
 
     for entry in &room_list.required {
         let candidates = resolve_candidates(entry, items, room_area, is_attic, &placed_tags, rng);
         for (name, item) in candidates {
             if let Some(cells) = try_place_item(
-                editor, item, &interior, &mut room.constraints,
+                editor, item, interior, constraints,
                 &slots, &open_cells, floor_y, ceiling_y,
-                roof_clearance.as_ref(),
+                roof_clearance,
                 palette, materials, loot_tables, rng,
             ).await {
                 if item.unique {
@@ -188,31 +218,31 @@ pub(super) async fn furnish_room(
                         placed_tags.insert(tag.to_string());
                     }
                 }
-                room.furniture.push(PlacedFurniture { name: name.clone(), cells });
+                placed.push(PlacedFurniture { name: name.clone(), cells });
                 break;
             }
         }
     }
 
     let fill_threshold = room_list.fill_threshold.unwrap_or(DEFAULT_FILL_THRESHOLD);
-    // Rooms that explicitly set a threshold (storage, pantry) run the
-    // optional list in repeated passes until nothing more fits — packing
+    // Rooms that explicitly set a threshold (storage, pantry, roof terrace) run
+    // the optional list in repeated passes until nothing more fits — packing
     // them until the threshold is hit or a full pass places nothing.
     let aggressive = room_list.fill_threshold.is_some();
 
     loop {
-        if room.constraints.fill_ratio() >= fill_threshold {
+        if constraints.fill_ratio() >= fill_threshold {
             break;
         }
         let mut placed_this_pass = false;
         for entry in &room_list.optional {
-            if room.constraints.fill_ratio() >= fill_threshold { break; }
+            if constraints.fill_ratio() >= fill_threshold { break; }
             let candidates = resolve_candidates(entry, items, room_area, is_attic, &placed_tags, rng);
             for (name, item) in candidates {
                 if let Some(cells) = try_place_item(
-                    editor, item, &interior, &mut room.constraints,
+                    editor, item, interior, constraints,
                     &slots, &open_cells, floor_y, ceiling_y,
-                    roof_clearance.as_ref(),
+                    roof_clearance,
                     palette, materials, loot_tables, rng,
                 ).await {
                     if item.unique {
@@ -220,7 +250,7 @@ pub(super) async fn furnish_room(
                             placed_tags.insert(tag.to_string());
                         }
                     }
-                    room.furniture.push(PlacedFurniture { name: name.clone(), cells });
+                    placed.push(PlacedFurniture { name: name.clone(), cells });
                     placed_this_pass = true;
                     break;
                 }
@@ -230,6 +260,8 @@ pub(super) async fn furnish_room(
             break;
         }
     }
+
+    placed
 }
 
 /// Furnish all rooms in a building using loaded furniture data.

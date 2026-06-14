@@ -5,7 +5,6 @@ use crate::generator::BuildClaim;
 use crate::generator::buildings_v2::footprint::Footprint;
 use crate::generator::buildings_v2::pipeline::BuildCtx;
 use crate::geometry::{Point2D, Point3D};
-use crate::minecraft::Block;
 
 /// How many blocks outward from the footprint edge to blend terrain.
 const BLEND_RADIUS: i32 = 5;
@@ -77,24 +76,20 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
                 continue;
             }
 
-            let surface = ctx.editor.world().get_ground_block(point).clone();
+            // Keep the blended cap in the natural surface material; gravity
+            // surfaces (sand/gravel) get a solid sandstone/stone body so the cap
+            // rests on a base and can't fall. (See `terraform_layers`.)
+            //
+            // Sample the real surface block at `terrain_y - 1` (top solid), not
+            // `get_ground_block` — that reads the first-air block above the
+            // surface (air), which would mis-detect the surface and hole it.
+            let surface = ctx
+                .editor
+                .world()
+                .get_block(point.add_y(terrain_y - 1))
+                .unwrap_or_else(|| crate::minecraft::Block::from_id("minecraft:dirt".into()));
             let is_snow = surface.id.as_str().contains("snow");
-            let is_sandy = {
-                let s = surface.id.as_str();
-                s.contains("sand") || s.contains("sandstone")
-            };
-
-            let (fill, top) = if is_sandy {
-                (
-                    Block::from_id("minecraft:sand".into()),
-                    Block::from_id("minecraft:sand".into()),
-                )
-            } else {
-                (
-                    Block::from_id("minecraft:dirt".into()),
-                    Block::from_id("minecraft:grass_block".into()),
-                )
-            };
+            let (fill, top) = crate::generator::terrain::terraform_layers(&surface);
 
             // Convert the old surface to fill material since it's being buried.
             ctx.editor.place_block(&fill, point.add_y(terrain_y - 1)).await;

@@ -81,6 +81,34 @@ fn boundary_distance(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
     dist
 }
 
+/// Choose the (subsurface fill, surface cap) blocks for terraforming a column,
+/// given the natural surface block. Grassy ground gets a dirt body + grass cap.
+/// Gravity surfaces (sand, red sand, gravel) get a SOLID rock body (sandstone /
+/// red sandstone / stone) under the loose cap, so the single top layer rests on
+/// a base and can't fall — and it matches real desert geology (sand on
+/// sandstone). Everything else (stone, terracotta, …) is stable and is filled
+/// and capped with itself. Snow folds into the grassy case; callers re-lay the
+/// snow layer on top.
+pub fn terraform_layers(surface: &Block) -> (Block, Block) {
+    let s = surface.id.as_str();
+    if s.contains("snow")
+        || s.contains("grass_block")
+        || s.contains("dirt")
+        || s.contains("podzol")
+        || s.contains("mycelium")
+    {
+        (Block::from_id("minecraft:dirt".into()), Block::from_id("minecraft:grass_block".into()))
+    } else if s.contains("red_sand") && !s.contains("sandstone") {
+        (Block::from_id("minecraft:red_sandstone".into()), surface.clone())
+    } else if s.contains("sand") && !s.contains("sandstone") {
+        (Block::from_id("minecraft:sandstone".into()), surface.clone())
+    } else if s.contains("gravel") {
+        (Block::from_id("minecraft:stone".into()), surface.clone())
+    } else {
+        (surface.clone(), surface.clone())
+    }
+}
+
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     // Only the points we actually terraform may be written back to the
     // heightmap. Asserting heights for skipped water cells would make the map
@@ -109,21 +137,21 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
             continue;
         }
 
-        // Material choice mirrors foundation `blend_terrain`: dirt+grass for
-        // normal ground, sand for sandy ground, snow re-capped on top. We sample
-        // the ground block only to *detect* the surface type — the placed top is
-        // a literal block, since the sampled cell isn't reliably solid.
-        let surface = editor.world().get_ground_block(xz).clone();
+        // Keep the terraformed cap in the natural surface material: grass stays
+        // grass, sand stays sand, stone stays stone. Gravity surfaces (sand/
+        // gravel) get a SOLID subsurface (sandstone/stone) so the cap has a base
+        // and can't fall. Snow is re-laid on top.
+        //
+        // Sample the real surface block at `terrain_y - 1` (the top solid),
+        // NOT `get_ground_block` — that reads `ground_block_map` at the
+        // first-air heightmap value, i.e. the block ABOVE the surface (air),
+        // which would mis-detect every surface and cap with air (a 1-deep hole).
+        let surface = editor
+            .world()
+            .get_block(point.with_y(terrain_y - 1))
+            .unwrap_or_else(|| Block::from_id("minecraft:dirt".into()));
+        let (fill, top) = terraform_layers(&surface);
         let is_snow = surface.id.as_str().contains("snow");
-        let is_sandy = {
-            let s = surface.id.as_str();
-            s.contains("sand") || s.contains("sandstone")
-        };
-        let (fill, top) = if is_sandy {
-            (Block::from_id("minecraft:sand".into()), Block::from_id("minecraft:sand".into()))
-        } else {
-            (Block::from_id("minecraft:dirt".into()), Block::from_id("minecraft:grass_block".into()))
-        };
 
         if target_y > terrain_y {
             // Raise: subsurface fill from the old surface up to the new top.
@@ -142,6 +170,22 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         editor.place_block_forced(&top, point.with_y(target_y - 1)).await;
         if is_snow {
             editor.place_block_forced(&surface, point.with_y(target_y)).await;
+        }
+
+        // When we're terraforming through water (skip_water = false, e.g. the
+        // city flatten), clear any water still standing above the new surface so
+        // the settlement has no awkward leftover puddles. Scan up from the
+        // surface until the water stops.
+        if !skip_water {
+            let mut y = target_y;
+            while editor
+                .world()
+                .get_block(point.with_y(y))
+                .is_some_and(|b| b.id.is_water())
+            {
+                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+                y += 1;
+            }
         }
     }
 
