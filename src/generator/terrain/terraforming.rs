@@ -138,12 +138,18 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         }
 
         // Keep the terraformed cap in the natural surface material: grass stays
-        // grass, sand stays sand, stone stays stone. Only genuinely grassy
-        // ground gets a dirt body under a grass cap; every other surface is
-        // capped with itself, so we never paint foreign grass over rock or sand.
-        // Gravity surfaces (sand/gravel) get a SOLID subsurface (sandstone/
-        // stone) so the cap has a base and can't fall. Snow is re-laid on top.
-        let surface = editor.world().get_ground_block(xz).clone();
+        // grass, sand stays sand, stone stays stone. Gravity surfaces (sand/
+        // gravel) get a SOLID subsurface (sandstone/stone) so the cap has a base
+        // and can't fall. Snow is re-laid on top.
+        //
+        // Sample the real surface block at `terrain_y - 1` (the top solid),
+        // NOT `get_ground_block` — that reads `ground_block_map` at the
+        // first-air heightmap value, i.e. the block ABOVE the surface (air),
+        // which would mis-detect every surface and cap with air (a 1-deep hole).
+        let surface = editor
+            .world()
+            .get_block(point.with_y(terrain_y - 1))
+            .unwrap_or_else(|| Block::from_id("minecraft:dirt".into()));
         let (fill, top) = terraform_layers(&surface);
         let is_snow = surface.id.as_str().contains("snow");
 

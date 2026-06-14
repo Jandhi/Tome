@@ -79,7 +79,15 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
             // Keep the blended cap in the natural surface material; gravity
             // surfaces (sand/gravel) get a solid sandstone/stone body so the cap
             // rests on a base and can't fall. (See `terraform_layers`.)
-            let surface = ctx.editor.world().get_ground_block(point).clone();
+            //
+            // Sample the real surface block at `terrain_y - 1` (top solid), not
+            // `get_ground_block` — that reads the first-air block above the
+            // surface (air), which would mis-detect the surface and hole it.
+            let surface = ctx
+                .editor
+                .world()
+                .get_block(point.add_y(terrain_y - 1))
+                .unwrap_or_else(|| crate::minecraft::Block::from_id("minecraft:dirt".into()));
             let is_snow = surface.id.as_str().contains("snow");
             let (fill, top) = crate::generator::terrain::terraform_layers(&surface);
 
