@@ -178,28 +178,28 @@ recipes:
       honey: 2
       beeswax: 1
     building: apiary
-    production_painter: 
+    production_painter: bee_area
 
   gather_wool:
     inputs: {}
     outputs:
       wool: 2
     building: shepherds_hut
-    production_painter: 
+    production_painter: sheep_pasture
 
   gather_sugar_cane:
     inputs: {}
     outputs:
       sugar_cane: 2
     building: sugar_plantation
-    production_painter:
+    production_painter: sugar_cane_fields
 
   gather_cows:
     inputs: {}
     outputs:
       cow: 1
     building: ranch
-    production_painter: 
+    production_painter: cattle_ranch
 
   gather_coal:
     inputs: {}

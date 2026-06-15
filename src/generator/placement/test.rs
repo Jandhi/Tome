@@ -103,7 +103,7 @@ mod tests {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &override_painter {
-                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
@@ -413,7 +413,7 @@ mod tests {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
@@ -1032,7 +1032,7 @@ mod tests {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
@@ -1239,7 +1239,7 @@ mod tests {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&district, painter, &data, &mut editor, &mut rng).await;
+                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", assignment.building, e),

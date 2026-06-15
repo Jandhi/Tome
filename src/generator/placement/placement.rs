@@ -18,8 +18,16 @@ use crate::{
 
 pub const NUM_CANDIDATES: usize = 10;
 pub const WATER_MARGIN_RADIUS: i32 = 4;
-pub const BLEND_RADIUS: i32 = 4;
-pub const MAX_BLEND_DELTA: i32 = 4;
+/// Width (cells) of the ring around a footprint that is graded from the
+/// flattened pad height back down to natural terrain. Wider = gentler grade on
+/// sloped sites, so the pad edges taper instead of dropping off as a cliff.
+pub const BLEND_RADIUS: i32 = 6;
+/// Maximum footprint height range (highest minus lowest natural ground cell)
+/// allowed for a normal building. Footprints steeper than this are hard-rejected
+/// during candidate selection — past this the per-building flatten leaves raw
+/// cut/fill faces no blend ring can hide. Bypassed by `Structure::allow_steep`
+/// (e.g. mines, which are meant to cut into a hillside).
+pub const MAX_PLACEMENT_SLOPE: i32 = 4;
 pub const YARD_RADIUS: i32 = 2;
 pub const ROAD_SEARCH_RADIUS: i32 = 8;
 /// When seeding urban industrial candidates, prefer interior cells within this
@@ -46,6 +54,9 @@ pub struct Candidate {
 #[derive(Debug, Clone, Copy)]
 pub struct CandidateScore {
     pub flatness: f32,
+    /// Footprint height range (max minus min natural ground), in blocks. Used as
+    /// the hard slope-reject metric; `flatness` (stddev) still feeds the score.
+    pub slope: i32,
     pub water_margin: i32,
     pub edge_penalty: f32,
     pub road_bonus: f32,
@@ -339,6 +350,11 @@ fn select_best_candidate(
             let Some(score) = score_candidate(&rect, editor) else {
                 continue; // hard reject (water inside footprint)
             };
+            // Hard reject footprints too steep to flatten cleanly, unless the
+            // structure opts into steep ground (e.g. mines).
+            if !structure.allow_steep && score.slope > MAX_PLACEMENT_SLOPE {
+                continue;
+            }
 
             match &best {
                 None => best = Some((candidate, score, rect)),
@@ -524,6 +540,8 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
     let variance =
         heights.iter().map(|h| (*h as f32 - mean).powi(2)).sum::<f32>() / heights.len() as f32;
     let flatness = variance.sqrt();
+    let slope = heights.iter().copied().max().unwrap_or(0)
+        - heights.iter().copied().min().unwrap_or(0);
 
     let mut water_margin = 0;
     for p in expanded_rect_cells(rect, WATER_MARGIN_RADIUS) {
@@ -545,6 +563,7 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
 
     Some(CandidateScore {
         flatness,
+        slope,
         water_margin,
         edge_penalty,
         road_bonus,
@@ -651,9 +670,10 @@ fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Po
             continue;
         }
         let natural_y = world.get_non_tree_height(p);
-        if (natural_y - target_y).abs() > MAX_BLEND_DELTA {
-            continue;
-        }
+        // Always grade toward natural terrain — no early bail on steep deltas, so
+        // the pad edge ramps down instead of leaving a cliff. The footprint slope
+        // is already bounded by MAX_PLACEMENT_SLOPE (except allow_steep buildings,
+        // which accept the larger earthworks), so the ramp stays reasonable.
         let t = dist as f32 / BLEND_RADIUS as f32;
         let blended = (target_y as f32 * (1.0 - t) + natural_y as f32 * t).round() as i32;
         out.insert(Point3D::new(p.x, blended, p.y));

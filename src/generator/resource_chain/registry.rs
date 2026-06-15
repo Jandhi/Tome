@@ -9,7 +9,7 @@ use crate::generator::nbts::{Structure, StructureType};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
 
-use super::production_painter::{ProductionPainter, ProductionPaintersFile};
+use super::production_painter::{AnimalNamesFile, ProductionPainter, ProductionPaintersFile};
 use super::types::{BiomeResourcesFile, ParcelResourceAssignment, RecipeDef, RecipesFile, ResourceDef, ResourcesFile};
 
 /// A flat-terrain resource is dropped from a parcel's candidate set when
@@ -21,10 +21,11 @@ use super::types::{BiomeResourcesFile, ParcelResourceAssignment, RecipeDef, Reci
 const FLAT_TERRAIN_RUGGEDNESS_LIMIT: f32 = 0.5;
 
 /// Roughness/gradient at or above which a parcel is treated as maximally rugged
-/// (ruggedness saturates to 1.0). Deliberately below the districts' off-limits thresholds
-/// (roughness 6.0, gradient 1.0) because the cost of terraforming a field climbs well
-/// before a parcel is rejected outright.
-const FLAT_TERRAIN_MAX_ROUGHNESS: f32 = 4.0;
+/// (ruggedness saturates to 1.0). Roughness is aligned with the districts' off-limits
+/// threshold (roughness 6.0) so only genuinely rough ground saturates; gradient stays
+/// below its off-limits cap (1.0) because slope drives terraforming cost faster than
+/// local roughness does.
+const FLAT_TERRAIN_MAX_ROUGHNESS: f32 = 6.0;
 const FLAT_TERRAIN_MAX_GRADIENT: f32 = 0.6;
 
 /// Score penalty per prior assignment a candidate already has *beyond the least-used
@@ -106,6 +107,14 @@ pub struct ResourceRegistry {
     biome_resources: HashMap<String, Vec<String>>,
     /// painter name -> production painter definition
     pub production_painters: HashMap<String, ProductionPainter>,
+    /// Names randomly assigned to animals spawned by the pasture/ranch painter.
+    pub animal_names: Vec<String>,
+    /// Optional decorative prefixes (e.g. "Ol'") prepended to a name ~10% of the time.
+    pub animal_name_prefixes: Vec<String>,
+    /// Optional decorative suffixes (e.g. "the Great") appended to a name ~10% of the time.
+    pub animal_name_suffixes: Vec<String>,
+    /// Funny names for bees placed inside beehives by the bee_area painter.
+    pub bee_names: Vec<String>,
 }
 
 pub struct ResolvedChains {
@@ -130,6 +139,7 @@ impl ResourceRegistry {
         let recipes: RecipesFile = load_yaml(base.join("recipes.yaml"))?;
         let biome_resources: BiomeResourcesFile = load_yaml(base.join("biome_resources.yaml"))?;
         let painters_file: ProductionPaintersFile = load_yaml(base.join("production_painters.yaml"))?;
+        let animal_names: AnimalNamesFile = load_yaml(base.join("animal_names.yaml"))?;
 
         let mut registry = Self::from_parts(
             resources.resources,
@@ -137,6 +147,10 @@ impl ResourceRegistry {
             biome_resources.biome_resources,
         )?;
         registry.production_painters = painters_file.production_painters;
+        registry.animal_names = animal_names.animal_names;
+        registry.animal_name_prefixes = animal_names.name_prefixes;
+        registry.animal_name_suffixes = animal_names.name_suffixes;
+        registry.bee_names = animal_names.bee_names;
         registry.validate_painters()?;
         Ok(registry)
     }
@@ -163,6 +177,10 @@ impl ResourceRegistry {
             raw_cost,
             biome_resources,
             production_painters: HashMap::new(),
+            animal_names: Vec::new(),
+            animal_name_prefixes: Vec::new(),
+            animal_name_suffixes: Vec::new(),
+            bee_names: Vec::new(),
         })
     }
 

@@ -14,6 +14,12 @@ pub struct ResourceDef {
     /// `0.0` (the default) means terrain-agnostic; `1.0` means a full penalty.
     #[serde(default)]
     pub flat_terrain: f32,
+    /// For mined resources, the Minecraft ore block this resource appears as in the
+    /// world (stone variant, e.g. `minecraft:coal_ore`). The mine painter places it
+    /// in outcrops and surface seams, switching to the deepslate variant where the
+    /// local rock is deepslate. `None` for non-mined resources.
+    #[serde(default)]
+    pub ore_block: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

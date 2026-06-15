@@ -18,12 +18,30 @@ pub async fn flatten_urban_area(
     smooth_iters: usize,
     skip_water: bool,
 ) {
-    if urban.is_empty() {
+    feathered_flatten(editor, urban, feather, smooth_iters, skip_water).await;
+}
+
+/// Flatten `region` toward a smoothed height field, feathering back to natural
+/// terrain over `feather` cells measured inward from the region boundary, so the
+/// flattened area melts into the surrounding landscape instead of ending in a
+/// step. Shared by the urban flatten and rural production-area smoothing.
+///
+/// - `smooth_iters`: passes of wide (5-away) neighbour averaging.
+/// - `feather`: width (cells) of the flatten→natural transition band.
+/// - `skip_water`: forwarded to [`force_height`] (true leaves lakes alone).
+pub async fn feathered_flatten(
+    editor: &mut Editor,
+    region: &HashSet<Point2D>,
+    feather: i32,
+    smooth_iters: usize,
+    skip_water: bool,
+) {
+    if region.is_empty() {
         return;
     }
 
-    // Natural surface height at each urban cell (skipping tree canopy).
-    let natural: HashSet<Point3D> = urban
+    // Natural surface height at each region cell (skipping tree canopy).
+    let natural: HashSet<Point3D> = region
         .iter()
         .map(|p| editor.world().add_non_tree_height(*p))
         .collect();
@@ -34,13 +52,13 @@ pub async fn flatten_urban_area(
     let smoothed_by_xz: HashMap<Point2D, i32> = smoothed.iter().map(|p| (p.drop_y(), p.y)).collect();
     let natural_by_xz: HashMap<Point2D, i32> = natural.iter().map(|p| (p.drop_y(), p.y)).collect();
 
-    // Distance (in cells) from each urban cell to the nearest non-urban cell,
-    // via multi-source BFS seeded on the boundary. Drives the feather.
-    let dist = boundary_distance(urban);
+    // Distance (in cells) from each region cell to the nearest cell outside the
+    // region, via multi-source BFS seeded on the boundary. Drives the feather.
+    let dist = boundary_distance(region);
     let feather = feather.max(1);
 
     let mut targets: HashSet<Point3D> = HashSet::new();
-    for &p in urban {
+    for &p in region {
         let natural_y = natural_by_xz[&p];
         let smoothed_y = *smoothed_by_xz.get(&p).unwrap_or(&natural_y);
         let d = *dist.get(&p).unwrap_or(&0);

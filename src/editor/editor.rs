@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -145,6 +145,36 @@ impl Editor {
 
         let positioned = PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into());
         let _ = self.provider.put_blocks_no_updates(&vec![positioned]).await;
+    }
+
+    /// Spawns entities at the given local points. Each tuple is
+    /// `(point, entity_id, nbt_data)` where `entity_id` is e.g. `"minecraft:sheep"`
+    /// and `nbt_data` is an optional SNBT string (e.g. a `CustomName` tag). Points
+    /// are local to the build area; absolute coordinates are sent to the server.
+    /// No-op in offline mode (like `flush_buffer`).
+    pub async fn spawn_entities(&self, entities: &[(Point3D, String, Option<String>)]) {
+        if self.offline || entities.is_empty() {
+            return;
+        }
+
+        let positioned: Vec<PositionedEntity> = entities
+            .iter()
+            .map(|(point, id, data)| {
+                let abs = *point + self.build_area.origin;
+                PositionedEntity {
+                    x: abs.x.into(),
+                    y: abs.y.into(),
+                    z: abs.z.into(),
+                    id: id.clone(),
+                    data: data.clone(),
+                }
+            })
+            .collect();
+
+        // Origin 0/0/0 — entity coordinates above are already absolute.
+        if let Err(e) = self.provider.put_entities(0, 0, 0, &positioned).await {
+            warn!("spawn_entities: failed to spawn {} entities: {}", positioned.len(), e);
+        }
     }
 
     pub fn get_block(&self, point: Point3D) -> Block {

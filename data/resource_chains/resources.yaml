@@ -43,10 +43,12 @@ resources:
     name: Iron Ore
     category: mineral
     tier: 0
+    ore_block: minecraft:iron_ore       # mine painter switches to deepslate_iron_ore on deepslate
   coal:
     name: Coal
     category: mineral
     tier: 0
+    ore_block: minecraft:coal_ore        # mine painter switches to deepslate_coal_ore on deepslate
   honey:
     name: Honey
     category: food

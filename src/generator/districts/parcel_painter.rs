@@ -13,7 +13,11 @@ pub async fn replace_ground(
     editor: &mut Editor,
     height_offset: Option<i32>,
     permit_blocks: Option<&HashSet<BlockID>>, // should this be a set of blocks to permit or a set of blocks to ignore? currently treated as ignore
-    ignore_water: Option<bool>) { //thereotically could be part of permit blocks
+    ignore_water: Option<bool>,
+    // When true, place even over an equally-dense block. Needed when *replacing* the
+    // surface block (e.g. grass -> farmland/dirt/water), since `place_block`'s density
+    // guard skips same-density swaps and would leave the original surface untouched.
+    force: bool) { //thereotically could be part of permit blocks
         for point in points {
             if editor.world_mut().is_claimed(*point) { // already built on point
                 continue;
@@ -26,7 +30,7 @@ pub async fn replace_ground(
 
             let mut height = editor.world_mut().get_non_tree_height(*point) - 1; // -1 to ensure we are placing on the ground
             let block = editor.get_block(Point3D::new(point.x, height, point.y));
-            
+
             if let Some(permit_blocks) = permit_blocks {
                 if permit_blocks.contains(&block.id) {
                     continue;
@@ -36,7 +40,12 @@ pub async fn replace_ground(
                 height += offset;
             }
             let block_pos = rng.choose_weighted(block_dict);
-            editor.place_block(&block_list[*block_pos], Point3D::new(point.x, height, point.y)).await;
+            let pos = Point3D::new(point.x, height, point.y);
+            if force {
+                editor.place_block_forced(&block_list[*block_pos], pos).await;
+            } else {
+                editor.place_block(&block_list[*block_pos], pos).await;
+            }
 
         }
     }

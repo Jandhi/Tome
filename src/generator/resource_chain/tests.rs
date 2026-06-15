@@ -489,8 +489,10 @@ mod tests {
     async fn colour_districts_by_resource() {
         use crate::editor::World;
         use crate::generator::districts::{generate_parcels, ParcelType};
-        use crate::geometry::Point3D;
-        use crate::http_mod::{GDMCHTTPProvider, HeightMapType};
+        use crate::generator::resource_chain::ProductionPainter;
+        use crate::generator::terrain::{feathered_flatten, flatten_urban_area};
+        use crate::geometry::{Point2D, Point3D};
+        use crate::http_mod::GDMCHTTPProvider;
         use crate::noise::Seed;
         use crate::util::init_logger;
 
@@ -501,16 +503,6 @@ mod tests {
 
         let provider = GDMCHTTPProvider::new();
         let build_area = provider.get_build_area().await.expect("Failed to get build area");
-        let height_map = provider
-            .get_heightmap(
-                build_area.origin.x,
-                build_area.origin.z,
-                build_area.size.x,
-                build_area.size.z,
-                HeightMapType::MotionBlockingNoPlants,
-            )
-            .await
-            .expect("Failed to get heightmap");
 
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
@@ -532,6 +524,81 @@ mod tests {
 
         let result = registry.resolve_for_parcels(&rural_analysis, &mut rng);
 
+        // ── Terraforming (no painters applied) ───────────────────────────────
+        // Reproduce only the earthworks the real pipeline performs before any
+        // blocks are painted: grade the urban interior, and smooth each rural
+        // production area per its assigned painter's flatten_strength. The
+        // painters themselves (palettes, irrigation, claims) are intentionally
+        // skipped — we just want to see the terraformed surface.
+
+        // Urban grading — same feather / iteration count as the road + placement
+        // pipeline (see placement/test.rs, districts/test.rs).
+        let urban = editor.world().get_urban_points();
+        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+
+        // Rural production-area smoothing. Mirrors paint_production_area's feathered
+        // smoothing: flatten the field interior + border ring, reaching a couple
+        // blocks into neighbouring land, and grade back to natural at the outer
+        // edge. No building is placed here, so there are no claims to exclude.
+        const EDGE_BUFFER: i32 = 3;
+        const NEIGHBOUR_REACH: i32 = 2;
+        for (id, assignment) in &result.parcel_assignments {
+            let Some(painter_name) = &assignment.production_painter else { continue };
+            let flatten_strength = match registry.production_painters.get(painter_name) {
+                Some(ProductionPainter::Palettes { flatten_strength, .. }) => *flatten_strength,
+                _ => continue,
+            };
+            let smooth_iters = (flatten_strength.clamp(0.0, 1.0) * 5.0).round() as usize;
+            if smooth_iters == 0 {
+                continue;
+            }
+
+            // Snapshot the geometry so the editor can be borrowed mutably below.
+            let Some((edges, points)) = editor.world().districts.get(id)
+                .map(|d| (d.data.edges.clone(), d.data.points_2d.clone()))
+            else {
+                continue;
+            };
+
+            let edge_buffer: HashSet<Point2D> = edges.iter()
+                .flat_map(|p| {
+                    let p2 = p.drop_y();
+                    (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
+                        (-EDGE_BUFFER..=EDGE_BUFFER).map(move |dz| Point2D::new(p2.x + dx, p2.y + dz))
+                    })
+                })
+                .collect();
+
+            // The district's own non-water cells (interior + border ring).
+            let own_cells: HashSet<Point2D> = points.iter()
+                .filter(|&&p| !editor.world().is_water(p))
+                .copied()
+                .collect();
+            // Skip parcels with no interior beyond the edge buffer (matches the
+            // painter's `free_cells.is_empty()` early-out).
+            if !own_cells.iter().any(|p| !edge_buffer.contains(p)) {
+                continue;
+            }
+
+            // Reach a couple blocks into neighbouring land for a feathered transition.
+            let mut region = own_cells.clone();
+            for &p in &own_cells {
+                for dx in -NEIGHBOUR_REACH..=NEIGHBOUR_REACH {
+                    for dz in -NEIGHBOUR_REACH..=NEIGHBOUR_REACH {
+                        let q = Point2D::new(p.x + dx, p.y + dz);
+                        if own_cells.contains(&q) {
+                            continue;
+                        }
+                        if editor.world().is_in_bounds_2d(q) && !editor.world().is_water(q) {
+                            region.insert(q);
+                        }
+                    }
+                }
+            }
+
+            feathered_flatten(&mut editor, &region, EDGE_BUFFER + NEIGHBOUR_REACH, smooth_iters, true).await;
+        }
+
         // Snapshot each district's type and (for rural) its assigned resource so we
         // don't hold a borrow on the world while painting through the editor.
         let district_color: HashMap<_, _> = editor.world().districts.iter()
@@ -552,6 +619,13 @@ mod tests {
 
         let glass = Block { id: "glass".into(), data: None, state: None };
 
+        // Edge cells flattened by 2D coordinate — terraforming may have moved an
+        // edge cell's Y, so a 3D `edges.contains` check would miss it. Color comes
+        // from `district_map`; this set only decides whether to cap with glass.
+        let edge_cells: HashSet<Point2D> = editor.world().districts.values()
+            .flat_map(|d| d.data.edges.iter().map(|e| e.drop_y()))
+            .collect();
+
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
                 let Some(district_id) = editor.world().district_map[x as usize][z as usize] else {
@@ -559,12 +633,10 @@ mod tests {
                 };
 
                 let block = district_color.get(&district_id).expect("district color");
-                let height = height_map[x as usize][z as usize] - build_area.origin.y;
-                let point = Point3D::new(x, height, z);
+                // Post-terraform surface height (local, matching block-write coords).
+                let height = editor.world().get_height_at(Point2D::new(x, z));
 
-                let on_edge = editor.world().districts.get(&district_id)
-                    .map(|d| d.data.edges.contains(&point))
-                    .unwrap_or(false);
+                let on_edge = edge_cells.contains(&Point2D::new(x, z));
 
                 if on_edge {
                     editor.place_block(&glass, Point3D::new(x, height, z)).await;
@@ -590,6 +662,193 @@ mod tests {
         for (resource, color) in &assigned {
             println!("║   {:<12} → {}", resource, color);
         }
+        println!("╚═════════════════════════════════════════════════╝\n");
+    }
+
+    /// End-to-end visual test (requires a live Minecraft server).
+    ///
+    /// Builds the rural production areas for real: city terraforming + wall, then
+    /// per-rural-parcel building placement and `paint_production_area` (the actual
+    /// painters — crops, logged clearings, etc.). Urban cells are overlaid with
+    /// blue wool and OffLimits with red so the city shell and reserved land read
+    /// clearly, while rural districts keep their painted production areas visible.
+    /// No urban buildings and no roads are placed.
+    ///
+    /// Run with:
+    ///   cargo test colour_districts_with_production_painters -- --nocapture
+    #[tokio::test]
+    async fn colour_districts_with_production_painters() {
+        use crate::editor::World;
+        use crate::generator::data::LoadedData;
+        use crate::generator::districts::{build_wall, generate_parcels, ParcelType, WallType};
+        use crate::generator::materials::{MaterialId, Placer};
+        use crate::generator::nbts::StructureType;
+        use crate::generator::placement::place_rural_building;
+        use crate::generator::resource_chain::paint_production_area;
+        use crate::generator::terrain::flatten_urban_area;
+        use crate::geometry::{Point2D, Point3D};
+        use crate::http_mod::GDMCHTTPProvider;
+        use crate::noise::Seed;
+        use crate::util::init_logger;
+
+        // ── Test tunables ────────────────────────────────────────────────────
+        // When true, every rural parcel is forced to use OVERRIDE_BUILDING (and
+        // its gather recipe's painter) instead of its resource-chain assignment.
+        // Handy for eyeballing one painter across the whole map — pair with a
+        // superflat world to test a painter on perfect terrain.
+        const OVERRIDE_ALL_RURAL: bool = true;
+        // Gather building forced when OVERRIDE_ALL_RURAL is set. Must be a building
+        // declared by a gather recipe (inputs: {}) in recipes.yaml, e.g.
+        // "farm" (wheat_fields), "woodcutter_hut" (logging_area),
+        // "shepherds_hut" (sheep_pasture), "ranch" (cattle_ranch),
+        // "sugar_plantation" (sugar_cane_fields), "iron_mine"/"coal_mine" (mine_terrain).
+        const OVERRIDE_BUILDING: &str = "iron_mine";
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_parcels(seed, &mut editor).await;
+
+        let data = LoadedData::load().expect("Failed to load generator data");
+
+        // ── Resource chain over rural districts ──────────────────────────────
+        let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
+            .filter(|(id, _)| {
+                editor.world().districts.get(id)
+                    .map(|d| d.data.parcel_type == ParcelType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
+
+        // ── City terraforming ────────────────────────────────────────────────
+        let urban = editor.world().get_urban_points();
+        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+
+        // ── City wall + gates ────────────────────────────────────────────────
+        // Built before placement so wall cells are claimed first (otherwise a
+        // rural building could be sited where the wall later goes).
+        let material = MaterialId::new("stone_bricks".to_string());
+        let mut wall_rng = rng.derive();
+        let mut placer_rng = rng.derive();
+        let mut placer = Placer::new(&data.materials, &mut placer_rng);
+        build_wall(
+            &urban,
+            &mut editor,
+            &mut wall_rng,
+            &mut placer,
+            &material,
+            &data.structures,
+            WallType::StandardWithInner,
+        )
+        .await;
+
+        // ── Rural buildings + production painters (the real painters) ────────
+        // When OVERRIDE_ALL_RURAL is set, resolve the forced building's painter
+        // from its gather recipe (inputs: {}) so every parcel uses the same method.
+        let override_painter: Option<String> = if OVERRIDE_ALL_RURAL {
+            data.resource_registry.recipes().values()
+                .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING)
+                .and_then(|r| r.production_painter.clone())
+        } else {
+            None
+        };
+
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
+        sd_ids.sort_by_key(|id| id.0);
+        let mut placed = 0usize;
+        for sd_id in &sd_ids {
+            let assignment = &result.parcel_assignments[sd_id];
+            let (building, painter) = if OVERRIDE_ALL_RURAL {
+                (OVERRIDE_BUILDING.to_string(), override_painter.clone())
+            } else {
+                (assignment.building.clone(), assignment.production_painter.clone())
+            };
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else { continue };
+            let structure_type = StructureType(building.clone());
+            let Some(structure) = data.structures.get(&structure_type).cloned() else {
+                log::warn!("No structure for building '{}' (parcel {:?})", building, sd_id);
+                continue;
+            };
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
+                Ok(()) => {
+                    placed += 1;
+                    if let Some(painter) = &painter {
+                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
+                    }
+                }
+                Err(e) => log::warn!("Rural placement failed for '{}': {}", building, e),
+            }
+        }
+        log::info!("Placed {} of {} rural buildings", placed, sd_ids.len());
+
+        // ── Overlay wool on urban (blue) and off-limits (red) only ───────────
+        // Rural cells are left as painted so the production areas stay visible.
+        // Skip claimed cells (wall, building footprints) so we don't wool over them.
+        let blue = Block { id: "blue_wool".into(), data: None, state: None };
+        let red = Block { id: "red_wool".into(), data: None, state: None };
+        let glass = Block { id: "glass".into(), data: None, state: None };
+
+        // Edge cells (2D) of every district — capped with glass so all borders
+        // (rural included) are identifiable, even where rural fields are left
+        // as-painted rather than wooled.
+        let edge_cells: HashSet<Point2D> = editor.world().districts.values()
+            .flat_map(|d| d.data.edges.iter().map(|e| e.drop_y()))
+            .collect();
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let p = Point2D::new(x, z);
+                let Some(district_id) = editor.world().district_map[x as usize][z as usize] else {
+                    continue;
+                };
+                let ptype = {
+                    let Some(district) = editor.world().districts.get(&district_id) else { continue };
+                    district.data.parcel_type
+                };
+                // Don't paint over the wall or building footprints.
+                if editor.world().is_claimed(p) {
+                    continue;
+                }
+                let on_edge = edge_cells.contains(&p);
+                let height = editor.world().get_height_at(p);
+                match ptype {
+                    ParcelType::Urban | ParcelType::OffLimits => {
+                        let block = if matches!(ptype, ParcelType::Urban) { &blue } else { &red };
+                        if on_edge {
+                            editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                            editor.place_block(block, Point3D::new(x, height - 1, z)).await;
+                        } else {
+                            editor.place_block(block, Point3D::new(x, height, z)).await;
+                        }
+                    }
+                    // Rural / Unknown: keep the painted surface, but cap the border
+                    // with glass so district boundaries stay visible.
+                    _ => {
+                        if on_edge {
+                            editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+
+        println!("\n╔══ District Overlay ═════════════════════════════╗");
+        println!("║ Urban     → blue_wool (wall left as built)");
+        println!("║ OffLimits → red_wool");
+        println!("║ Rural     → real production painters + buildings");
+        println!("║ Borders   → glass (all district edges)");
         println!("╚═════════════════════════════════════════════════╝\n");
     }
 
