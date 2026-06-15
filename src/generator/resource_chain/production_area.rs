@@ -540,24 +540,21 @@ async fn sugarcane_production_painter(
 }
 
 /// Builds beehive block-entity NBT filled with three bees, each given a random
-/// (visible) funny name from `bee_names` when any are loaded. Bees emerge to buzz
-/// the canopy (low occupation/in-hive ticks). Tweak here if a Minecraft version
-/// changes the beehive `Bees` / bee-name format.
-fn beehive_nbt(bee_names: &[String], rng: &mut RNG) -> String {
+/// (visible) funny name from `bee_names` — decorated with the same ~10% prefix /
+/// ~10% suffix system as pasture animals (e.g. "Sir Buzz", "Beeyonce the Great").
+/// Bees emerge to buzz the canopy (low occupation/in-hive ticks). Tweak here if a
+/// Minecraft version changes the beehive `Bees` / bee-name format.
+fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], rng: &mut RNG) -> String {
     const BEE_COUNT: usize = 3;
-    // Distinct names per hive where possible; fewer/none if the list is short/empty.
-    let chosen = rng.choose_many(bee_names, BEE_COUNT);
+    // Distinct base names per hive where possible; fewer/none if the list is short/empty.
+    let chosen: Vec<String> = rng.choose_many(bee_names, BEE_COUNT).into_iter().cloned().collect();
 
     let bees: Vec<String> = (0..BEE_COUNT)
         .map(|i| {
             let entity = match chosen.get(i) {
-                Some(name) => {
-                    // Escape for the single-quoted SNBT string wrapping the JSON.
-                    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
-                    format!(
-                        "{{id:\"minecraft:bee\",CustomName:'{{\"text\":\"{}\"}}',CustomNameVisible:1b}}",
-                        escaped
-                    )
+                Some(base) => {
+                    let name = decorate_name(base, prefixes, suffixes, rng);
+                    format!("{{id:\"minecraft:bee\",{}}}", custom_name_snbt(&name))
                 }
                 None => "{id:\"minecraft:bee\"}".to_string(),
             };
@@ -601,13 +598,19 @@ fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)>
 }
 
 /// Builds a populated beehive facing `facing`, with a random honey level and
-/// randomly-named bees.
-fn make_beehive(facing: Point2D, bee_names: &[String], rng: &mut RNG) -> Block {
+/// randomly-named, prefix/suffix-decorated bees.
+fn make_beehive(
+    facing: Point2D,
+    bee_names: &[String],
+    prefixes: &[String],
+    suffixes: &[String],
+    rng: &mut RNG,
+) -> Block {
     let state = HashMap::from([
         ("facing".to_string(), cardinal_to_str(&facing).unwrap_or_else(|| "north".to_string())),
         ("honey_level".to_string(), rng.rand_i32_range(0, 6).to_string()),
     ]);
-    Block::new("minecraft:beehive".into(), Some(state), Some(beehive_nbt(bee_names, rng)))
+    Block::new("minecraft:beehive".into(), Some(state), Some(beehive_nbt(bee_names, prefixes, suffixes, rng)))
 }
 
 /// Hangs a populated beehive in the canopy of a percentage of the area's trees —
@@ -641,11 +644,14 @@ async fn bee_area_production_painter(
     let trees = group_trees(free_cells, editor);
     let count = ((trees.len() as f32) * p.percent.clamp(0.0, 1.0)).round() as usize;
     let selected = rng.choose_many(&trees, count);
-    let bee_names = &data.resource_registry.bee_names;
+    let reg = &data.resource_registry;
+    let bee_names = &reg.bee_names;
+    let prefixes = &reg.animal_name_prefixes;
+    let suffixes = &reg.animal_name_suffixes;
 
     for tree in &selected {
         if let Some((pos, facing)) = find_hive_spot(tree.trunk, editor) {
-            let hive = make_beehive(facing, bee_names, rng);
+            let hive = make_beehive(facing, bee_names, prefixes, suffixes, rng);
             // Forced so it can take a leaf cell as well as an air pocket.
             editor.place_block_forced(&hive, pos).await;
         }
@@ -691,7 +697,12 @@ fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
     for c in ordered.iter().step_by(step) {
         let top = editor.world().get_non_tree_height(*c) - 1;
         for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
-            if let Some(rock) = natural_rock_id(&editor.get_block(Point3D::new(c.x, top - dy, c.y)).id) {
+            // `try_get_block` (not `get_block`) so scanning below the world floor —
+            // common for a mine near bedrock — returns None instead of panicking.
+            let Some(block) = editor.try_get_block(Point3D::new(c.x, top - dy, c.y)) else {
+                break;
+            };
+            if let Some(rock) = natural_rock_id(&block.id) {
                 *counts.entry(rock).or_insert(0) += 1;
                 break;
             }
@@ -754,6 +765,11 @@ async fn place_outcrop(
                 continue;
             }
             let cell = Point2D::new(center.x + dx, center.y + dz);
+            // An outcrop can spill past its free-cell centre to the map edge;
+            // `get_non_tree_height` indexes the heightmap unchecked, so guard it.
+            if !editor.world().is_in_bounds_2d(cell) {
+                continue;
+            }
             let top = editor.world().get_non_tree_height(cell) - 1;
             // Height tapers from the centre outward, plus a 0–1 block of jitter.
             let falloff = 1.0 - (dist2 as f32 / (r2 as f32 + 1.0)).sqrt();
@@ -875,11 +891,31 @@ fn close_diagonal_gaps(
     fence
 }
 
+/// Applies the shared name decoration to a chosen `name`: a decorative prefix
+/// ~10% of the time and a suffix ~10% of the time (independent rolls, so ~1% get
+/// both), joined with spaces, e.g. "Ol' Bessie", "Daisy the Great". Used for both
+/// pasture animals and beehive bees.
+fn decorate_name(name: &str, prefixes: &[String], suffixes: &[String], rng: &mut RNG) -> String {
+    let mut out = name.to_string();
+    if !prefixes.is_empty() && rng.rand_i32_range(0, 100) < 10 {
+        out = format!("{} {}", rng.choose(prefixes), out);
+    }
+    if !suffixes.is_empty() && rng.rand_i32_range(0, 100) < 10 {
+        out = format!("{} {}", out, rng.choose(suffixes));
+    }
+    out
+}
+
+/// Wraps a name in the single-quoted SNBT `CustomName` text component, escaping
+/// the apostrophes in prefixes like "Ol'" / backslashes that would close it.
+fn custom_name_snbt(name: &str) -> String {
+    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
+    format!("CustomName:'{{\"text\":\"{}\"}}',CustomNameVisible:1b", escaped)
+}
+
 /// Builds the `CustomName` NBT for a spawned animal (visible nametag), or `None`
-/// when no names are loaded. A chosen name gets a decorative prefix ~10% of the
-/// time and a suffix ~10% of the time (independent rolls, so ~1% get both), e.g.
-/// "Ol' Bessie", "Daisy the Great". Tweak the NBT string here if a Minecraft
-/// version changes the entity name format.
+/// when no names are loaded. Tweak the NBT string here if a Minecraft version
+/// changes the entity name format.
 fn animal_name_nbt(
     names: &[String],
     prefixes: &[String],
@@ -889,17 +925,9 @@ fn animal_name_nbt(
     if names.is_empty() {
         return None;
     }
-    let mut name = rng.choose(names).clone();
-    if !prefixes.is_empty() && rng.rand_i32_range(0, 100) < 10 {
-        name = format!("{} {}", rng.choose(prefixes), name);
-    }
-    if !suffixes.is_empty() && rng.rand_i32_range(0, 100) < 10 {
-        name = format!("{} {}", name, rng.choose(suffixes));
-    }
-    // Escape for the single-quoted SNBT string wrapping the JSON text component —
-    // prefixes like "Ol'" contain an apostrophe that would otherwise close it.
-    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
-    Some(format!("{{CustomName:'{{\"text\":\"{}\"}}',CustomNameVisible:1b}}", escaped))
+    let base = rng.choose(names).clone();
+    let name = decorate_name(&base, prefixes, suffixes, rng);
+    Some(format!("{{{}}}", custom_name_snbt(&name)))
 }
 
 /// Enclosed grazing pasture: fences the perimeter of the free cells (with a few

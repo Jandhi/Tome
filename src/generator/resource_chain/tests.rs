@@ -783,7 +783,13 @@ mod tests {
                 Ok(()) => {
                     placed += 1;
                     if let Some(painter) = &painter {
-                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
+                        // Resource for the *placed* building (so the mine painter's ore
+                        // matches an overridden building), falling back to the parcel's.
+                        let resource = data.resource_registry.recipes().values()
+                            .find(|r| r.inputs.is_empty() && r.building == building)
+                            .and_then(|r| r.outputs.keys().next().map(|s| s.as_str()))
+                            .unwrap_or(assignment.primary_resource.as_str());
+                        paint_production_area(&district, painter, resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", building, e),

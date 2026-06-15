@@ -81,10 +81,15 @@ mod tests {
 
         // Resolve the painter from the override building's own gather recipe, not from
         // the parcel assignment (which would use the resource-chain's painter instead).
-        let override_painter: Option<String> = data.resource_registry.recipes()
+        let override_recipe = data.resource_registry.recipes()
             .values()
-            .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING)
+            .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING);
+        let override_painter: Option<String> = override_recipe
             .and_then(|r| r.production_painter.clone());
+        // The override building's gathered resource, so painters keyed on the
+        // resource (e.g. the mine painter's ore) match the overridden building.
+        let override_resource: Option<String> = override_recipe
+            .and_then(|r| r.outputs.keys().next().cloned());
 
         let mut placed_count = 0usize;
         for sd_id in &sd_ids {
@@ -103,7 +108,9 @@ mod tests {
                 Ok(()) => {
                     placed_count += 1;
                     if let Some(painter) = &override_painter {
-                        paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
+                        let resource = override_resource.as_deref()
+                            .unwrap_or(assignment.primary_resource.as_str());
+                        paint_production_area(&district, painter, resource, &data, &mut editor, &mut rng).await;
                     }
                 }
                 Err(e) => log::warn!(
