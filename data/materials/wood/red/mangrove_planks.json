@@ -6,6 +6,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:mangrove_planks",
+        "shelf"              : "minecraft:mangrove_shelf",
         "stairs"             : "minecraft:mangrove_stairs",
         "slab"               : "minecraft:mangrove_slab",
         "fence"              : "minecraft:mangrove_fence",

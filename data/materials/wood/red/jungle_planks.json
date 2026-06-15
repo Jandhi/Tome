@@ -6,6 +6,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:jungle_planks",
+        "shelf"              : "minecraft:jungle_shelf",
         "stairs"             : "minecraft:jungle_stairs",
         "slab"               : "minecraft:jungle_slab",
         "fence"              : "minecraft:jungle_fence",

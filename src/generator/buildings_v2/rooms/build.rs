@@ -33,8 +33,9 @@ fn find_entry_rect(rects: &[Rect2D], wall_segs: &WallSegments) -> Option<usize> 
             continue;
         }
         let door_cell = cells[idx];
-        // The room is one cell inward from the door
-        let inward: Point2D = (-seg.facing).into();
+        // The room is one cell inward from the door. `seg.facing` is already the
+        // wall's INWARD normal, so add it directly (negating lands outside).
+        let inward: Point2D = seg.facing.into();
         let interior_cell = door_cell + inward;
 
         for (i, rect) in rects.iter().enumerate() {

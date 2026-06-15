@@ -5,6 +5,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:cherry_planks",
+        "shelf"              : "minecraft:cherry_shelf",
         "stairs"             : "minecraft:cherry_stairs",
         "slab"               : "minecraft:cherry_slab",
         "fence"              : "minecraft:cherry_fence",

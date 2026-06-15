@@ -2,6 +2,7 @@
     "id" : "stripped_birch_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:stripped_birch_log"
+        "block" : "minecraft:stripped_birch_log",
+        "shelf" : "minecraft:birch_shelf"
     }
 }

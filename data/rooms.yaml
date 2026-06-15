@@ -4,43 +4,43 @@ armory:
 
 bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase, carpet, carpet, reading_nook, dressing_screen, potted_plant]
+  optional: [chest, bookshelf, desk, chair, shelf, display_shelf, wall_banner, barrel, crafting_table, table, bookshelf, shelf, vase, carpet, carpet, reading_nook, dressing_screen, potted_plant]
 
 common:
   required: [bed, crafting_table, furnace, chest]
-  optional: [lantern, table, chair, bench]
+  optional: [lantern, display_shelf, table, chair, bench]
 
 dining:
   required: [lantern, table]
-  optional: [chair, chair, chair, chair, wall_banner, vase, chest, carpet, carpet, bench, chandelier, potted_plant]
+  optional: [chair, chair, chair, chair, wall_banner, display_shelf, vase, chest, carpet, carpet, bench, chandelier, potted_plant]
 
 great_room:
   required: [lantern]
-  optional: [chest, bookshelf, table, chair, chair, wall_banner, vase, shelf, carpet, carpet, lectern, bench, chandelier, potted_plant]
+  optional: [chest, bookshelf, display_shelf, table, chair, chair, wall_banner, vase, shelf, carpet, carpet, lectern, bench, chandelier, potted_plant]
 
 hearth:
   required: [furnace, crafting_table]
-  optional: [chest, barrel, lantern]
+  optional: [chest, barrel, lantern, display_shelf]
 
 kitchen:
-  required: [furnace, smoker]
-  optional: [cauldron, barrel, lantern, potted_plant]
+  required: [furnace, smoker, kitchen_shelf]
+  optional: [cauldron, barrel, lantern, kitchen_shelf, potted_plant]
 
 library:
-  required: [bookshelf]
-  optional: [bookshelf, lantern, lectern]
+  required: [bookshelf, library_shelf]
+  optional: [bookshelf, library_shelf, lantern, lectern]
 
 master_bedroom:
   required: [bed, lantern]
-  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, wall_banner, vase, table, carpet, carpet, reading_nook, dressing_screen, chandelier, potted_plant]
+  optional: [chest, desk, chair, bookshelf, bookshelf, shelf, library_shelf, wall_banner, vase, table, carpet, carpet, reading_nook, dressing_screen, chandelier, potted_plant]
 
 multi_bedroom:
   required: [bed, lantern]
-  optional: [chest, bookshelf, desk, chair, shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen, potted_plant]
+  optional: [chest, bookshelf, desk, chair, shelf, library_shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen, potted_plant]
 
 pantry:
   fill_threshold: 0.78
-  required: [lantern]
+  required: [lantern, pantry_shelf]
   optional:
     - barrel
     - barrel_stack
@@ -80,11 +80,11 @@ storage:
 
 studio:
   required: [loom]
-  optional: [crafting_table, lantern]
+  optional: [crafting_table, lantern, tool_shelf]
 
 study:
-  required: [bookshelf]
-  optional: [lantern, desk, chair, bookshelf, shelf, carpet, carpet, lectern, potted_plant]
+  required: [bookshelf, library_shelf]
+  optional: [lantern, desk, chair, bookshelf, library_shelf, shelf, carpet, carpet, lectern, potted_plant]
 
 # Flat-roof themes (desert). decorate_rooftops picks ONE of these per building
 # so neighbouring roofs read as different spaces. These aren't real rooms — the
@@ -93,7 +93,7 @@ study:
 
 # Living terrace — a shaded spot to relax.
 roof_lounge:
-  fill_threshold: 0.45
+  fill_threshold: 0.3
   required: [roof_shade]
   optional:
     - roof_bedroll
@@ -112,7 +112,7 @@ roof_lounge:
 
 # Roof garden — greenery and water.
 roof_garden:
-  fill_threshold: 0.5
+  fill_threshold: 0.33
   required: [roof_shade]
   optional:
     - roof_planter
@@ -129,7 +129,7 @@ roof_garden:
 
 # Open-air kitchen — cooking and food stores.
 roof_kitchen:
-  fill_threshold: 0.5
+  fill_threshold: 0.33
   required: [roof_tandoor]
   optional:
     - roof_brazier
@@ -147,7 +147,7 @@ roof_kitchen:
 
 # Workshop — crafting on the roof.
 roof_workshop:
-  fill_threshold: 0.55
+  fill_threshold: 0.35
   required: [loom]
   optional:
     - roof_grindstone
@@ -163,7 +163,7 @@ roof_workshop:
 
 # Storage roof — a few goods stacked up, not a packed warehouse.
 roof_storage:
-  fill_threshold: 0.4
+  fill_threshold: 0.28
   required: [barrel]
   optional:
     - crate
@@ -178,7 +178,7 @@ roof_storage:
 
 # Sleeping deck — bedouin-style, sleep in the cool night air.
 roof_sleeping:
-  fill_threshold: 0.45
+  fill_threshold: 0.3
   required: [roof_shade]
   optional:
     - roof_bedroll
@@ -191,3 +191,61 @@ roof_sleeping:
     - roof_jars
     - potted_plant
     - roof_laundry
+
+# ---------------------------------------------------------------------------
+# Cellar themes — one chosen at random per building's cellar, in an even mix
+# with the plain `storage` root cellar (see cellar.rs CELLAR_THEMES). All are
+# windowless, so each requires a lantern.
+# ---------------------------------------------------------------------------
+
+# Wine cellar — casks and racked bottles with a small tasting nook. Kept airy.
+cellar_wine:
+  fill_threshold: 0.55
+  required: [lantern, barrel_stack, wine_shelf]
+  optional:
+    - barrel
+    - barrel_stack
+    - roof_amphora
+    - roof_jars
+    - shelf
+    - loaded_shelves
+    - table
+    - chair
+    - chair
+    - bench
+    - vase
+    - crate
+
+# Larder / cold store — food stores and preservation. A well-stocked pantry.
+cellar_larder:
+  fill_threshold: 0.7
+  required: [lantern, barrel, pantry_shelf]
+  optional:
+    - sack_pile
+    - hay_pile
+    - barrel
+    - crate
+    - cauldron
+    - smoker
+    - shelf
+    - loaded_shelves
+    - roof_jars
+    - roof_amphora
+    - barrel_stack
+
+# Undercroft workshop — crafting below ground. Tools and raw stock.
+cellar_workshop:
+  fill_threshold: 0.6
+  required: [lantern, crafting_table, tool_shelf]
+  optional:
+    - anvil
+    - loom
+    - roof_grindstone
+    - crate
+    - barrel
+    - sack_pile
+    - shelf
+    - stacked_bookshelves
+    - table
+    - cauldron
+    - furnace

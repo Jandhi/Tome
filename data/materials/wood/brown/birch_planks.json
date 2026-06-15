@@ -5,6 +5,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:birch_planks",
+        "shelf"              : "minecraft:birch_shelf",
         "stairs"             : "minecraft:birch_stairs",
         "slab"               : "minecraft:birch_slab",
         "fence"              : "minecraft:birch_fence",

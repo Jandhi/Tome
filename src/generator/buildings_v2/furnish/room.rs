@@ -178,7 +178,7 @@ pub(super) async fn furnish_room(
 /// from a room furniture list. Shared by [`furnish_room`] (interior rooms) and
 /// rooftop terrace decoration: the caller supplies the geometry (interior,
 /// floor/ceiling Y, optional roof clearance) and gets back the placed items.
-pub(super) async fn furnish_interior(
+pub(crate) async fn furnish_interior(
     editor: &Editor,
     interior: &Rect2D,
     constraints: &mut ConstraintMap,

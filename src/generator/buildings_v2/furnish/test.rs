@@ -2006,9 +2006,9 @@ fn random_table() -> LootTable {
         count: Some([2, 4]),
         capacity: Some(27),
         items: vec![
-            LootItem { id: "minecraft:bread".into(), count: [1, 3], weight: 3.0 },
-            LootItem { id: "minecraft:wheat".into(), count: [2, 5], weight: 2.0 },
-            LootItem { id: "minecraft:apple".into(), count: [1, 1], weight: 1.0 },
+            LootItem { id: "minecraft:bread".into(), count: [1, 3], weight: 3.0, name: None, components: None },
+            LootItem { id: "minecraft:wheat".into(), count: [2, 5], weight: 2.0, name: None, components: None },
+            LootItem { id: "minecraft:apple".into(), count: [1, 1], weight: 1.0, name: None, components: None },
         ],
         fixed: vec![],
     }
@@ -2059,7 +2059,7 @@ fn loot_roll_slots_are_distinct() {
     let table = LootTable {
         count: Some([5, 5]),
         capacity: Some(27),
-        items: vec![LootItem { id: "minecraft:stick".into(), count: [1, 1], weight: 1.0 }],
+        items: vec![LootItem { id: "minecraft:stick".into(), count: [1, 1], weight: 1.0, name: None, components: None }],
         fixed: vec![],
     };
     let mut rng = RNG::new(7);
@@ -2080,7 +2080,7 @@ fn loot_roll_capacity_caps_stack_count() {
     let table = LootTable {
         count: Some([10, 10]),
         capacity: Some(3),
-        items: vec![LootItem { id: "minecraft:coal".into(), count: [1, 1], weight: 1.0 }],
+        items: vec![LootItem { id: "minecraft:coal".into(), count: [1, 1], weight: 1.0, name: None, components: None }],
         fixed: vec![],
     };
     let mut rng = RNG::new(5);
@@ -2100,12 +2100,12 @@ fn loot_roll_fixed_slots_assigned_directly() {
             FixedSlot {
                 slot: 0,
                 chance: 1.0,
-                items: vec![LootItem { id: "minecraft:raw_iron".into(), count: [2, 2], weight: 1.0 }],
+                items: vec![LootItem { id: "minecraft:raw_iron".into(), count: [2, 2], weight: 1.0, name: None, components: None }],
             },
             FixedSlot {
                 slot: 1,
                 chance: 1.0,
-                items: vec![LootItem { id: "minecraft:coal".into(), count: [3, 3], weight: 1.0 }],
+                items: vec![LootItem { id: "minecraft:coal".into(), count: [3, 3], weight: 1.0, name: None, components: None }],
             },
         ],
     };
@@ -2125,7 +2125,7 @@ fn loot_roll_fixed_slot_chance_zero_skips() {
             FixedSlot {
                 slot: 2,
                 chance: 0.0,
-                items: vec![LootItem { id: "minecraft:iron_ingot".into(), count: [1, 1], weight: 1.0 }],
+                items: vec![LootItem { id: "minecraft:iron_ingot".into(), count: [1, 1], weight: 1.0, name: None, components: None }],
             },
         ],
     };

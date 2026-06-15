@@ -163,7 +163,7 @@ fn ground_block_cells(
 
 /// Per-cell roof-block y for an attic room. Used to reject furniture cells
 /// that would poke into (or against) the sloped roof.
-pub(super) struct RoofClearance<'a> {
+pub(crate) struct RoofClearance<'a> {
     pub(super) hm: &'a RoofHeightmap,
     /// Wall-top y for this rect (= roof_y from Frame). The lowest roof block
     /// at (x, z) sits at `roof_y + heightmap.get(x, z).floor()`.

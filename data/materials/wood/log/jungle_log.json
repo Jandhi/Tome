@@ -2,6 +2,7 @@
     "id" : "jungle_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:jungle_log"
+        "block" : "minecraft:jungle_log",
+        "shelf" : "minecraft:jungle_shelf"
     }
 }
