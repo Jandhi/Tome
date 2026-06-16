@@ -58,6 +58,13 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
         }
     };
 
+    // Paste the structure without block updates: with updates on, the server runs
+    // placement side effects, e.g. placing a bed foot auto-spawns a head (and a door
+    // bottom an upper half) — duplicating the second half the NBT already contains,
+    // often shoved into an adjacent wall where it then breaks. We write every block
+    // exactly as authored instead. Re-enabled before returning.
+    editor.set_block_updates(false).await;
+
     if input_palette.is_none() || output_palette.is_none() {
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
@@ -147,6 +154,9 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             }
         }
     }
+
+    // Flush the structure's blocks (still update-free) and restore the default.
+    editor.set_block_updates(true).await;
 
     Ok(())
 }

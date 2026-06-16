@@ -19,6 +19,13 @@ pub struct Editor {
     provider: GDMCHTTPProvider,
     block_buffer: RefCell<Vec<PositionedBlock>>,
     buffer_size: usize,
+    /// When false, `flush_buffer` sends buffered blocks with `doBlockUpdates=false`,
+    /// so the server places exactly the blocks given without running placement side
+    /// effects. Needed when pasting authored structures: with updates on, placing a
+    /// bed foot makes the server auto-spawn a head (and a door bottom an upper half),
+    /// duplicating the second half the NBT already contains — often into a wall.
+    /// Defaults to true; toggle via `set_block_updates` around a structure paste.
+    block_updates: RefCell<bool>,
     block_cache: RefCell<HashMap<Point3D, Block>>,
     world: World,
     materials: HashMap<MaterialId, Material>,
@@ -37,6 +44,7 @@ impl Editor {
             provider: GDMCHTTPProvider::new(),
             block_buffer: RefCell::new(Vec::new()),
             buffer_size: 32,
+            block_updates: RefCell::new(true),
             block_cache: RefCell::new(HashMap::new()),
             world,
             materials: HashMap::new(),
@@ -61,6 +69,16 @@ impl Editor {
 
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
+    }
+
+    /// Controls whether buffered blocks are flushed with block updates on
+    /// (`true`, the default) or off. Flushes any pending buffer first so the
+    /// switch only affects blocks placed afterwards. Disable around a structure
+    /// paste so the server doesn't auto-spawn the second half of beds/doors that
+    /// the structure already contains; re-enable when done.
+    pub async fn set_block_updates(&self, on: bool) {
+        self.flush_buffer().await;
+        *self.block_updates.borrow_mut() = on;
     }
 
     fn load_data(&mut self) -> anyhow::Result<()> {
@@ -221,7 +239,8 @@ impl Editor {
             return;
         }
 
-        let result = self.provider.put_blocks(&buffer).await.expect("Failed to send blocks");
+        let do_updates = *self.block_updates.borrow();
+        let result = self.provider.put_blocks_options(&buffer, do_updates).await.expect("Failed to send blocks");
 
         for (index, response) in result.iter().enumerate() {
             let point: Point3D = buffer[index].get_coordinate().into();
