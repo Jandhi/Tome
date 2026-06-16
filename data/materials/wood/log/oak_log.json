@@ -2,6 +2,7 @@
     "id" : "oak_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:oak_log"
+        "block" : "minecraft:oak_log",
+        "shelf" : "minecraft:oak_shelf"
     }
 }

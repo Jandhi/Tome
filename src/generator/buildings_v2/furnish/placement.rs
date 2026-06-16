@@ -163,7 +163,7 @@ fn ground_block_cells(
 
 /// Per-cell roof-block y for an attic room. Used to reject furniture cells
 /// that would poke into (or against) the sloped roof.
-pub(super) struct RoofClearance<'a> {
+pub(crate) struct RoofClearance<'a> {
     pub(super) hm: &'a RoofHeightmap,
     /// Wall-top y for this rect (= roof_y from Frame). The lowest roof block
     /// at (x, z) sits at `roof_y + heightmap.get(x, z).floor()`.
@@ -183,6 +183,38 @@ impl RoofClearance<'_> {
         match self.roof_block_y(cell) {
             Some(rb_y) => world_y + 1 < rb_y,
             None => false,
+        }
+    }
+
+    /// True if a player can stand on the attic floor at this cell — i.e. there
+    /// are two air blocks (feet at `floor_y`, head at `floor_y + 1`) below the
+    /// lowest roof block. Eave cells under the slope fail this and must be
+    /// pruned from the walkable graph so connectivity routing can't path
+    /// through them. Cells with no roof data are assumed clear (not pruned).
+    pub(super) fn floor_walkable(&self, cell: (i32, i32), floor_y: i32) -> bool {
+        match self.roof_block_y(cell) {
+            Some(rb_y) => rb_y >= floor_y + 2,
+            None => true,
+        }
+    }
+}
+
+/// Mark attic floor cells with sub-2-block headroom as `Blocked` so the
+/// connectivity flood-fill and fill-ratio treat them as the impassable eave
+/// cells they physically are. Only `Empty` cells are pruned — reserved access
+/// cells (stair tops, doorways, ladder) keep their state.
+pub(super) fn prune_low_headroom(
+    constraints: &mut ConstraintMap,
+    interior: &Rect2D,
+    clearance: &RoofClearance,
+    floor_y: i32,
+) {
+    for cell in interior.iter() {
+        let xz = (cell.x, cell.y);
+        if matches!(constraints.get(xz), Some(CellState::Empty))
+            && !clearance.floor_walkable(xz, floor_y)
+        {
+            constraints.set(xz, CellState::Blocked);
         }
     }
 }

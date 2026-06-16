@@ -28,9 +28,29 @@ fn roll_range_inclusive(range: [i32; 2], rng: &mut RNG) -> i32 {
     if lo == hi { lo } else { rng.rand_i32_range(lo, hi + 1) }
 }
 
+/// Render one item stack as SNBT, including a `components:{…}` block when the
+/// loot item carries a custom name and/or extra component entries.
+fn render_item(slot: i32, item: &data::LootItem, count: i32) -> String {
+    let mut comp: Vec<String> = Vec::new();
+    if let Some(name) = &item.name {
+        // custom_name is a text component; an SNBT-quoted JSON string works
+        // (the server normalises it). Verified on 1.21.11.
+        comp.push(format!("\"minecraft:custom_name\":'\"{}\"'", name));
+    }
+    if let Some(extra) = &item.components {
+        comp.push(extra.clone());
+    }
+    let comp_str = if comp.is_empty() {
+        String::new()
+    } else {
+        format!(",components:{{{}}}", comp.join(","))
+    };
+    format!("{{Slot:{}b,id:\"{}\",Count:{}b{}}}", slot, item.id, count, comp_str)
+}
+
 /// Roll an SNBT `{Items:[...]}` payload for a container from a loot table.
 pub(super) fn roll_loot_snbt(table: &LootTable, rng: &mut RNG) -> String {
-    let mut entries: Vec<(i32, String, i32)> = Vec::new();
+    let mut parts: Vec<String> = Vec::new();
 
     if !table.fixed.is_empty() {
         // Fixed strategy: furnace/smoker style, each slot rolled independently.
@@ -42,7 +62,7 @@ pub(super) fn roll_loot_snbt(table: &LootTable, rng: &mut RNG) -> String {
             }
             if let Some(item) = pick_weighted_item(&fs.items, rng) {
                 let count = roll_range_inclusive(item.count, rng).max(1);
-                entries.push((fs.slot, item.id.clone(), count));
+                parts.push(render_item(fs.slot, item, count));
             }
         }
     } else if !table.items.is_empty() {
@@ -57,14 +77,10 @@ pub(super) fn roll_loot_snbt(table: &LootTable, rng: &mut RNG) -> String {
             let slot = slot_pool.swap_remove(idx);
             if let Some(item) = pick_weighted_item(&table.items, rng) {
                 let count = roll_range_inclusive(item.count, rng).max(1);
-                entries.push((slot, item.id.clone(), count));
+                parts.push(render_item(slot, item, count));
             }
         }
     }
 
-    let parts: Vec<String> = entries
-        .iter()
-        .map(|(slot, id, count)| format!("{{Slot:{}b,id:\"{}\",Count:{}b}}", slot, id, count))
-        .collect();
     format!("{{Items:[{}]}}", parts.join(","))
 }

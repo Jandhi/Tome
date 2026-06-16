@@ -6,6 +6,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:spruce_planks",
+        "shelf"              : "minecraft:spruce_shelf",
         "stairs"             : "minecraft:spruce_stairs",
         "slab"               : "minecraft:spruce_slab",
         "fence"              : "minecraft:spruce_fence",

@@ -28,6 +28,8 @@ pub enum BlockForm {
     PressurePlate,
     #[serde(rename = "chiseled")]
     Chiseled,
+    #[serde(rename = "shelf")]
+    Shelf,
     #[serde(rename = "wood")]
     Wood,
     #[serde(rename = "log")]
@@ -98,6 +100,10 @@ impl BlockForm {
             BlockForm::PressurePlate
         } else if id_string.contains("chiseled") {
             BlockForm::Chiseled
+        } else if id_string.contains("_shelf") {
+            // `oak_shelf`, `spruce_shelf`, … — the 1.21.9+ display shelf. The
+            // `_` guards against `bookshelf` (no underscore before "shelf").
+            BlockForm::Shelf
         } else if id_string.contains("air") || id_string.contains("water") || id_string.contains("lava") || id_string.contains("snow") {
             BlockForm::Sparse
         } else {
@@ -119,6 +125,7 @@ impl BlockForm {
             BlockForm::Button => 0.1,
             BlockForm::PressurePlate => 0.1,
             BlockForm::Chiseled => 1.0,
+            BlockForm::Shelf => 0.3,
             BlockForm::Sign | BlockForm::WallSign | BlockForm::HangingSign | BlockForm::HangingWallSign => 0.1,
             BlockForm::Sparse => 0.0,
             BlockForm::Wood => 1.0,

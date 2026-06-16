@@ -2,6 +2,7 @@
     "id" : "stripped_acacia_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:stripped_acacia_log"
+        "block" : "minecraft:stripped_acacia_log",
+        "shelf" : "minecraft:acacia_shelf"
     }
 }

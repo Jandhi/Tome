@@ -2,6 +2,7 @@
     "id" : "spruce_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:spruce_log"
+        "block" : "minecraft:spruce_log",
+        "shelf" : "minecraft:spruce_shelf"
     }
 }

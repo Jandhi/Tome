@@ -4,6 +4,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:warped_planks",
+        "shelf"              : "minecraft:warped_shelf",
         "stairs"             : "minecraft:warped_stairs",
         "slab"               : "minecraft:warped_slab",
         "fence"              : "minecraft:warped_fence",

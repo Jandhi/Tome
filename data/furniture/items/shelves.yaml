@@ -1,0 +1,89 @@
+# Display shelves — wall-mounted minecraft:*_shelf blocks (1.21.9+) that show
+# up to 3 thematic items to telegraph a room's purpose. Modelled like the wall
+# banner: a single block one above the floor (offset [along, y, away] = [0,1,0]),
+# no floor block, so the cell stays walkable underneath. `swap: wood` retargets
+# the species to the building's secondary wood (oak_shelf -> spruce_shelf, …);
+# `loot:` fills the 3 display slots from the matching table in loot.yaml.
+#
+# Authored facing=south = the north-wall case (shelf faces south, into the
+# room); rotate_block spins it to the correct outward facing on the other walls.
+# All carry the `display_shelf` tag plus their own name; rooms reference the
+# specific item so each room gets shelving that fits it.
+
+wine_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_wine
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+pantry_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_pantry
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+kitchen_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_kitchen
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+library_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_books
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+tool_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_tools
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+
+display_shelf:
+  tags: [display_shelf]
+  blocks:
+    - block: "minecraft:oak_shelf[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: wood
+      walkable: true
+      loot: shelf_general
+  constraints:
+    - offset: [0, 0]
+      constraint: wall

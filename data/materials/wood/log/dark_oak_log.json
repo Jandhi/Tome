@@ -2,6 +2,7 @@
     "id" : "dark_oak_log",
     "connections" : {},
     "blocks" : {
-        "block" : "minecraft:dark_oak_log"
+        "block" : "minecraft:dark_oak_log",
+        "shelf" : "minecraft:dark_oak_shelf"
     }
 }

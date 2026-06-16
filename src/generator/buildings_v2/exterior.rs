@@ -58,7 +58,9 @@ pub async fn decorate_exterior_walls(
     let mut avoid: HashSet<Point2D> = HashSet::new();
     for (seg, opening) in wall_segs.doors() {
         let cells = segment_cells(seg);
-        let out: Point2D = seg.facing.into();
+        // `seg.facing` is the wall's INWARD normal, so the *outside* of the door
+        // (where exterior props would block the entrance) is its negation.
+        let out: Point2D = (-seg.facing).into();
         for dx in 0..opening.width {
             if let Some(&cell) = cells.get((opening.offset + dx) as usize) {
                 avoid.insert(cell + out);

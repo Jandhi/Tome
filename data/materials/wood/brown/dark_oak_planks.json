@@ -5,6 +5,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:dark_oak_planks",
+        "shelf"              : "minecraft:dark_oak_shelf",
         "stairs"             : "minecraft:dark_oak_stairs",
         "slab"               : "minecraft:dark_oak_slab",
         "fence"              : "minecraft:dark_oak_fence",
