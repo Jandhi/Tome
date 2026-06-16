@@ -13,8 +13,8 @@ use super::block::swap_block_for_palette;
 use super::data::{Furniture, LootTable, RoomFurnitureList};
 use super::loot::roll_loot_snbt;
 use super::placement::{
-    RoofClearance, WallSlot, interior_rect, is_ceiling_item, needs_wall, try_place_at_wall_slot,
-    try_place_ceiling, try_place_freestanding, wall_slots,
+    RoofClearance, WallSlot, interior_rect, is_ceiling_item, needs_wall, prune_low_headroom,
+    try_place_at_wall_slot, try_place_ceiling, try_place_freestanding, wall_slots,
 };
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
@@ -165,6 +165,15 @@ pub(super) async fn furnish_room(
     } else {
         None
     };
+
+    // Eave cells under the low part of the roof aren't physically standable.
+    // Prune them out of the walkable graph before furnishing so the
+    // connectivity guard can't route a "path" through cells the player's head
+    // won't fit through (otherwise furniture can seal the real route while the
+    // check stays satisfied via the eaves).
+    if let Some(rc) = roof_clearance.as_ref() {
+        prune_low_headroom(&mut room.constraints, &interior, rc, floor_y);
+    }
 
     let placed = furnish_interior(
         editor, &interior, &mut room.constraints, room_list, items,

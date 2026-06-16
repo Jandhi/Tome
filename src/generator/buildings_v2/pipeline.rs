@@ -200,7 +200,7 @@ pub async fn build_house(
     // house reads as lived-in. Skips doors, roads, and claimed cells.
     decorate_exterior_walls(ctx, &footprint, &wall_segs).await;
 
-    check_building_invariants(&frame, &room_plan, &floor_plan)?;
+    check_building_invariants(&frame, &room_plan, &floor_plan, &roof_heightmaps)?;
 
     // Cellar runs last: it carves below the finished building using a derived
     // RNG, so it neither perturbs the main stream nor disturbs the room_plan
