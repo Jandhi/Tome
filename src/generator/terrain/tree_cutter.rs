@@ -132,7 +132,11 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
         let top = editor.world().get_motion_blocking_height_at(point) - 1;
         for y in (top - MAX_SCAN_DEPTH..=top).rev() {
             let pos = Point3D::new(point.x, y, point.y);
-            if editor.get_block(pos).id.is_log() && visited_logs.insert(pos) {
+            // `try_get_block`, not `get_block`: the deep scan can run past the world
+            // floor (low column, ravine), where `get_block` would panic. None means
+            // out of bounds below — nothing deeper to find, so stop this column.
+            let Some(block) = editor.try_get_block(pos) else { break; };
+            if block.id.is_log() && visited_logs.insert(pos) {
                 stack.push(pos);
             }
         }
@@ -149,7 +153,11 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
                         continue;
                     }
                     let n = Point3D::new(pos.x + dx, pos.y + dy, pos.z + dz);
-                    if editor.get_block(n).id.is_log() && visited_logs.insert(n) {
+                    // `try_get_block`: a neighbour can fall outside the build area
+                    // (edge column) or below the world floor; None is simply not a log.
+                    if editor.try_get_block(n).map_or(false, |b| b.id.is_log())
+                        && visited_logs.insert(n)
+                    {
                         stack.push(n);
                     }
                 }
@@ -169,7 +177,9 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
         let mut lowest_cleared: Option<i32> = None;
         for y in (top - MAX_SCAN_DEPTH..=top).rev() {
             let pos = Point3D::new(point.x, y, point.y);
-            if editor.get_block(pos).id.is_tree() {
+            // `try_get_block`: stop at the world floor rather than panicking below it.
+            let Some(block) = editor.try_get_block(pos) else { break; };
+            if block.id.is_tree() {
                 editor.place_block(&"air".into(), pos).await;
                 lowest_cleared = Some(y);
             }
@@ -178,7 +188,7 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
         // tree block (the trunk base) — never deeper, to avoid grassing buried dirt.
         if let Some(base) = lowest_cleared {
             let ground = Point3D::new(point.x, base - 1, point.y);
-            if editor.get_block(ground).id == "dirt".into() {
+            if editor.try_get_block(ground).map_or(false, |b| b.id == "dirt".into()) {
                 editor.place_block(&"grass_block".into(), ground).await;
             }
         }
