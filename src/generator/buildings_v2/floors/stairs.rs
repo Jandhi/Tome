@@ -240,7 +240,9 @@ pub(super) fn select_stairwells(
 fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i32)> {
     let mut cells = HashSet::new();
     for seg in wall_segs.segments_on_floor(floor) {
-        let inward: Point2D = (-seg.facing).into();
+        // `seg.facing` is the wall's INWARD normal (points toward the interior),
+        // so the cell a player stands on to use the door is `door_cell + facing`.
+        let inward: Point2D = seg.facing.into();
         let seg_cells = segment_cells(seg);
         for o in &seg.openings {
             if !matches!(o.kind, OpeningKind::Door(_)) {
@@ -471,7 +473,11 @@ fn pick_stair_for_floor(
     let mut door_facings: HashSet<Cardinal> = HashSet::new();
     for seg in wall_segs.segments_on_floor(floor) {
         if seg.openings.iter().any(|o| matches!(o.kind, OpeningKind::Door(_))) {
-            door_facings.insert(seg.facing);
+            // `wall_facing` (below) names the geometric *outward* side a stair
+            // backs against; `seg.facing` is the wall's INWARD normal, so the
+            // matching outward side is its negation. Comparing them in the same
+            // frame is what actually keeps a stair off a door-bearing wall.
+            door_facings.insert(-seg.facing);
         }
     }
 

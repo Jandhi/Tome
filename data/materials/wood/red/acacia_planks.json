@@ -6,6 +6,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:acacia_planks",
+        "shelf"              : "minecraft:acacia_shelf",
         "stairs"             : "minecraft:acacia_stairs",
         "slab"               : "minecraft:acacia_slab",
         "fence"              : "minecraft:acacia_fence",

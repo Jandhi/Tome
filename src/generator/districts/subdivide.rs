@@ -104,6 +104,120 @@ pub fn carve_ribbon_connectors(
     connectors
 }
 
+/// Grow connector alleys so every alley corridor reaches the road network.
+///
+/// `alleys` is the union of corridor cells (the between-parcel lanes from
+/// [`subdivide_block`], any number of disconnected components); `network` is the
+/// road cells the alleys must reach; `open` is the walkable space a connector
+/// may occupy (urban cells that aren't buildings, walls, or roads — typically
+/// computed *after* houses are placed, so connectors route around them).
+///
+/// Each corridor component is linked by the shortest path of `open` cells to the
+/// nearest already-connected cell — a road, or a connector/corridor linked
+/// earlier this pass — so the connectors form a tree hanging off the roads
+/// rather than parallel stubs. Components nearest the network connect first.
+/// Returns just the carved connector cells (corridors and roads excluded); union
+/// them with `alleys` to get the full paved alley set. A component that already
+/// touches the network, or can't reach it through `open`, carves nothing.
+pub fn connect_alleys_to_roads(
+    alleys: &HashSet<Point2D>,
+    open: &HashSet<Point2D>,
+    network: &HashSet<Point2D>,
+) -> HashSet<Point2D> {
+    let components = connected_components(alleys);
+
+    // Distance of each open cell to the network (multi-source BFS), used only to
+    // order components nearest-first so the tree grows outward from the roads.
+    let dist = network_distances(open, network);
+    let comp_key = |comp: &HashSet<Point2D>| {
+        comp.iter().filter_map(|c| dist.get(c).copied()).min().unwrap_or(i32::MAX)
+    };
+    let mut order: Vec<usize> = (0..components.len()).collect();
+    order.sort_by_key(|&i| comp_key(&components[i]));
+
+    let mut connected: HashSet<Point2D> = network.clone();
+    let mut carved: HashSet<Point2D> = HashSet::new();
+    for &i in &order {
+        let comp = &components[i];
+        let touching = comp.iter().any(|c| {
+            connected.contains(c) || CARDINALS_2D.iter().any(|&d| connected.contains(&(*c + d)))
+        });
+        if !touching {
+            if let Some(path) = bfs_to_connected(comp, open, &connected) {
+                carved.extend(path.iter().copied());
+                connected.extend(path);
+            }
+        }
+        // The corridor itself joins the connected tree, so later components can
+        // merge onto it (not just onto the original roads).
+        connected.extend(comp.iter().copied());
+    }
+    carved
+}
+
+/// Multi-source BFS distance (cardinal steps) from `network` outward through
+/// `open`. Open cells cardinally adjacent to the network are distance 1.
+fn network_distances(open: &HashSet<Point2D>, network: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
+    let mut dist: HashMap<Point2D, i32> = HashMap::new();
+    let mut queue: VecDeque<Point2D> = VecDeque::new();
+    for &c in open {
+        if CARDINALS_2D.iter().any(|&d| network.contains(&(c + d))) {
+            dist.insert(c, 1);
+            queue.push_back(c);
+        }
+    }
+    while let Some(c) = queue.pop_front() {
+        let d = dist[&c];
+        for dir in CARDINALS_2D {
+            let n = c + dir;
+            if open.contains(&n) && !dist.contains_key(&n) {
+                dist.insert(n, d + 1);
+                queue.push_back(n);
+            }
+        }
+    }
+    dist
+}
+
+/// Shortest path of `open` cells from `comp` to the nearest `connected` cell.
+/// BFS outward from every component cell; on reaching a connected cell, backtrace
+/// to the component. Returns the cells strictly between the component and the
+/// network (the connector to carve), or `None` if the network is unreachable.
+fn bfs_to_connected(
+    comp: &HashSet<Point2D>,
+    open: &HashSet<Point2D>,
+    connected: &HashSet<Point2D>,
+) -> Option<Vec<Point2D>> {
+    let mut parent: HashMap<Point2D, Point2D> = HashMap::new();
+    let mut seen: HashSet<Point2D> = comp.clone();
+    let mut queue: VecDeque<Point2D> = comp.iter().copied().collect();
+    while let Some(c) = queue.pop_front() {
+        for dir in CARDINALS_2D {
+            let n = c + dir;
+            if seen.contains(&n) {
+                continue;
+            }
+            if connected.contains(&n) {
+                // Reached the network at `n` via `c`. Walk `c` back to a corridor
+                // cell, collecting the open cells between (the connector).
+                let mut path = Vec::new();
+                let mut cur = c;
+                while !comp.contains(&cur) {
+                    path.push(cur);
+                    cur = parent[&cur];
+                }
+                return Some(path);
+            }
+            if open.contains(&n) {
+                seen.insert(n);
+                parent.insert(n, c);
+                queue.push_back(n);
+            }
+        }
+    }
+    None
+}
+
 /// Recursively subdivide a block of cells until every sub-block fits within
 /// `max_dim` along both axes. Each cut lays a 1-cell alley on the split line
 /// and recurses on the connected components of each side (so concave blocks

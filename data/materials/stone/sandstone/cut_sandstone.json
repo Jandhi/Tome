@@ -5,6 +5,7 @@
     },
     "blocks" : {
         "block" : "minecraft:cut_sandstone",
+        "log" : "minecraft:cut_sandstone",
         "stairs" : "minecraft:sandstone_stairs",
         "slab" : "minecraft:sandstone_slab",
         "wall" : "minecraft:sandstone_wall",

@@ -25,12 +25,9 @@ use super::floors::{FloorPlan, StairKind};
 use super::footprint::{Footprint, SizeClass};
 use super::frame::{Frame, CELLAR_FLOOR};
 use super::pipeline::BuildCtx;
-use super::rooms::{
-    compute_room_interior, CellState, ConstraintMap, Room, RoomPlan, RoomRole,
-};
-use super::furnish::furnish_rooms;
+use super::rooms::{compute_room_interior, CellState, ConstraintMap, RoomPlan};
+use super::furnish::furnish_interior;
 use super::walls::{segment_cells, WallSegments};
-use super::RoomType;
 
 /// Roll cellar eligibility by size class. Larger, grander buildings are far
 /// more likely to have a cellar; a cottage only rarely gets a root cellar.
@@ -175,7 +172,9 @@ fn ground_floor_door_cells(wall_segs: &WallSegments) -> Vec<Point2D> {
             continue;
         }
         let seg_cells = segment_cells(seg);
-        let inward: Point2D = (-seg.facing).into();
+        // `seg.facing` is the wall's INWARD normal, so the cell a person stands
+        // on entering is `door_cell + facing` (negating it lands outside).
+        let inward: Point2D = seg.facing.into();
         for w in 0..opening.width as usize {
             let idx = opening.offset as usize + w;
             if let Some(&door_cell) = seg_cells.get(idx) {
@@ -300,7 +299,7 @@ pub async fn maybe_build_cellar(
     let (positions, dir) = stair;
     place_descending_stair(ctx, &positions, dir, floor_y, &main_stair_cells, &mut rng).await;
 
-    furnish_cellar(ctx, frame, core, interior, &positions).await;
+    furnish_cellar(ctx, frame, interior, &positions).await;
     Some(positions)
 }
 
@@ -417,13 +416,18 @@ async fn place_descending_stair(
     }
 }
 
-/// Build a one-room plan for the cellar and run the shared furnishing pass over
-/// it using the `storage` furniture list. Stair cells are constrained out so no
-/// furniture lands on the steps or hangs over the shaft.
+/// Cellar themes — one chosen uniformly at random per building. `storage` is the
+/// plain root cellar; the rest are flavoured rooms defined in `data/rooms.yaml`.
+/// All are windowless, so each list requires a lantern for light.
+const CELLAR_THEMES: [&str; 4] = ["storage", "cellar_wine", "cellar_larder", "cellar_workshop"];
+
+/// Furnish the cellar from a randomly chosen theme list. Reuses the shared
+/// `furnish_interior` engine (same as rooms and rooftop terraces): we seed the
+/// constraint map so no furniture lands on the stair steps or hangs over the
+/// shaft, then pack the chosen list against the cellar's interior rect.
 async fn furnish_cellar(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
-    core: Rect2D,
     interior: Rect2D,
     positions: &[Point2D],
 ) {
@@ -439,20 +443,49 @@ async fn furnish_cellar(
         constraints.set_ceiling(cell);
     }
 
-    let room = Room {
-        rect: core,
-        rect_index: 0,
-        floor: CELLAR_FLOOR,
-        role: RoomRole::Cellar,
-        room_type: RoomType::Storage,
-        interior,
-        constraints,
-        furniture: Vec::new(),
-        floor_type: None,
+    // Pick this cellar's theme; fall back to the plain storage list if a themed
+    // entry is missing from the data.
+    let mut pick_rng = ctx.rng.derive();
+    let key = CELLAR_THEMES[pick_rng.rand_i32_range(0, CELLAR_THEMES.len() as i32) as usize];
+    let room_list = match ctx
+        .data
+        .furniture
+        .rooms
+        .get(key)
+        .or_else(|| ctx.data.furniture.rooms.get("storage"))
+    {
+        Some(list) => list,
+        None => return,
     };
 
-    let mut plan = RoomPlan { rooms: vec![room], interior_doors: Vec::new() };
-    furnish_rooms(ctx, &mut plan, frame, &[]).await;
+    // The cellar's deck sits at the CELLAR_FLOOR surface; its ceiling is the
+    // ground-floor slab (flat, so no roof clearance).
+    let floor_y = frame.floor_y(CELLAR_FLOOR);
+    let ceiling_y = frame.ceiling_y(CELLAR_FLOOR);
+
+    let editor: &Editor = &*ctx.editor;
+    let items = &ctx.data.furniture.items;
+    let materials = &ctx.data.materials;
+    let loot = &ctx.data.furniture.loot;
+    let palette = ctx.palette;
+    let mut furn_rng = ctx.rng.derive();
+
+    furnish_interior(
+        editor,
+        &interior,
+        &mut constraints,
+        room_list,
+        items,
+        floor_y,
+        ceiling_y,
+        None,  // flat ground-floor slab above — no roof-clearance clamp
+        false, // not an attic
+        palette,
+        materials,
+        loot,
+        &mut furn_rng,
+    )
+    .await;
 }
 
 #[cfg(test)]

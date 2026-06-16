@@ -22,8 +22,9 @@ use super::foundation::place_foundation;
 use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
-use super::furnish::furnish_rooms;
-use super::BuildingContext;
+use super::furnish::{decorate_rooftops, furnish_rooms};
+use super::exterior::decorate_exterior_walls;
+use super::{BuildingContext, Culture};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
 use super::roof::{place_roof, place_roof_ladder};
@@ -69,6 +70,9 @@ pub struct HouseOutput {
     pub floor_plan: FloorPlan,
     pub room_plan: RoomPlan,
     pub door_ramps: Vec<DoorRamp>,
+    /// Exterior entrance cell per ground-floor door (bottom of the ramp if any,
+    /// else the cell outside the door). Used to start door→road connectors.
+    pub door_entrances: Vec<Point2D>,
     pub has_attic: bool,
     pub has_cellar: bool,
     /// Cellar descending-stair cells (position 0 is the cellar landing), if a
@@ -123,8 +127,13 @@ pub async fn build_house(
     // Resolve the timber pattern now that the frame is known — auto-pick
     // filters out patterns whose studs wouldn't fit the longest wall segment.
     // Use a derived RNG so adding the auto-pick path doesn't shift the main
-    // stream that rooms/furnish later draw from.
+    // stream that rooms/furnish later draw from. Decorative timber framing is a
+    // Medieval feature; other cultures keep the plain skeleton (baseline corner
+    // posts + crossbeams only).
     let timber_pattern = bctx.timber_pattern.unwrap_or_else(|| {
+        if bctx.culture != Culture::Medieval {
+            return TimberPattern::Plain;
+        }
         let max_seg_len = wall_segs.segments.iter()
             .map(|s| s.length.max(0) as u32)
             .max()
@@ -170,6 +179,9 @@ pub async fn build_house(
     // Reconcile doors with terrain: run parallel stair ramps along the wall
     // for doors where `base_y` doesn't match outside-terrain.
     let door_ramps = plan_door_ramps_from_world(&wall_segs, &footprint, ctx.editor.world());
+    // Save the real exterior entrance per door (bottom of the ramp, if any) for
+    // the settlement's door→road connectors.
+    let door_entrances = super::door_ramp::door_entrances(&wall_segs, &door_ramps);
     place_door_ramps(ctx, &door_ramps).await;
 
     assign_room_floors(&mut room_plan);
@@ -178,7 +190,17 @@ pub async fn build_house(
 
     furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
 
-    check_building_invariants(&frame, &room_plan, &floor_plan)?;
+    // Flat roofs are open terraces — decorate the deck (shade, seating, plants)
+    // once the interior is furnished. Keeps the ladder exit clear.
+    if matches!(roof_style, RoofStyle::Flat) {
+        decorate_rooftops(ctx, &frame, roof_ladder_wall).await;
+    }
+
+    // A few sparse props against the outside walls (barrels, pots, …) so the
+    // house reads as lived-in. Skips doors, roads, and claimed cells.
+    decorate_exterior_walls(ctx, &footprint, &wall_segs).await;
+
+    check_building_invariants(&frame, &room_plan, &floor_plan, &roof_heightmaps)?;
 
     // Cellar runs last: it carves below the finished building using a derived
     // RNG, so it neither perturbs the main stream nor disturbs the room_plan
@@ -201,6 +223,7 @@ pub async fn build_house(
         floor_plan,
         room_plan,
         door_ramps,
+        door_entrances,
         has_attic,
         has_cellar,
         cellar_stair,

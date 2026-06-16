@@ -19,7 +19,10 @@ pub struct WallSegment {
     pub extra_start: Option<Point2D>,
     /// Extra cell appended at a concave end corner
     pub extra_end: Option<Point2D>,
-    /// Which direction the wall faces outward
+    /// The wall's INWARD normal — points from the wall toward the building
+    /// interior. (Door blocks use this as their Minecraft `facing`, and the
+    /// exterior side is `-facing`.) Despite the name, this is *not* the outward
+    /// direction; treating it as outward silently picks the wrong side.
     pub facing: Cardinal,
     /// Floor index (0 = ground)
     pub floor: u32,

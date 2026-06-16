@@ -231,6 +231,18 @@ pub struct LootItem {
     pub count: [i32; 2],
     #[serde(default = "default_weight")]
     pub weight: f32,
+    /// Optional custom display name — sets the item's `minecraft:custom_name`
+    /// component. Used for flavour on display shelves (e.g. a healing potion
+    /// shown as "Wine"). Plain text only.
+    #[serde(default)]
+    pub name: Option<String>,
+    /// Optional extra component entries inserted verbatim inside the item's
+    /// `components:{…}` SNBT — e.g.
+    /// `"minecraft:potion_contents":{potion:"minecraft:healing"}` to colour a
+    /// potion. Author the inner entries only (no outer braces); combine several
+    /// with commas.
+    #[serde(default)]
+    pub components: Option<String>,
 }
 
 /// A fixed slot assignment (furnace-style).

@@ -266,6 +266,40 @@ pub fn plan_door_ramps(
     ramps
 }
 
+/// The exterior entrance cell for every ground-floor door — the cell a player
+/// stands on when they step out and reach natural grade. For a door with a ramp
+/// this is one cell past the bottom of the ramp; for a flat door it's the
+/// landing directly outside. Used to start door→road connector paths from the
+/// real entrance instead of guessing.
+pub fn door_entrances(wall_segs: &WallSegments, ramps: &[DoorRamp]) -> Vec<Point2D> {
+    use std::collections::HashMap;
+    let ramp_by_door: HashMap<Point2D, &DoorRamp> =
+        ramps.iter().map(|r| (r.door_cell, r)).collect();
+
+    let mut entrances = Vec::new();
+    for (seg, opening) in wall_segs.doors() {
+        if seg.floor != 0 {
+            continue;
+        }
+        let cells = segment_cells(seg);
+        let door_idx = opening.offset as usize;
+        let Some(&door_cell) = cells.get(door_idx) else { continue };
+        let outward: Point2D = (-seg.facing).into();
+        let landing = door_cell + outward;
+
+        let entrance = match ramp_by_door.get(&door_cell) {
+            // One cell past the last step, where the ramp meets grade.
+            Some(ramp) => match ramp.steps.last() {
+                Some(last) => last.cell + Point2D::from(ramp.side_dir),
+                None => ramp.landing_cell,
+            },
+            None => landing,
+        };
+        entrances.push(entrance);
+    }
+    entrances
+}
+
 /// Plan ramps from a World's heightmap (convenience wrapper).
 pub fn plan_door_ramps_from_world(
     wall_segs: &WallSegments,

@@ -1,0 +1,7 @@
+{
+  "id" : "resource_base",
+
+  "primary_wood" : "oak_planks",
+  "primary_stone" : "cobblestone",
+  "secondary_stone" : "stone_bricks"
+}

@@ -5,6 +5,7 @@
     },
     "blocks" : {
         "block"              : "minecraft:crimson_planks",
+        "shelf"              : "minecraft:crimson_shelf",
         "stairs"             : "minecraft:crimson_stairs",
         "slab"               : "minecraft:crimson_slab",
         "fence"              : "minecraft:crimson_fence",

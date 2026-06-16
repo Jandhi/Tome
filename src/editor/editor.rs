@@ -83,6 +83,20 @@ impl Editor {
             return;
         }
 
+        // Never place an `axis` blockstate on a block that doesn't support one
+        // (e.g. a log palette-swapped into sandstone). Minecraft rejects the
+        // whole placement for an invalid state and the block silently vanishes,
+        // so strip the stray axis here — the single chokepoint all placers hit.
+        let stripped;
+        let block = if block.state.as_ref().map_or(false, |s| s.contains_key("axis")) && !block.id.is_axis_block() {
+            let mut b = block.clone();
+            if let Some(s) = b.state.as_mut() { s.remove("axis"); }
+            stripped = b;
+            &stripped
+        } else {
+            block
+        };
+
         if !force {
             let cache = self.block_cache.borrow();
             if cache.contains_key(&point) {

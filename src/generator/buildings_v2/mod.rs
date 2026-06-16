@@ -1,6 +1,7 @@
 pub mod blueprint;
 pub mod cellar;
 pub mod door_ramp;
+pub mod exterior;
 pub mod floors;
 pub mod footprint;
 pub mod foundation;
@@ -75,6 +76,17 @@ impl Culture {
             Culture::Medieval => (2, 3),
             Culture::Desert => (0, 1),
             Culture::Japanese => (0, 1),
+        }
+    }
+
+    /// Percent chance that each rect (core or wing) is forced square during
+    /// footprint generation. Square rects get domed roofs under the flat-roof
+    /// (desert) path — see `roof::dome`. Non-desert cultures keep their natural
+    /// aspect-ratio distribution (0 = no bias, RNG stream untouched).
+    pub fn square_bias(&self) -> i32 {
+        match self {
+            Culture::Desert => 40,
+            _ => 0,
         }
     }
 }

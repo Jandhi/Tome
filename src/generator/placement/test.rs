@@ -202,7 +202,9 @@ mod tests {
 
         // Flatten, then route the tiered network over the gentled terrain.
         let urban = editor.world().get_urban_points();
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         // --- Place the industrial buildings FIRST, on good flattened ground. With
         // no roads yet, `road_bonus` is 0 — these big buildings are sited by
@@ -242,7 +244,7 @@ mod tests {
         let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         let before = editor.world().structures.len();
-        if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data).await {
+        if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data, None).await {
             log::warn!("Urban industrial placement failed: {}", e);
         }
         let placed = editor.world().structures.len() - before;
@@ -281,8 +283,8 @@ mod tests {
         let arterial_material = MaterialId::new("stone_bricks".to_string());
         let collector_material = MaterialId::new("cobblestone".to_string());
         let paths = build_road_network(
-            &editor, arterial_material, collector_material, true, &anchor_nodes, &blocked,
-        ).await;
+            &editor, arterial_material, collector_material, true, &anchor_nodes, &blocked, 1,
+        ).await.paths;
         println!("Routed {} road segments", paths.len());
 
         // Realize: grade the corridor to routed heights, lay + meld the surface,
@@ -352,7 +354,9 @@ mod tests {
         let urban = editor.world().get_urban_points();
 
         log_trees(&mut editor, urban.clone()).await;
-        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+        // skip_water = false: terraform through any water in the urban area and
+        // clear leftover puddles, so the settlement isn't dotted with water.
+        flatten_urban_area(&mut editor, &urban, 16, 12, false).await;
 
         let data = LoadedData::load().expect("Failed to load generator data");
         // Wall + gates — gates seed the collector tier of the network.
@@ -441,7 +445,13 @@ mod tests {
 
         let counts: HashMap<String, u32> = result.processing_buildings.clone();
         let want: u32 = counts.values().sum();
-        println!("Placing {} industrial buildings (roads will connect them)", want);
+        let mut breakdown: Vec<(&String, &u32)> = counts.iter().collect();
+        breakdown.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+        println!(
+            "Placing {} industrial buildings (roads will connect them): {}",
+            want,
+            breakdown.iter().map(|(n, c)| format!("{}×{}", c, n)).collect::<Vec<_>>().join(", "),
+        );
 
         let urban_districts: Vec<_> = editor.world().districts.values()
             .filter(|sd| sd.data.parcel_type == ParcelType::Urban)
@@ -450,7 +460,12 @@ mod tests {
         let urban_refs: Vec<_> = urban_districts.iter().collect();
 
         let before = editor.world().structures.len();
-        if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data).await {
+        // Re-skin the industrial NBTs into the settlement's culture palette
+        // (their baked `resource_base` blocks → desert sandstone).
+        let ind_palette = data.palettes
+            .get(&crate::generator::buildings_v2::Culture::Desert.palette_id())
+            .expect("industry palette not found").clone();
+        if let Err(e) = place_urban_buildings(&urban_refs, &counts, &mut rng, &mut editor, &data, Some(&ind_palette)).await {
             log::warn!("Urban industrial placement failed: {}", e);
         }
         let placed = editor.world().structures.len() - before;
@@ -481,12 +496,14 @@ mod tests {
             .collect();
 
         // Phase 2 — tiered A* road network, connecting the industrial buildings
-        // (anchor nodes) and routed around them (the `blocked` barrier).
-        let arterial_material = MaterialId::new("stone_bricks".to_string());
-        let collector_material = MaterialId::new("cobblestone".to_string());
-        let paths = build_road_network(
-            &editor, arterial_material, collector_material, true, &ind_nodes, &blocked,
+        // (anchor nodes) and routed around them (the `blocked` barrier). One
+        // material for every tier — tiers differ by width, not surface block.
+        // Desert settlement: sandstone-paved roads.
+        let road_material = MaterialId::new("sandstone".to_string());
+        let road_network = build_road_network(
+            &editor, road_material.clone(), road_material, true, &ind_nodes, &blocked, 1,
         ).await;
+        let paths = road_network.paths.clone();
         println!("Routed {} road segments", paths.len());
 
         // DEBUG: Phase A merge check — how many of each path's cells coincide
@@ -593,49 +610,37 @@ mod tests {
         const RIBBON_DEPTH: i32 = 14;
         let mut sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
         let mut alley_band: HashSet<Point2D> = HashSet::new();
-        let mut ribbon_lot_count = 0usize;
+        let mut ribbon_parcel_count = 0usize;
         let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
-            let (mut ribbon_lots, interior) =
+            let (ribbon_parcels, interior) =
                 crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
             let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
 
-            // Connect the interior alleys to the main roads by carving through the
-            // ribbon, then convert those cells from frontage ribbon to alley.
-            let ribbon_union: HashSet<Point2D> = ribbon_lots.iter().flatten().copied().collect();
-            let connectors = crate::generator::districts::subdivide::carve_ribbon_connectors(
-                &ribbon_union, &alleys, &main_road_cells,
-            );
-            if !connectors.is_empty() {
-                for rp in &mut ribbon_lots { rp.retain(|c| !connectors.contains(c)); }
-                ribbon_lots.retain(|rp| !rp.is_empty());
-            }
-
-            ribbon_lot_count += ribbon_lots.len();
-            for rp in &ribbon_lots { ribbon_cells.extend(rp); }
-            sub_blocks.extend(ribbon_lots);
+            // The BSP cut lines are the alley *corridors* between back lots. We
+            // don't pave them here — they're connected to the main roads and laid
+            // down AFTER houses (see `connect_alleys_to_roads` below), so the
+            // connector can route around placed buildings to actually reach a road.
+            ribbon_parcel_count += ribbon_parcels.len();
+            for rp in &ribbon_parcels { ribbon_cells.extend(rp); }
+            sub_blocks.extend(ribbon_parcels);
             alley_band.extend(&alleys);
-            alley_band.extend(&connectors);
             sub_blocks.extend(subs);
         }
         println!(
-            "Subdivided into {} lots ({} road-frontage ribbons), {} subdivider-road cells",
-            sub_blocks.len(), ribbon_lot_count, alley_band.len(),
+            "Subdivided into {} parcels ({} road-frontage ribbons), {} alley-corridor cells",
+            sub_blocks.len(), ribbon_parcel_count, alley_band.len(),
         );
 
-        // Assemble every road into one path list (mains + a synthesised width-1
-        // alley path), but DON'T build them yet — we build after the houses so
-        // house-foundation earth can't bury the road. Houses are placed first and
-        // sit their floor at the level of the road they front (see `road_h`).
-        let alley_pts: Vec<Point3D> = alley_band.iter().map(|c| editor.world().add_height(*c)).collect();
-        let alley_path = Path::new(alley_pts, 1, MaterialId::new("cobblestone".to_string()), PathPriority::Low);
-        let mut all_paths = paths.clone();
-        all_paths.push(alley_path);
+        // Build only the MAIN roads now (houses follow, then alleys last). Houses
+        // pin their floor to the road they front (`road_h`); alley-fronting houses
+        // pin to the alley corridor's ground height, since the corridor cells are
+        // known even though they aren't paved yet.
+        let all_paths = paths.clone();
 
-        // Road-height lookup over the paved band of every road (centreline +
-        // width ring, min y on overlap), so a house can pin its floor to the
-        // road it fronts. Built from `all_paths` so alley-facing houses get the
-        // alley level too.
+        // Road-height lookup: main-road paved band (centreline + width ring, min y
+        // on overlap) for road-fronting houses, plus the alley corridor cells at
+        // ground height for alley-fronting houses.
         let mut road_h: HashMap<Point2D, i32> = HashMap::new();
         for path in &all_paths {
             let w = path.width() as i32;
@@ -648,6 +653,9 @@ mod tests {
                     }
                 }
             }
+        }
+        for &c in &alley_band {
+            road_h.entry(c).or_insert_with(|| editor.world().add_height(c).y);
         }
 
         // Frontage bands per tier (paved cells, matching the roads we'll build).
@@ -672,7 +680,15 @@ mod tests {
             .map(|(c, &y)| Point3D::new(c.x, y, c.y))
             .collect();
         force_height(&mut editor, &corridor_pts, false).await;
-        build_paths_merged(&editor, &data, &all_paths, &mut rng).await;
+        // `build_paths_merged` returns the exact cells where it laid a half-step
+        // slab (the grade lips). We drive door-floor raising and threshold clearing
+        // off this set instead of reading the placed road back out of the editor
+        // (whose block cache is keyed by local coords while get_block subtracts the
+        // build-area origin — reading there returns world terrain, not the road).
+        let road_slabs: HashSet<Point3D> = build_paths_merged(&editor, &data, &all_paths, &mut rng).await;
+        // Per-cell slab height for the alignment probe.
+        let slab_y_by_cell: HashMap<Point2D, i32> =
+            road_slabs.iter().map(|p| (p.drop_y(), p.y)).collect();
 
         // Claim every paved road cell so house-foundation terraforming can't
         // touch it (blend_terrain skips `BuildClaim::Path`).
@@ -680,6 +696,68 @@ mod tests {
             for c in paved(path) {
                 editor.world_mut().claim(c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
             }
+        }
+
+        // Road-label viz: each named road (stroke) gets a wool colour, floated
+        // two blocks above the debug tier markers. Segments grouped into one road
+        // share a colour, so a long avenue reads as one ribbon even where side
+        // streets branch. Alleys (no road_id) are unlabelled. The `label` map is
+        // computed unconditionally because the SVG town map below reuses it; only
+        // the in-world wool placement is gated.
+        // One label per cell so roads sharing pavement (a collector merged onto an
+        // arterial) don't braid two colors over one street: the higher tier wins
+        // the shared cells, and a road only shows its own colour where it diverges.
+        // Thickened to each road's width so it reads as a solid ribbon from the air.
+        let prio_rank = |p: PathPriority| match p {
+            PathPriority::High => 2u8,
+            PathPriority::Medium => 1,
+            PathPriority::Low => 0,
+        };
+        // Approximate per-road footprint, so on a shared trunk the bigger road
+        // wins the cells (the main avenue keeps its colour; a smaller road only
+        // shows where it diverges) instead of two colours weaving.
+        let mut rid_size: HashMap<u32, usize> = HashMap::new();
+        for path in &all_paths {
+            if let Some(rid) = path.road_id() {
+                let span = (2 * (path.width() as usize - 1) + 1).pow(2);
+                *rid_size.entry(rid).or_insert(0) += path.points().len() * span;
+            }
+        }
+        let mut label: HashMap<P2, (u8, usize, u32, i32)> = HashMap::new(); // cell -> (tier, road_size, road_id, y)
+        for path in &all_paths {
+            let Some(rid) = path.road_id() else { continue; };
+            let key = (prio_rank(path.priority()), *rid_size.get(&rid).unwrap_or(&0));
+            let r = path.width() as i32 - 1;
+            for p in path.points() {
+                for dx in -r..=r {
+                    for dz in -r..=r {
+                        let c = P2::new(p.x + dx, p.z + dz);
+                        let e = label.entry(c).or_insert((key.0, key.1, rid, p.y));
+                        if (key.0, key.1) >= (e.0, e.1) {
+                            *e = (key.0, key.1, rid, p.y);
+                        }
+                    }
+                }
+            }
+        }
+        // In-world wool ribbons — disabled for now. Flip `DEBUG_ROAD_WOOL` to
+        // restore them; the SVG town map is unaffected either way.
+        const DEBUG_ROAD_WOOL: bool = false;
+        if DEBUG_ROAD_WOOL {
+            const WOOL_COLORS: [&str; 16] = [
+                "white_wool", "orange_wool", "magenta_wool", "light_blue_wool",
+                "yellow_wool", "lime_wool", "pink_wool", "gray_wool",
+                "light_gray_wool", "cyan_wool", "purple_wool", "blue_wool",
+                "brown_wool", "green_wool", "red_wool", "black_wool",
+            ];
+            const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
+            let mut named_roads: HashSet<u32> = HashSet::new();
+            for (c, (_, _, rid, y)) in &label {
+                named_roads.insert(*rid);
+                let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
+                editor.place_block_forced(&wool, Point3D::new(c.x, y + LABEL_HEIGHT, c.y)).await;
+            }
+            println!("Labelled {} named roads", named_roads.len());
         }
 
         // ---- Phase 4: hierarchical house placement ----
@@ -698,18 +776,17 @@ mod tests {
         use crate::generator::materials::{Palette, PaletteId};
         use crate::geometry::Point2D as P2;
 
-        let base_palette: Palette = data.palettes.get(&PaletteId::from("medieval_spruce"))
+        // Culture for this settlement. Desert → sandstone palette, flat roofs,
+        // and domed square rects (see buildings_v2::roof::dome).
+        let culture = Culture::Desert;
+        let base_palette: Palette = data.palettes.get(&culture.palette_id())
             .expect("base palette not found").clone();
         let wood_ids: Vec<PaletteId> = vec!["oak".into(), "spruce".into(), "dark_oak".into()];
         let stone_ids: Vec<PaletteId> = vec!["stone_bricks".into(), "cobblestone".into(), "deepslate".into()];
         let roof_ids: Vec<PaletteId> = vec![
             "acacia_wood_roof".into(), "brick_roof".into(), "oak_wood_roof".into(), "red_wood_roof".into(),
         ];
-        let pitches = [
-            RoofStyle::Gable(GablePitch::Slab),
-            RoofStyle::Gable(GablePitch::Stairs),
-            RoofStyle::Gable(GablePitch::Double),
-        ];
+        let roof_styles = culture.roof_styles();
 
         fn roll_palette(rng: &mut RNG, base: &Palette, data: &LoadedData, woods: &[PaletteId], stones: &[PaletteId], roofs: &[PaletteId]) -> Palette {
             let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
@@ -745,6 +822,8 @@ mod tests {
         // placement and checked for a road-slab lip afterward (we can't touch
         // `editor` inside the loop; it's borrowed by the build context).
         let mut door_thresholds: Vec<Point3D> = Vec::new();
+        // Ground-floor door exterior cells, for door->road connector paths.
+        let mut door_cells: Vec<P2> = Vec::new();
         for lot in &sub_blocks {
             if lot.is_empty() { continue; }
             let Some(mut plot) = plot_from_block(lot) else { continue; };
@@ -767,43 +846,80 @@ mod tests {
                         let max_depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
                         if cursor + fw > chain_len { cursor += 1; continue; }
                         let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
-                        // Deepest depth (down to MIN_FIT_DEPTH) whose rect fits the
-                        // lot — shrinks the house to hug a diagonal ribbon.
-                        let Some(depth) = (MIN_FIT_DEPTH..=max_depth).rev()
+                        // Square-frontage bias: with the culture's square chance,
+                        // make the house a square (depth = front width) if it fits,
+                        // so it gets a dome. Guarded so a 0 bias never draws RNG.
+                        // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
+                        // that fits, shrinking the house to hug a diagonal ribbon.
+                        let want_square = culture.square_bias() > 0
+                            && rng.percent(culture.square_bias())
+                            && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
+                        let depth = if want_square {
+                            fw
+                        } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
                             .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
-                        else { tier_unfit[ti] += 1; cursor += 1; continue; };
+                        {
+                            d
+                        } else {
+                            tier_unfit[ti] += 1; cursor += 1; continue;
+                        };
                         let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
 
-                        let palette = roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids);
-                        let roof_style = pitches[rng.rand_i32_range(0, pitches.len() as i32) as usize];
+                        // Desert keeps a uniform sandstone palette; other cultures
+                        // roll wood/stone/roof variants per house for variety.
+                        let palette = match culture {
+                            Culture::Desert => base_palette.clone(),
+                            _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
+                        };
+                        let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
                         let plot_bounds = synthetic_plot_bounds(&rect, frontage.outward);
                         let footprint = Footprint::from_rect(rect);
                         // Align the main door with the road it faces: pin the floor
-                        // (= door sill) to the height of the *nearest* road cell to
-                        // this frontage. Probe outward from every frontage cell and
-                        // keep the closest road-height hit.
+                        // (= door sill) to the routed height of the *nearest* road cell.
+                        // Probe outward from every frontage cell and keep the closest
+                        // road-height hit. (Uses road_h — the routed integer height —
+                        // NOT a live block read: the editor's block cache is keyed by
+                        // local coords while get_block subtracts the build-area origin,
+                        // so reading placed road blocks here returns world terrain, not
+                        // the road. See note below on the slab detection.)
                         let road_dir = P2::from(frontage.outward);
                         let base_lvl = {
-                            let mut best: Option<(i32, i32)> = None; // (dist, height)
+                            let mut best: Option<(i32, i32, P2)> = None; // (dist, height, road cell)
                             for &c in chain_slice {
                                 for step in 1..=RIBBON_DEPTH {
                                     let probe = c + P2::new(road_dir.x * step, road_dir.y * step);
                                     if let Some(&y) = road_h.get(&probe) {
-                                        if best.map_or(true, |(bd, _)| step < bd) { best = Some((step, y)); }
+                                        if best.map_or(true, |(bd, _, _)| step < bd) { best = Some((step, y, probe)); }
                                         break;
                                     }
                                 }
                             }
-                            best.map(|(_, y)| y)
+                            best.map(|(_, y, cell)| {
+                                // If the fronting road cell carries a half-step slab,
+                                // raise the floor one block above the slab so the door
+                                // steps down onto it instead of opening onto a lip.
+                                match slab_y_by_cell.get(&cell) {
+                                    Some(&slab_y) => {
+                                        let base = slab_y + 1;
+                                        println!("[door-align] facing {:?} road_cell={:?} road_h={} slab_y={} -> base_y={} (raised)",
+                                            frontage.outward, (cell.x, cell.y), y, slab_y, base);
+                                        base
+                                    }
+                                    None => y,
+                                }
+                            })
                         };
-                        let mut bctx = BuildingContext::new(Culture::Medieval, size_class, roof_style);
+                        let mut bctx = BuildingContext::new(culture, size_class, roof_style);
                         bctx.base_y_override = base_lvl;
                         let mut bctx_editor = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                            Ok(_) => {
+                            Ok(out) => {
                                 plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
+                                // Real door entrances (bottom of ramp, if any),
+                                // saved by the pipeline, for door->road connectors.
+                                door_cells.extend(out.door_entrances.iter().copied());
                                 // Collect door-threshold cells: the strip just outside
                                 // the house's road-facing wall at floor level, where a
                                 // road slab leaves a half-block lip in the doorway. We
@@ -871,23 +987,17 @@ mod tests {
         );
 
         // Clear road-slab lips at the collected door thresholds: a slab sitting at
-        // the door's floor level reads as an awkward half-step; replacing it with
-        // air leaves the road's full-block surface flush with the threshold. We
-        // scan a small Y window (the actual slab y drifts ±1-2 from the probed road
-        // height after smoothing) and only clear *road-material* slabs — never a
-        // house's own wooden door-ramp slab/stair.
-        let is_road_slab = |b: &Block| -> bool {
-            let id = b.id.as_str();
-            id.contains("slab")
-                && (id.contains("cobble") || id.contains("stone") || id.contains("brick")
-                    || id.contains("andesite") || id.contains("granite") || id.contains("diorite")
-                    || id.contains("gravel"))
-        };
+        // or just above the sill reads as an awkward half-step into the doorway;
+        // replacing it with air keeps the threshold walkable. We check only the sill
+        // and one above — NOT below, since a fronting slab the house was raised over
+        // legitimately sits at sill-1 (the door steps down onto it). Driven off the
+        // exact slab cells `build_paths_merged` reported, so it never touches a
+        // house's own door-ramp blocks.
         let mut cleared_door_slabs = 0usize;
         for p in &door_thresholds {
-            for dy in -2..=2 {
+            for dy in 0..=1 {
                 let q = Point3D::new(p.x, p.y + dy, p.z);
-                if is_road_slab(&editor.get_block(q)) {
+                if road_slabs.contains(&q) {
                     editor.place_block_forced(&"air".into(), q).await;
                     cleared_door_slabs += 1;
                 }
@@ -895,14 +1005,13 @@ mod tests {
         }
         println!("Cleared {} road-slab lips at door thresholds", cleared_door_slabs);
 
-        // Pave the verge: a forecourt of the road's own material in the gap
-        // between each main road and its houses, so the diagonal set-back reads
-        // as a paved shoulder. Painted at the live ground top (h-1), matching the
-        // post-flatten/foundation surface. Arterial verge = stone bricks (its
-        // road material), collector verge = cobblestone.
+        // Pave the verge: a forecourt of the road's material in the gap between
+        // each main road and its houses, so the diagonal set-back reads as a paved
+        // shoulder. Painted at the live ground top (h-1), matching the
+        // post-flatten/foundation surface. One material for every tier.
         let verge_blocks = [
-            Block { id: "stone_bricks".into(), data: None, state: None },
-            Block { id: "cobblestone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
+            Block { id: "sandstone".into(), data: None, state: None },
         ];
         let mut verge_total = 0usize;
         for (ti, cells) in tier_verge.iter().enumerate() {
@@ -914,6 +1023,193 @@ mod tests {
         }
         println!("Paved {} verge cells (arterial {} + collector {})", verge_total, tier_verge[0].len(), tier_verge[1].len());
 
+        // ---- Alleys, built LAST (around the placed houses) ----
+        // The BSP corridors are the back-lot lanes; connect each corridor
+        // component to the main-road network through open ground — routing around
+        // the now-placed houses — then pave corridors + connectors as one width-1
+        // network. Building after houses is what guarantees every alley reaches a
+        // road (the old straight-punch connector often dead-ended).
+        let open: HashSet<P2> = urban.iter().copied()
+            .filter(|c| !matches!(
+                editor.world().get_claim(*c),
+                Some(crate::generator::BuildClaim::Building(_)
+                    | crate::generator::BuildClaim::Structure(_)
+                    | crate::generator::BuildClaim::Wall
+                    | crate::generator::BuildClaim::Path(_))
+            ))
+            .collect();
+        let connectors = crate::generator::districts::subdivide::connect_alleys_to_roads(
+            &alley_band, &open, &main_road_cells,
+        );
+        let mut full_alleys = alley_band.clone();
+        full_alleys.extend(&connectors);
+        println!(
+            "Alleys: {} corridor + {} connector cells -> {} total",
+            alley_band.len(), connectors.len(), full_alleys.len(),
+        );
+        let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c)).collect();
+        let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
+        build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
+        for c in &full_alleys {
+            editor.world_mut().claim(*c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
+        }
+
+        // --- Settlement summary ---
+        // Road surface = every paved cell of the routed network (mains + alleys)
+        // that lands inside the urban area, over total urban cells. Verge
+        // forecourts are added on top as paved shoulders.
+        let road_cells: HashSet<P2> = all_paths.iter()
+            .flat_map(|p| paved(p))
+            .chain(tier_verge.iter().flatten().copied())
+            .chain(full_alleys.iter().copied())
+            .filter(|c| urban.contains(c))
+            .collect();
+        let road_pct = 100.0 * road_cells.len() as f32 / urban.len().max(1) as f32;
+
+        // Door->road connectors: any door not already on/beside a road gets a
+        // 1-wide sandstone path A*'d to the nearest road, routed around buildings.
+        let blocked_for_paths: HashSet<P2> = urban.iter().copied().filter(|&c| matches!(
+            editor.world().get_claim(c),
+            Some(crate::generator::BuildClaim::Building(_)
+                | crate::generator::BuildClaim::Wall
+                | crate::generator::BuildClaim::Structure(_)
+                | crate::generator::BuildClaim::Gate)
+        )).collect();
+        let already: usize = door_cells.iter().filter(|&&d| {
+            road_cells.contains(&d) || d.neighbours().iter().any(|n| road_cells.contains(n))
+        }).count();
+        println!("Door entrances: {} ({} already on/beside a road)", door_cells.len(), already);
+        let connected = crate::generator::paths::connect_doors_to_roads(
+            &editor, &data, &door_cells, &urban, &road_cells, &blocked_for_paths,
+            MaterialId::new("sandstone".to_string()), &mut rng,
+        ).await;
+        println!("Connected {} doors to roads", connected);
+        println!(
+            "SUMMARY: {} industrial + {} rural resource buildings, {} houses | \
+             road surface {} / {} urban cells ({:.1}%)",
+            placed, placed_count, total_buildings,
+            road_cells.len(), urban.len(), road_pct,
+        );
+
+        // ---- Top-down town map (SVG) ----
+        // Layers: grass background, water, building/wall footprints, alleys, then
+        // the named road network coloured per road (same 16-hue palette as the
+        // in-world wool labels), with each road's id printed at its centroid.
+        {
+            use std::fmt::Write as _;
+            const ROAD_SVG: [&str; 16] = [
+                "#e9ecec", "#f9801d", "#c74ebd", "#3ab3da", "#fed83d", "#80c71f",
+                "#f38baa", "#474f52", "#9d9d97", "#169c9c", "#8932b8", "#3c44aa",
+                "#835432", "#5e7c16", "#b02e26", "#1d1d21",
+            ];
+            // Bounds from the urban footprint, padded.
+            let (mut minx, mut minz, mut maxx, mut maxz) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+            for c in &urban {
+                minx = minx.min(c.x); maxx = maxx.max(c.x);
+                minz = minz.min(c.y); maxz = maxz.max(c.y);
+            }
+            let pad = 3;
+            minx -= pad; minz -= pad; maxx += pad; maxz += pad;
+            let (w, h) = (maxx - minx + 1, maxz - minz + 1);
+
+            let mut svg = String::new();
+            let _ = write!(svg,
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\" \
+                 width=\"{}\" height=\"{}\" shape-rendering=\"crispEdges\">\n",
+                w * 4, h * 4);
+            let _ = write!(svg, "<rect x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\" fill=\"#b9d68a\"/>\n");
+
+            // Base layer: water / footprints / wall / alleys (roads drawn on top).
+            for z in minz..=maxz {
+                for x in minx..=maxx {
+                    let c = P2::new(x, z);
+                    if !editor.world().is_in_bounds_2d(c) { continue; }
+                    let fill = if full_alleys.contains(&c) {
+                        "#b8b8b8"
+                    } else {
+                        match editor.world().get_claim(c) {
+                            Some(crate::generator::BuildClaim::Wall) => "#3a3a3a",
+                            Some(crate::generator::BuildClaim::Gate) => "#6a6a6a",
+                            Some(crate::generator::BuildClaim::Building(_)
+                                | crate::generator::BuildClaim::Structure(_)) => "#d9cfa3",
+                            // Pavement: named roads get recoloured on top; this
+                            // keeps discarded (unnamed) short roads visible as grey.
+                            Some(crate::generator::BuildClaim::Path(_)) => "#c4c4c4",
+                            _ if editor.world().is_water(c) => "#4a6fb0",
+                            _ => continue,
+                        }
+                    };
+                    let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
+                        x - minx, z - minz, fill);
+                }
+            }
+
+            // Road layer + per-road centroid for the id label.
+            let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
+            for (c, (_, _, rid, _)) in &label {
+                let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
+                    c.x - minx, c.y - minz, ROAD_SVG[*rid as usize % ROAD_SVG.len()]);
+                let e = centroid.entry(*rid).or_insert((0, 0, 0));
+                e.0 += (c.x - minx) as i64; e.1 += (c.y - minz) as i64; e.2 += 1;
+            }
+            for (rid, (sx, sz, n)) in &centroid {
+                if *n == 0 { continue; }
+                let _ = write!(svg,
+                    "<text x=\"{}\" y=\"{}\" font-size=\"7\" font-weight=\"bold\" fill=\"#000\" \
+                     stroke=\"#fff\" stroke-width=\"0.4\" paint-order=\"stroke\" text-anchor=\"middle\">{}</text>\n",
+                    sx / n, sz / n + 2, rid);
+            }
+
+            // Abstract graph overlay: the MST + shortcut edges drawn as straight
+            // thin lines between their nodes (the data structure, before A* curved
+            // it onto the terrain). Arterial edges thicker; shortcuts dashed.
+            let nx = |p: Point3D| p.x - minx;
+            let nz = |p: Point3D| p.z - minz;
+            for e in &road_network.edges {
+                let (pa, pb) = (road_network.nodes[e.a], road_network.nodes[e.b]);
+                let (sw, dash) = (
+                    if e.arterial { "1.2" } else { "0.6" },
+                    if e.shortcut { " stroke-dasharray=\"2,2\"" } else { "" },
+                );
+                let _ = write!(svg,
+                    "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#111\" \
+                     stroke-width=\"{}\" stroke-opacity=\"0.85\"{}/>\n",
+                    nx(pa), nz(pa), nx(pb), nz(pb), sw, dash);
+            }
+            for (i, p) in road_network.nodes.iter().enumerate() {
+                let _ = write!(svg,
+                    "<circle cx=\"{}\" cy=\"{}\" r=\"1.6\" fill=\"#111\" stroke=\"#fff\" stroke-width=\"0.4\"/>\n",
+                    nx(*p), nz(*p));
+                let _ = write!(svg,
+                    "<text x=\"{}\" y=\"{}\" font-size=\"4\" fill=\"#fff\" text-anchor=\"middle\">{}</text>\n",
+                    nx(*p), nz(*p) + 1, i);
+            }
+            let _ = write!(svg, "</svg>\n");
+
+            std::fs::create_dir_all("output").ok();
+            match std::fs::write("output/town.svg", &svg) {
+                Ok(_) => println!("Wrote town map to output/town.svg ({}x{} cells)", w, h),
+                Err(e) => println!("Failed to write town.svg: {}", e),
+            }
+        }
+
+        // Street lighting: run last, after houses have claimed their cells, so
+        // lamps line every road's verge without landing on a building. The city
+        // generator picks the lantern type city-wide.
+        let city_rect = editor.world().world_rect_2d();
+        let city_centre = (city_rect.origin + city_rect.max()) / 2;
+        let cold = {
+            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = n.name();
+            n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+        };
+        let street_lantern: crate::minecraft::Block = if cold {
+            "minecraft:soul_lantern".into()
+        } else {
+            "minecraft:lantern".into()
+        };
+        let lamps = crate::generator::paths::place_street_lights(&editor, &all_paths, &street_lantern).await;
+        println!("Placed {} street lamps", lamps.len());
 
         editor.flush_buffer().await;
 
@@ -1083,6 +1379,7 @@ mod tests {
             &mut rng,
             &mut editor,
             &data,
+            None,
         )
         .await
         {
@@ -1283,6 +1580,7 @@ mod tests {
             &mut rng,
             &mut editor,
             &data,
+            None,
         )
         .await
         {

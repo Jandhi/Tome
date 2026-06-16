@@ -136,13 +136,20 @@ pub async fn get_path_with(
     ctx : RouteContext<'_>,
     explore_callback: impl AsyncFnMut(&Vec<Point3D>)
 ) -> Option<Path> {
-    let new_start = get_best_mod4_point(start, editor);
-    let new_end = get_best_mod4_point(end, editor);
+    // At step 1 there is no lattice: route on exact cells, no mod-4 snapping.
+    let (new_start, new_end) = if params.step > 1 {
+        (get_best_mod4_point(start, editor), get_best_mod4_point(end, editor))
+    } else {
+        (start, end)
+    };
 
+    // Road hierarchy (standard urban tiers): High = arterials (the main MST
+    // backbone), Medium = collectors (gate spurs onto the backbone), Low =
+    // local roads/alleys.
     let width = match priority {
-        PathPriority::Low => 1,
-        PathPriority::Medium => 2,
-        PathPriority::High => 3,
+        PathPriority::Low => 1,    // local / alley
+        PathPriority::Medium => 2, // collector / secondary
+        PathPriority::High => 4,   // arterial / main
     };
 
     let mut path = route_path_with(editor, new_start, new_end, &params, ctx, explore_callback).await?;
@@ -183,10 +190,14 @@ pub async fn route_path_with(
     ctx : RouteContext<'_>,
     mut explore_callback: impl AsyncFnMut(&Vec<Point3D>)
 ) -> Option<Vec<Point3D>> {
-    let new_start = get_best_mod4_point(start, editor);
-    let new_end = get_best_mod4_point(end, editor);
+    // At step 1 there is no lattice: route on exact cells, no mod-4 snapping.
+    let (new_start, new_end) = if params.step > 1 {
+        (get_best_mod4_point(start, editor), get_best_mod4_point(end, editor))
+    } else {
+        (start, end)
+    };
 
-    const HEURISTIC_WEIGHT: u64 = 10;
+    const HEURISTIC_WEIGHT: u64 = 1;
 
     // Primary hop = `step` cells; if that hop is too steep (terrain slope worse
     // than ~1:1 over the hop) fall back to a half-length hop so the route can
@@ -294,7 +305,10 @@ pub async fn route_path_with(
                     }
                 }
 
-                // Hard barrier: never route through a placed building footprint.
+                // Hard barrier: never route through a placed building footprint
+                // (or its margin). Keeping the centreline out of the margin also
+                // keeps the widened road shoulder off the footprint, so the road
+                // can't graze a building.
                 if let Some(blocked) = ctx.blocked {
                     if blocked.contains(&neighbour_2d) {
                         continue;

@@ -1,0 +1,115 @@
+# Thematic / signature furniture — pieces meant to give a single room type its
+# own visual identity so rooms don't all read as the same generic mix of
+# chests, barrels, carpets and banners. Same schema as common.yaml. The engine
+# places blocks / block-entities only (not entities like armor stands or item
+# frames), so "martial" or "culinary" flavour comes from distinctive blocks —
+# grindstones, campfires, cauldrons, dyed wool — rather than decorative props.
+
+# ---------------------------------------------------------------------------
+# Martial — armoury / workshop
+# ---------------------------------------------------------------------------
+
+# Sharpening wheel. Floor grindstone, freestanding. Reads as a workstation for
+# maintaining tools and arms. (roof_grindstone is the rooftop-deck variant.)
+grindstone:
+  blocks:
+    - block: "minecraft:grindstone[face=floor,facing=north]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+# Twin wall banners side by side — a heraldic display for halls and armouries.
+# Both hang on the wall a block up, facing the room; the pair takes the
+# palette's primary + secondary colours so they read as matched standards.
+banner_pair:
+  min_room_area: 12
+  blocks:
+    - block: "minecraft:white_wall_banner[facing=south]"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: color
+    - block: "minecraft:white_wall_banner[facing=south]"
+      offset: [1, 1, 0]
+      layer: ground
+      swap: secondary_color
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+    - offset: [1, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# Weapons chest — a plain chest stocked from the armoury loot table. Reads as a
+# footlocker of arms; distinct from the generic `chest` only by its contents.
+weapon_chest:
+  blocks:
+    - block: "minecraft:chest"
+      offset: [0, 0, 0]
+      layer: ground
+      loot: armory
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+# ---------------------------------------------------------------------------
+# Culinary — kitchen / hearth
+# ---------------------------------------------------------------------------
+
+# Open cook-fire: a lit campfire. Campfires don't spread fire, so they're safe
+# on wooden floors. The kitchen's signature heat source alongside smoker/furnace.
+kitchen_hearth:
+  blocks:
+    - block: "minecraft:campfire[lit=true,facing=south]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+      facing: away_from_wall
+
+# Fireplace: a lit campfire set against the wall, the cosy centre of a hearth
+# room. Faces into the room. Unique so a room gets at most one.
+hearth_fire:
+  unique: true
+  blocks:
+    - block: "minecraft:campfire[lit=true,facing=south]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: wall
+      facing: away_from_wall
+
+# ---------------------------------------------------------------------------
+# Craft — weaver's studio
+# ---------------------------------------------------------------------------
+
+# Bales of dyed wool stacked two high — raw stock for a weaver. Picks up the
+# palette's primary then secondary colour so studios' bales differ by building.
+wool_bales:
+  blocks:
+    - block: "minecraft:white_wool"
+      offset: [0, 0, 0]
+      layer: ground
+      swap: color
+    - block: "minecraft:white_wool"
+      offset: [0, 1, 0]
+      layer: ground
+      swap: secondary_color
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable
+
+# Dye vat: a water-filled cauldron for setting colour into cloth. Freestanding.
+dye_vat:
+  blocks:
+    - block: "minecraft:water_cauldron[level=3]"
+      offset: [0, 0, 0]
+      layer: ground
+  constraints:
+    - offset: [0, 0]
+      constraint: blocked_reachable

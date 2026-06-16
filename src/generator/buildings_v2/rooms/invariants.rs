@@ -10,6 +10,7 @@ use super::super::footprint::merge::{concave_corner_cells, walk_edge_cells};
 use super::super::footprint::{find_boundaries, phantom_wall_cells};
 use super::super::floors::FloorPlan;
 use super::super::frame::Frame;
+use super::super::roof::heightmap::RoofHeightmap;
 use super::constraints::CellState;
 use super::plan::{RoomPlan, RoomRole};
 
@@ -69,6 +70,7 @@ pub fn check_building_invariants(
     frame: &Frame,
     room_plan: &RoomPlan,
     floor_plan: &FloorPlan,
+    roof_heightmaps: &[RoofHeightmap],
 ) -> Result<(), String> {
     const NEIGHBORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
@@ -130,6 +132,37 @@ pub fn check_building_invariants(
                         "invariant (c): room {:?} floor {} furniture '{}' overlaps stair cell ({},{})",
                         room.room_type, room.floor, furn.name, fx, fz,
                     ));
+                }
+            }
+        }
+
+        // Invariant 4: no Empty (furniture-placeable, connectivity-routable)
+        // attic cell has sub-2-block headroom. The furnish prune
+        // (`prune_low_headroom`) converts eave cells under the low roof to
+        // Blocked so the connectivity guard can't route a path through cells the
+        // player's head won't fit through, and so furniture can't land there. If
+        // an Empty cell still has the roof <2 blocks above the floor, the prune
+        // regressed and furniture could orphan part of the attic behind an
+        // impassable eave. (UnblockedReachable perimeter cells — gable doorways,
+        // stair-air-above — are deliberately left: they're dead-end spurs, not
+        // through-routes, so they can't create the orphaning the prune prevents.)
+        if room.role == RoomRole::Attic {
+            if let Some(hm) = roof_heightmaps.get(room.rect_index) {
+                let floor_y = frame.floor_y(room.floor);
+                let roof_y = frame.roof_y(room.rect_index);
+                for ((cx, cz), state) in room.constraints.iter_ground() {
+                    if state != CellState::Empty { continue; }
+                    let h = hm.get(cx, cz);
+                    if h == f32::NEG_INFINITY { continue; }
+                    let rb_y = roof_y + h.floor() as i32;
+                    if rb_y < floor_y + 2 {
+                        return Err(format!(
+                            "invariant (d): room {:?} floor {} Empty attic cell ({},{}) \
+                             has roof block at y={} but floor y={} — only {} block(s) of \
+                             headroom (need ≥2); eave prune regressed",
+                            room.room_type, room.floor, cx, cz, rb_y, floor_y, rb_y - floor_y,
+                        ));
+                    }
                 }
             }
         }

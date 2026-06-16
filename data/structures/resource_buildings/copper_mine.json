@@ -11,5 +11,6 @@
     9,
     9
   ],
-  "allow_steep": true
+  "allow_steep": true,
+  "palette": "resource_base"
 }

@@ -105,7 +105,12 @@ impl Palette {
     pub fn swap_with<'palette>(&'palette self, block : BlockID, output_palette : &'palette Palette, materials : &'palette HashMap<MaterialId, Material>) -> PaletteSwapResult<'palette> {
         if let Some((role, form)) = self.find_role_and_form(&block, &materials) {
             if let Some(material_id) = output_palette.get_material(role) {
-                return PaletteSwapResult::Material(material_id, form);
+                // Only swap when the output material can express this form.
+                // A stone material has no doors/fences/signs — swapping those
+                // would place nothing; keeping the original block is better.
+                if materials.get(material_id).is_some_and(|m| m.has_form(&form)) {
+                    return PaletteSwapResult::Material(material_id, form);
+                }
             }
         }
 

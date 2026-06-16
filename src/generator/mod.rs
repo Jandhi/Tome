@@ -12,5 +12,7 @@ pub mod paths;
 pub mod placement;
 pub mod style;
 pub mod chronicle;
+pub mod settlement;
 
 pub use build_claim::BuildClaim;
+pub use settlement::generate_town;

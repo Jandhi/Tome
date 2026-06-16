@@ -59,8 +59,22 @@ impl Material {
         })
     }
 
+    /// Whether this material can express `form`, directly or via the
+    /// structural fallback to its plain `Block`.
+    pub fn has_form(&self, form: &BlockForm) -> bool {
+        self.blocks.contains_key(form)
+            || (form.falls_back_to_block() && self.blocks.contains_key(&BlockForm::Block))
+    }
+
     pub fn get_block(&self, form: &BlockForm, rng : &mut RNG) -> Option<&BlockID> {
-        match self.blocks.get(form)? {
+        let blocks = self.blocks.get(form).or_else(|| {
+            if form.falls_back_to_block() {
+                self.blocks.get(&BlockForm::Block)
+            } else {
+                None
+            }
+        })?;
+        match blocks {
             MaterialBlocks::Block(block_id) => Some(block_id),
             MaterialBlocks::Blocks(hash_map) => Some(rng.choose_weighted(hash_map)),
         }
