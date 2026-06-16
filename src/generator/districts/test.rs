@@ -1232,9 +1232,9 @@ mod tests {
         let urban_sd_refs: Vec<_> = urban_sds.iter().collect();
         let n_before = editor.world().structures.len();
         // Re-skin the industrial NBTs into the settlement's culture palette
-        // (their baked `resource_base` blocks → desert sandstone).
+        // (their baked `resource_base` blocks → medieval spruce/stone).
         let ind_palette = data.palettes
-            .get(&crate::generator::buildings_v2::Culture::Desert.palette_id())
+            .get(&crate::generator::buildings_v2::Culture::Medieval.palette_id())
             .expect("industry palette not found").clone();
         if let Err(e) = place_urban_buildings(&urban_sd_refs, &ind_counts, &mut rng, &mut editor, &data, Some(&ind_palette)).await {
             log::warn!("industrial placement failed: {}", e);
@@ -1493,9 +1493,10 @@ mod tests {
         use crate::generator::materials::{Palette, PaletteId};
         use crate::geometry::Point2D as P2;
 
-        // Culture for this settlement. Desert → sandstone palette, flat roofs,
-        // and domed square rects (see buildings_v2::roof::dome).
-        let culture = Culture::Desert;
+        // Culture for this settlement. Medieval → spruce/stone palette, gable
+        // roofs, glass windows, and timber-frame jetties (square_bias 0, so no
+        // domes; per-house wood/stone/roof variety via roll_palette below).
+        let culture = Culture::Medieval;
         let base_palette: Palette = data.palettes.get(&culture.palette_id())
             .expect("base palette not found").clone();
         let wood_ids: Vec<PaletteId> = vec!["oak".into(), "spruce".into(), "dark_oak".into()];
