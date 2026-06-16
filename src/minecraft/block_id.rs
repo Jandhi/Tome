@@ -48,6 +48,13 @@ impl BlockID {
     pub fn is_air(&self) -> bool {
         matches!(self.name(), "air" | "cave_air" | "void_air")
     }
+
+    /// A structure void marks "leave whatever is already here" in an NBT — it must
+    /// be skipped at placement, never written, or it punches invisible holes in the
+    /// terrain a structure is meant to sit on (e.g. the foundation layers of a mine).
+    pub fn is_structure_void(&self) -> bool {
+        self.name() == "structure_void"
+    }
 }
 
 impl Default for BlockID {

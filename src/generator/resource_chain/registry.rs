@@ -28,6 +28,27 @@ const FLAT_TERRAIN_RUGGEDNESS_LIMIT: f32 = 0.5;
 const FLAT_TERRAIN_MAX_ROUGHNESS: f32 = 6.0;
 const FLAT_TERRAIN_MAX_GRADIENT: f32 = 0.6;
 
+/// Maximum fraction of a district's cells that may be water before it is denied a
+/// resource assignment entirely. Water cells are excluded from a production area's
+/// buildable cells (see `paint_production_area`), so a mostly-water district would
+/// strand its gather building on a scrap of land beside the lake — the kind of
+/// placement that looks like a building sitting on water. This is a touch more
+/// lenient than the urban cutoff (0.33): a little shoreline water is fine for a
+/// rural field, but a district that's mostly water gets no resource at all.
+const MAX_RESOURCE_WATER: f32 = 0.40;
+
+/// TEMPORARY (competition entry): hard caps on production variety, applied as a
+/// post-processing step over the normal resolver output. Flip to `false` to restore
+/// the full balancing system unchanged. While enabled:
+///   - each gather resource is assigned to at most `MAX_RURAL_PER_RESOURCE` districts
+///     (so e.g. at most two apiaries / two woodcutters across the map), and
+///   - each city processing building appears at most `MAX_PROCESSING_PER_BUILDING`
+///     times (one brewery, one chandlery, …), intermediate or finished alike.
+/// See `resolve_for_parcels` for the two gated blocks that enforce these.
+pub(crate) const COMPETITION_HARD_CAPS: bool = true;
+pub(crate) const MAX_RURAL_PER_RESOURCE: usize = 2;
+const MAX_PROCESSING_PER_BUILDING: u32 = 1;
+
 /// Score penalty per prior assignment a candidate already has *beyond the least-used
 /// option available to the same parcel*. Discourages over-representing one resource —
 /// e.g. introducing a 3rd wheat when wool and cow each have only one — while never
@@ -440,8 +461,18 @@ impl ResourceRegistry {
         const FINISHED_GOOD_CAP: u32 = 15;
 
         // Build candidate resource lists from each parcel's major biomes (≥30%).
+        // Districts that are mostly water are given no candidates at all: their
+        // buildable land is too sparse/fragmented to host a gather building and its
+        // production area without stranding it on the water's edge.
         let base_options: HashMap<DistrictID, Vec<String>> = parcel_analysis.iter()
             .map(|(id, analysis)| {
+                if analysis.water_percentage() > MAX_RESOURCE_WATER {
+                    log::info!(
+                        "[resource-chain]   parcel {:>3} -> (none) — too much water ({:.0}% > {:.0}%)",
+                        id.0, analysis.water_percentage() * 100.0, MAX_RESOURCE_WATER * 100.0,
+                    );
+                    return (*id, Vec::new());
+                }
                 let mut candidates: Vec<String> = analysis.major_biomes().iter()
                     .flat_map(|biome| self.resources_for_biome(biome))
                     .collect::<HashSet<_>>()
@@ -571,7 +602,33 @@ impl ResourceRegistry {
         // primary resource), respecting the per-resource parcel quotas computed above.
         // The primary output is credited at 2 units; co-products from multi-output recipes
         // (e.g. gather_bees → honey + beeswax) are scaled proportionally.
-        let parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, true, rng);
+        let mut parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, true, rng);
+
+        // Competition cap: keep at most MAX_RURAL_PER_RESOURCE districts per gather
+        // resource. Applied here, before supply/buildings/plan are derived, so the rest
+        // of the pipeline stays consistent with the trimmed rural set. Deterministic:
+        // for each over-represented resource we keep the lowest-ID districts and drop
+        // the excess (those districts simply go unproduced). This is a *hard* cap the
+        // quota system alone can't guarantee, since its diversity floor may overshoot.
+        if COMPETITION_HARD_CAPS {
+            let mut by_resource: HashMap<String, Vec<DistrictID>> = HashMap::new();
+            for (id, a) in &parcel_assignments {
+                by_resource.entry(a.primary_resource.clone()).or_default().push(*id);
+            }
+            for (resource, mut ids) in by_resource {
+                if ids.len() <= MAX_RURAL_PER_RESOURCE {
+                    continue;
+                }
+                ids.sort_by_key(|id| id.0);
+                for drop_id in ids.into_iter().skip(MAX_RURAL_PER_RESOURCE) {
+                    parcel_assignments.remove(&drop_id);
+                    log::info!(
+                        "[resource-chain]   competition cap: dropped {:?} (resource {}) — over {} per resource",
+                        drop_id, resource, MAX_RURAL_PER_RESOURCE,
+                    );
+                }
+            }
+        }
 
         let mut supply: HashMap<String, u32> = HashMap::new();
         let mut gather_buildings: HashMap<String, u32> = HashMap::new();
@@ -610,6 +667,16 @@ impl ResourceRegistry {
             }
         }
         let _ = resolved; // intermediate leftovers now come from forward execution, not the raw-cost projection
+
+        // Competition cap: at most MAX_PROCESSING_PER_BUILDING of each city processing
+        // building (intermediate or finished alike — each building type is its own key).
+        // Clamps the placement-driving counts only; the finished/leftover good totals
+        // above still reflect the full chain math, which is fine for reporting.
+        if COMPETITION_HARD_CAPS {
+            for count in processing_buildings.values_mut() {
+                *count = (*count).min(MAX_PROCESSING_PER_BUILDING);
+            }
+        }
 
         // Leftover raw goods (tier 0).
         let mut leftover_goods: Vec<(String, u32)> = self.resources.iter()

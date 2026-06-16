@@ -105,7 +105,7 @@ mod tests {
             );
 
             match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => {
+                Ok(true) => {
                     placed_count += 1;
                     if let Some(painter) = &override_painter {
                         let resource = override_resource.as_deref()
@@ -113,6 +113,7 @@ mod tests {
                         paint_production_area(&district, painter, resource, &data, &mut editor, &mut rng).await;
                     }
                 }
+                Ok(false) => {}
                 Err(e) => log::warn!(
                     "Failed to place '{}' in super-parcel {:?}: {}",
                     OVERRIDE_BUILDING, sd_id, e
@@ -417,12 +418,13 @@ mod tests {
             );
 
             match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => {
+                Ok(true) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
                         paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
+                Ok(false) => {}
                 Err(e) => log::warn!(
                     "Failed to place '{}' in super-parcel {:?}: {}",
                     assignment.building,
@@ -1036,12 +1038,13 @@ mod tests {
             );
 
             match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => {
+                Ok(true) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
                         paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
+                Ok(false) => {}
                 Err(e) => log::warn!(
                     "Failed to place '{}' in super-parcel {:?}: {}",
                     assignment.building,
@@ -1243,12 +1246,13 @@ mod tests {
             };
 
             match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => {
+                Ok(true) => {
                     placed_count += 1;
                     if let Some(painter) = &assignment.production_painter {
                         paint_production_area(&district, painter, &assignment.primary_resource, &data, &mut editor, &mut rng).await;
                     }
                 }
+                Ok(false) => {}
                 Err(e) => log::warn!("Rural placement failed for '{}': {}", assignment.building, e),
             }
         }

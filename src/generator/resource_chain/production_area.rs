@@ -12,7 +12,7 @@ use crate::{
         materials::{MaterialRole, PaletteId},
         terrain::{feathered_flatten, group_trees, log_trees},
     },
-    geometry::{cardinal_to_str, Point2D, Point3D, CARDINALS_2D},
+    geometry::{cardinal_to_str, Point2D, Point3D, CARDINALS_2D, ALL_8},
     minecraft::{Block, BlockForm, BlockID},
     noise::RNG,
 };
@@ -61,12 +61,19 @@ pub async fn paint_production_area(
         .collect();
 
     // Free cells: parcel interior excluding edge buffer, not yet claimed, not water.
-    let free_cells: HashSet<Point2D> = district.data.points_2d.iter()
+    let raw_free_cells: HashSet<Point2D> = district.data.points_2d.iter()
         .filter(|&&p| !edge_buffer.contains(&p))
         .filter(|&&p| !editor.world().is_claimed(p))
         .filter(|&&p| !editor.world().is_water(p))
         .copied()
         .collect();
+
+    // Smooth the field shape before painting: a morphological opening shaves off
+    // the thin strips and frayed protrusions that make the painted area's edge
+    // look ragged. Cells it removes simply stay natural terrain. Fall back to the
+    // raw set if opening would erase a genuinely small-but-valid field.
+    let smoothed = smooth_region(&raw_free_cells);
+    let free_cells = if smoothed.is_empty() { raw_free_cells } else { smoothed };
 
     if free_cells.is_empty() {
         return;
@@ -542,10 +549,19 @@ async fn sugarcane_production_painter(
 /// Builds beehive block-entity NBT filled with three bees, each given a random
 /// (visible) funny name from `bee_names` — decorated with the same ~10% prefix /
 /// ~10% suffix system as pasture animals (e.g. "Sir Buzz", "Beeyonce the Great").
-/// Bees emerge to buzz the canopy (low occupation/in-hive ticks). Tweak here if a
-/// Minecraft version changes the beehive `Bees` / bee-name format.
+///
+/// Uses the snake_case `bees` / `entity_data` / `min_ticks_in_hive` /
+/// `ticks_in_hive` tag names introduced in 1.21.4 — the old capitalized
+/// `Bees`/`EntityData`/`MinOccupationTicks`/`TicksInHive` form is silently
+/// dropped on current servers, leaving the nest empty. `min_ticks_in_hive` is a
+/// positive value so the bees actually reside in the nest on placement (rather
+/// than emerging on the first tick); they'll buzz the canopy on their own once
+/// the chunk is loaded. Tweak here if a Minecraft version changes the format.
 fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], rng: &mut RNG) -> String {
     const BEE_COUNT: usize = 3;
+    // Minecraft's default minimum occupation; keeps bees in the nest until they
+    // leave to pollinate, so a freshly-placed nest reads as populated.
+    const MIN_TICKS_IN_HIVE: i32 = 600;
     // Distinct base names per hive where possible; fewer/none if the list is short/empty.
     let chosen: Vec<String> = rng.choose_many(bee_names, BEE_COUNT).into_iter().cloned().collect();
 
@@ -558,18 +574,26 @@ fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], r
                 }
                 None => "{id:\"minecraft:bee\"}".to_string(),
             };
-            format!("{{EntityData:{},MinOccupationTicks:0,TicksInHive:0}}", entity)
+            format!(
+                "{{entity_data:{},min_ticks_in_hive:{},ticks_in_hive:0}}",
+                entity, MIN_TICKS_IN_HIVE
+            )
         })
         .collect();
 
-    format!("{{id:\"minecraft:beehive\",Bees:[{}]}}", bees.join(","))
+    format!("{{id:\"minecraft:beehive\",bees:[{}]}}", bees.join(","))
 }
 
 /// Finds a nest site on `trunk`'s log column: a cell cardinally adjacent to a log
-/// (1 block away), itself air or leaves (so we don't carve the stem), with a leaf
-/// directly above (sheltered beneath the canopy). Searches from the top log down
-/// so hives sit up in the canopy. Returns `(position, facing)` where `facing`
-/// points away from the trunk. `None` if the tree has no such nook.
+/// (1 block away), itself air or leaves (so we don't carve the stem), tucked just
+/// under the leaf canopy. Returns `(position, facing)` where `facing` points away
+/// from the trunk. `None` if the tree has no such nook.
+///
+/// Searches from the bottom of the trunk *up*, taking the lowest qualifying spot,
+/// so the hive ends up nestled against the trunk at the underside of the canopy
+/// rather than perched on top of it. A spot qualifies if it is sheltered by a leaf
+/// directly above (the canopy roof) — hanging beneath a leaf is fine even without
+/// neighbouring leaves.
 fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)> {
     let base_y = editor.world().get_non_tree_height(trunk);
 
@@ -581,13 +605,14 @@ fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)>
         y += 1;
     }
 
-    for ly in (base_y..=top_y).rev() {
+    for ly in base_y..=top_y {
         for d in CARDINALS_2D {
             let pos = Point3D::new(trunk.x + d.x, ly, trunk.y + d.y);
             let here = editor.get_block(pos).id;
             if !(here.is_air() || here.is_leaves()) {
-                continue;
+                continue; // don't carve into a branch or neighbouring trunk
             }
+            // Sheltered by the canopy roof directly overhead.
             let above = editor.get_block(Point3D::new(pos.x, pos.y + 1, pos.z)).id;
             if above.is_leaves() {
                 return Some((pos, d));
@@ -610,7 +635,10 @@ fn make_beehive(
         ("facing".to_string(), cardinal_to_str(&facing).unwrap_or_else(|| "north".to_string())),
         ("honey_level".to_string(), rng.rand_i32_range(0, 6).to_string()),
     ]);
-    Block::new("minecraft:beehive".into(), Some(state), Some(beehive_nbt(bee_names, prefixes, suffixes, rng)))
+    // `bee_nest` is the naturally-generated variant — looks at home hanging in a
+    // tree canopy (the crafted `beehive` looks man-made). Both share the same
+    // `minecraft:beehive` block-entity type, so the NBT `id` stays `beehive`.
+    Block::new("minecraft:bee_nest".into(), Some(state), Some(beehive_nbt(bee_names, prefixes, suffixes, rng)))
 }
 
 /// Hangs a populated beehive in the canopy of a percentage of the area's trees —
@@ -665,13 +693,13 @@ async fn bee_area_production_painter(
 
 // --- Mine painter tunables (edit freely to change the look) ---
 /// Per-cell chance, in parts-per-1000, of seeding a rock outcrop.
-const MINE_BOULDER_CHANCE_PERMILLE: i32 = 30;
+const MINE_BOULDER_CHANCE_PERMILLE: i32 = 15;
 /// Per-cell chance, in parts-per-1000, of an ore block poking through the surface.
-const MINE_TERRAIN_ORE_PERMILLE: i32 = 20;
+const MINE_TERRAIN_ORE_PERMILLE: i32 = 15;
 /// Percent of outcrops that carry ore.
-const MINE_ORE_BOULDER_PERCENT: i32 = 40;
+const MINE_ORE_BOULDER_PERCENT: i32 = 30;
 /// Within an ore-bearing outcrop, percent of blocks that are ore (vs rock).
-const MINE_BOULDER_ORE_PERCENT: i32 = 30;
+const MINE_BOULDER_ORE_PERCENT: i32 = 16;
 /// Outcrop horizontal radius and vertical height, in blocks.
 const MINE_BOULDER_MAX_RADIUS: i32 = 2;
 const MINE_BOULDER_MAX_HEIGHT: i32 = 3;
@@ -682,8 +710,8 @@ const MINE_GEOLOGY_SCAN_DEPTH: i32 = 10;
 /// Canonical natural rock id (no `minecraft:` prefix) if `id` is one, else `None`.
 fn natural_rock_id(id: &BlockID) -> Option<&'static str> {
     let s = id.as_str().trim_start_matches("minecraft:");
-    const ROCKS: [&str; 8] = [
-        "stone", "deepslate", "granite", "diorite", "andesite", "tuff", "calcite", "basalt",
+    const ROCKS: [&str; 10] = [
+        "stone", "deepslate", "granite", "diorite", "andesite", "tuff", "calcite", "basalt", "sandstone", "red_sandstone",
     ];
     ROCKS.iter().copied().find(|&r| r == s)
 }
@@ -691,6 +719,11 @@ fn natural_rock_id(id: &BlockID) -> Option<&'static str> {
 /// Samples the local geology: probes a scatter of cells, scanning down up to
 /// `MINE_GEOLOGY_SCAN_DEPTH` for the first natural rock, and returns the most
 /// common one plus whether it's deepslate. Defaults to stone if none is found.
+///
+/// Used for the *area-wide* default (ore deepslate-variant, surface seams). Because
+/// vanilla terrain is overwhelmingly stone, this almost always returns stone — which
+/// is why per-outcrop detection (`detect_outcrop_rock`) drives the boulder palettes,
+/// so granite/andesite/diorite blobs still surface where they're actually exposed.
 fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
     let step = (ordered.len() / MINE_GEOLOGY_SAMPLES).max(1);
@@ -714,19 +747,59 @@ fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
     }
 }
 
+/// Detects the dominant natural rock in the columns a boulder would cover at
+/// `center` (a `MINE_BOULDER_MAX_RADIUS` window), scanning each column down to the
+/// first natural rock. Returns that rock plus whether it's deepslate; defaults to
+/// stone. Sampling locally — rather than picking one rock for the whole mine — means
+/// a boulder sitting on an exposed granite/andesite/diorite blob is built from that
+/// variant, so small pockets of stone variants surface where they actually occur
+/// instead of being drowned out by the area-wide stone majority.
+fn detect_outcrop_rock(center: Point2D, editor: &Editor) -> (String, bool) {
+    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    let r = MINE_BOULDER_MAX_RADIUS;
+    for dx in -r..=r {
+        for dz in -r..=r {
+            let cell = Point2D::new(center.x + dx, center.y + dz);
+            if !editor.world().is_in_bounds_2d(cell) {
+                continue;
+            }
+            let top = editor.world().get_non_tree_height(cell) - 1;
+            for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
+                let Some(block) = editor.try_get_block(Point3D::new(cell.x, top - dy, cell.y)) else {
+                    break;
+                };
+                if let Some(rock) = natural_rock_id(&block.id) {
+                    *counts.entry(rock).or_insert(0) += 1;
+                    break;
+                }
+            }
+        }
+    }
+    match counts.into_iter().max_by_key(|&(_, n)| n) {
+        Some((rock, _)) => (rock.to_string(), rock == "deepslate"),
+        None => ("stone".to_string(), false),
+    }
+}
+
 /// A weighted block mix for an outcrop of the given local rock: the rock itself,
-/// a cobbled accent, and a mossy speck for age. Deepslate uses cobbled deepslate.
+/// a cobbled accent, and a mossy speck for age — all matched to the local rock.
+///
+/// Only `stone` (cobblestone / mossy_cobblestone) and `deepslate` (cobbled_deepslate)
+/// have dedicated cobbled/mossy forms in Minecraft. The other stone variants
+/// (granite/diorite/andesite/tuff/calcite/basalt) have none, so they use the rock
+/// itself for the accent and speck — keeping, say, a granite boulder granite-toned
+/// instead of speckled with grey cobblestone.
 fn rock_palette(rock: &str) -> Vec<(Block, f32)> {
     let primary = format!("minecraft:{}", rock);
-    let (accent, mossy) = if rock == "deepslate" {
-        ("minecraft:cobbled_deepslate", "minecraft:cobbled_deepslate")
-    } else {
-        ("minecraft:cobblestone", "minecraft:mossy_cobblestone")
+    let (accent, mossy): (String, String) = match rock {
+        "stone" => ("minecraft:cobblestone".into(), "minecraft:mossy_cobblestone".into()),
+        "deepslate" => ("minecraft:cobbled_deepslate".into(), "minecraft:cobbled_deepslate".into()),
+        _ => (primary.clone(), primary.clone()),
     };
     vec![
         (Block::from_id(primary.as_str().into()), 0.55),
-        (Block::from_id(accent.into()), 0.35),
-        (Block::from_id(mossy.into()), 0.10),
+        (Block::from_id(accent.as_str().into()), 0.35),
+        (Block::from_id(mossy.as_str().into()), 0.10),
     ]
 }
 
@@ -789,11 +862,13 @@ async fn place_outcrop(
     }
 }
 
-/// Mostly leaves the mine's terrain alone, dotting it with rock outcrops built
-/// from the local stone (cobble/stone by default), some bearing the mine's ore,
-/// plus occasional ore seams poking through the ground. The ore is resolved from
-/// the gathered `resource` (`ore_block` in resources.yaml), so one painter serves
-/// every mine — an iron mine seeds iron ore, a coal mine coal.
+/// Mostly leaves the mine's terrain alone, dotting it with rock outcrops, some
+/// bearing the mine's ore, plus occasional ore seams poking through the ground.
+/// Each outcrop is built from the rock detected directly beneath it (see
+/// `detect_outcrop_rock`), so a boulder on an exposed granite/andesite/diorite blob
+/// surfaces that variant rather than every outcrop being plain stone. The ore is
+/// resolved from the gathered `resource` (`ore_block` in resources.yaml), so one
+/// painter serves every mine — an iron mine seeds iron ore, a coal mine coal.
 async fn mine_production_painter(
     _params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
@@ -806,22 +881,26 @@ async fn mine_production_painter(
     let mut ordered: Vec<Point2D> = free_cells.iter().copied().collect();
     ordered.sort_by_key(|p| (p.x, p.y));
 
-    let (rock_name, is_deepslate) = detect_local_rock(&ordered, editor);
-    let rocks = rock_palette(&rock_name);
-
-    let ore_block: Option<Block> = data
+    // Raw ore id (e.g. "minecraft:iron_ore"); the deepslate variant is applied per
+    // location from the rock detected there.
+    let ore_id: Option<String> = data
         .resource_registry
         .resources()
         .get(resource)
         .and_then(|def| def.ore_block.as_ref())
-        .map(|id| ore_for_rock(id, is_deepslate));
-    if ore_block.is_none() {
+        .cloned();
+    if ore_id.is_none() {
         warn!("mine_production_painter: resource '{}' has no ore_block; placing plain rock", resource);
     }
 
+    // Area-wide rock, used only as the deepslate signal for the surface seams below.
+    let (_, area_deepslate) = detect_local_rock(&ordered, editor);
+
     let mut occupied: HashSet<Point2D> = HashSet::new();
 
-    // 1. Rock outcrops, a fraction of them ore-bearing.
+    // 1. Rock outcrops, a fraction of them ore-bearing. Each is built from the rock
+    //    detected right under it, so boulders over granite/andesite/diorite blobs
+    //    surface those variants instead of every outcrop reading as stone.
     for &c in &ordered {
         if occupied.contains(&c) {
             continue;
@@ -829,14 +908,20 @@ async fn mine_production_painter(
         if rng.rand_i32_range(0, 1000) >= MINE_BOULDER_CHANCE_PERMILLE {
             continue;
         }
+        let (rock_name, is_deepslate) = detect_outcrop_rock(c, editor);
+        let rocks = rock_palette(&rock_name);
+        let ore = ore_id
+            .as_ref()
+            .map(|id| ore_for_rock(id, is_deepslate))
+            .unwrap_or_else(|| rocks[0].0.clone());
         let ore_bearing =
-            ore_block.is_some() && rng.rand_i32_range(0, 100) < MINE_ORE_BOULDER_PERCENT;
-        let ore = ore_block.clone().unwrap_or_else(|| rocks[0].0.clone());
+            ore_id.is_some() && rng.rand_i32_range(0, 100) < MINE_ORE_BOULDER_PERCENT;
         place_outcrop(c, &rocks, &ore, ore_bearing, &mut occupied, structure_id, editor, rng).await;
     }
 
     // 2. Ore seams poking through the surface, away from the outcrops.
-    if let Some(ore) = &ore_block {
+    if let Some(id) = &ore_id {
+        let seam_ore = ore_for_rock(id, area_deepslate);
         for &c in &ordered {
             if occupied.contains(&c) {
                 continue;
@@ -845,7 +930,7 @@ async fn mine_production_painter(
                 continue;
             }
             let top = editor.world().get_non_tree_height(c) - 1;
-            editor.place_block_forced(ore, Point3D::new(c.x, top, c.y)).await;
+            editor.place_block_forced(&seam_ore, Point3D::new(c.x, top, c.y)).await;
         }
     }
 
@@ -891,6 +976,62 @@ fn close_diagonal_gaps(
     fence
 }
 
+/// Prunes dangling spurs from a fence ring. A thin protrusion of the pasture
+/// turns into a fence line that juts out and dead-ends — visually a fence
+/// "randomly connecting" to nothing. Fences only join along cardinals, so a cell
+/// that belongs to the enclosing loop has at least two orthogonal fence
+/// neighbours; a spur tip has one (and an isolated cell, none). Iteratively
+/// removing every cell with fewer than two orthogonal fence neighbours peels each
+/// appendage back to the loop it hangs off, leaving only closed rings.
+/// Cleans up a cell region's outline so painted production areas don't end in
+/// ragged, thin strips. A morphological *opening* with a 3x3 (8-connectivity)
+/// structuring element: a one-cell erosion followed by a one-cell dilation, both
+/// 8-connected and clipped to the original region.
+///
+/// Erosion keeps only cells whose full 8-neighbourhood is present, so anything
+/// narrower than three cells — 1-/2-wide tendrils, frayed single-cell fringes,
+/// convex spikes — erodes to nothing. Dilation then regrows the 8-ring around the
+/// surviving core, which restores solid blobs *including their corners* (a 3x3
+/// square is preserved) without re-extending the thin features, since the core
+/// never reaches into them. The result is always a subset of the input, so it
+/// never paints onto claimed/water/out-of-parcel cells. A region with no solid
+/// ≥3-wide core reduces to empty and returns empty (caller decides the fallback).
+fn smooth_region(region: &HashSet<Point2D>) -> HashSet<Point2D> {
+    let eroded: HashSet<Point2D> = region
+        .iter()
+        .copied()
+        .filter(|&c| ALL_8.iter().all(|&d| region.contains(&(c + d))))
+        .collect();
+
+    let mut opened = eroded.clone();
+    for &c in &eroded {
+        for d in ALL_8 {
+            let n = c + d;
+            if region.contains(&n) {
+                opened.insert(n);
+            }
+        }
+    }
+    opened
+}
+
+fn prune_fence_spurs(mut fence: HashSet<Point2D>) -> HashSet<Point2D> {
+    loop {
+        let spurs: Vec<Point2D> = fence
+            .iter()
+            .filter(|&&c| CARDINALS_2D.iter().filter(|&&d| fence.contains(&(c + d))).count() < 2)
+            .copied()
+            .collect();
+        if spurs.is_empty() {
+            break;
+        }
+        for s in spurs {
+            fence.remove(&s);
+        }
+    }
+    fence
+}
+
 /// Applies the shared name decoration to a chosen `name`: a decorative prefix
 /// ~10% of the time and a suffix ~10% of the time (independent rolls, so ~1% get
 /// both), joined with spaces, e.g. "Ol' Bessie", "Daisy the Great". Used for both
@@ -906,11 +1047,17 @@ fn decorate_name(name: &str, prefixes: &[String], suffixes: &[String], rng: &mut
     out
 }
 
-/// Wraps a name in the single-quoted SNBT `CustomName` text component, escaping
-/// the apostrophes in prefixes like "Ol'" / backslashes that would close it.
+/// Builds the `CustomName` SNBT for a visible nametag, as a plain text component.
+///
+/// On 1.21.5+ the `CustomName` value is parsed directly as an SNBT text
+/// component, so the old `'{"text":"..."}'` JSON-string form is rendered
+/// *literally* (braces and all). A bare double-quoted string is a valid text
+/// component (literal text), so we emit `CustomName:"Name"` — escaping only the
+/// backslashes and double quotes that would close the string. Apostrophes (e.g.
+/// "Ol'") are fine unescaped inside double quotes.
 fn custom_name_snbt(name: &str) -> String {
-    let escaped = name.replace('\\', "\\\\").replace('\'', "\\'");
-    format!("CustomName:'{{\"text\":\"{}\"}}',CustomNameVisible:1b", escaped)
+    let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("CustomName:\"{}\",CustomNameVisible:1b", escaped)
 }
 
 /// Builds the `CustomName` NBT for a spawned animal (visible nametag), or `None`
@@ -992,9 +1139,18 @@ async fn pasture_production_painter(
     // Fences only join along cardinals, so close any diagonal gaps where the ring
     // turns at a corner (otherwise the enclosure leaks).
     let fence_cells = close_diagonal_gaps(&perimeter_set, free_cells);
+    // Drop dead-end spurs left by thin pasture protrusions so the fence reads as a
+    // clean enclosure instead of stray lines jutting out.
+    let fence_cells = prune_fence_spurs(fence_cells);
 
     // A few gates spaced around the ring (~1 per 15 perimeter cells, at least 2).
-    let perimeter: Vec<Point2D> = perimeter_set.iter().copied().collect();
+    // Only real perimeter cells that survived pruning are gate-eligible (never the
+    // diagonal bridge cells, and never a pruned spur).
+    let perimeter: Vec<Point2D> = perimeter_set
+        .iter()
+        .copied()
+        .filter(|c| fence_cells.contains(c))
+        .collect();
     const GATE_SPACING: usize = 15;
     let gate_count = (perimeter.len() / GATE_SPACING).max(2).min(perimeter.len());
     let gate_cells: HashSet<Point2D> =
@@ -1084,5 +1240,75 @@ mod tests {
         let free = perimeter.clone();
         let fence = close_diagonal_gaps(&perimeter, &free);
         assert_eq!(fence, perimeter, "a straight run has no diagonal gaps");
+    }
+
+    #[test]
+    fn prune_keeps_closed_loop() {
+        // A 3x3 ring (8 cells, hollow centre): every cell has two orthogonal
+        // neighbours, so nothing is pruned.
+        let ring = set(&[
+            (0, 0), (1, 0), (2, 0),
+            (0, 1),         (2, 1),
+            (0, 2), (1, 2), (2, 2),
+        ]);
+        assert_eq!(prune_fence_spurs(ring.clone()), ring, "a closed loop must survive intact");
+    }
+
+    #[test]
+    fn prune_removes_spur_off_a_loop() {
+        // Same ring plus a two-cell spur hanging off (3,1)-(4,1).
+        let mut withspur = set(&[
+            (0, 0), (1, 0), (2, 0),
+            (0, 1),         (2, 1),
+            (0, 2), (1, 2), (2, 2),
+        ]);
+        withspur.insert(Point2D::new(3, 1));
+        withspur.insert(Point2D::new(4, 1));
+        let loop_only = set(&[
+            (0, 0), (1, 0), (2, 0),
+            (0, 1),         (2, 1),
+            (0, 2), (1, 2), (2, 2),
+        ]);
+        assert_eq!(prune_fence_spurs(withspur), loop_only, "the dangling spur must be pruned back to the loop");
+    }
+
+    #[test]
+    fn prune_clears_an_open_line() {
+        // A bare line (no cycle) is all dead-ends and prunes away entirely.
+        let line = set(&[(0, 0), (1, 0), (2, 0), (3, 0)]);
+        assert!(prune_fence_spurs(line).is_empty(), "an open line with no loop should fully prune");
+    }
+
+    /// A solid 3x3 blob keeps a 1-wide tendril hanging off it; smoothing removes
+    /// the whole tendril (opening shortens it, the prune peels the stub) while the
+    /// blob survives intact.
+    #[test]
+    fn smooth_drops_thin_tendril_keeps_blob() {
+        let mut region: HashSet<Point2D> = HashSet::new();
+        for x in 0..3 {
+            for z in 0..3 {
+                region.insert(Point2D::new(x, z));
+            }
+        }
+        // 1-wide tendril extending right from the blob's middle row.
+        region.insert(Point2D::new(3, 1));
+        region.insert(Point2D::new(4, 1));
+
+        let smoothed = smooth_region(&region);
+        assert!(!smoothed.contains(&Point2D::new(4, 1)), "tendril tip must be removed");
+        assert!(!smoothed.contains(&Point2D::new(3, 1)), "tendril stub must be removed");
+        // The solid 3x3 blob is preserved.
+        for x in 0..3 {
+            for z in 0..3 {
+                assert!(smoothed.contains(&Point2D::new(x, z)), "blob cell ({x},{z}) must survive");
+            }
+        }
+    }
+
+    #[test]
+    fn smooth_erases_a_one_wide_region() {
+        // Nothing is ≥3 wide, so the whole strip erodes/prunes away (caller falls back).
+        let strip = set(&[(0, 0), (1, 0), (2, 0), (3, 0)]);
+        assert!(smooth_region(&strip).is_empty(), "a 1-wide region has no solid core to keep");
     }
 }

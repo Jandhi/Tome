@@ -63,8 +63,8 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
-            if palette_data.name == "air".into() {
-                continue; // Skip air blocks
+            if palette_data.name == "air".into() || palette_data.name.is_structure_void() {
+                continue; // Skip air, and structure voids (leave existing terrain).
             }
 
             let mut pos = Point3D::from(blockdata.pos);
@@ -90,8 +90,8 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
-            if palette_data.name == "air".into() {
-                continue; // Skip air blocks
+            if palette_data.name == "air".into() || palette_data.name.is_structure_void() {
+                continue; // Skip air, and structure voids (leave existing terrain).
             }
 
             let mut pos = Point3D::from(blockdata.pos);
@@ -102,7 +102,7 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             if let Some(mz) = mirror_z {
                 pos.z = mz * 2 - pos.z;
             }
-            
+
             let swap = input_palette.unwrap().swap_with(palette_data.name.clone(), output_palette.unwrap(), materials);
 
             match swap {

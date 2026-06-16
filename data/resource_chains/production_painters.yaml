@@ -20,12 +20,12 @@ production_painters:
     type: function
     function: mine_production_painter
 
-  # apiary surroundings — populated beehives hung in the canopy of nearby trees.
+  # apiary surroundings — populated bee nests hung in the canopy of nearby trees.
   bee_area:
     type: function
     function: bee_area_production_painter
     params:
-      percent: 0.3     # fraction of trees that get a hive
+      percent: 0.2     # fraction of trees that get a hive
 
   # shepherd's grazing field — fenced pasture with a small flock of sheep.
   sheep_pasture:

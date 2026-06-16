@@ -110,24 +110,85 @@ pub async fn log_stems(editor: &Editor, points: HashSet<Point2D>) {
 }
 
 pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
-    for point in points {
-        let height = editor.world().get_motion_blocking_height_at(point) - 1; // checking ground
-        let point3d = point.add_y(height);
-        let mut block_id = editor.get_block(point3d).id;
+    /// How far below a column's canopy top we scan. Generous enough to always
+    /// pass the whole tree down to the ground — even when a tall neighbouring
+    /// canopy overhangs the column and pushes its motion-blocking top far above
+    /// the actual tree. A fixed, smaller window was the bug that left logs
+    /// floating below an overhang once their leaves were stripped.
+    const MAX_SCAN_DEPTH: i32 = 100;
+    /// Flood-fill neighbourhood for following branch logs out from the stem.
+    /// Strictly 26-connected (radius 1): vanilla branches are continuous,
+    /// directly-adjacent logs, so radius 1 follows them all — while refusing to
+    /// jump a gap into a distinct neighbouring tree, which would cascade-fell a
+    /// whole forest patch in the selective logging painter.
+    const LOG_BRIDGE: i32 = 1;
 
-        if !block_id.is_tree() {
-            continue;
-        }
-        editor.place_block(&"air".into(), point3d).await;
-        for y in 1..40 {
-            block_id = editor.get_block(Point3D::new(point.x, height - y, point.y)).id;
-            if block_id.is_tree() {
-                editor.place_block(&"air".into(), Point3D::new(point.x, height - y, point.y)).await;
-            } else if block_id == "dirt".into() {
-                editor.place_block(&"grass_block".into(), Point3D::new(point.x, height - y, point.y)).await;
-            } else if block_id != "air".into() {
-                continue;
+    let mut columns: HashSet<Point2D> = points.clone();
+    let mut visited_logs: HashSet<Point3D> = HashSet::new();
+    let mut stack: Vec<Point3D> = Vec::new();
+
+    // 1. Seed from every log in each input column (full-depth scan, no window).
+    for &point in &points {
+        let top = editor.world().get_motion_blocking_height_at(point) - 1;
+        for y in (top - MAX_SCAN_DEPTH..=top).rev() {
+            let pos = Point3D::new(point.x, y, point.y);
+            if editor.get_block(pos).id.is_log() && visited_logs.insert(pos) {
+                stack.push(pos);
             }
+        }
+    }
+
+    // 2. Flood fill through logs to gather branch logs that jut beyond the seed
+    //    footprint (big oaks, jungle trees), bridging small leaf gaps.
+    while let Some(pos) = stack.pop() {
+        columns.insert(Point2D::new(pos.x, pos.z));
+        for dx in -LOG_BRIDGE..=LOG_BRIDGE {
+            for dy in -LOG_BRIDGE..=LOG_BRIDGE {
+                for dz in -LOG_BRIDGE..=LOG_BRIDGE {
+                    if dx == 0 && dy == 0 && dz == 0 {
+                        continue;
+                    }
+                    let n = Point3D::new(pos.x + dx, pos.y + dy, pos.z + dz);
+                    if editor.get_block(n).id.is_log() && visited_logs.insert(n) {
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Clear each affected column from its canopy top down through the full
+    //    scan depth, stripping every log + leaf and converting the trunk base's
+    //    dirt back to grass. No fixed window, so a log left low under an overhang
+    //    is reached.
+    for &point in &columns {
+        let top = editor.world().get_motion_blocking_height_at(point) - 1;
+        if !editor.get_block(point.add_y(top)).id.is_tree() {
+            continue; // column surface isn't a tree — leave it untouched
+        }
+        let mut lowest_cleared: Option<i32> = None;
+        for y in (top - MAX_SCAN_DEPTH..=top).rev() {
+            let pos = Point3D::new(point.x, y, point.y);
+            if editor.get_block(pos).id.is_tree() {
+                editor.place_block(&"air".into(), pos).await;
+                lowest_cleared = Some(y);
+            }
+        }
+        // Restore grass only at the block directly beneath the lowest cleared
+        // tree block (the trunk base) — never deeper, to avoid grassing buried dirt.
+        if let Some(base) = lowest_cleared {
+            let ground = Point3D::new(point.x, base - 1, point.y);
+            if editor.get_block(ground).id == "dirt".into() {
+                editor.place_block(&"grass_block".into(), ground).await;
+            }
+        }
+    }
+
+    // 4. Safety net: any flood-fill log whose column was skipped by the surface
+    //    guard above (rare) still gets cleared.
+    for &pos in &visited_logs {
+        if editor.get_block(pos).id.is_log() {
+            editor.place_block(&"air".into(), pos).await;
         }
     }
 }

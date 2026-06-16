@@ -438,11 +438,22 @@ mod tests {
                 *counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
             }
 
-            assert_eq!(result.parcel_assignments.len(), 12, "all parcels assigned (seed {})", seed);
-            // All three plains resources should be represented, each at least once.
+            // All three plains resources should be represented, each at least once —
+            // the core "no collapse to a single resource" guard, true with caps on or off.
             for r in ["wheat", "wool", "cow"] {
                 assert!(counts.get(r).copied().unwrap_or(0) >= 1,
                     "expected at least one '{}' parcel on plains, got {:?} (seed {})", r, counts, seed);
+            }
+
+            if super::super::registry::COMPETITION_HARD_CAPS {
+                // The competition cap trims each resource to at most MAX_RURAL_PER_RESOURCE,
+                // so not every parcel is assigned and no resource exceeds the cap.
+                let cap = super::super::registry::MAX_RURAL_PER_RESOURCE as u32;
+                for (r, c) in &counts {
+                    assert!(*c <= cap, "resource '{}' over cap {}: {:?} (seed {})", r, cap, counts, seed);
+                }
+            } else {
+                assert_eq!(result.parcel_assignments.len(), 12, "all parcels assigned (seed {})", seed);
             }
         }
     }
@@ -696,7 +707,7 @@ mod tests {
         // its gather recipe's painter) instead of its resource-chain assignment.
         // Handy for eyeballing one painter across the whole map — pair with a
         // superflat world to test a painter on perfect terrain.
-        const OVERRIDE_ALL_RURAL: bool = true;
+        const OVERRIDE_ALL_RURAL: bool = false;
         // Gather building forced when OVERRIDE_ALL_RURAL is set. Must be a building
         // declared by a gather recipe (inputs: {}) in recipes.yaml, e.g.
         // "farm" (wheat_fields), "woodcutter_hut" (logging_area),
@@ -780,7 +791,8 @@ mod tests {
                 continue;
             };
             match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
-                Ok(()) => {
+                Ok(false) => {}
+                Ok(true) => {
                     placed += 1;
                     if let Some(painter) = &painter {
                         // Resource for the *placed* building (so the mine painter's ore

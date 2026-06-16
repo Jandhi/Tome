@@ -119,7 +119,13 @@ impl World {
                 world.ground_height_map[x][z] = ground_map[x][z] - y_offset;
                 world.ocean_floor_height_map[x][z] = ocean_map[x][z] - y_offset;
                 world.motion_blocking_height_map[x][z] = motion_blocking_map[x][z] - y_offset;
-                world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z], z as i32)).expect("Failed to get block at point");
+                // The heightmap value is the first *air* cell above the surface (see
+                // `add_non_tree_height` / `analyze_parcel`, which read the surface block at
+                // `height - 1`). Sample one block down so `ground_block_map` — and thus
+                // `is_water` / `get_ground_block` — actually holds the surface block rather
+                // than the air above it. Without the `-1`, `is_water` reported false over
+                // open water, letting buildings be placed on water and backfilled.
+                world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z] - 1, z as i32)).expect("Failed to get block at point");
                 world.ground_biome_map[x][z] = world.get_biome(Point3D::new(x as i32, world.ocean_floor_height_map[x][z], z as i32)).expect("Failed to get biome at point");
             }
         }

@@ -162,7 +162,7 @@ fn pick_balanced_parent(
             } else {
                 *child_sd.parcel_adjacency().get(other).unwrap_or(&0) as f32 / child_perimeter as f32
             };
-            let score = get_candidate_score(parcel_analysis_data, child, *other, Some(adjacency_ratio));
+            let score = get_candidate_score(parcel_analysis_data, child, *other, Some(adjacency_ratio), ADJACENCY_WEIGHT);
             Some((*other, score))
         })
         .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"))
@@ -179,30 +179,67 @@ fn pick_balanced_parent(
 ///   compactness is rewarded relative to the growing city, not just the prime anchor.
 ///
 /// `adjacency_ratio` is an already-normalized `[0,1]` fraction; `None` disables the adjacency term.
-pub fn get_candidate_score(parcel_analysis_data : &HashMap<DistrictID, ParcelAnalysis>, target : DistrictID, candidate : DistrictID, adjacency_ratio : Option<f32>) -> f32 {
+/// `weight` is how heavily the adjacency term counts relative to the five terrain terms — district
+/// merge passes `ADJACENCY_WEIGHT`, city growth passes the larger `CITY_GROWTH_ADJACENCY_WEIGHT` so
+/// compactness dominates. Ignored when `adjacency_ratio` is `None`.
+pub fn get_candidate_score(parcel_analysis_data : &HashMap<DistrictID, ParcelAnalysis>, target : DistrictID, candidate : DistrictID, adjacency_ratio : Option<f32>, weight : f32) -> f32 {
+    candidate_score_terms(parcel_analysis_data, target, candidate, adjacency_ratio, weight).total()
+}
+
+/// Per-term decomposition of [`get_candidate_score`], for diagnostics. `total()` reproduces the
+/// score exactly, so logging this keeps the breakdown in lock-step with the scoring formula.
+pub struct ScoreTerms {
+    /// Raw adjacency ratio in `[0,1]` (0 when the adjacency term is disabled).
+    pub adjacency: f32,
+    pub biome: f32,
+    pub water: f32,
+    pub forest: f32,
+    pub gradient: f32,
+    pub roughness: f32,
+    /// Adjacency weight applied in the total: `ADJACENCY_WEIGHT` when enabled, else `0`.
+    pub weight: f32,
+}
+
+impl ScoreTerms {
+    /// The five terrain-similarity terms (each in `[0,1]`), summed.
+    pub fn terrain_sum(&self) -> f32 {
+        self.biome + self.water + self.forest + self.gradient + self.roughness
+    }
+
+    /// The final normalized candidate score — identical to [`get_candidate_score`].
+    pub fn total(&self) -> f32 {
+        (self.adjacency * self.weight + self.terrain_sum()) / (5.0 + self.weight)
+    }
+}
+
+/// Compute the [`ScoreTerms`] breakdown for `candidate` joining/merging next to `target`.
+/// See [`get_candidate_score`] for the meaning of `adjacency_ratio` and `weight`.
+pub fn candidate_score_terms(parcel_analysis_data : &HashMap<DistrictID, ParcelAnalysis>, target : DistrictID, candidate : DistrictID, adjacency_ratio : Option<f32>, weight : f32) -> ScoreTerms {
     let target_analysis = parcel_analysis_data.get(&target).expect("Could not find parcel analysis data for target");
     let candidate_analysis = parcel_analysis_data.get(&candidate).expect("Could not find parcel analysis data for candidate");
 
     let use_adjacency = adjacency_ratio.is_some();
-    let adjacency_score = adjacency_ratio.unwrap_or(0.0);
 
     let biome_score : f32 = 1.0 - target_analysis.biome_count().iter()
         .map(|(biome, _)| {
             (target_analysis.biome_percentage(biome) - candidate_analysis.biome_percentage(biome)).abs()
         })
         .sum::<f32>() / target_analysis.biome_count().len() as f32;
-    
+
     let water_score = 1.0 - (target_analysis.water_percentage() - candidate_analysis.water_percentage()).abs();
     let forest_score = 1.0 - (target_analysis.forested_percentage() - candidate_analysis.forested_percentage()).abs();
     let gradient_score = 1.0 - (target_analysis.gradient() - candidate_analysis.gradient()).abs();
     let roughness_score = 1.0 - (target_analysis.roughness() - candidate_analysis.roughness()).abs();
 
-    return (adjacency_score * ADJACENCY_WEIGHT
-        + biome_score
-        + water_score
-        + forest_score
-        + gradient_score
-        + roughness_score) / (5.0 + if use_adjacency { ADJACENCY_WEIGHT } else { 0.0 })
+    ScoreTerms {
+        adjacency: adjacency_ratio.unwrap_or(0.0),
+        biome: biome_score,
+        water: water_score,
+        forest: forest_score,
+        gradient: gradient_score,
+        roughness: roughness_score,
+        weight: if use_adjacency { weight } else { 0.0 },
+    }
 }
 
 /// Calculates the similarity score between two parcels based on their analysis data, same as above but for parcels instead of super parcel and adjacency removed
