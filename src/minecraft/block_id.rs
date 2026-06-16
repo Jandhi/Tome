@@ -79,12 +79,6 @@ impl BlockID {
             )
     }
 
-    /// True for tree trunk blocks (`*_log`, including stripped variants). Used to
-    /// locate a tree's stem, as opposed to its surrounding canopy ([`is_leaves`]).
-    pub fn is_log(&self) -> bool {
-        self.0.contains("log")
-    }
-
     pub fn is_air(&self) -> bool {
         matches!(self.name(), "air" | "cave_air" | "void_air")
     }
@@ -94,6 +88,8 @@ impl BlockID {
     /// terrain a structure is meant to sit on (e.g. the foundation layers of a mine).
     pub fn is_structure_void(&self) -> bool {
         self.name() == "structure_void"
+    }
+
     /// Natural terrain a road may carve through: untouched ground plus the
     /// dirt/sand fill that terraforming (`force_height`, foundation blends)
     /// lays down. Deliberately excludes every structure block.
