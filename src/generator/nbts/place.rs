@@ -58,12 +58,10 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
         }
     };
 
-    // Paste the structure without block updates: with updates on, the server runs
-    // placement side effects, e.g. placing a bed foot auto-spawns a head (and a door
-    // bottom an upper half) — duplicating the second half the NBT already contains,
-    // often shoved into an adjacent wall where it then breaks. We write every block
-    // exactly as authored instead. Re-enabled before returning.
-    editor.set_block_updates(false).await;
+    // Beds are pasted without block updates: with updates on, the server runs the
+    // placement side effect of a bed foot auto-spawning its head — duplicating the
+    // half the NBT already contains, often shoved into an adjacent wall where it
+    // then breaks. Every other block is written normally.
 
     if input_palette.is_none() || output_palette.is_none() {
         for blockdata in structure.blocks {
@@ -88,7 +86,12 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
                 state: palette_data.properties.clone(),
                 data, // Now contains the SNBT string if data exists
             });
-            editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
+            let point = transform.apply(Point3D::from(blockdata.pos));
+            if block.id.is_bed() {
+                editor.place_block_no_update(&block, point).await;
+            } else {
+                editor.place_block(&block, point).await;
+            }
         }
     } else {
         let placer = placer.unwrap();
@@ -127,7 +130,12 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
                         data, // Now contains the SNBT string if data exists
                     });
 
-                    editor.place_block(&block, transform.apply(pos)).await;
+                    let point = transform.apply(pos);
+                    if block.id.is_bed() {
+                        editor.place_block_no_update(&block, point).await;
+                    } else {
+                        editor.place_block(&block, point).await;
+                    }
                 },
                 PaletteSwapResult::Material(material_id, form) => {
                     // Only log/wood/pillar forms keep an axis; for any other form
@@ -154,9 +162,6 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             }
         }
     }
-
-    // Flush the structure's blocks (still update-free) and restore the default.
-    editor.set_block_updates(true).await;
 
     Ok(())
 }

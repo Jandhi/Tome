@@ -83,6 +83,13 @@ impl BlockID {
         matches!(self.name(), "air" | "cave_air" | "void_air")
     }
 
+    /// True for any colored bed. Placing a bed foot with block updates on makes
+    /// the server auto-spawn the head, duplicating the half the NBT already
+    /// contains — so beds must be pasted update-free.
+    pub fn is_bed(&self) -> bool {
+        self.name().ends_with("_bed")
+    }
+
     /// A structure void marks "leave whatever is already here" in an NBT — it must
     /// be skipped at placement, never written, or it punches invisible holes in the
     /// terrain a structure is meant to sit on (e.g. the foundation layers of a mine).
