@@ -976,13 +976,6 @@ fn close_diagonal_gaps(
     fence
 }
 
-/// Prunes dangling spurs from a fence ring. A thin protrusion of the pasture
-/// turns into a fence line that juts out and dead-ends — visually a fence
-/// "randomly connecting" to nothing. Fences only join along cardinals, so a cell
-/// that belongs to the enclosing loop has at least two orthogonal fence
-/// neighbours; a spur tip has one (and an isolated cell, none). Iteratively
-/// removing every cell with fewer than two orthogonal fence neighbours peels each
-/// appendage back to the loop it hangs off, leaving only closed rings.
 /// Cleans up a cell region's outline so painted production areas don't end in
 /// ragged, thin strips. A morphological *opening* with a 3x3 (8-connectivity)
 /// structuring element: a one-cell erosion followed by a one-cell dilation, both
@@ -1015,6 +1008,13 @@ fn smooth_region(region: &HashSet<Point2D>) -> HashSet<Point2D> {
     opened
 }
 
+/// Prunes dangling spurs from a fence ring. A thin protrusion of the pasture
+/// turns into a fence line that juts out and dead-ends — visually a fence
+/// "randomly connecting" to nothing. Fences only join along cardinals, so a cell
+/// that belongs to the enclosing loop has at least two orthogonal fence
+/// neighbours; a spur tip has one (and an isolated cell, none). Iteratively
+/// removing every cell with fewer than two orthogonal fence neighbours peels each
+/// appendage back to the loop it hangs off, leaving only closed rings.
 fn prune_fence_spurs(mut fence: HashSet<Point2D>) -> HashSet<Point2D> {
     loop {
         let spurs: Vec<Point2D> = fence
