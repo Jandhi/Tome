@@ -10,6 +10,7 @@ mod coordinate;
 
 pub use provider::GDMCHTTPProvider;
 pub use positioned_block::PositionedBlock;
+pub use entity::PositionedEntity;
 pub use coordinate::Coordinate;
 pub use command_response::CommandResponse;
 pub use height_map::HeightMapType;

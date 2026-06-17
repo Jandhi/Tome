@@ -3,7 +3,7 @@ mod tests {
     use std::collections::{HashMap, HashSet};
     use std::env;
 
-    use crate::minecraft::Biome;
+    use crate::minecraft::{Biome, Block};
     use crate::noise::RNG;
 
     use super::super::registry::{load_yaml, ResourceRegistry};
@@ -68,6 +68,48 @@ mod tests {
         assert!(chains.producible.contains("iron_ingot"), "should smelt iron");
         assert!(chains.producible.contains("tools"), "should craft tools");
         assert!(chains.producible.contains("arrows"), "flint + feathers = arrows");
+    }
+
+    /// Regression for the broken-iron-chain bug (run 20260614_111106): iron_ore and coal
+    /// were gathered but no wood, yet the chain rigidly took the alphabetically-first
+    /// `charcoal` smelting recipe (which needs wood), so the chain's budget collapsed to
+    /// zero and all the iron + coal were wasted. Chain construction is now availability
+    /// aware: with no wood, smelting must route through the `coal` recipes.
+    #[test]
+    fn iron_chain_routes_through_coal_when_no_wood() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+        let available: HashSet<String> = ["iron_ore", "coal"].iter().map(|s| s.to_string()).collect();
+
+        let plan = registry.select_production(&available, &mut rng);
+        let tools = plan.chains.iter().find(|c| c.finished_good == "tools")
+            .expect("tools should be producible from iron_ore + coal");
+
+        assert!(tools.recipe_ids.iter().any(|r| r == "iron_ore_coal_to_ingot"),
+            "smelting should use the coal recipe, got {:?}", tools.recipe_ids);
+        assert!(!tools.recipe_ids.iter().any(|r| r.contains("charcoal")),
+            "must not use the charcoal path when wood is absent, got {:?}", tools.recipe_ids);
+        // The cost the executor budgets against must be expressed in the fuel actually used.
+        assert!(tools.raw_cost.get("coal").copied().unwrap_or(0.0) > 0.0,
+            "tools raw_cost should include coal, got {:?}", tools.raw_cost);
+        assert!(!tools.raw_cost.contains_key("wood"),
+            "tools raw_cost should not reference wood, got {:?}", tools.raw_cost);
+    }
+
+    /// Companion to the above: when wood *is* available the charcoal smelting path is
+    /// still preferred (it sorts first), so this change doesn't disturb the common case.
+    #[test]
+    fn iron_chain_prefers_charcoal_when_wood_present() {
+        let registry = make_registry();
+        let mut rng = RNG::new(42);
+        let available: HashSet<String> = ["iron_ore", "wood"].iter().map(|s| s.to_string()).collect();
+
+        let plan = registry.select_production(&available, &mut rng);
+        let tools = plan.chains.iter().find(|c| c.finished_good == "tools")
+            .expect("tools should be producible from iron_ore + wood");
+
+        assert!(tools.recipe_ids.iter().any(|r| r == "iron_ore_charcoal_to_ingot"),
+            "with wood present, smelting should use the charcoal recipe, got {:?}", tools.recipe_ids);
     }
 
     #[test]
@@ -363,6 +405,469 @@ mod tests {
         // Parcel 0 has no valid candidates and is skipped
         assert_eq!(assignments.len(), 1);
         assert_eq!(assignments[&1].primary_resource, "wood");
+    }
+
+    /// Regression guard for the resource-chain cap logic: a settlement of all-plains
+    /// rural parcels must NOT collapse to a single resource. Plains offers wheat, wool
+    /// and cow; the cap loop used to ban over-supplied resources outright, which
+    /// cascaded until only wool survived. Now caps limit per-resource parcel *counts*
+    /// (never below 1), so every biome-supported resource keeps at least one parcel.
+    #[test]
+    fn plains_parcels_stay_diverse() {
+        use crate::generator::districts::DistrictID;
+        use crate::minecraft::Biome;
+
+        let registry = make_registry();
+
+        // Try several seeds so we don't rely on a single lucky RNG stream.
+        for seed in [12345, 1, 7, 99, 2024] {
+            let mut rng = RNG::new(seed);
+            let parcels: HashMap<DistrictID, crate::generator::districts::ParcelAnalysis> = (0..12)
+                .map(|i| (
+                    DistrictID(i),
+                    crate::generator::districts::ParcelAnalysis::from_biome_count(
+                        [(Biome::from("minecraft:plains"), 100)].into(),
+                    ),
+                ))
+                .collect();
+
+            let result = registry.resolve_for_parcels(&parcels, &mut rng);
+
+            let mut counts: HashMap<String, u32> = HashMap::new();
+            for a in result.parcel_assignments.values() {
+                *counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
+            }
+
+            // All three plains resources should be represented, each at least once —
+            // the core "no collapse to a single resource" guard, true with caps on or off.
+            for r in ["wheat", "wool", "cow"] {
+                assert!(counts.get(r).copied().unwrap_or(0) >= 1,
+                    "expected at least one '{}' parcel on plains, got {:?} (seed {})", r, counts, seed);
+            }
+
+            if super::super::registry::COMPETITION_HARD_CAPS {
+                // The competition cap trims each resource to at most MAX_RURAL_PER_RESOURCE,
+                // so not every parcel is assigned and no resource exceeds the cap.
+                let cap = super::super::registry::MAX_RURAL_PER_RESOURCE as u32;
+                for (r, c) in &counts {
+                    assert!(*c <= cap, "resource '{}' over cap {}: {:?} (seed {})", r, cap, counts, seed);
+                }
+            } else {
+                assert_eq!(result.parcel_assignments.len(), 12, "all parcels assigned (seed {})", seed);
+            }
+        }
+    }
+
+    /// Wool color used to paint a district for a given raw resource. Each raw
+    /// resource gets a stable, distinct color so adjacent districts read clearly.
+    /// Unmapped resources fall back to a deterministic color by name length.
+    fn colour_id_for_resource(resource: &str) -> &'static str {
+        match resource {
+            "wood" => "brown_wool",
+            "wheat" => "yellow_wool",
+            "iron_ore" => "light_gray_wool",
+            "coal" => "black_wool",
+            "honey" => "orange_wool",
+            "beeswax" => "white_wool",
+            "wool" => "pink_wool",
+            "sugar_cane" => "lime_wool",
+            "cow" => "magenta_wool",
+            other => {
+                // Deterministic fallback for any resource not explicitly mapped.
+                const FALLBACK: [&str; 4] = ["cyan_wool", "purple_wool", "green_wool", "light_blue_wool"];
+                FALLBACK[other.len() % FALLBACK.len()]
+            }
+        }
+    }
+
+    /// Wool block painted on a district for a given raw resource.
+    fn block_for_resource(resource: &str) -> Block {
+        Block { id: colour_id_for_resource(resource).into(), data: None, state: None }
+    }
+
+    /// End-to-end visual test (requires a live Minecraft server).
+    ///
+    /// Runs districting (`generate_parcels`), computes the resource chain over the
+    /// rural districts (`resolve_for_parcels`), then paints every district:
+    ///   - Rural    → a wool color keyed to its assigned raw resource
+    ///   - Urban    → blue wool
+    ///   - OffLimits → red wool
+    /// District edges are capped with glass so boundaries stay legible.
+    ///
+    /// Run with:
+    ///   cargo test colour_districts_by_resource -- --nocapture
+    #[tokio::test]
+    async fn colour_districts_by_resource() {
+        use crate::editor::World;
+        use crate::generator::districts::{generate_parcels, ParcelType};
+        use crate::generator::resource_chain::ProductionPainter;
+        use crate::generator::terrain::{feathered_flatten, flatten_urban_area};
+        use crate::geometry::{Point2D, Point3D};
+        use crate::http_mod::GDMCHTTPProvider;
+        use crate::noise::Seed;
+        use crate::util::init_logger;
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_parcels(seed, &mut editor).await;
+
+        // ── Resource chain over rural districts ──────────────────────────────
+        // Only rural districts produce raw resources, so feed just those into
+        // the resolver (matching `parcel_resource_production_report`).
+        let registry = ResourceRegistry::load().expect("Failed to load resource registry");
+        let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
+            .filter(|(id, _)| {
+                editor.world().districts.get(id)
+                    .map(|d| d.data.parcel_type == ParcelType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+
+        let result = registry.resolve_for_parcels(&rural_analysis, &mut rng);
+
+        // ── Terraforming (no painters applied) ───────────────────────────────
+        // Reproduce only the earthworks the real pipeline performs before any
+        // blocks are painted: grade the urban interior, and smooth each rural
+        // production area per its assigned painter's flatten_strength. The
+        // painters themselves (palettes, irrigation, claims) are intentionally
+        // skipped — we just want to see the terraformed surface.
+
+        // Urban grading — same feather / iteration count as the road + placement
+        // pipeline (see placement/test.rs, districts/test.rs).
+        let urban = editor.world().get_urban_points();
+        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+
+        // Rural production-area smoothing. Mirrors paint_production_area's feathered
+        // smoothing: flatten the field interior + border ring, reaching a couple
+        // blocks into neighbouring land, and grade back to natural at the outer
+        // edge. No building is placed here, so there are no claims to exclude.
+        const EDGE_BUFFER: i32 = 3;
+        const NEIGHBOUR_REACH: i32 = 2;
+        for (id, assignment) in &result.parcel_assignments {
+            let Some(painter_name) = &assignment.production_painter else { continue };
+            let flatten_strength = match registry.production_painters.get(painter_name) {
+                Some(ProductionPainter::Palettes { flatten_strength, .. }) => *flatten_strength,
+                _ => continue,
+            };
+            let smooth_iters = (flatten_strength.clamp(0.0, 1.0) * 5.0).round() as usize;
+            if smooth_iters == 0 {
+                continue;
+            }
+
+            // Snapshot the geometry so the editor can be borrowed mutably below.
+            let Some((edges, points)) = editor.world().districts.get(id)
+                .map(|d| (d.data.edges.clone(), d.data.points_2d.clone()))
+            else {
+                continue;
+            };
+
+            let edge_buffer: HashSet<Point2D> = edges.iter()
+                .flat_map(|p| {
+                    let p2 = p.drop_y();
+                    (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
+                        (-EDGE_BUFFER..=EDGE_BUFFER).map(move |dz| Point2D::new(p2.x + dx, p2.y + dz))
+                    })
+                })
+                .collect();
+
+            // The district's own non-water cells (interior + border ring).
+            let own_cells: HashSet<Point2D> = points.iter()
+                .filter(|&&p| !editor.world().is_water(p))
+                .copied()
+                .collect();
+            // Skip parcels with no interior beyond the edge buffer (matches the
+            // painter's `free_cells.is_empty()` early-out).
+            if !own_cells.iter().any(|p| !edge_buffer.contains(p)) {
+                continue;
+            }
+
+            // Reach a couple blocks into neighbouring land for a feathered transition.
+            let mut region = own_cells.clone();
+            for &p in &own_cells {
+                for dx in -NEIGHBOUR_REACH..=NEIGHBOUR_REACH {
+                    for dz in -NEIGHBOUR_REACH..=NEIGHBOUR_REACH {
+                        let q = Point2D::new(p.x + dx, p.y + dz);
+                        if own_cells.contains(&q) {
+                            continue;
+                        }
+                        if editor.world().is_in_bounds_2d(q) && !editor.world().is_water(q) {
+                            region.insert(q);
+                        }
+                    }
+                }
+            }
+
+            feathered_flatten(&mut editor, &region, EDGE_BUFFER + NEIGHBOUR_REACH, smooth_iters, true).await;
+        }
+
+        // Snapshot each district's type and (for rural) its assigned resource so we
+        // don't hold a borrow on the world while painting through the editor.
+        let district_color: HashMap<_, _> = editor.world().districts.iter()
+            .map(|(id, d)| {
+                let block = match d.data.parcel_type {
+                    ParcelType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
+                    ParcelType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+                    ParcelType::Rural => match result.parcel_assignments.get(id) {
+                        Some(a) => block_for_resource(&a.primary_resource),
+                        // Rural district with no assignable resource — fall back to gray.
+                        None => Block { id: "gray_wool".into(), data: None, state: None },
+                    },
+                    ParcelType::Unknown => Block { id: "bedrock".into(), data: None, state: None },
+                };
+                (*id, block)
+            })
+            .collect();
+
+        let glass = Block { id: "glass".into(), data: None, state: None };
+
+        // Edge cells flattened by 2D coordinate — terraforming may have moved an
+        // edge cell's Y, so a 3D `edges.contains` check would miss it. Color comes
+        // from `district_map`; this set only decides whether to cap with glass.
+        let edge_cells: HashSet<Point2D> = editor.world().districts.values()
+            .flat_map(|d| d.data.edges.iter().map(|e| e.drop_y()))
+            .collect();
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let Some(district_id) = editor.world().district_map[x as usize][z as usize] else {
+                    continue;
+                };
+
+                let block = district_color.get(&district_id).expect("district color");
+                // Post-terraform surface height (local, matching block-write coords).
+                let height = editor.world().get_height_at(Point2D::new(x, z));
+
+                let on_edge = edge_cells.contains(&Point2D::new(x, z));
+
+                if on_edge {
+                    editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                    editor.place_block(block, Point3D::new(x, height - 1, z)).await;
+                } else {
+                    editor.place_block(block, Point3D::new(x, height, z)).await;
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+
+        // ── Legend ───────────────────────────────────────────────────────────
+        println!("\n╔══ District Color Legend ════════════════════════╗");
+        println!("║ Urban     → blue_wool");
+        println!("║ OffLimits → red_wool");
+        println!("║ Rural     → keyed by raw resource:");
+        let mut assigned: Vec<(&String, &'static str)> = result.parcel_assignments.values()
+            .map(|a| (&a.primary_resource, colour_id_for_resource(&a.primary_resource)))
+            .collect();
+        assigned.sort();
+        assigned.dedup();
+        for (resource, color) in &assigned {
+            println!("║   {:<12} → {}", resource, color);
+        }
+        println!("╚═════════════════════════════════════════════════╝\n");
+    }
+
+    /// End-to-end visual test (requires a live Minecraft server).
+    ///
+    /// Builds the rural production areas for real: city terraforming + wall, then
+    /// per-rural-parcel building placement and `paint_production_area` (the actual
+    /// painters — crops, logged clearings, etc.). Urban cells are overlaid with
+    /// blue wool and OffLimits with red so the city shell and reserved land read
+    /// clearly, while rural districts keep their painted production areas visible.
+    /// No urban buildings and no roads are placed.
+    ///
+    /// Run with:
+    ///   cargo test colour_districts_with_production_painters -- --nocapture
+    #[tokio::test]
+    async fn colour_districts_with_production_painters() {
+        use crate::editor::World;
+        use crate::generator::data::LoadedData;
+        use crate::generator::districts::{build_wall, generate_parcels, ParcelType, WallType};
+        use crate::generator::materials::{MaterialId, Placer};
+        use crate::generator::nbts::StructureType;
+        use crate::generator::placement::place_rural_building;
+        use crate::generator::resource_chain::paint_production_area;
+        use crate::generator::terrain::flatten_urban_area;
+        use crate::geometry::{Point2D, Point3D};
+        use crate::http_mod::GDMCHTTPProvider;
+        use crate::noise::Seed;
+        use crate::util::init_logger;
+
+        // ── Test tunables ────────────────────────────────────────────────────
+        // When true, every rural parcel is forced to use OVERRIDE_BUILDING (and
+        // its gather recipe's painter) instead of its resource-chain assignment.
+        // Handy for eyeballing one painter across the whole map — pair with a
+        // superflat world to test a painter on perfect terrain.
+        const OVERRIDE_ALL_RURAL: bool = false;
+        // Gather building forced when OVERRIDE_ALL_RURAL is set. Must be a building
+        // declared by a gather recipe (inputs: {}) in recipes.yaml, e.g.
+        // "farm" (wheat_fields), "woodcutter_hut" (logging_area),
+        // "shepherds_hut" (sheep_pasture), "ranch" (cattle_ranch),
+        // "sugar_plantation" (sugar_cane_fields), "iron_mine"/"coal_mine" (mine_terrain).
+        const OVERRIDE_BUILDING: &str = "iron_mine";
+
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        generate_parcels(seed, &mut editor).await;
+
+        let data = LoadedData::load().expect("Failed to load generator data");
+
+        // ── Resource chain over rural districts ──────────────────────────────
+        let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
+            .filter(|(id, _)| {
+                editor.world().districts.get(id)
+                    .map(|d| d.data.parcel_type == ParcelType::Rural)
+                    .unwrap_or(false)
+            })
+            .map(|(id, analysis)| (*id, analysis.clone()))
+            .collect();
+        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
+
+        // ── City terraforming ────────────────────────────────────────────────
+        let urban = editor.world().get_urban_points();
+        flatten_urban_area(&mut editor, &urban, 16, 12, true).await;
+
+        // ── City wall + gates ────────────────────────────────────────────────
+        // Built before placement so wall cells are claimed first (otherwise a
+        // rural building could be sited where the wall later goes).
+        let material = MaterialId::new("stone_bricks".to_string());
+        let mut wall_rng = rng.derive();
+        let mut placer_rng = rng.derive();
+        let mut placer = Placer::new(&data.materials, &mut placer_rng);
+        build_wall(
+            &urban,
+            &mut editor,
+            &mut wall_rng,
+            &mut placer,
+            &material,
+            &data.structures,
+            WallType::StandardWithInner,
+        )
+        .await;
+
+        // ── Rural buildings + production painters (the real painters) ────────
+        // When OVERRIDE_ALL_RURAL is set, resolve the forced building's painter
+        // from its gather recipe (inputs: {}) so every parcel uses the same method.
+        let override_painter: Option<String> = if OVERRIDE_ALL_RURAL {
+            data.resource_registry.recipes().values()
+                .find(|r| r.inputs.is_empty() && r.building == OVERRIDE_BUILDING)
+                .and_then(|r| r.production_painter.clone())
+        } else {
+            None
+        };
+
+        let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
+        sd_ids.sort_by_key(|id| id.0);
+        let mut placed = 0usize;
+        for sd_id in &sd_ids {
+            let assignment = &result.parcel_assignments[sd_id];
+            let (building, painter) = if OVERRIDE_ALL_RURAL {
+                (OVERRIDE_BUILDING.to_string(), override_painter.clone())
+            } else {
+                (assignment.building.clone(), assignment.production_painter.clone())
+            };
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else { continue };
+            let structure_type = StructureType(building.clone());
+            let Some(structure) = data.structures.get(&structure_type).cloned() else {
+                log::warn!("No structure for building '{}' (parcel {:?})", building, sd_id);
+                continue;
+            };
+            match place_rural_building(&district, &structure, &mut rng, &mut editor, &data).await {
+                Ok(false) => {}
+                Ok(true) => {
+                    placed += 1;
+                    if let Some(painter) = &painter {
+                        // Resource for the *placed* building (so the mine painter's ore
+                        // matches an overridden building), falling back to the parcel's.
+                        let resource = data.resource_registry.recipes().values()
+                            .find(|r| r.inputs.is_empty() && r.building == building)
+                            .and_then(|r| r.outputs.keys().next().map(|s| s.as_str()))
+                            .unwrap_or(assignment.primary_resource.as_str());
+                        paint_production_area(&district, painter, resource, &data, &mut editor, &mut rng).await;
+                    }
+                }
+                Err(e) => log::warn!("Rural placement failed for '{}': {}", building, e),
+            }
+        }
+        log::info!("Placed {} of {} rural buildings", placed, sd_ids.len());
+
+        // ── Overlay wool on urban (blue) and off-limits (red) only ───────────
+        // Rural cells are left as painted so the production areas stay visible.
+        // Skip claimed cells (wall, building footprints) so we don't wool over them.
+        let blue = Block { id: "blue_wool".into(), data: None, state: None };
+        let red = Block { id: "red_wool".into(), data: None, state: None };
+        let glass = Block { id: "glass".into(), data: None, state: None };
+
+        // Edge cells (2D) of every district — capped with glass so all borders
+        // (rural included) are identifiable, even where rural fields are left
+        // as-painted rather than wooled.
+        let edge_cells: HashSet<Point2D> = editor.world().districts.values()
+            .flat_map(|d| d.data.edges.iter().map(|e| e.drop_y()))
+            .collect();
+
+        for x in 0..build_area.size.x {
+            for z in 0..build_area.size.z {
+                let p = Point2D::new(x, z);
+                let Some(district_id) = editor.world().district_map[x as usize][z as usize] else {
+                    continue;
+                };
+                let ptype = {
+                    let Some(district) = editor.world().districts.get(&district_id) else { continue };
+                    district.data.parcel_type
+                };
+                // Don't paint over the wall or building footprints.
+                if editor.world().is_claimed(p) {
+                    continue;
+                }
+                let on_edge = edge_cells.contains(&p);
+                let height = editor.world().get_height_at(p);
+                match ptype {
+                    ParcelType::Urban | ParcelType::OffLimits => {
+                        let block = if matches!(ptype, ParcelType::Urban) { &blue } else { &red };
+                        if on_edge {
+                            editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                            editor.place_block(block, Point3D::new(x, height - 1, z)).await;
+                        } else {
+                            editor.place_block(block, Point3D::new(x, height, z)).await;
+                        }
+                    }
+                    // Rural / Unknown: keep the painted surface, but cap the border
+                    // with glass so district boundaries stay visible.
+                    _ => {
+                        if on_edge {
+                            editor.place_block(&glass, Point3D::new(x, height, z)).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        editor.flush_buffer().await;
+
+        println!("\n╔══ District Overlay ═════════════════════════════╗");
+        println!("║ Urban     → blue_wool (wall left as built)");
+        println!("║ OffLimits → red_wool");
+        println!("║ Rural     → real production painters + buildings");
+        println!("║ Borders   → glass (all district edges)");
+        println!("╚═════════════════════════════════════════════════╝\n");
     }
 
     /// Diagnostic test — passes a `HashMap<DistrictID, ParcelAnalysis>` to

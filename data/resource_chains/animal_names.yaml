@@ -1,0 +1,239 @@
+# Names randomly assigned to animals spawned into pasture/ranch production areas
+# (see pasture_production_painter). Edit freely — loaded at runtime, no recompile.
+animal_names:
+  - Bessie
+  - Daisy
+  - Clover
+  - Buttercup
+  - Rosie
+  - Marigold
+  - Willow
+  - Hazel
+  - Maple
+  - Pepper
+  - Cinnamon
+  - Nutmeg
+  - Biscuit
+  - Pudding
+  - Dandelion
+  - Clementine
+  - Bramble
+  - Thistle
+  - Poppy
+  - Maisie
+  - Woolly
+  - Shaun
+  - Ramsey
+  - Gus
+  - Otis
+  - Angus
+  - Dexter
+  - Ferdinand
+  - Norman
+  - Barnaby
+  - Pip
+  - Tuffet
+  - Snowy
+  - Patches
+  - Domino
+  - Freckles
+  - Comet
+  - Pumpkin
+  - Honey
+  - Misty
+  - Bluebell
+  - Primrose
+  - Fern
+  - Ivy
+  - Olive
+  - Juniper
+  - Saffron
+  - Ginger
+  - Toffee
+  - Caramel
+  - Mocha
+  - Truffle
+  - Dumpling
+  - Crumpet
+  - Waffle
+  - Custard
+  - Marshmallow
+  - Treacle
+  - Gravy
+  - Pickles
+  - Beans
+  - Noodle
+  - Tater
+  - Spud
+  - Turnip
+  - Parsnip
+  - Sprout
+  - Clucky
+  - Wilbur
+  - Gertrude
+  - Mabel
+  - Ethel
+  - Agnes
+  - Doris
+  - Mildred
+  - Winnie
+  - Bramwell
+  - Cornelius
+  - Mortimer
+  - Reginald
+  - Percival
+  - Humphrey
+  - Bartholomew
+  - Wendell
+  - Chester
+  - Murphy
+  - Buster
+  - Rusty
+  - Scout
+  - Bandit
+  - Biscuit Jr
+  - Moo-donna
+  - Sir Loin
+  - Lambchop
+  - Baabara
+  - Woolliam
+  - Fleecer
+  - Cottonball
+  - Cloud
+  - Snowflake
+  - Frosty
+  - Pebbles
+  - Boulder
+  - Acorn
+  - Chestnut
+  - Walnut
+  - Almond
+  - Hazelnut
+  - Berry
+  - Plum
+  - Apricot
+  - Peaches
+  - Cherry
+  - Apple
+  - Pear
+  - Quince
+  - Sorrel
+  - Clematis
+  - Aster
+  - Lupin
+  - Foxglove
+  - Heather
+  - Rowan
+  - Birch
+  - Aspen
+  - Cedar
+  - Linden
+  - Tansy
+  - Yarrow
+  - Comfrey
+  - Borage
+  - Fennel
+  - Sage
+  - Rosemary
+  - Basil
+  - Dill
+  - Clover Jr
+  - Buttons
+  - Mittens
+  - Socks
+  - Boots
+  - Dotty
+  - Spot
+  - Patch
+  - Star
+  - Lucky
+  - Duchess
+  - Daisy May
+  - Bonnie
+  - Lottie
+  - Tilly
+  - Flossie
+  - Nellie
+  - Maud
+  - Beatrice
+  - Henrietta
+
+# Decorations applied to a chosen name: ~10% chance of a prefix and ~10% chance of
+# a suffix (rolled independently, so ~1% of animals get both). Joined with a space,
+# e.g. "Ol' Bessie", "Daisy the Great", "Sir Angus the Mighty".
+name_prefixes:
+  - "Ol'"
+  - "Lil'"
+  - Sir
+  - Lady
+  - Captain
+  - Madame
+  - Baron
+  - Duke
+  - Lord
+  - Mama
+  - Papa
+  - Uncle
+  - Auntie
+  - Young
+  - Big
+  - Wee
+  - King
+  - Queen
+  - Professor
+  - Dame
+
+name_suffixes:
+  - the Great
+  - the Bold
+  - the Brave
+  - "Jr."
+  - "Sr."
+  - the Wise
+  - the Magnificent
+  - the Third
+  - the Elder
+  - the Younger
+  - of the Meadow
+  - the Fluffy
+  - the Mighty
+  - von Pasture
+  - the Gentle
+  - Esquire
+  - the Wanderer
+  - the Stout
+  - the Muncher
+  - Supreme
+
+# Names for the bees inside beehives placed by the bee_area painter. Pun away.
+bee_names:
+  - Buzz
+  - Beelzebub
+  - Bumble
+  - Stinger
+  - Beeyonce
+  - Buzz Aldrin
+  - Barry
+  - Maya
+  - Pollen
+  - Honey
+  - Queenie
+  - Bee Arthur
+  - Buzzkill
+  - Waggle
+  - Combs
+  - Nectar
+  - Sir Buzz-a-lot
+  - Bzzt
+  - Beethoven
+  - Mc Stingface
+  - Zippy
+  - Bizzy
+  - Buzzby
+  - Sting
+  - Waspington
+  - Honeycomb
+  - Fuzzy
+  - Apiarius
+  - Drizzle
+  - Beebo

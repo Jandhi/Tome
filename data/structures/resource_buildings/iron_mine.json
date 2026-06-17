@@ -10,6 +10,7 @@
     9,
     9
   ],
-  "y_offset": 0,
+  "y_offset": -2,
+  "allow_steep": true,
   "palette": "resource_base"
 }

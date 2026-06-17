@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use log::{info, warn};
@@ -14,13 +14,47 @@ use crate::{
         terrain::{force_height, log_trees},
     },
     geometry::{Cardinal, Point2D, Point3D, Rect2D},
+    minecraft::Block,
     noise::RNG,
 };
 
-pub const NUM_CANDIDATES: usize = 10;
+pub const NUM_CANDIDATES: usize = 16;
+/// For rural placement, the candidate pool is the flattest `NUM_CANDIDATES *
+/// CANDIDATE_POOL_MULTIPLE` interior cells, from which `NUM_CANDIDATES` are drawn
+/// at random. A larger multiple spreads candidates out (more variety, flatter
+/// bias diluted); a smaller one concentrates them on the flattest ground. This
+/// lets large footprints (e.g. the 16×15 apiary) reliably find a viable pad in
+/// rough forest districts where uniformly-random darts usually miss it.
+pub const CANDIDATE_POOL_MULTIPLE: usize = 6;
 pub const WATER_MARGIN_RADIUS: i32 = 4;
-pub const BLEND_RADIUS: i32 = 4;
-pub const MAX_BLEND_DELTA: i32 = 4;
+/// Fraction of the in-bounds cells in the `WATER_MARGIN_RADIUS` ring around a
+/// footprint that may be water before the site is hard-rejected. A building at a
+/// normal shoreline has water on roughly one side (~1/3 of the ring), which is
+/// fine; a building on a small island or spit is surrounded by water on most
+/// sides (well over half) and reads as "built on the water". Past this fraction
+/// the candidate is dropped entirely rather than merely penalised.
+pub const MAX_WATER_SURROUND_FRACTION: f32 = 0.5;
+/// Width (cells) of the ring around a footprint that is graded from the
+/// flattened pad height back down to natural terrain. Wider = gentler grade on
+/// sloped sites, so the pad edges taper instead of dropping off as a cliff.
+pub const BLEND_RADIUS: i32 = 6;
+/// Maximum footprint height range (highest minus lowest natural ground cell)
+/// allowed for a normal building. Footprints steeper than this are hard-rejected
+/// during candidate selection — past this the per-building flatten leaves raw
+/// cut/fill faces no blend ring can hide. Bypassed by `Structure::allow_steep`
+/// (e.g. mines, which are meant to cut into a hillside).
+pub const MAX_PLACEMENT_SLOPE: i32 = 4;
+/// Pad-height percentile for `allow_steep` buildings (mines). They sit on slopes
+/// far beyond `MAX_PLACEMENT_SLOPE`, where flattening to the median (0.5) would
+/// perch the downhill half on a tall fill pedestal — the building looks like it's
+/// floating on a plinth. A low percentile cuts the pad *into* the hillside so the
+/// downhill edge meets near-natural grade and no fill pedestal is left underneath.
+pub const STEEP_TARGET_PERCENTILE: f32 = 0.1;
+/// Radius (cells) of the solid foundation skirt built around an `allow_steep`
+/// building's footprint. On the steep, broken terrain mines land on, the regular
+/// dirt blend ramp can't reach grade and the building perches on a thin pad; the
+/// skirt batters a solid, ground-matched plinth down to natural grade instead.
+pub const FOUNDATION_SKIRT_RADIUS: i32 = 6;
 pub const YARD_RADIUS: i32 = 2;
 pub const ROAD_SEARCH_RADIUS: i32 = 8;
 /// When seeding urban industrial candidates, prefer interior cells within this
@@ -47,6 +81,9 @@ pub struct Candidate {
 #[derive(Debug, Clone, Copy)]
 pub struct CandidateScore {
     pub flatness: f32,
+    /// Footprint height range (max minus min natural ground), in blocks. Used as
+    /// the hard slope-reject metric; `flatness` (stddev) still feeds the score.
+    pub slope: i32,
     pub water_margin: i32,
     pub edge_penalty: f32,
     pub road_bonus: f32,
@@ -98,38 +135,48 @@ pub fn footprint_rect(structure: &Structure, candidate: Candidate) -> Rect2D {
 }
 
 /// Public entry point. Picks a spot inside `district`, prepares the ground,
-/// places the structure, and claims the footprint. Returns `Ok(())` whether
-/// a placement happened or the function bailed out due to no viable site —
-/// the failure case is logged but not error-propagated.
+/// places the structure, and claims the footprint.
 ///
 /// Operates at the super-parcel level to match the resource chain's assignment
 /// granularity (`SettlementProductionResult::parcel_assignments` is keyed by
 /// `DistrictID`).
+///
+/// Returns `Ok(true)` only when a building was actually placed. The "couldn't
+/// place" outcomes (invalid size, no interior, no viable candidate) return
+/// `Ok(false)` so callers can tell a real placement from a skip — painting a
+/// production area on a skip would attribute it to the previously placed
+/// building (e.g. bees scattered with no apiary ever built).
 pub async fn place_rural_building(
     district: &District,
     structure: &Structure,
     rng: &mut RNG,
     editor: &mut Editor,
     data: &LoadedData,
-) -> Result<()> {
+) -> Result<bool> {
     if structure.size_xz.0 <= 0 || structure.size_xz.1 <= 0 {
         warn!(
             "Structure '{}' has invalid size {:?}; skipping placement for super-parcel {:?}",
             structure.id.0, structure.size_xz, district.id
         );
-        return Ok(());
+        return Ok(false);
     }
 
     let edge_2d: HashSet<Point2D> =
         district.data.edges.iter().map(|p| p.drop_y()).collect();
 
     // Exclude cells inside the regularized wall footprint: a district can vote Rural
-    // yet still own a few cells the closing pass pulled inside the wall.
+    // yet still own a few cells the closing pass pulled inside the wall. Water cells
+    // are dropped here too: a building centre never belongs on water, and — since a
+    // water surface is perfectly flat — leaving them in would let the flatness ranking
+    // below rank them as the *best* candidates, only for `score_candidate` to reject
+    // every one (water in footprint), starving placement near lakes/rivers.
     let interior: Vec<Point2D> = district
         .data
         .points_2d
         .iter()
-        .filter(|p| !edge_2d.contains(p) && !editor.world().is_urban(**p))
+        .filter(|p| {
+            !edge_2d.contains(p) && !editor.world().is_urban(**p) && !editor.world().is_water(**p)
+        })
         .copied()
         .collect();
 
@@ -138,14 +185,10 @@ pub async fn place_rural_building(
             "Super-parcel {:?} has no interior cells for placement of '{}'",
             district.id, structure.id.0
         );
-        return Ok(());
+        return Ok(false);
     }
 
-    let centres: Vec<Point2D> = rng
-        .choose_many(&interior, NUM_CANDIDATES)
-        .into_iter()
-        .copied()
-        .collect();
+    let centres = flattest_candidate_centres(&interior, structure, editor, rng);
 
     let best = select_best_candidate(&centres, &district.data.points_2d, structure, editor, rng);
     let Some((candidate, score, rect)) = best else {
@@ -153,7 +196,7 @@ pub async fn place_rural_building(
             "No viable placement for '{}' in super-parcel {:?}",
             structure.id.0, district.id
         );
-        return Ok(());
+        return Ok(false);
     };
 
     info!(
@@ -168,7 +211,76 @@ pub async fn place_rural_building(
         );
         return Err(e);
     }
-    Ok(())
+    Ok(true)
+}
+
+/// Picks placement-candidate centres biased toward the flattest interior ground.
+///
+/// Uniform random sampling places `NUM_CANDIDATES` darts across the whole district;
+/// in a large, rough forest district (where the apiary and other big production
+/// buildings land) the few flat pockets that can actually hold the footprint are
+/// rarely hit, and placement fails outright. Instead we rank every interior cell by
+/// the flatness of the ground around it (over a window sized to the footprint),
+/// keep the flattest `NUM_CANDIDATES * CANDIDATE_POOL_MULTIPLE`, and draw the
+/// candidates from that pool — so we reliably consider the viable pads while
+/// keeping randomness for spatial variety. `select_best_candidate` still fully
+/// scores and slope-checks each, so this only changes *where we look*, not the
+/// acceptance criteria.
+fn flattest_candidate_centres(
+    interior: &[Point2D],
+    structure: &Structure,
+    editor: &Editor,
+    rng: &mut RNG,
+) -> Vec<Point2D> {
+    if interior.len() <= NUM_CANDIDATES {
+        return interior.to_vec();
+    }
+
+    // Probe a window roughly half the footprint's larger side: a small height range
+    // here means the full footprint has a real chance of fitting under the slope cap.
+    let (sx, sz) = structure.size_xz;
+    let probe_radius = (sx.max(sz) / 2).max(1);
+
+    // Precompute non-tree surface heights once so the windowed range below doesn't
+    // re-walk tree columns for every overlapping window.
+    let height_at: HashMap<Point2D, i32> = interior
+        .iter()
+        .map(|&p| (p, editor.world().get_non_tree_height(p)))
+        .collect();
+
+    let mut ranked: Vec<Point2D> = interior.to_vec();
+    ranked.sort_by_cached_key(|&c| local_height_range(c, probe_radius, &height_at));
+
+    let pool_size = (NUM_CANDIDATES * CANDIDATE_POOL_MULTIPLE).min(ranked.len());
+    rng.choose_many(&ranked[..pool_size], NUM_CANDIDATES)
+        .into_iter()
+        .copied()
+        .collect()
+}
+
+/// Local surface-height range (max − min) over the `radius` window around `cell`,
+/// read from the precomputed `height_at` map. Cells outside the map (district
+/// edge / non-interior) are skipped; a cell whose window is mostly outside the
+/// district is ranked worst (`i32::MAX`), since a large footprint can't fit there
+/// anyway. Lower is flatter.
+fn local_height_range(cell: Point2D, radius: i32, height_at: &HashMap<Point2D, i32>) -> i32 {
+    let mut min = i32::MAX;
+    let mut max = i32::MIN;
+    let mut count = 0;
+    for dx in -radius..=radius {
+        for dz in -radius..=radius {
+            if let Some(&h) = height_at.get(&Point2D::new(cell.x + dx, cell.y + dz)) {
+                min = min.min(h);
+                max = max.max(h);
+                count += 1;
+            }
+        }
+    }
+    let window = (2 * radius + 1) * (2 * radius + 1);
+    if (count * 2) < window {
+        return i32::MAX; // too close to the district edge to seat the footprint
+    }
+    max - min
 }
 
 /// Places a single processing/secondary building somewhere in the urban region.
@@ -345,6 +457,11 @@ fn select_best_candidate(
             let Some(score) = score_candidate(&rect, editor) else {
                 continue; // hard reject (water inside footprint)
             };
+            // Hard reject footprints too steep to flatten cleanly, unless the
+            // structure opts into steep ground (e.g. mines).
+            if !structure.allow_steep && score.slope > MAX_PLACEMENT_SLOPE {
+                continue;
+            }
 
             match &best {
                 None => best = Some((candidate, score, rect)),
@@ -440,17 +557,26 @@ async fn execute_placement(
         .collect();
     log_trees(editor, yard).await;
 
-    // Step 4b — flatten the footprint and taper the blend ring.
-    let target_y = median_height(&footprint_cells, editor);
+    // Step 4b — flatten the footprint and taper the blend ring. Steep-tolerant
+    // buildings (mines) cut into the hillside instead of perching on fill.
+    let target_y = footprint_target_height(&footprint_cells, editor, structure.allow_steep);
     let inner_points: HashSet<Point3D> = footprint_cells
         .iter()
         .map(|p| Point3D::new(p.x, target_y, p.y))
         .collect();
     force_height(editor, &inner_points, false).await;
 
-    let blend_points = build_blend_ring(&rect, target_y, editor);
-    if !blend_points.is_empty() {
-        force_height(editor, &blend_points, true).await;
+    if structure.allow_steep {
+        // Steep, broken sites (mines): the dirt blend ramp can't reach grade across
+        // a badlands drop, leaving the building perched on a pad. A solid,
+        // ground-matched skirt batters down to natural grade so it reads as a plinth
+        // cut into the slope.
+        build_foundation_skirt(editor, &rect, target_y).await;
+    } else {
+        let blend_points = build_blend_ring(&rect, target_y, editor);
+        if !blend_points.is_empty() {
+            force_height(editor, &blend_points, true).await;
+        }
     }
 
     // Step 5 — place the NBT. With an output palette, build a placer so the
@@ -520,7 +646,8 @@ fn rect_too_close_to_wall(rect: &Rect2D, editor: &Editor, buffer: i32) -> bool {
 }
 
 /// Score a candidate footprint. Returns `None` when the footprint should be
-/// hard-rejected (water cell inside it).
+/// hard-rejected: a water cell inside it, or a footprint mostly surrounded by
+/// water (a small island/spit — see `MAX_WATER_SURROUND_FRACTION`).
 pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore> {
     let world = editor.world();
 
@@ -536,15 +663,26 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
     let variance =
         heights.iter().map(|h| (*h as f32 - mean).powi(2)).sum::<f32>() / heights.len() as f32;
     let flatness = variance.sqrt();
+    let slope = heights.iter().copied().max().unwrap_or(0)
+        - heights.iter().copied().min().unwrap_or(0);
 
     let mut water_margin = 0;
+    let mut ring_cells = 0;
     for p in expanded_rect_cells(rect, WATER_MARGIN_RADIUS) {
-        if rect.contains(p) {
+        if rect.contains(p) || !world.is_in_bounds_2d(p) {
             continue;
         }
-        if world.is_in_bounds_2d(p) && world.is_water(p) {
+        ring_cells += 1;
+        if world.is_water(p) {
             water_margin += 1;
         }
+    }
+
+    // Hard reject sites that are mostly surrounded by water (small islands/spits):
+    // the footprint itself is dry land, but the building reads as sitting on the
+    // water. A normal shoreline (water on ~one side) stays under the threshold.
+    if ring_cells > 0 && (water_margin as f32 / ring_cells as f32) > MAX_WATER_SURROUND_FRACTION {
+        return None;
     }
 
     let edge_penalty = edge_proximity_penalty(rect, editor);
@@ -557,6 +695,7 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
 
     Some(CandidateScore {
         flatness,
+        slope,
         water_margin,
         edge_penalty,
         road_bonus,
@@ -639,13 +778,23 @@ fn expanded_rect_cells(rect: &Rect2D, radius: i32) -> Vec<Point2D> {
     out
 }
 
-fn median_height(cells: &[Point2D], editor: &Editor) -> i32 {
+/// Height the footprint is flattened to. Normal buildings use the median
+/// (balanced cut/fill — fine within `MAX_PLACEMENT_SLOPE`). `allow_steep`
+/// buildings sit on much larger slopes, where the median would bury the uphill
+/// side and perch the downhill side on a tall fill pedestal (the "floating mine"
+/// look); they instead target `STEEP_TARGET_PERCENTILE` so the pad is cut into the
+/// hill and the downhill edge meets near-natural grade. The low percentile (not a
+/// strict min) ignores the odd outlier-low cell — e.g. a ravine or cave mouth in
+/// the footprint — so one deep cell can't drag the whole pad down.
+fn footprint_target_height(cells: &[Point2D], editor: &Editor, allow_steep: bool) -> i32 {
     let mut heights: Vec<i32> = cells
         .iter()
         .map(|p| editor.world().get_non_tree_height(*p))
         .collect();
     heights.sort_unstable();
-    heights[heights.len() / 2]
+    let percentile = if allow_steep { STEEP_TARGET_PERCENTILE } else { 0.5 };
+    let idx = (((heights.len() - 1) as f32) * percentile).round() as usize;
+    heights[idx]
 }
 
 fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Point3D> {
@@ -663,12 +812,87 @@ fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Po
             continue;
         }
         let natural_y = world.get_non_tree_height(p);
-        if (natural_y - target_y).abs() > MAX_BLEND_DELTA {
-            continue;
-        }
+        // Always grade toward natural terrain — no early bail on steep deltas, so
+        // the pad edge ramps down instead of leaving a cliff. The footprint slope
+        // is already bounded by MAX_PLACEMENT_SLOPE (except allow_steep buildings,
+        // which accept the larger earthworks), so the ramp stays reasonable.
         let t = dist as f32 / BLEND_RADIUS as f32;
         let blended = (target_y as f32 * (1.0 - t) + natural_y as f32 * t).round() as i32;
         out.insert(Point3D::new(p.x, blended, p.y));
     }
     out
+}
+
+/// Picks the foundation/skirt material: the most common *natural* surface block
+/// over the footprint (`ground_block_map`, untouched by our terraforming), so the
+/// skirt reads as the local rock — terracotta in badlands, sand in desert, stone on
+/// a rocky hill — rather than a dirt scar. Falls back to stone.
+fn sample_foundation_material(rect: &Rect2D, editor: &Editor) -> Block {
+    let world = editor.world();
+    let mut counts: HashMap<String, u32> = HashMap::new();
+    for p in rect.iter() {
+        if !world.is_in_bounds_2d(p) {
+            continue;
+        }
+        *counts.entry(world.get_ground_block(p).id.as_str().to_string()).or_insert(0) += 1;
+    }
+    counts
+        .into_iter()
+        .max_by_key(|(_, n)| *n)
+        .map(|(id, _)| Block::from_id(id.as_str().into()))
+        .unwrap_or_else(|| Block::from_id("minecraft:stone".into()))
+}
+
+/// Builds a solid foundation skirt around an `allow_steep` footprint: a battered
+/// plinth of the local rock that descends from the pad edge to natural grade,
+/// replacing the dirt blend ramp. On the steep, broken terrain mines sit on, this
+/// is what keeps the building grounded instead of perched on a thin pad.
+///
+/// Per apron cell (Manhattan ring `1..=FOUNDATION_SKIRT_RADIUS` around the
+/// footprint) the skirt top is interpolated from the pad height down to that cell's
+/// natural grade. Where the ground is *below* the skirt top (downhill) we fill a
+/// solid column up to it; where it's *above* (uphill) we cut down to it, so the pad
+/// is neither perched nor walled in. The heightmap is updated to match.
+async fn build_foundation_skirt(editor: &mut Editor, rect: &Rect2D, target_y: i32) {
+    let material = sample_foundation_material(rect, editor);
+
+    // Snapshot (cell, natural_y, skirt_top) before mutating any heights.
+    let mut plan: Vec<(Point2D, i32, i32)> = Vec::new();
+    {
+        let world = editor.world();
+        for p in expanded_rect_cells(rect, FOUNDATION_SKIRT_RADIUS) {
+            if rect.contains(p) || !world.is_in_bounds_2d(p) {
+                continue;
+            }
+            let dist = manhattan_distance_to_rect(rect, p);
+            if dist == 0 || dist > FOUNDATION_SKIRT_RADIUS {
+                continue;
+            }
+            let natural_y = world.get_non_tree_height(p);
+            // Taper from the pad height (just outside the wall) to natural grade at
+            // the skirt's outer edge.
+            let t = dist as f32 / (FOUNDATION_SKIRT_RADIUS as f32 + 1.0);
+            let skirt_top = (target_y as f32 * (1.0 - t) + natural_y as f32 * t).round() as i32;
+            plan.push((p, natural_y, skirt_top));
+        }
+    }
+
+    let mut new_heights: HashSet<Point3D> = HashSet::new();
+    for (p, natural_y, skirt_top) in plan {
+        if skirt_top > natural_y {
+            // Downhill: raise a solid material plinth from grade up to the skirt top.
+            for y in natural_y..skirt_top {
+                editor.place_block_forced(&material, Point3D::new(p.x, y, p.y)).await;
+            }
+        } else if skirt_top < natural_y {
+            // Uphill: cut the ground down to the skirt top so the pad isn't walled in.
+            for y in skirt_top..natural_y {
+                editor.place_block_forced(&"air".into(), Point3D::new(p.x, y, p.y)).await;
+            }
+        }
+        // Cap the new surface (top solid sits at skirt_top - 1) with the material.
+        editor.place_block_forced(&material, Point3D::new(p.x, skirt_top - 1, p.y)).await;
+        new_heights.insert(Point3D::new(p.x, skirt_top, p.y));
+    }
+    editor.world_mut().set_heights(&new_heights);
 }

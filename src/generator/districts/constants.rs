@@ -14,7 +14,8 @@ pub const URBAN_GROWTH_CUTOFF: f32 = 0.10; // Candidate score needed to grow the
 pub const URBAN_GROWTH_CUTOFF_HIGH: f32 = 0.33; // Higher candidate score needed to grow beyond the minimum, up to URBAN_SIZE_MAX
 pub const URBAN_OPTION_SCORE_MAX: f32 = 0.75; // Max district_score to be eligible as an urban (prime) candidate
 pub const RURAL_OPTION_SCORE_MAX: f32 = 1.5; // Max district_score to be classified Rural (above this is Off-Limits)
-pub const ADJACENCY_WEIGHT: f32 = 3.0; // Weight for adjacency in parcel comparison scoring
+pub const ADJACENCY_WEIGHT: f32 = 3.0; // Weight for adjacency in parcel comparison scoring (district merge)
+pub const CITY_GROWTH_ADJACENCY_WEIGHT: f32 = 8.0; // Adjacency weight when growing the city: much higher than ADJACENCY_WEIGHT so compactness dominates terrain similarity and the city stays clustered instead of stretching into tendrils
 pub const URBAN_RELATIVE_TO_PRIME: f32 = 0.0; // score needed exceed to be under to be urban in relation to prime parcel
 
 // Urban footprint regularization (see districts/footprint.rs).

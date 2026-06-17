@@ -130,6 +130,7 @@ mod tests {
                 weight: 1.0,
                 size_xz: (0, 0),
                 y_offset: 0,
+                allow_steep: false,
             },
             wall_type: Some(WallType::Support),
             vertical_position: Some(VerticalWallPosition::Bottom),
@@ -199,6 +200,7 @@ mod tests {
                 weight: 1.0,
                 size_xz: (0, 0),
                 y_offset: 0,
+                allow_steep: false,
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),
         };

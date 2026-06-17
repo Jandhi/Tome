@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -19,6 +19,13 @@ pub struct Editor {
     provider: GDMCHTTPProvider,
     block_buffer: RefCell<Vec<PositionedBlock>>,
     buffer_size: usize,
+    /// When false, `flush_buffer` sends buffered blocks with `doBlockUpdates=false`,
+    /// so the server places exactly the blocks given without running placement side
+    /// effects. Needed when pasting authored structures: with updates on, placing a
+    /// bed foot makes the server auto-spawn a head (and a door bottom an upper half),
+    /// duplicating the second half the NBT already contains — often into a wall.
+    /// Defaults to true; toggle via `set_block_updates` around a structure paste.
+    block_updates: RefCell<bool>,
     block_cache: RefCell<HashMap<Point3D, Block>>,
     world: World,
     materials: HashMap<MaterialId, Material>,
@@ -37,6 +44,7 @@ impl Editor {
             provider: GDMCHTTPProvider::new(),
             block_buffer: RefCell::new(Vec::new()),
             buffer_size: 32,
+            block_updates: RefCell::new(true),
             block_cache: RefCell::new(HashMap::new()),
             world,
             materials: HashMap::new(),
@@ -61,6 +69,16 @@ impl Editor {
 
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
+    }
+
+    /// Controls whether buffered blocks are flushed with block updates on
+    /// (`true`, the default) or off. Flushes any pending buffer first so the
+    /// switch only affects blocks placed afterwards. Disable around a structure
+    /// paste so the server doesn't auto-spawn the second half of beds/doors that
+    /// the structure already contains; re-enable when done.
+    pub async fn set_block_updates(&self, on: bool) {
+        self.flush_buffer().await;
+        *self.block_updates.borrow_mut() = on;
     }
 
     fn load_data(&mut self) -> anyhow::Result<()> {
@@ -161,6 +179,36 @@ impl Editor {
         let _ = self.provider.put_blocks_no_updates(&vec![positioned]).await;
     }
 
+    /// Spawns entities at the given local points. Each tuple is
+    /// `(point, entity_id, nbt_data)` where `entity_id` is e.g. `"minecraft:sheep"`
+    /// and `nbt_data` is an optional SNBT string (e.g. a `CustomName` tag). Points
+    /// are local to the build area; absolute coordinates are sent to the server.
+    /// No-op in offline mode (like `flush_buffer`).
+    pub async fn spawn_entities(&self, entities: &[(Point3D, String, Option<String>)]) {
+        if self.offline || entities.is_empty() {
+            return;
+        }
+
+        let positioned: Vec<PositionedEntity> = entities
+            .iter()
+            .map(|(point, id, data)| {
+                let abs = *point + self.build_area.origin;
+                PositionedEntity {
+                    x: abs.x.into(),
+                    y: abs.y.into(),
+                    z: abs.z.into(),
+                    id: id.clone(),
+                    data: data.clone(),
+                }
+            })
+            .collect();
+
+        // Origin 0/0/0 — entity coordinates above are already absolute.
+        if let Err(e) = self.provider.put_entities(0, 0, 0, &positioned).await {
+            warn!("spawn_entities: failed to spawn {} entities: {}", positioned.len(), e);
+        }
+    }
+
     pub fn get_block(&self, point: Point3D) -> Block {
         if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
             return block.clone();
@@ -191,7 +239,8 @@ impl Editor {
             return;
         }
 
-        let result = self.provider.put_blocks(&buffer).await.expect("Failed to send blocks");
+        let do_updates = *self.block_updates.borrow();
+        let result = self.provider.put_blocks_options(&buffer, do_updates).await.expect("Failed to send blocks");
 
         for (index, response) in result.iter().enumerate() {
             let point: Point3D = buffer[index].get_coordinate().into();

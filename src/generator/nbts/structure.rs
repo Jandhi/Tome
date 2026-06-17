@@ -63,6 +63,12 @@ pub struct Structure {
     /// height so the lowest block embeds at ground level.
     #[serde(default)]
     pub y_offset : i32,
+
+    /// When true, this structure may be sited on steep ground that placement
+    /// would otherwise hard-reject (see `MAX_PLACEMENT_SLOPE`). Intended for
+    /// buildings meant to cut into a hillside, e.g. mines. Default false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_steep : bool,
 }
 
 fn default_weight() -> f32 {

@@ -878,6 +878,7 @@ mod tests {
             Some(0),
             None, // No permit blocks
             Some(false), // Ignore water
+            false, // not forcing over equally-dense blocks
         ).await;
 
         editor.flush_buffer().await;

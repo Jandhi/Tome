@@ -1,6 +1,6 @@
 {
   "id": "copper_mine",
-  "y_offset": 0,
+  "y_offset": -2,
   "path": "data/structures/resource_buildings/copper_mine.nbt",
   "origin": {
     "x": 4,
@@ -11,5 +11,6 @@
     9,
     9
   ],
+  "allow_steep": true,
   "palette": "resource_base"
 }

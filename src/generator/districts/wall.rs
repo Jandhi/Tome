@@ -503,52 +503,115 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
 }
 
 
-/// Adds height to wall points based on a heightmap, smoothing transitions.
-/// Returns a Vec<Point3D> where `.y` is the wall *top* height at each point.
+/// How far the wall top may rise above its resting `WALL_HEIGHT` to keep a climb
+/// walkable (pre-climbing into a rise at 1/cell instead of jumping it).
+pub const MAX_WALL_RAISE: i32 = 14;
+/// How far the wall top may drop below its resting `WALL_HEIGHT` for the same reason
+/// (easing down toward a steep section from the high side). Together these give the
+/// height a two-sided budget, so a sharp change is split into a rise on one side and
+/// a dip on the other and absorbed over twice as many cells.
+pub const MAX_WALL_DROP: i32 = 8;
+
+/// Relax `values` in place to the smallest 1-Lipschitz function that dominates them
+/// (no cell more than 1 below a neighbour), treating the slice as a closed ring.
+fn relax_lipschitz_above(values: &mut [i32]) {
+    let n = values.len();
+    loop {
+        let mut changed = false;
+        for i in 0..n {
+            let bound = values[(i + n - 1) % n] - 1;
+            if bound > values[i] {
+                values[i] = bound;
+                changed = true;
+            }
+        }
+        for i in (0..n).rev() {
+            let bound = values[(i + 1) % n] - 1;
+            if bound > values[i] {
+                values[i] = bound;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Relax `values` in place to the largest 1-Lipschitz function dominated by them
+/// (no cell more than 1 above a neighbour), treating the slice as a closed ring.
+fn relax_lipschitz_below(values: &mut [i32]) {
+    let n = values.len();
+    loop {
+        let mut changed = false;
+        for i in 0..n {
+            let bound = values[(i + n - 1) % n] + 1;
+            if bound < values[i] {
+                values[i] = bound;
+                changed = true;
+            }
+        }
+        for i in (0..n).rev() {
+            let bound = values[(i + 1) % n] + 1;
+            if bound < values[i] {
+                values[i] = bound;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+}
+
+/// Computes the wall-top height at each ring point so the walkway is *walkable*:
+/// adjacent tops differ by at most 1 wherever the height budget allows, so every
+/// step can be bridged by a single stair/slab. Returns a Vec<Point3D> where `.y` is
+/// the wall top at each point.
 ///
-/// The base height tracks the terrain but is rate-limited to MAX_STEP per point in
-/// *both* directions, so adjacent wall columns can never differ in top height by
-/// more than MAX_STEP. This is what prevents the tall single-block spikes: a sharp
-/// terrain change is spread over several points instead of jumping in one step. The
-/// only exception is the gap guard, which pulls the base up on a genuine cliff so
-/// the wall always covers the ground — and only by as much as that requires.
+/// The desired top is `WALL_HEIGHT` above the terrain. To absorb a sharp change we
+/// take the midpoint of two 1-Lipschitz envelopes of that desired profile — the
+/// smallest one that dominates it (`above`, which pre-climbs *before* a rise) and the
+/// largest one it dominates (`below`, which eases *after* it). Their average is the
+/// smoothest 1-Lipschitz curve through the desired profile: it equals the desired
+/// height on flat/gentle ground and ramps symmetrically through steep spots, rising
+/// on one side and dipping on the other. It is then clamped to a two-sided budget
+/// (`-MAX_WALL_DROP .. +MAX_WALL_RAISE` around resting), which only bites — leaving a
+/// residual step — where terrain is genuinely too steep for a continuous walkway.
+///
+/// Ring points are treated as a closed loop (the wall is a cycle), so the constraint
+/// is enforced around the wrap as well.
 pub fn add_wall_points_height(
     wall_points: &[Point2D],
     editor: &mut Editor,
 ) -> Vec<Point3D> {
-    // Max change in wall-top height between adjacent points, in either direction.
-    const MAX_STEP: i32 = 1;
-    // Minimum wall thickness that must remain above the terrain. If the rate-limited
-    // base drops so far below a rising cliff that less than this would be left, the
-    // base is forced up just enough to keep it.
-    const MIN_CLEARANCE: i32 = 3;
+    let n = wall_points.len();
 
-    let mut current_height = editor.world().get_height_at(wall_points[0]);
-    let mut height_wall_points = Vec::with_capacity(wall_points.len());
+    let desired: Vec<i32> = wall_points
+        .iter()
+        .map(|p| editor.world().get_height_at(*p) + WALL_HEIGHT)
+        .collect();
 
-    for point in wall_points {
-        let target_height = editor.world().get_height_at(*point);
+    let mut above = desired.clone();
+    relax_lipschitz_above(&mut above);
+    let mut below = desired.clone();
+    relax_lipschitz_below(&mut below);
 
-        // Step the base toward the terrain, capped to MAX_STEP per point so a steep
-        // change is smeared across several points rather than producing a spike.
-        let delta = (target_height - current_height).clamp(-MAX_STEP, MAX_STEP);
-        current_height += delta;
+    let tops: Vec<i32> = (0..n)
+        .map(|i| {
+            // Midpoint of the two envelopes: the smoothest walkable curve. `above`
+            // and `below` are each 1-Lipschitz and within 1 of each other per step,
+            // so their floored average is 1-Lipschitz too.
+            let mid = (above[i] + below[i]).div_euclid(2);
+            mid.clamp(desired[i] - MAX_WALL_DROP, desired[i] + MAX_WALL_RAISE)
+        })
+        .collect();
 
-        // Gap guard: on a cliff the rate-limited base can fall far enough below the
-        // terrain that the wall would no longer cover it — pull it up just enough to
-        // keep MIN_CLEARANCE of wall above the ground.
-        if current_height + WALL_HEIGHT < target_height + MIN_CLEARANCE {
-            current_height = target_height + MIN_CLEARANCE - WALL_HEIGHT;
-        }
-
-        height_wall_points.push(Point3D {
-            x: point.x,
-            y: current_height + WALL_HEIGHT,
-            z: point.y,
-        });
-    }
-
-    height_wall_points
+    wall_points
+        .iter()
+        .zip(tops)
+        .map(|(point, y)| Point3D { x: point.x, y, z: point.y })
+        .collect()
 }
 
 /// Adds directionality to wall points to know which way to build walkways.
@@ -668,8 +731,81 @@ pub async fn flatten_walkway(
             }
         }
     }
+
+    // Fill solid blocks beneath each walkway cell so the shelf reads as one
+    // continuous surface. Each cell's slab used to float on air; where adjacent
+    // cells differed in height by more than a single stair could bridge, the side
+    // face was left open — the see-through / fall-through holes on steep terrain.
+    // Dropping each column down to its lowest orthogonal neighbour closes those
+    // faces, and the minimum-one-block support also seals the slab layer itself.
+    for (point, bottom, top) in walkway_support_columns(&updated_walkway_heights) {
+        for y in bottom..=top {
+            material_placer.place_block(editor, Point3D { x: point.x, y, z: point.y }, material_id, BlockForm::Block, None, None).await;
+        }
+    }
+
+    // Ladder fallback: where two adjacent walkway cells still differ in height by
+    // more than a single stair can bridge — a residual step on terrain too steep even
+    // for the two-sided height budget — hang a ladder up the taller cell's face from
+    // the lower cell's airspace, so the walkway stays traversable instead of
+    // dead-ending at a blank wall. Only the lower cell of the pair places it, climbing
+    // toward the higher neighbour; the ladder backs onto that neighbour's fill column.
+    for (&point, &height) in updated_walkway_heights.clone().iter() {
+        for direction in CARDINALS_2D {
+            let neighbour = point + Point2D::from(direction);
+            let Some(&neighbour_height) = updated_walkway_heights.get(&neighbour) else {
+                continue;
+            };
+            let low = height.floor() as i32;
+            let high = neighbour_height.floor() as i32;
+            if high - low < 2 {
+                continue; // bridgeable by slab/stair, or this is the higher cell
+            }
+            // `facing` points away from the supporting block; the higher neighbour
+            // (the support) is in `direction`, so the ladder faces the opposite way.
+            let facing = Cardinal::from_point_2d(direction)
+                .expect("cardinal direction")
+                .opposite()
+                .to_string();
+            let Some(ladder) = crate::minecraft::string_to_block(&format!("ladder[facing={facing}]"))
+            else {
+                continue;
+            };
+            for y in (low + 1)..high {
+                editor.place_block(&ladder, Point3D { x: point.x, y, z: point.y }).await;
+            }
+        }
+    }
+
     updated_walkway_heights
 
+}
+
+/// Plan A support fill: for every walkway cell, the inclusive vertical span
+/// `[bottom, top]` of solid blocks that must sit beneath its slab cap so the
+/// walkway is a continuous surface with no open vertical faces between cells.
+///
+/// `top` is the highest *full* block under the cap (one below the slab, so it
+/// never collides with the cell's own slab regardless of slab type). `bottom`
+/// drops to the lowest orthogonal walkway neighbour's `top`, so the face between
+/// two cells of differing height is always backed by wall instead of air — that
+/// open face was the source of the walkway holes. A cell with no lower neighbour
+/// still gets its own single support block (`bottom == top`), sealing the layer.
+fn walkway_support_columns(heights: &HashMap<Point2D, f64>) -> Vec<(Point2D, i32, i32)> {
+    let support_top = |h: f64| h.floor() as i32 - 1;
+    let mut columns = Vec::with_capacity(heights.len());
+    for (&point, &height) in heights {
+        let top = support_top(height);
+        let mut bottom = top;
+        for direction in CARDINALS_2D {
+            let neighbour = point + Point2D::from(direction);
+            if let Some(&neighbour_height) = heights.get(&neighbour) {
+                bottom = bottom.min(support_top(neighbour_height));
+            }
+        }
+        columns.push((point, bottom, top));
+    }
+    columns
 }
 
 pub fn average_neighbour_height(
@@ -752,12 +888,10 @@ mod tests {
     use crate::editor::World;
     use crate::geometry::Rect3D;
 
-    // Mirror the private consts inside `add_wall_points_height`.
-    const MAX_STEP: i32 = 1;
-    const MIN_CLEARANCE: i32 = 3;
-
-    /// Run `add_wall_points_height` over a 1-D terrain profile laid along x at
-    /// z=1, returning the wall-top height at each point.
+    /// Run `add_wall_points_height` over a terrain profile laid along x at z=1,
+    /// returning the wall-top height at each point. The profile is treated as a
+    /// closed loop (the wall is a ring), so test profiles are written cyclic — the
+    /// last and first entries are adjacent and should match terrain-wise.
     fn tops_for(terrain: &[i32]) -> Vec<i32> {
         let n = terrain.len() as i32;
         let build_area =
@@ -779,32 +913,42 @@ mod tests {
             .collect()
     }
 
-    /// Assert the three correctness invariants over any terrain profile:
-    /// (1) the wall always covers the ground, (2) the top never drops by more
-    /// than MAX_STEP (no downward spikes), and (3) any upward jump bigger than
-    /// MAX_STEP is forced by the gap guard — it lands exactly at the minimum
-    /// clearance, never gratuitously.
+    /// Assert the wall-top invariants over a cyclic terrain profile:
+    /// (1) bounded height — the top stays within the two-sided budget around its
+    ///     resting height (`WALL_HEIGHT - MAX_WALL_DROP .. WALL_HEIGHT + MAX_WALL_RAISE`
+    ///     above terrain), so the wall always covers the ground and never towers off;
+    /// (2) walkable where affordable — a step larger than 1 may only appear where a
+    ///     cell has hit a budget boundary (terrain genuinely too steep). Anywhere the
+    ///     budget has slack, adjacent tops differ by at most 1, bridgeable by a single
+    ///     stair/slab.
     fn assert_invariants(terrain: &[i32]) {
         let tops = tops_for(terrain);
-        assert_eq!(tops.len(), terrain.len());
-        for i in 0..terrain.len() {
+        let n = terrain.len();
+        assert_eq!(tops.len(), n);
+        let at_budget = |i: usize| {
+            tops[i] == terrain[i] + WALL_HEIGHT + MAX_WALL_RAISE
+                || tops[i] == terrain[i] + WALL_HEIGHT - MAX_WALL_DROP
+        };
+        for i in 0..n {
             assert!(
-                tops[i] >= terrain[i] + MIN_CLEARANCE,
-                "point {i}: top {} does not cover terrain {} + clearance {MIN_CLEARANCE} (profile {terrain:?})",
+                tops[i] >= terrain[i] + WALL_HEIGHT - MAX_WALL_DROP,
+                "point {i}: top {} below the drop budget over terrain {} (profile {terrain:?})",
                 tops[i], terrain[i],
             );
-            if i > 0 {
+            assert!(
+                tops[i] <= terrain[i] + WALL_HEIGHT + MAX_WALL_RAISE,
+                "point {i}: top {} above the raise budget over terrain {} (profile {terrain:?})",
+                tops[i], terrain[i],
+            );
+        }
+        for i in 0..n {
+            let j = (i + 1) % n;
+            if (tops[i] - tops[j]).abs() > 1 {
                 assert!(
-                    tops[i] >= tops[i - 1] - MAX_STEP,
-                    "point {i}: downward spike {} -> {} (profile {terrain:?})",
-                    tops[i - 1], tops[i],
+                    at_budget(i) || at_budget(j),
+                    "unwalkable step {} -> {} between {i} and {j} with budget to spare (profile {terrain:?})",
+                    tops[i], tops[j],
                 );
-                if tops[i] > tops[i - 1] + MAX_STEP {
-                    assert_eq!(
-                        tops[i], terrain[i] + MIN_CLEARANCE,
-                        "point {i}: upward spike not pinned to gap guard (profile {terrain:?})",
-                        );
-                }
             }
         }
     }
@@ -818,47 +962,58 @@ mod tests {
     #[test]
     fn smooth_profiles_hold_invariants() {
         assert_invariants(&[64; 8]);
-        assert_invariants(&[60, 61, 62, 63, 64, 65, 66, 67]); // gentle rise
-        assert_invariants(&[70, 69, 68, 67, 66, 65, 64, 63]); // gentle fall
-        assert_invariants(&[64, 65, 66, 65, 64, 65, 66, 65]); // rolling
+        assert_invariants(&[64, 65, 66, 67, 66, 65, 64, 63]); // gentle hill (cyclic)
+        assert_invariants(&[64, 65, 64, 65, 64, 65, 64, 65]); // rolling
     }
 
     #[test]
     fn cliffs_hold_invariants() {
-        assert_invariants(&[64, 64, 64, 90, 90, 90]); // up-cliff (+26)
-        assert_invariants(&[90, 90, 90, 64, 64, 64]); // down-cliff (-26)
-        assert_invariants(&[64, 90, 64, 90, 64, 90]); // alternating spikes
-        assert_invariants(&[64, 64, 100, 64, 64]); // single tall spike
+        assert_invariants(&[64, 64, 64, 90, 90, 90, 64, 64, 64]); // up- then down-cliff
+        assert_invariants(&[64, 90, 64, 90, 64, 90, 64, 90]); // alternating spikes
+        assert_invariants(&[64, 64, 100, 100, 64, 64]); // tall plateau
     }
 
     #[test]
-    fn up_cliff_does_not_overshoot() {
-        // A sharp rise is rate-limited until the gap guard must intervene; once
-        // it does, the top hugs terrain + clearance rather than overshooting.
-        let terrain = [64, 64, 64, 64, 90, 90, 90, 90];
+    fn moderate_change_is_fully_walkable() {
+        // A rise of 8 fits inside the combined two-sided budget (drop + raise = 14),
+        // so given room to ramp it is split into a dip on the high side and a climb on
+        // the low side and spread into 1-per-cell steps — no unclimbable step anywhere.
+        let terrain = [64, 64, 64, 64, 64, 64, 72, 72, 72, 72, 72, 72];
         let tops = tops_for(&terrain);
-        for (i, &t) in tops.iter().enumerate() {
-            assert!(t <= terrain[i].max(64) + WALL_HEIGHT,
-                "point {i}: top {t} overshoots above wall height over terrain {}", terrain[i]);
+        let n = tops.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            assert!(
+                (tops[i] - tops[j]).abs() <= 1,
+                "step {} -> {} at {i}->{j} should be walkable (tops {tops:?})",
+                tops[i], tops[j],
+            );
         }
     }
 
     #[test]
-    fn down_cliff_stays_tall_then_recovers() {
-        // The base lags a steep drop by one block per point, so the wall is tall
-        // over the low ground and steps back down toward the terrain gradually.
-        // Recovery is 1 block/point, so the flat run must be longer than the drop
-        // (here a drop of 6 over 8 flat points) for the wall to fully settle.
-        let terrain = [70, 70, 64, 64, 64, 64, 64, 64, 64, 64];
+    fn steep_change_splits_budget_both_ways() {
+        // A +20 plateau outruns even the combined budget. The wall both dips below
+        // resting on the high side and rises above it on the low side to shrink the
+        // gap as far as the budget allows, leaving a residual step at each edge.
+        let terrain = [64, 64, 64, 64, 84, 84, 84, 84, 64, 64];
         let tops = tops_for(&terrain);
-        // Right after the drop the wall is much taller than its resting height.
-        assert!(tops[2] > 64 + WALL_HEIGHT, "wall should stay tall right after the drop");
-        // Given enough flat run it settles back to the resting height.
-        assert_eq!(*tops.last().unwrap(), 64 + WALL_HEIGHT);
-        // And it only ever steps down by MAX_STEP at a time.
-        for i in 1..tops.len() {
-            assert!(tops[i] >= tops[i - 1] - MAX_STEP);
-        }
+        let n = tops.len();
+        // Low-side approach rises above resting height (uses the raise budget) ...
+        assert!(
+            tops[3] > 64 + WALL_HEIGHT,
+            "low approach should rise above resting (tops {tops:?})",
+        );
+        // ... and the high plateau dips below resting height (uses the drop budget).
+        assert!(
+            tops[4] < 84 + WALL_HEIGHT,
+            "high side should dip below resting (tops {tops:?})",
+        );
+        let big_steps = (0..n)
+            .filter(|&i| (tops[i] - tops[(i + 1) % n]).abs() > 1)
+            .count();
+        assert_eq!(big_steps, 2, "a plateau leaves one residual step up and one down (tops {tops:?})");
+        assert_invariants(&terrain);
     }
 
     // ---- wall-ring tracing ----
@@ -943,5 +1098,100 @@ mod tests {
         // A lone 2×2 blob is below MIN_WALL_LOOP and should not yield a ring.
         let region = filled_rect(0, 0, 2, 2);
         assert!(trace_wall_loops(&region).is_empty());
+    }
+
+    // ---- walkway support fill (Plan A) ----
+
+    /// `walkway_support_columns` mirror of the cap → support-block mapping used in
+    /// the assertions below: the highest full block under a cell's slab cap.
+    fn support_top(h: f64) -> i32 {
+        h.floor() as i32 - 1
+    }
+
+    /// Build a height map laid along x at z=0 from a surface profile.
+    fn heights_along_x(surfaces: &[f64]) -> HashMap<Point2D, f64> {
+        surfaces
+            .iter()
+            .enumerate()
+            .map(|(i, &h)| (Point2D::new(i as i32, 0), h))
+            .collect()
+    }
+
+    /// The core invariant: between any two orthogonally adjacent walkway cells the
+    /// taller one's fill must reach down to at least the shorter one's support top,
+    /// so the connecting vertical face is solid (no walkway hole). Also every cell
+    /// keeps at least one support block.
+    fn assert_no_open_faces(heights: &HashMap<Point2D, f64>) {
+        let cols: HashMap<Point2D, (i32, i32)> = walkway_support_columns(heights)
+            .into_iter()
+            .map(|(p, bottom, top)| (p, (bottom, top)))
+            .collect();
+        for (&point, &(bottom, top)) in &cols {
+            assert!(bottom <= top, "cell {point:?} has empty support span");
+            for direction in CARDINALS_2D {
+                let neighbour = point + Point2D::from(direction);
+                let Some(&(_nb_bottom, nb_top)) = cols.get(&neighbour) else {
+                    continue;
+                };
+                if top >= nb_top {
+                    // This cell is the taller (or equal) one: its fill must cover
+                    // the neighbour's top so the shared face has no air gap.
+                    assert!(
+                        bottom <= nb_top,
+                        "open face between {point:?} (fill {bottom}..={top}) and \
+                         {neighbour:?} (top {nb_top})",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn flat_walkway_each_cell_self_supported() {
+        let heights = heights_along_x(&[70.0; 6]);
+        for (_p, bottom, top) in walkway_support_columns(&heights) {
+            assert_eq!(bottom, top, "flat run needs only a single support block");
+            assert_eq!(top, support_top(70.0));
+        }
+        assert_no_open_faces(&heights);
+    }
+
+    #[test]
+    fn gentle_slope_has_no_open_faces() {
+        assert_no_open_faces(&heights_along_x(&[70.0, 71.0, 72.0, 73.0, 74.0]));
+        // half-step slabs (top-slab fractional surfaces) interleaved
+        assert_no_open_faces(&heights_along_x(&[70.0, 70.49, 71.0, 71.49, 72.0]));
+    }
+
+    #[test]
+    fn cliff_face_is_filled_solid() {
+        // A gap-guard cliff: a sudden ~18-block jump mid-run. The fill must bridge
+        // the whole face rather than leaving it open (the screenshot holes).
+        let heights = heights_along_x(&[70.0, 71.0, 72.0, 90.0, 91.0, 92.0]);
+        assert_no_open_faces(&heights);
+        // The tall cell at the cliff must drop its fill all the way to the low side.
+        let cols: HashMap<Point2D, (i32, i32)> = walkway_support_columns(&heights)
+            .into_iter()
+            .map(|(p, b, t)| (p, (b, t)))
+            .collect();
+        let (bottom, _top) = cols[&Point2D::new(3, 0)];
+        assert!(
+            bottom <= support_top(72.0),
+            "cliff cell fill {bottom} should reach the low neighbour's top {}",
+            support_top(72.0),
+        );
+    }
+
+    #[test]
+    fn two_dimensional_walkway_band_has_no_open_faces() {
+        // A 3-wide band that steps up along its length — exercises both axes.
+        let mut heights = HashMap::new();
+        for x in 0..8 {
+            let surface = 64.0 + x as f64; // 1 per cell along x
+            for z in 0..3 {
+                heights.insert(Point2D::new(x, z), surface);
+            }
+        }
+        assert_no_open_faces(&heights);
     }
 }
