@@ -215,11 +215,6 @@ pub async fn place_rural_building(
     Ok(true)
 }
 
-/// Attempts to place one rural gather building for `assignment` on district
-/// `sd_id`, painting its production area on success. Returns whether it placed.
-/// Used by the settlement pipeline for both the primary assignment pass and the
-/// competition-cap fallback promotion (a dropped same-resource parcel retried when
-/// a primary can't seat).
 /// A rural resource building that physically placed, carrying everything needed
 /// to (a) route the rural road network to it and (b) paint its production area.
 ///

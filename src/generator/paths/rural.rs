@@ -24,7 +24,7 @@ use crate::generator::BuildClaim;
 use crate::generator::districts::{District, DistrictID};
 use crate::generator::materials::MaterialId;
 use crate::generator::nbts::StructureID;
-use crate::generator::resource_chain::EDGE_BUFFER;
+use crate::generator::resource_chain::border_ring_cells;
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 
 use super::path::{Path, PathPriority};
@@ -86,7 +86,9 @@ pub async fn build_rural_road_network(
         jobs.push((anchor, gate));
 
         if b.has_border_ring {
-            ring_cells.extend(predict_border_ring(editor, district));
+            // Predict the painter's border ring (it hasn't run yet) from the same
+            // shared computation, so routes can hug the ring the painter will lay.
+            ring_cells.extend(border_ring_cells(district, editor));
         }
     }
 
@@ -252,33 +254,4 @@ fn perimeter_outside(footprint: &HashSet<Point2D>) -> Vec<Point2D> {
         }
     }
     out.into_iter().collect()
-}
-
-/// Predicts the `rural_road` border ring a production painter will lay for
-/// `district`: the interior cells within `EDGE_BUFFER` (Chebyshev) of an edge
-/// cell that are unclaimed and not water. Mirrors the `border_cells` computation
-/// in [`crate::generator::resource_chain::paint_production_area`], so the road
-/// network and the painter agree on the ring.
-fn predict_border_ring(editor: &Editor, district: &District) -> HashSet<Point2D> {
-    let edge_buffer: HashSet<Point2D> = district
-        .data
-        .edges
-        .iter()
-        .flat_map(|p| {
-            let p2 = p.drop_y();
-            (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
-                (-EDGE_BUFFER..=EDGE_BUFFER).map(move |dz| Point2D::new(p2.x + dx, p2.y + dz))
-            })
-        })
-        .collect();
-
-    district
-        .data
-        .points_2d
-        .iter()
-        .copied()
-        .filter(|p| edge_buffer.contains(p))
-        .filter(|&p| !editor.world().is_claimed(p))
-        .filter(|&p| !editor.world().is_water(p))
-        .collect()
 }
