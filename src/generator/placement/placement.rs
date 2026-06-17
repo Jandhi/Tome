@@ -8,9 +8,10 @@ use crate::{
     generator::{
         BuildClaim,
         data::LoadedData,
-        districts::District,
+        districts::{District, DistrictID, ParcelAnalysis},
         materials::{Palette, Placer},
-        nbts::{Rotation, Structure, StructureID, place_structure},
+        nbts::{Rotation, Structure, StructureID, StructureType, place_structure},
+        resource_chain::{ParcelResourceAssignment, SettlementProductionResult},
         terrain::{force_height, log_trees},
     },
     geometry::{Cardinal, Point2D, Point3D, Rect2D},
@@ -214,6 +215,79 @@ pub async fn place_rural_building(
     Ok(true)
 }
 
+/// Attempts to place one rural gather building for `assignment` on district
+/// `sd_id`, painting its production area on success. Returns whether it placed.
+/// Used by the settlement pipeline for both the primary assignment pass and the
+/// competition-cap fallback promotion (a dropped same-resource parcel retried when
+/// a primary can't seat).
+/// A rural resource building that physically placed, carrying everything needed
+/// to (a) route the rural road network to it and (b) paint its production area.
+///
+/// Painting is **deferred**: the rural road network must be built between
+/// placement and painting (so it can predict and reuse each area's `rural_road`
+/// border ring), so `try_place_rural` no longer paints inline — the caller paints
+/// via [`paint_production_area_for`](crate::generator::resource_chain::paint_production_area_for)
+/// once the roads are down.
+pub struct PlacedRural {
+    pub district: DistrictID,
+    pub structure: StructureID,
+    /// Production painter name for this building, if any.
+    pub painter: Option<String>,
+    /// Resource resolved for the *placed* building (so a mine painter's ore
+    /// matches an overridden building), used when painting the production area.
+    pub resource: String,
+    /// Whether this building's production painter will lay a `rural_road` border
+    /// ring — the rural road network predicts and reuses it.
+    pub has_border_ring: bool,
+}
+
+/// Places a rural resource building for `sd_id` and returns its [`PlacedRural`]
+/// record on success (or `None` if the building couldn't be seated). Does **not**
+/// paint the production area — see [`PlacedRural`].
+pub async fn try_place_rural(
+    sd_id: DistrictID,
+    assignment: &ParcelResourceAssignment,
+    data: &LoadedData,
+    editor: &mut Editor,
+    rng: &mut RNG,
+) -> Option<PlacedRural> {
+    let building = assignment.building.clone();
+    let Some(district) = editor.world().districts.get(&sd_id).cloned() else { return None };
+    let Some(structure) = data.structures.get(&StructureType(building.clone())).cloned() else {
+        warn!("No structure for building '{}' (parcel {:?})", building, sd_id);
+        return None;
+    };
+    match place_rural_building(&district, &structure, rng, editor, data).await {
+        Ok(true) => {
+            let Some(structure_id) = editor.world().structures.last().cloned() else {
+                warn!("try_place_rural: placement reported success but pushed no structure for '{}'", building);
+                return None;
+            };
+            // Resource for the *placed* building (so the mine painter's ore
+            // matches an overridden building), falling back to the parcel's.
+            let resource = data.resource_registry.recipes().values()
+                .find(|r| r.inputs.is_empty() && r.building == building)
+                .and_then(|r| r.outputs.keys().next().cloned())
+                .unwrap_or_else(|| assignment.primary_resource.clone());
+            let has_border_ring = assignment.production_painter.as_deref().map_or(false, |name| {
+                data.resource_registry.production_painters.get(name).map_or(false, |p| p.paints_border())
+            });
+            Some(PlacedRural {
+                district: sd_id,
+                structure: structure_id,
+                painter: assignment.production_painter.clone(),
+                resource,
+                has_border_ring,
+            })
+        }
+        Ok(false) => None,
+        Err(e) => {
+            warn!("Rural placement failed for '{}' (parcel {:?}): {}", building, sd_id, e);
+            None
+        }
+    }
+}
+
 /// Picks placement-candidate centres biased toward the flattest interior ground.
 ///
 /// Uniform random sampling places `NUM_CANDIDATES` darts across the whole district;
@@ -281,6 +355,117 @@ fn local_height_range(cell: Point2D, radius: i32, height_at: &HashMap<Point2D, i
         return i32::MAX; // too close to the district edge to seat the footprint
     }
     max - min
+}
+
+/// Cheap feasibility probe used by the resource chain *before* it locks the
+/// settlement's economy: for a rural `district`, which of the given building
+/// `footprints` can actually be seated under `MAX_PLACEMENT_SLOPE`?
+///
+/// Each footprint is `(size_x, size_z, allow_steep)`. The check mirrors the
+/// interior + slope gating in `place_rural_building`/`select_best_candidate`:
+/// a footprint is seatable if some interior cell's footprint-sized window stays
+/// within the slope cap (the same `local_height_range` window the candidate
+/// ranker uses). `allow_steep` footprints (mines) bypass the cap and only need a
+/// non-empty interior. Returns one bool per input footprint, in order.
+///
+/// This is intentionally permissive: it answers "could this ever seat here?" so a
+/// resource is only excluded from a parcel when *no* viable pad exists — placement
+/// still does the exact per-candidate slope check. Sharing one interior height
+/// scan across all footprints keeps it to a single pass per district.
+pub fn district_seatable_footprints(
+    district: &District,
+    editor: &Editor,
+    footprints: &[(i32, i32, bool)],
+) -> Vec<bool> {
+    let edge_2d: HashSet<Point2D> =
+        district.data.edges.iter().map(|p| p.drop_y()).collect();
+
+    // Same interior as `place_rural_building`: drop edge, urban and water cells.
+    let interior: Vec<Point2D> = district
+        .data
+        .points_2d
+        .iter()
+        .filter(|p| {
+            !edge_2d.contains(p) && !editor.world().is_urban(**p) && !editor.world().is_water(**p)
+        })
+        .copied()
+        .collect();
+
+    if interior.is_empty() {
+        return vec![false; footprints.len()];
+    }
+
+    // Precompute non-tree surface heights once, reused for every footprint's window.
+    let height_at: HashMap<Point2D, i32> = interior
+        .iter()
+        .map(|&p| (p, editor.world().get_non_tree_height(p)))
+        .collect();
+
+    footprints
+        .iter()
+        .map(|&(sx, sz, allow_steep)| {
+            if sx <= 0 || sz <= 0 {
+                return false;
+            }
+            if allow_steep {
+                return true; // slope cap bypassed; interior is non-empty here
+            }
+            let probe_radius = (sx.max(sz) / 2).max(1);
+            interior
+                .iter()
+                .any(|&c| local_height_range(c, probe_radius, &height_at) <= MAX_PLACEMENT_SLOPE)
+        })
+        .collect()
+}
+
+/// Resolve the settlement's rural economy with placement feasibility folded in.
+///
+/// Wraps [`ResourceRegistry::resolve_for_parcels_seated`]: it derives each gather
+/// resource's building footprint from `data`, asks
+/// [`district_seatable_footprints`] which footprints every rural district can
+/// actually seat under the slope cap, and feeds that constraint into the resolver
+/// so the plan never assigns a building a parcel can't physically hold. Consumers
+/// (and tests) with a live `Editor` call this instead of `resolve_for_parcels` and
+/// get the seatability handling for free.
+pub fn resolve_rural_production(
+    data: &LoadedData,
+    editor: &Editor,
+    rural_analysis: &HashMap<DistrictID, ParcelAnalysis>,
+    rng: &mut RNG,
+) -> SettlementProductionResult {
+    // Map each gather resource to its building footprint (size + steep tolerance).
+    let mut gather_footprints: HashMap<String, (i32, i32, bool)> = HashMap::new();
+    for recipe in data.resource_registry.recipes().values() {
+        if !recipe.inputs.is_empty() {
+            continue; // only gather (no-input) recipes seat a rural building
+        }
+        let Some(structure) = data.structures.get(&StructureType(recipe.building.clone())) else {
+            continue;
+        };
+        let fp = (structure.size_xz.0, structure.size_xz.1, structure.allow_steep);
+        for resource in recipe.outputs.keys() {
+            gather_footprints.insert(resource.clone(), fp);
+        }
+    }
+
+    // Per rural district, the subset of gather resources whose footprint fits.
+    let resources: Vec<String> = gather_footprints.keys().cloned().collect();
+    let footprints: Vec<(i32, i32, bool)> = resources.iter().map(|r| gather_footprints[r]).collect();
+    let seatable: HashMap<DistrictID, HashSet<String>> = rural_analysis
+        .keys()
+        .filter_map(|id| {
+            let district = editor.world().districts.get(id)?.clone();
+            let fits = district_seatable_footprints(&district, editor, &footprints);
+            let set: HashSet<String> = resources
+                .iter()
+                .zip(fits)
+                .filter_map(|(r, ok)| ok.then(|| r.clone()))
+                .collect();
+            Some((*id, set))
+        })
+        .collect();
+
+    data.resource_registry.resolve_for_parcels_seated(rural_analysis, Some(&seatable), rng)
 }
 
 /// Places a single processing/secondary building somewhere in the urban region.
