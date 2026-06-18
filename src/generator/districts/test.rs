@@ -1139,4 +1139,41 @@ mod tests {
             crate::generator::buildings_v2::Culture::Medieval,
         ).await;
     }
+
+    /// DEBUG: generate a town, then detect the leftover green (unclaimed urban)
+    /// open-space regions and float a wool marker above each so we can eyeball
+    /// where the dead space falls before building any real decoration on it.
+    #[tokio::test]
+    async fn open_space_regions() {
+        use crate::generator::open_space::{detect_regions, paint_regions_debug};
+
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+        crate::generator::settlement::generate_town(
+            &mut editor,
+            Seed(12345),
+            crate::generator::buildings_v2::Culture::Medieval,
+        ).await;
+
+        let urban = editor.world().get_urban_points();
+        let regions = detect_regions(editor.world(), &urban);
+
+        use crate::generator::open_space::RegionType;
+        let total_cells: usize = regions.iter().map(|r| r.area).sum();
+        let count = |t: RegionType| regions.iter().filter(|r| r.region_type() == t).count();
+        println!(
+            "Open-space regions: {} ({} cells) | plaza {} nook {} park {} yard {}",
+            regions.len(),
+            total_cells,
+            count(RegionType::Plaza),
+            count(RegionType::Nook),
+            count(RegionType::Park),
+            count(RegionType::Yard),
+        );
+
+        paint_regions_debug(&editor, &regions).await;
+        editor.flush_buffer().await;
+    }
 }
