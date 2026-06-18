@@ -8,14 +8,25 @@ use std::collections::{HashMap, HashSet};
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
-use crate::minecraft::{Block, BlockForm};
+use crate::minecraft::{string_to_block, Block, BlockForm};
 use crate::noise::RNG;
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
+use super::super::Culture;
 use super::segments::{
     DoorStyle, Opening, OpeningKind, WallSegments, WindowStyle, segment_cells,
 };
+
+/// Banner colours for a desert doorway curtain — warm, sun-bleached cloth.
+const CURTAIN_COLORS: [&str; 6] = [
+    "white",
+    "red",
+    "orange",
+    "yellow",
+    "brown",
+    "light_gray",
+];
 
 /// What fills a window opening.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -276,6 +287,7 @@ pub async fn place_openings(
     ctx: &mut BuildCtx<'_>,
     wall_segs: &WallSegments,
     window_fill: WindowFill,
+    culture: Culture,
 ) {
     let editor: &Editor = &*ctx.editor;
     let data = ctx.data;
@@ -309,50 +321,88 @@ pub async fn place_openings(
             match &opening.kind {
                 OpeningKind::Door(_style) => {
                     let facing_str = seg.facing.to_string();
+                    // Desert doorways: about half hang a banner curtain over an
+                    // open fence gate instead of a solid swinging door. Decided
+                    // once per opening so both cells of a doorway match.
+                    let curtain = culture == Culture::Desert && rng.percent(50);
                     for dx in 0..opening.width {
                         let idx = (opening.offset + dx) as usize;
                         if idx >= cells.len() { continue; }
                         let cell = cells[idx];
-
-                        let hinge = if dx == 0 { "right" } else { "left" };
-
-                        // Lower half
-                        let lower_state = HashMap::from([
-                            ("facing".to_string(), facing_str.clone()),
-                            ("half".to_string(), "lower".to_string()),
-                            ("hinge".to_string(), hinge.to_string()),
-                        ]);
                         let y = seg.base_y + opening.y_offset as i32;
-                        placer.place_block(
-                            editor,
-                            Point3D::new(cell.x, y, cell.y),
-                            BlockForm::Door,
-                            Some(&lower_state),
-                            None,
-                        ).await;
 
-                        // Upper half
-                        let upper_state = HashMap::from([
-                            ("facing".to_string(), facing_str.clone()),
-                            ("half".to_string(), "upper".to_string()),
-                            ("hinge".to_string(), hinge.to_string()),
-                        ]);
-                        placer.place_block(
-                            editor,
-                            Point3D::new(cell.x, y + 1, cell.y),
-                            BlockForm::Door,
-                            Some(&upper_state),
-                            None,
-                        ).await;
+                        // Banner colour for the curtain variant, chosen per cell.
+                        let mut curtain_color: Option<&str> = None;
+                        if curtain {
+                            // An open fence gate as a low threshold, raised one
+                            // block off the floor. Faced with the outward normal
+                            // so it swings open toward the street side.
+                            let gate_state = HashMap::from([
+                                ("facing".to_string(), (-seg.facing).to_string()),
+                                ("open".to_string(), "true".to_string()),
+                            ]);
+                            placer.place_block(
+                                editor,
+                                Point3D::new(cell.x, y + 1, cell.y),
+                                BlockForm::FenceGate,
+                                Some(&gate_state),
+                                None,
+                            ).await;
+                            curtain_color = Some(*rng.choose(&CURTAIN_COLORS));
+                        } else {
+                            let hinge = if dx == 0 { "right" } else { "left" };
+
+                            // Lower half
+                            let lower_state = HashMap::from([
+                                ("facing".to_string(), facing_str.clone()),
+                                ("half".to_string(), "lower".to_string()),
+                                ("hinge".to_string(), hinge.to_string()),
+                            ]);
+                            placer.place_block(
+                                editor,
+                                Point3D::new(cell.x, y, cell.y),
+                                BlockForm::Door,
+                                Some(&lower_state),
+                                None,
+                            ).await;
+
+                            // Upper half
+                            let upper_state = HashMap::from([
+                                ("facing".to_string(), facing_str.clone()),
+                                ("half".to_string(), "upper".to_string()),
+                                ("hinge".to_string(), hinge.to_string()),
+                            ]);
+                            placer.place_block(
+                                editor,
+                                Point3D::new(cell.x, y + 1, cell.y),
+                                BlockForm::Door,
+                                Some(&upper_state),
+                                None,
+                            ).await;
+                        }
 
                         // Clear the exterior of the doorway so terrain, a road
-                        // slab, or a verge lip can't wall the door shut: force air
-                        // in the cell just outside, over the full door height.
+                        // slab, or a verge lip can't wall the door (or gate) shut:
+                        // force air in the cell just outside, over the full height.
                         // Forced because air is the least-dense block and a normal
                         // placement would skip an existing solid.
                         let out = cell + Point2D::from(seg.facing);
                         for h in 0..opening.height as i32 {
                             editor.place_block_forced(&"air".into(), Point3D::new(out.x, y + h, out.y)).await;
+                        }
+
+                        // Curtain banner: hung one block out on the *exterior*
+                        // side of the doorway (`seg.facing` is the inward normal,
+                        // so outside is `cell - facing`), facing out toward the
+                        // street. The no-update placement keeps it from popping.
+                        if let Some(color) = curtain_color {
+                            let outside = cell - Point2D::from(seg.facing);
+                            let banner_facing = (-seg.facing).to_string();
+                            let banner = format!("minecraft:{color}_wall_banner[facing={banner_facing}]");
+                            editor.place_block_forced(
+                                &string_to_block(&banner).expect("curtain banner block"),
+                                Point3D::new(outside.x, y + 1, outside.y),
+                            ).await;
                         }
                     }
                 }

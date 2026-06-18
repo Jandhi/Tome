@@ -60,6 +60,12 @@ pub struct RoadNetwork {
     pub nodes: Vec<Point3D>,
     /// MST + shortcut edges over `nodes`.
     pub edges: Vec<RoadEdge>,
+    /// Per-cell road number for the realised pavement, computed geometrically
+    /// from the routed centrelines (split at true junctions — including A*
+    /// crossings — then merged by actual straightness). This, not `Path::road_id`,
+    /// is the source of truth for road identity in the map and street signs:
+    /// one number = one continuous physical road. Centreline cells only.
+    pub road_labels: HashMap<Point2D, u32>,
 }
 
 /// How much longer the tree path between two nodes must be than their
@@ -118,14 +124,14 @@ pub async fn build_road_network(
 ) -> RoadNetwork {
     let urban = editor.world().get_urban_points();
     if urban.is_empty() {
-        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new() };
+        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new(), road_labels: HashMap::new() };
     }
 
     // Destination nodes (town centre, industry, district centres, gates),
     // deduped and relocated off building footprints.
     let (nodes, kinds) = assemble_nodes(editor, include_town_center, anchor_nodes, blocked, &urban);
     if nodes.len() < 2 {
-        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new() };
+        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new(), road_labels: HashMap::new() };
     }
 
     // --- Edges: MST backbone + capped loop-closing shortcuts. ---
@@ -208,15 +214,27 @@ pub async fn build_road_network(
         }
     }
 
-    // Group segments into named roads (strokes), discard short stubs, and stamp
-    // the road id onto each path (logging what each road connects).
+    // Legacy topological grouping: still stamps a per-path road_id and logs what
+    // each road connects. Kept for the abstract-graph view; road identity for the
+    // map and signs now comes from the geometric pass below.
     name_roads(&mut paths, &path_edges, &nodes, &kinds);
+
+    // Geometric labelling: split the realised centrelines at true junctions
+    // (degree ≥ 3, catching A* crossings and merged corridors the node graph
+    // can't see) and merge through them by actual straightness, so one number is
+    // one continuous physical road.
+    let road_labels = crate::generator::paths::label_roads_geometric(&paths);
+    log::info!(
+        "geometric road labelling: {} centreline cells -> {} roads",
+        road_labels.len(),
+        road_labels.values().copied().collect::<std::collections::HashSet<_>>().len(),
+    );
 
     let edges = all_edges.iter().enumerate().map(|(ei, &(a, b))| RoadEdge {
         a, b, shortcut: ei >= mst_len, arterial: is_arterial[ei],
     }).collect();
 
-    RoadNetwork { paths, nodes, edges }
+    RoadNetwork { paths, nodes, edges, road_labels }
 }
 
 /// Assemble the network's destination nodes — town centre (optional), industry

@@ -10,7 +10,9 @@ use crate::{editor::Editor, geometry::{average_to_neighbours_5_away_multi, Point
 ///   the flattened target surface. Higher → flatter city, more earthworks.
 /// - `feather`: width in cells of the flatten→natural transition band, measured
 ///   from the urban boundary inward.
-/// - `skip_water`: forwarded to [`force_height`] (true leaves lakes alone).
+/// - `skip_water`: forwarded to [`force_height`]. `true` leaves lakes alone;
+///   `false` terraforms through them and drains all standing water/lava so the
+///   city is left with no liquid.
 pub async fn flatten_urban_area(
     editor: &mut Editor,
     urban: &HashSet<Point2D>,
@@ -127,25 +129,20 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         if matches!(editor.world().get_claim(xz), Some(crate::generator::BuildClaim::Wall)) {
             continue;
         }
-        updated.insert(*point);
-
         // Heightmap convention (see World::new / blend_terrain): the surface
         // value is the first air block; the top solid sits at `value - 1`.
         let terrain_y = editor.world().get_ocean_floor_height_at(xz);
         let target_y = point.y;
-        if terrain_y == target_y {
-            continue;
-        }
 
         // Keep the terraformed cap in the natural surface material: grass stays
         // grass, sand stays sand, stone stays stone. Gravity surfaces (sand/
         // gravel) get a SOLID subsurface (sandstone/stone) so the cap has a base
         // and can't fall. Snow is re-laid on top.
         //
-        // Sample the real surface block at `terrain_y - 1` (the top solid),
-        // NOT `get_ground_block` — that reads `ground_block_map` at the
-        // first-air heightmap value, i.e. the block ABOVE the surface (air),
-        // which would mis-detect every surface and cap with air (a 1-deep hole).
+        // Sample the real surface block at `terrain_y - 1` (the top solid), NOT
+        // `get_ground_block` — that reads `ground_block_map` at the first-air
+        // heightmap value, i.e. the block ABOVE the surface (air), which would
+        // mis-detect every surface and cap with air (a 1-deep hole).
         let surface = editor
             .world()
             .get_block(point.with_y(terrain_y - 1))
@@ -153,39 +150,70 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         let (fill, top) = terraform_layers(&surface);
         let is_snow = surface.id.as_str().contains("snow");
 
-        if target_y > terrain_y {
-            // Raise: subsurface fill from the old surface up to the new top.
-            for y in terrain_y..target_y {
-                editor.place_block_forced(&fill, point.with_y(y)).await;
+        let mut changed = terrain_y != target_y;
+        if terrain_y != target_y {
+            if target_y > terrain_y {
+                // Raise: subsurface fill from the old surface up to the new top.
+                for y in terrain_y..target_y {
+                    editor.place_block_forced(&fill, point.with_y(y)).await;
+                }
+            } else {
+                // Lower: clear down to the new surface.
+                for y in target_y..=terrain_y {
+                    editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+                }
             }
-        } else {
-            // Lower: clear down to the new surface.
-            for y in target_y..=terrain_y {
-                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+
+            // Cap with the surface material at the new top (target_y - 1),
+            // re-laying a snow layer above it if the original ground was snowy.
+            editor.place_block_forced(&top, point.with_y(target_y - 1)).await;
+            if is_snow {
+                editor.place_block_forced(&surface, point.with_y(target_y)).await;
             }
         }
 
-        // Cap with the surface material at the new top (target_y - 1), re-laying
-        // a snow layer above it if the original ground was snowy.
-        editor.place_block_forced(&top, point.with_y(target_y - 1)).await;
-        if is_snow {
-            editor.place_block_forced(&surface, point.with_y(target_y)).await;
-        }
-
-        // When we're terraforming through water (skip_water = false, e.g. the
-        // city flatten), clear any water still standing above the new surface so
-        // the settlement has no awkward leftover puddles. Scan up from the
-        // surface until the water stops.
+        // When we're terraforming through liquid (skip_water = false, e.g. the
+        // city flatten), REPLACE any standing water/lava in the column with solid
+        // ground rather than draining it to air. An air pocket just lets the
+        // neighbouring lake flow straight back in — only a solid block keeps the
+        // city dry. Fill the whole liquid stack (submerged below grade, and any
+        // standing above it), then re-cap and report the true new surface so the
+        // heightmap matches.
+        let mut surface_air = target_y;
         if !skip_water {
+            let is_liquid_at = |editor: &Editor, y: i32| {
+                editor
+                    .world()
+                    .get_block(point.with_y(y))
+                    .is_some_and(|b| b.id.is_liquid())
+            };
+
+            // Submerged liquid just below the graded surface → solid fill.
+            let mut y = target_y - 1;
+            while is_liquid_at(editor, y) {
+                editor.place_block_forced(&fill, point.with_y(y)).await;
+                changed = true;
+                y -= 1;
+            }
+            // Liquid at/above the graded surface → solid fill, tracking the top.
             let mut y = target_y;
-            while editor
-                .world()
-                .get_block(point.with_y(y))
-                .is_some_and(|b| b.id.is_water())
-            {
-                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+            while is_liquid_at(editor, y) {
+                editor.place_block_forced(&fill, point.with_y(y)).await;
+                changed = true;
                 y += 1;
             }
+            if y > target_y {
+                // Liquid rose above grade; cap the raised solid and lift the surface.
+                editor.place_block_forced(&top, point.with_y(y - 1)).await;
+                surface_air = y;
+            }
+        }
+
+        // Only the cells we actually touched may be written back to the
+        // heightmap; asserting heights for untouched (e.g. skipped) cells would
+        // make the map claim land that was never built.
+        if changed {
+            updated.insert(point.with_y(surface_air));
         }
     }
 

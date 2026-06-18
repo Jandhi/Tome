@@ -1,0 +1,89 @@
+# Road-naming vocabulary and tuning for paths/naming.rs (name_roads_layered).
+# Layers: landmark (trade fronting the road) -> gate/centre -> generic.
+
+# Share of roads that may carry a trade ("industry") name. Strongest-frontage
+# trades win the slots; the rest fall through to gate/centre/generic.
+landmark_fraction: 0.35
+
+# How far out from a road centreline to look for a fronting building (past the
+# pavement width + verge, since the centreline doesn't touch the footprint).
+frontage_radius: 4
+
+# Occasional "Old "/"New " prefix for flavour, rolled per road from the RNG.
+flavour:
+  old_pct: 7
+  new_pct: 7
+
+# Structure type -> street-name stem. Anything not listed is title-cased.
+trades:
+  smithy: Smith
+  mill: Mill
+  bakery: Baker
+  carpenter: Carpenter
+  tannery: Tanner
+  weaver: Weaver
+  brewery: Brewer
+  butcher: Butcher
+  sawmill: Sawyer
+  farm: Farm
+  ranch: Farm
+  chandlery: Chandler
+  scriptorium: Scribe
+
+# Generic filler stems contributed by the settlement culture (always in the pool).
+cultures:
+  desert: [Caravan, Spice, Sun, Dust]
+  japanese: [Garden, Crane, Maple, Lotus]
+  medieval: [Kings, Church, Market, Bridge, Castle]
+
+# Generic filler stems by biome. First rule whose `contains` has a substring of
+# the biome name wins, so order most-specific first. An empty `contains` always
+# matches — keep it last as the fallback.
+biomes:
+  - contains: [badlands]
+    words: [Canyon, Mesa, Clay, Sand, Bluff, Ochre]
+  - contains: [cherry]
+    words: [Blossom, Petal, Cherry, Pink, Bloom]
+  - contains: [mushroom]
+    words: [Spore, Toadstool, Cap, Mycel, Fungal]
+  - contains: [mangrove, swamp]
+    words: [Marsh, Bog, Reed, Frog, Mud, Willow]
+  - contains: [jungle]
+    words: [Vine, Cocoa, Fern, Parrot, Canopy]
+  - contains: [desert]
+    words: [Dune, Sand, Palm, Oasis, Mirage]
+  - contains: [savanna]
+    words: [Acacia, Gold, Dust, Plain, Bramble]
+  - contains: [snow, frozen, ice, grove]
+    words: [Frost, Snow, Glacier, Cold, North, Icicle]
+  - contains: [taiga]
+    words: [Pine, Spruce, Fir, Timber, Elk]
+  - contains: [birch]
+    words: [Birch, Silver, Hazel, Willow]
+  - contains: [forest]
+    words: [Oak, Elm, Glade, Thorn, Fern, Hazel]
+  - contains: [peak, hill, slope, windswept, mountain]
+    words: [Crag, Ridge, Summit, Peak, Stone, High]
+  - contains: [beach, shore, ocean, river, coast]
+    words: [Shell, Tide, Cove, Gull, Harbour]
+  - contains: [meadow, plains, sunflower]
+    words: [Meadow, Clover, Long, Green, Brook, Lark]
+  - contains: []
+    words: [Long, Green, Stone, Meadow, Brook]
+
+# Suffix pools by culture then tier, picked by road id. Medium (most roads) is
+# wide so names vary; High leans grand, Low small. `medieval` also serves as the
+# fallback for any unlisted culture.
+suffixes:
+  desert:
+    high: [Road, Way, Avenue]
+    medium: [Street, Lane, Row, Alley]
+    low: [Alley, Passage, Steps, Walk]
+  japanese:
+    high: [Avenue, Way, Road]
+    medium: [Street, Lane, Row, Path]
+    low: [Path, Close, Alley, Steps]
+  medieval:
+    high: [Street, Road, Way]
+    medium: [Street, Lane, Row, Alley]
+    low: [Close, Alley, Wynd, Lane, Steps]

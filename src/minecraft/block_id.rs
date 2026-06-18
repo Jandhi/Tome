@@ -29,6 +29,17 @@ impl BlockID {
         )
     }
 
+    pub fn is_lava(&self) -> bool {
+        matches!(self.name(), "lava" | "flowing_lava")
+    }
+
+    /// Any fluid the city terraform must drain — water (and its column blocks)
+    /// plus lava. Used by `force_height` so the settlement is left with NO
+    /// standing liquid, not just no water.
+    pub fn is_liquid(&self) -> bool {
+        self.is_water() || self.is_lava()
+    }
+
     pub fn is_tree(&self) -> bool {
         let name = self.name();
         name.contains("log")

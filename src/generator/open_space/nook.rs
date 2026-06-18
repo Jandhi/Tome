@@ -7,20 +7,20 @@
 use std::collections::HashSet;
 
 use crate::editor::Editor;
-use crate::generator::terrain::Forest;
 use crate::geometry::{Point2D, CARDINALS_2D};
 use crate::noise::RNG;
 
 use super::props::{
     inward_dir, is_building, is_path, place_bench, place_lantern_post, place_planter, place_tree,
 };
+use super::theme::Theme;
 use super::Region;
 
 /// Below this area a nook is too cramped for a centrepiece tree — planters only.
 const TREE_MIN_AREA: usize = 12;
 
 /// Furnish one nook region in place.
-pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, forest: &Forest) {
+pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme: &Theme) {
     let world = editor.world();
     let cells: HashSet<Point2D> = region.cells.iter().copied().collect();
     let height_at = |c: Point2D| world.get_ocean_floor_height_at(c);
@@ -78,7 +78,7 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, fores
             .min_by_key(|c| c.distance_squared(&centroid))
         {
             let biome = world.get_surface_biome_at(center);
-            place_tree(editor, forest, &biome, center, height_at(center), rng).await;
+            place_tree(editor, theme, &biome, center, height_at(center), rng).await;
             // Keep the centrepiece cell and its neighbours clear of furniture.
             used.insert(center);
             for d in CARDINALS_2D {
@@ -97,7 +97,7 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, fores
             continue;
         }
         if let Some(inward) = inward_dir(world, c, &cells) {
-            place_bench(editor, c, height_at(c), inward).await;
+            place_bench(editor, c, height_at(c), inward, theme.wood).await;
             used.insert(c);
             placed += 1;
         }
@@ -112,7 +112,7 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, fores
         if used.contains(&c) {
             continue;
         }
-        place_planter(editor, c, height_at(c)).await;
+        place_planter(editor, c, height_at(c), theme.wood).await;
         used.insert(c);
         placed += 1;
     }
@@ -122,7 +122,7 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, fores
         if used.contains(&c) {
             continue;
         }
-        place_lantern_post(editor, c, height_at(c)).await;
+        place_lantern_post(editor, c, height_at(c), theme.wood).await;
         break;
     }
 }

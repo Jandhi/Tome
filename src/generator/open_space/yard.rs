@@ -10,6 +10,7 @@ use crate::geometry::{Point2D, CARDINALS_2D};
 use crate::noise::RNG;
 
 use super::props::{is_building, is_path, place_lantern_post, put, put_forced};
+use super::theme::Theme;
 use super::Region;
 
 /// A mature crop for a kitchen-garden patch.
@@ -23,7 +24,7 @@ fn crop(rng: &mut RNG) -> &'static str {
 }
 
 /// Furnish one yard region in place.
-pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG) {
+pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG, theme: &Theme) {
     let world = editor.world();
     let cells: HashSet<Point2D> = region.cells.iter().copied().collect();
     let height_at = |c: Point2D| world.get_ocean_floor_height_at(c);
@@ -60,10 +61,18 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG) {
     // hole. Farmland + water are forced so they show through the grass surface.
     if !interior.is_empty() {
         let crop_block = crop(rng);
-        let water_cell = interior[0];
+        // Watering hole: the first interior cell fully boxed in by same-height
+        // region cells, so the source can't spill out a side and flood the
+        // patch. `None` → an all-farmland garden (the soil is moist regardless).
+        let water_cell = interior.iter().copied().find(|&c| {
+            let h = height_at(c);
+            CARDINALS_2D
+                .iter()
+                .all(|d| cells.contains(&(c + *d)) && height_at(c + *d) == h)
+        });
         for &c in &interior {
             let h = height_at(c);
-            if c == water_cell {
+            if Some(c) == water_cell {
                 put_forced(editor, c.x, h - 1, c.y, "minecraft:water").await;
             } else {
                 put_forced(editor, c.x, h - 1, c.y, "minecraft:farmland[moisture=7]").await;
@@ -89,7 +98,7 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG) {
                 && !is_path(world.get_claim(n).as_ref())
         });
         if open_side {
-            put(editor, c.x, h, c.y, "minecraft:oak_fence").await;
+            put(editor, c.x, h, c.y, &format!("minecraft:{}_fence", theme.wood)).await;
             used.insert(c);
         } else if prop_budget > 0 {
             let prop = *rng.choose(&[
@@ -108,7 +117,7 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG) {
         if used.contains(&c) {
             continue;
         }
-        place_lantern_post(editor, c, height_at(c)).await;
+        place_lantern_post(editor, c, height_at(c), theme.wood).await;
         break;
     }
 }

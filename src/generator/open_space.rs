@@ -1,29 +1,35 @@
-//! Open-space (dead-space) detection: after buildings + roads are placed, the
-//! urban cells that remain unclaimed are "green" — the leftover gaps the
-//! settlement should eventually fill with parks, plazas, yards, props…
+//! Open-space (dead-space) detection and furnishing: after buildings + roads are
+//! placed, the urban cells that remain unclaimed are "green" — the leftover gaps
+//! between the built-up lots.
 //!
-//! For now this module just *finds* those gaps: it flood-fills the unclaimed
-//! urban cells into connected components ([`Region`]s). Classifying each gap
-//! into plaza/park/yard/etc. is deferred. [`paint_regions_debug`] is a
-//! diagnostic that floats a wool marker above each region so the detection can
-//! be eyeballed in-world.
+//! [`detect_regions`] flood-fills those unclaimed cells into connected
+//! components ([`Region`]s) and classifies each by size and position into a
+//! [`RegionType`] — plaza, nook, park, or yard. The per-type `furnish_*`
+//! functions (in the submodules) then decorate each gap in place.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::editor::{Editor, World};
+use serde_derive::Deserialize;
+
+use crate::data::load_yaml;
+use crate::editor::World;
 use crate::generator::BuildClaim;
-use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
-use crate::minecraft::Block;
+use crate::geometry::{Point2D, CARDINALS_2D};
+use crate::noise::RNG;
 
 mod props;
+mod theme;
 mod nook;
 mod plaza;
 mod yard;
 mod park;
+#[cfg(test)]
+mod test;
 pub use nook::furnish_nook;
-pub use plaza::furnish_plaza;
+pub use plaza::{furnish_plaza, PlazaType};
+pub use theme::Theme;
 pub use yard::furnish_yard;
-pub use park::furnish_park;
+pub use park::{furnish_park, ParkType};
 
 /// Where a region sits relative to the city's outer extent.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,20 +69,6 @@ impl RegionType {
         }
     }
 
-    /// Debug wool colour: green family = interior, warm = edge; brighter = large.
-    fn debug_wool(self) -> Block {
-        let id = match self {
-            RegionType::Plaza => "lime_wool",
-            RegionType::Nook => "green_wool",
-            RegionType::Park => "orange_wool",
-            RegionType::Yard => "red_wool",
-        };
-        Block {
-            id: id.into(),
-            state: None,
-            data: None,
-        }
-    }
 }
 
 /// One connected component of green (unclaimed urban) cells — a leftover gap in
@@ -101,6 +93,130 @@ impl Region {
             (RegionKind::Edge, true) => RegionType::Park,
             (RegionKind::Edge, false) => RegionType::Yard,
         }
+    }
+
+    /// Centroid cell of the region.
+    pub fn centroid(&self) -> Point2D {
+        let n = self.cells.len().max(1) as i64;
+        let (sx, sz) = self
+            .cells
+            .iter()
+            .fold((0i64, 0i64), |(ax, az), c| (ax + c.x as i64, az + c.y as i64));
+        Point2D::new((sx / n) as i32, (sz / n) as i32)
+    }
+}
+
+/// Per-culture word overrides for a [`PlaceSchema`] — e.g. a desert market trades
+/// its generic suffixes for `Souk`/`Bazaar`. An empty list falls back to the
+/// schema's default words for that part.
+#[derive(Debug, Default, Deserialize)]
+struct CultureWords {
+    #[serde(default)]
+    stems: Vec<String>,
+    #[serde(default)]
+    suffixes: Vec<String>,
+}
+
+/// A `<stem> <suffix>` naming schema for one open-space kind, with optional
+/// per-culture word lists (keyed by culture: `desert`, `medieval`, `japanese`).
+#[derive(Debug, Deserialize)]
+struct PlaceSchema {
+    stems: Vec<String>,
+    suffixes: Vec<String>,
+    #[serde(default)]
+    cultures: HashMap<String, CultureWords>,
+}
+
+impl PlaceSchema {
+    /// A unique "<stem> <suffix>" for `culture`, rolled from the RNG; falls back
+    /// to numbering if the (small) combination space is exhausted. Culture words
+    /// override the defaults; an empty culture list keeps the default for that
+    /// part, so a desert market can swap suffixes (Souk/Bazaar) but reuse stems.
+    fn pick(&self, culture: &str, rng: &mut RNG, used: &mut HashSet<String>) -> Option<String> {
+        let cw = self.cultures.get(culture);
+        let stems = match cw {
+            Some(c) if !c.stems.is_empty() => &c.stems,
+            _ => &self.stems,
+        };
+        let suffixes = match cw {
+            Some(c) if !c.suffixes.is_empty() => &c.suffixes,
+            _ => &self.suffixes,
+        };
+        if stems.is_empty() || suffixes.is_empty() {
+            return None;
+        }
+        let one = |rng: &mut RNG, v: &[String]| -> String {
+            v[(rng.rand_i32_range(0, v.len() as i32) as usize) % v.len()].clone()
+        };
+        for _ in 0..24 {
+            let cand = format!("{} {}", one(rng, stems), one(rng, suffixes));
+            if used.insert(cand.clone()) {
+                return Some(cand);
+            }
+        }
+        let base = format!("{} {}", stems[0], suffixes[0]);
+        let mut i = 2;
+        loop {
+            let cand = format!("{base} {i}");
+            if used.insert(cand.clone()) {
+                return Some(cand);
+            }
+            i += 1;
+        }
+    }
+}
+
+/// Lowercase culture key used to look up per-culture word overrides in the YAML.
+fn culture_key(culture: crate::generator::buildings_v2::Culture) -> &'static str {
+    use crate::generator::buildings_v2::Culture;
+    match culture {
+        Culture::Desert => "desert",
+        Culture::Japanese => "japanese",
+        Culture::Medieval => "medieval",
+    }
+}
+
+/// Open-space naming vocabulary, from `data/open_space_names.yaml`. Both plazas
+/// and parks have a schema PER type (keyed by `PlazaType::key` / `ParkType::key`),
+/// so a space is named for what it actually is — `Fountain Square`, `Corn Market`,
+/// `Willow Cemetery`, `Heron Pond`. De-duplicate names with a shared `used` set.
+#[derive(Debug, Deserialize)]
+pub struct OpenSpaceNames {
+    plazas: HashMap<String, PlaceSchema>,
+    parks: HashMap<String, PlaceSchema>,
+}
+
+impl OpenSpaceNames {
+    pub fn load() -> Option<Self> {
+        match load_yaml("open_space_names.yaml") {
+            Ok(c) => Some(c),
+            Err(e) => {
+                log::warn!("open_space_names.yaml failed to load ({e}); open spaces stay unnamed");
+                None
+            }
+        }
+    }
+
+    /// Name a plaza by its built [`PlazaType`], in the settlement's culture.
+    pub fn name_plaza(
+        &self,
+        plaza_type: PlazaType,
+        culture: crate::generator::buildings_v2::Culture,
+        rng: &mut RNG,
+        used: &mut HashSet<String>,
+    ) -> Option<String> {
+        self.plazas.get(plaza_type.key())?.pick(culture_key(culture), rng, used)
+    }
+
+    /// Name a park by its built [`ParkType`], in the settlement's culture.
+    pub fn name_park(
+        &self,
+        park_type: ParkType,
+        culture: crate::generator::buildings_v2::Culture,
+        rng: &mut RNG,
+        used: &mut HashSet<String>,
+    ) -> Option<String> {
+        self.parks.get(park_type.key())?.pick(culture_key(culture), rng, used)
     }
 }
 
@@ -299,22 +415,3 @@ pub fn detect_regions(world: &World, urban: &HashSet<Point2D>) -> Vec<Region> {
     regions
 }
 
-/// How far above the ground surface the debug wool floats, so it reads as a
-/// clear marker layer above buildings/terrain instead of being hidden at (and
-/// overwritten on) the surface.
-const DEBUG_LIFT: i32 = 12;
-
-/// DEBUG: float a wool marker above every detected open-space cell, coloured by
-/// region type — plaza=lime, nook=green, park=orange, yard=red — so the
-/// split can be eyeballed from afar.
-pub async fn paint_regions_debug(editor: &Editor, regions: &[Region]) {
-    for region in regions {
-        let wool = region.region_type().debug_wool();
-        for &c in &region.cells {
-            let h = editor.world().get_ocean_floor_height_at(c);
-            editor
-                .place_block(&wool, Point3D::new(c.x, h + DEBUG_LIFT, c.y))
-                .await;
-        }
-    }
-}

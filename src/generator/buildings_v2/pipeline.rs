@@ -174,7 +174,7 @@ pub async fn build_house(
     }
     place_windows(&mut wall_segs, &interior_wall_cells, ctx.rng);
     mark_windows(&mut room_plan, &wall_segs);
-    place_openings(ctx, &wall_segs, window_fill).await;
+    place_openings(ctx, &wall_segs, window_fill, bctx.culture).await;
 
     // Reconcile doors with terrain: run parallel stair ramps along the wall
     // for doors where `base_y` doesn't match outside-terrain.

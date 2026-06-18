@@ -29,6 +29,15 @@ pub async fn generate_town(
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
 
+    // Infrastructure materials follow the culture: a desert town gets sandstone
+    // roads and walls, everyone else the default stone/cobble.
+    let desert = matches!(culture, crate::generator::buildings_v2::Culture::Desert);
+    let (wall_mat, arterial_mat, collector_mat): (&str, &str, &str) = if desert {
+        ("smooth_sandstone", "smooth_sandstone", "sandstone")
+    } else {
+        ("stone_bricks", "stone_bricks", "cobblestone")
+    };
+
     generate_parcels(seed, editor).await;
 
     // EVAL AID: the live server hands out a different build area each run, and
@@ -69,12 +78,27 @@ pub async fn generate_town(
 
     // Wall + gates — gates populate world.gate_locations, used by the network.
     let materials = Material::load().expect("Failed to load materials");
-    let wall_material = MaterialId::new("stone_bricks".to_string());
+    let wall_material = MaterialId::new(wall_mat.to_string());
     let mut placer: Placer = Placer::new(&materials, &mut rng);
     let structures = Structure::load().expect("Failed to load structures");
+    let data = LoadedData::load().expect("Failed to load data");
+    // Re-skin wall towers into the culture palette so the placed tower NBT
+    // matches the rest of the settlement. The tower's oak cap maps to the roof
+    // role, so each culture's tower roof follows its building roofs. Desert is
+    // the exception: merge a dark-prismarine roof override so desert tower roofs
+    // pop against the sandstone body instead of being sandstone-on-sandstone.
+    let tower_palette = data.palettes.get(&culture.palette_id()).cloned().map(|p| {
+        if desert {
+            let roof = data.palettes.get(&"prismarine_roof".into())
+                .expect("prismarine_roof palette not found");
+            p.merged_with(roof)
+        } else {
+            p
+        }
+    });
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
-        &mut placer, &wall_material, &structures, WallType::Standard,
+        &mut placer, &wall_material, &structures, WallType::Standard, tower_palette.as_ref(),
     ).await;
     drop(placer);
 
@@ -93,9 +117,11 @@ pub async fn generate_town(
     // aren't dropped into standing forest.
     log_trees(&*editor, urban.clone()).await;
     println!("Logged {} urban cells of trees", urban.len());
-    flatten_urban_area(editor, &urban, 16, 12, true).await;
-
-    let data = LoadedData::load().expect("Failed to load data");
+    // skip_water = false: terraform through any lake/lava in the urban area so
+    // the settlement is left with NO standing liquid (lakebeds filled to grade,
+    // residual water/lava drained). Leaving lakes (skip_water = true) is what
+    // dotted the city with water before.
+    flatten_urban_area(editor, &urban, 16, 12, false).await;
 
     // ---- Industrial buildings FIRST ----
     // Place a handful of big processing buildings on the flattened ground (no
@@ -155,11 +181,14 @@ pub async fn generate_town(
 
     // Phase 2 — tiered A* road network, connecting the industrial buildings
     // (anchor nodes) and routed around them (the `blocked` barrier).
-    let arterial_material = MaterialId::new("stone_bricks".to_string());
-    let collector_material = MaterialId::new("cobblestone".to_string());
-    let paths = build_road_network(
+    let arterial_material = MaterialId::new(arterial_mat.to_string());
+    let collector_material = MaterialId::new(collector_mat.to_string());
+    // Keep the whole network (not just `.paths`) so the end-of-run town map can
+    // overlay the abstract MST/node graph.
+    let road_network = build_road_network(
         &*editor, arterial_material, collector_material, true, &ind_nodes, &blocked, 1,
-    ).await.paths;
+    ).await;
+    let paths = road_network.paths.clone();
     println!("Routed {} road segments", paths.len());
 
     // DEBUG: Phase A merge check — how many of each path's cells coincide
@@ -199,16 +228,34 @@ pub async fn generate_town(
         cells
     };
 
-    // Blocks = urban minus the paved main roads and the wall.
-    let wall: HashSet<Point2D> = urban.iter()
+    // Blocks = urban minus the paved main roads and a buffer strip just inside
+    // the wall, so houses never butt right up against it. The boundary ring is
+    // dilated `WALL_BUFFER` cells inward; the resulting strip is left open (it
+    // gets furnished as a green belt / wall-walk by the open-space pass).
+    const WALL_BUFFER: i32 = 2;
+    let wall_ring: HashSet<Point2D> = urban.iter()
         .filter(|&&c| crate::geometry::CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
         .copied()
         .collect();
+    let mut wall_zone = wall_ring.clone();
+    let mut frontier = wall_ring;
+    for _ in 0..WALL_BUFFER {
+        let mut next: HashSet<Point2D> = HashSet::new();
+        for &c in &frontier {
+            for d in crate::geometry::CARDINALS_2D {
+                let n = c + d;
+                if urban.contains(&n) && wall_zone.insert(n) {
+                    next.insert(n);
+                }
+            }
+        }
+        frontier = next;
+    }
     let mut barriers: HashSet<Point2D> = HashSet::new();
     for path in &paths {
         barriers.extend(paved(path));
     }
-    barriers.extend(&wall);
+    barriers.extend(&wall_zone);
     // Industrial buildings (footprint + margin) are barriers too, so blocks —
     // and the subdivision, alleys, and houses inside them — form *around* the
     // buildings, never through them.
@@ -301,7 +348,7 @@ pub async fn generate_town(
     // house-foundation earth can't bury the road. Houses are placed first and
     // sit their floor at the level of the road they front (see `road_h`).
     let alley_pts: Vec<Point3D> = alley_band.iter().map(|c| editor.world().add_height(*c)).collect();
-    let alley_path = Path::new(alley_pts, 1, MaterialId::new("cobblestone".to_string()), PathPriority::Low);
+    let alley_path = Path::new(alley_pts, 1, MaterialId::new(collector_mat.to_string()), PathPriority::Low);
     let mut all_paths = paths.clone();
     all_paths.push(alley_path);
 
@@ -556,8 +603,8 @@ pub async fn generate_town(
     // post-flatten/foundation surface. Arterial verge = stone bricks (its
     // road material), collector verge = cobblestone.
     let verge_blocks = [
-        Block { id: "stone_bricks".into(), data: None, state: None },
-        Block { id: "cobblestone".into(), data: None, state: None },
+        Block { id: arterial_mat.into(), data: None, state: None },
+        Block { id: collector_mat.into(), data: None, state: None },
     ];
     let mut verge_total = 0usize;
     for (ti, cells) in tier_verge.iter().enumerate() {
@@ -586,6 +633,88 @@ pub async fn generate_town(
     };
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
     println!("Placed {} street lamps", lamps.len());
+
+    // Name the roads (layered: landmark → gate/centre → generic) now that all
+    // buildings have claimed their cells, then sign the intersections. Runs
+    // before the open-space pass; each sign cell is claimed as a path so
+    // plazas/parks/etc. won't furnish over it.
+    let mut name_rng = RNG::new(seed).derive();
+    let road_names = crate::generator::paths::name_roads_layered(
+        editor.world(), &road_network.road_labels, &all_paths,
+        &editor.world().gate_locations.clone(), culture, &mut name_rng,
+    );
+    let signs = crate::generator::paths::place_street_signs(
+        editor, &all_paths, &road_network.road_labels, &road_names,
+    ).await;
+    println!("Placed {} street signs", signs.len());
+
+    // ---- Open spaces: furnish the leftover gaps between buildings and roads ----
+    // Detect the empty pockets inside the wall and furnish each by type: plazas
+    // (paved civic squares), nooks (small ringed gardens), parks (large green
+    // commons), and yards (perimeter kitchen gardens).
+    let mut place_labels: Vec<(Point2D, String)> = Vec::new();
+    {
+        use crate::generator::open_space::{
+            detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, OpenSpaceNames,
+            Theme, RegionType,
+        };
+        let regions = detect_regions(editor.world(), &urban);
+        let theme = Theme::for_culture(culture);
+        let mut os_rng = rng.derive();
+        // Names are picked alongside furnishing so a park is named for the type it
+        // was actually built as; `used` keeps every name unique within the town.
+        let names = OpenSpaceNames::load();
+        let mut used: HashSet<String> = HashSet::new();
+        let mut counts = [0usize; 4]; // plaza, nook, park, yard
+        for region in &regions {
+            match region.region_type() {
+                RegionType::Plaza => {
+                    let plaza_type = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
+                    if let Some(name) = names.as_ref().and_then(|n| n.name_plaza(plaza_type, culture, &mut os_rng, &mut used)) {
+                        place_labels.push((region.centroid(), name));
+                    }
+                    counts[0] += 1;
+                }
+                RegionType::Nook => {
+                    furnish_nook(&*editor, region, &mut os_rng, &theme).await;
+                    counts[1] += 1;
+                }
+                RegionType::Park => {
+                    let park_type = furnish_park(editor, region, &mut os_rng, &theme).await;
+                    if let Some(name) = names.as_ref().and_then(|n| n.name_park(park_type, culture, &mut os_rng, &mut used)) {
+                        place_labels.push((region.centroid(), name));
+                    }
+                    counts[2] += 1;
+                }
+                RegionType::Yard => {
+                    furnish_yard(&*editor, region, &mut os_rng, &theme).await;
+                    counts[3] += 1;
+                }
+            }
+        }
+        println!(
+            "Furnished open spaces — plaza {} nook {} park {} yard {}",
+            counts[0], counts[1], counts[2], counts[3],
+        );
+    }
+
+    // Top-down town map (SVG) for inspection: footprints + named roads coloured
+    // by id + the abstract MST/node overlay, with sign posts marked.
+    {
+        let svg = crate::generator::paths::render_town_map(
+            editor.world(), &urban, &road_network.paths, &road_network.road_labels,
+            &road_names, &alley_band, Some(&road_network), &signs, &place_labels,
+        );
+        std::fs::create_dir_all("output").ok();
+        match std::fs::write("output/town.svg", &svg) {
+            Ok(()) => println!("Wrote town map to output/town.svg"),
+            Err(e) => log::warn!("failed to write town map: {e}"),
+        }
+        match crate::generator::paths::rasterize_to_png(&svg, "output/town.png") {
+            Ok(()) => println!("Wrote town map to output/town.png"),
+            Err(e) => log::warn!("failed to render town.png: {e}"),
+        }
+    }
 
     editor.flush_buffer().await;
 }

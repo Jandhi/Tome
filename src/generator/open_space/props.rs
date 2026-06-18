@@ -2,14 +2,16 @@
 //! per-type furnishers (nook, plaza, …). All placement is in world coordinates;
 //! `h` is the first air cell above the surface (surface block sits at `h - 1`).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::{Editor, World};
-use crate::generator::terrain::{generate_tree, Forest, Tree};
+use crate::generator::terrain::{generate_tree_feature, Tree};
 use crate::generator::BuildClaim;
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::minecraft::{string_to_block, Biome};
 use crate::noise::RNG;
+
+use super::theme::Theme;
 
 /// Place a single block from an id string (`"id"` or `"id[state=…]"`).
 pub(super) async fn put(editor: &Editor, x: i32, y: i32, z: i32, id: &str) {
@@ -41,6 +43,43 @@ pub(super) fn is_path(claim: Option<&BuildClaim>) -> bool {
     matches!(claim, Some(BuildClaim::Path(_) | BuildClaim::PathPlanned(_)))
 }
 
+/// Orthogonal distance of each region cell from the region edge (0 = a cell on
+/// the perimeter), via a multi-source BFS inward. Shared by the open-space
+/// furnishers to taper edge effects (e.g. the flatten lerp).
+pub(super) fn edge_depth(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
+    let mut depth: HashMap<Point2D, i32> = HashMap::new();
+    let mut queue: VecDeque<Point2D> = VecDeque::new();
+    for &c in cells {
+        if CARDINALS_2D.iter().any(|d| !cells.contains(&(c + *d))) {
+            depth.insert(c, 0);
+            queue.push_back(c);
+        }
+    }
+    while let Some(c) = queue.pop_front() {
+        let dc = depth[&c];
+        for d in CARDINALS_2D {
+            let n = c + d;
+            if cells.contains(&n) && !depth.contains_key(&n) {
+                depth.insert(n, dc + 1);
+                queue.push_back(n);
+            }
+        }
+    }
+    depth
+}
+
+/// Edge-taper weight for flattening, by distance from the region edge: the two
+/// outermost rings only partly level toward the flat target, so the surface
+/// eases into the surrounding ground instead of dropping off a cliff. `1.0` =
+/// fully flat.
+pub(super) fn flatten_blend(depth: i32) -> f32 {
+    match depth {
+        0 => 0.34, // outermost ring: mostly natural
+        1 => 0.67, // second ring: partway
+        _ => 1.0,  // interior: fully flat
+    }
+}
+
 /// Minecraft stair `facing` value for a cardinal step (the direction the seat
 /// opens toward).
 pub(super) fn cardinal_facing(dir: Point2D) -> &'static str {
@@ -67,10 +106,16 @@ pub(super) fn inward_dir(world: &World, c: Point2D, cells: &HashSet<Point2D>) ->
     None
 }
 
-/// A small, biome-appropriate tree species, or `None` for biomes where a tree
+/// A small tree species. A desert-*style* settlement always grows small jungle
+/// trees (matching its warm palette) whatever the biome; every other style
+/// picks a small, biome-appropriate species, or `None` for biomes where a tree
 /// looks out of place (desert/badlands/etc.). All returned variants have a
 /// palette in the `small_mixed` forest.
-pub(super) fn biome_tree(biome: &Biome, rng: &mut RNG) -> Option<Tree> {
+pub(super) fn biome_tree(theme: &Theme, biome: &Biome, rng: &mut RNG) -> Option<Tree> {
+    if theme.arid {
+        let weights = vec![(Tree::SmallJungle, 4.0), (Tree::MediumJungle, 1.0)];
+        return Some(*rng.choose_weighted_vec(&weights));
+    }
     let n = biome.name();
     let weights: Vec<(Tree, f32)> = if n.contains("birch") {
         vec![(Tree::SmallBirch, 4.0), (Tree::SmallOak, 1.0)]
@@ -100,41 +145,56 @@ pub(super) fn biome_tree(biome: &Biome, rng: &mut RNG) -> Option<Tree> {
     Some(*rng.choose_weighted_vec(&weights))
 }
 
-/// Place a biome-appropriate small tree at `c`. Returns `false` (placing
-/// nothing) for treeless biomes or a missing palette.
+/// Place a biome-appropriate small vanilla tree at `c` (grown server-side via
+/// `place feature`). Returns `false` (placing nothing) for treeless biomes.
 pub(super) async fn place_tree(
     editor: &Editor,
-    forest: &Forest,
+    theme: &Theme,
     biome: &Biome,
     c: Point2D,
     h: i32,
     rng: &mut RNG,
 ) -> bool {
-    let Some(tree) = biome_tree(biome, rng) else {
+    let Some(tree) = biome_tree(theme, biome, rng) else {
         return false;
     };
-    let Some(palette) = forest.tree_palette().get(&tree) else {
-        return false;
-    };
-    generate_tree(tree, editor, Point3D::new(c.x, h, c.y), rng, palette).await;
+    lay_soil_patch(editor, c, h).await;
+    let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y)).await;
     true
 }
 
-/// A bench (oak stairs) backed against a wall, seat facing `inward`.
-pub(super) async fn place_bench(editor: &Editor, c: Point2D, h: i32, inward: Point2D) {
-    let block = string_to_block(&format!("minecraft:oak_stairs[facing={}]", cardinal_facing(inward)))
+/// Lay grassy soil at a cell's surface (`h - 1`) so flowers and tree trunks sit
+/// on grass even in a sand-floored (desert) open space.
+pub(super) async fn lay_soil(editor: &Editor, c: Point2D, h: i32) {
+    put_forced(editor, c.x, h - 1, c.y, "minecraft:grass_block").await;
+}
+
+/// Like [`lay_soil`] but a small plus-shaped patch (the cell + its cardinal
+/// neighbours), so a tree reads as planted in soil rather than on a lone tile.
+pub(super) async fn lay_soil_patch(editor: &Editor, c: Point2D, h: i32) {
+    lay_soil(editor, c, h).await;
+    for d in CARDINALS_2D {
+        let n = c + d;
+        let hn = editor.world().get_ocean_floor_height_at(n);
+        lay_soil(editor, n, hn).await;
+    }
+}
+
+/// A bench (`wood` stairs) backed against a wall, seat facing `inward`.
+pub(super) async fn place_bench(editor: &Editor, c: Point2D, h: i32, inward: Point2D, wood: &str) {
+    let block = string_to_block(&format!("minecraft:{}_stairs[facing={}]", wood, cardinal_facing(inward)))
         .expect("bench stair block");
     editor.place_block(&block, Point3D::new(c.x, h, c.y)).await;
 }
 
-/// A planter: a wood base with a leafy azalea on top.
-pub(super) async fn place_planter(editor: &Editor, c: Point2D, h: i32) {
-    editor.place_block(&"minecraft:oak_planks".into(), Point3D::new(c.x, h, c.y)).await;
+/// A planter: a `wood` base with a leafy azalea on top.
+pub(super) async fn place_planter(editor: &Editor, c: Point2D, h: i32, wood: &str) {
+    put(editor, c.x, h, c.y, &format!("minecraft:{}_planks", wood)).await;
     editor.place_block(&"minecraft:azalea".into(), Point3D::new(c.x, h + 1, c.y)).await;
 }
 
-/// A lantern on a fence post.
-pub(super) async fn place_lantern_post(editor: &Editor, c: Point2D, h: i32) {
-    editor.place_block(&"minecraft:oak_fence".into(), Point3D::new(c.x, h, c.y)).await;
+/// A lantern on a `wood` fence post.
+pub(super) async fn place_lantern_post(editor: &Editor, c: Point2D, h: i32, wood: &str) {
+    put(editor, c.x, h, c.y, &format!("minecraft:{}_fence", wood)).await;
     editor.place_block(&"minecraft:lantern".into(), Point3D::new(c.x, h + 1, c.y)).await;
 }

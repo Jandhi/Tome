@@ -231,6 +231,21 @@ impl Editor {
         };
         self.provider.give_player_book(pages, &title, &author).await
     }
+
+    /// Generate a vanilla worldgen feature via the server's `place feature`
+    /// command — e.g. `place feature minecraft:fancy_oak X Y Z`.
+    ///
+    /// `point` is in build-area-local coordinates (the origin is added to reach
+    /// world space, matching [`place_block`](Self::place_block)). Unlike block
+    /// placements this goes straight to the server and **bypasses the block
+    /// buffer/cache**, so the placed blocks won't be visible to later
+    /// `get_block` reads.
+    pub async fn place_feature(&self, feature: &str, point: Point3D) -> anyhow::Result<()> {
+        let world = point + self.build_area.origin;
+        let command = format!("place feature {} {} {} {}", feature, world.x, world.y, world.z);
+        self.provider.command(vec![command]).await?;
+        Ok(())
+    }
 }
 
 impl Drop for Editor {
