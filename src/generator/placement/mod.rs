@@ -3,9 +3,13 @@ mod placement;
 mod test;
 
 pub use placement::{
+    district_seatable_footprints,
     place_rural_building,
     place_urban_building,
     place_urban_buildings,
+    resolve_rural_production,
+    try_place_rural,
+    PlacedRural,
 };
 
 #[cfg(test)]

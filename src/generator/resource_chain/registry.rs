@@ -112,6 +112,12 @@ pub struct SettlementProductionResult {
     pub gather_buildings: HashMap<String, u32>,
     /// Processing buildings required, scaled by units of finished goods produced.
     pub processing_buildings: HashMap<String, u32>,
+    /// Districts dropped by the per-resource competition cap, kept as an ordered
+    /// fallback list per gather resource (flattest/most-seatable first). When a
+    /// primary `parcel_assignments` entry fails to physically place, the caller can
+    /// promote the best dropped same-resource candidate instead of losing the
+    /// building outright — preserving the planned economy without exceeding the cap.
+    pub fallback_assignments: HashMap<String, Vec<(DistrictID, ParcelResourceAssignment)>>,
 }
 
 #[derive(Debug)]
@@ -455,6 +461,23 @@ impl ResourceRegistry {
         parcel_analysis: &HashMap<DistrictID, ParcelAnalysis>,
         rng: &mut RNG,
     ) -> SettlementProductionResult {
+        self.resolve_for_parcels_seated(parcel_analysis, None, rng)
+    }
+
+    /// As [`resolve_for_parcels`], but additionally honours a per-parcel
+    /// *seatability* constraint: `seatable[id]` is the set of resources whose
+    /// gather building footprint can physically fit in district `id` under the
+    /// placement slope cap (computed by `placement::district_seatable_footprints`).
+    /// A resource absent from a parcel's set is excluded from that parcel exactly
+    /// like a terrain exclusion, so the planned economy never advertises a gather
+    /// building that placement would later drop for want of a flat pad. `None`
+    /// disables the constraint (all resources seatable everywhere).
+    pub fn resolve_for_parcels_seated(
+        &self,
+        parcel_analysis: &HashMap<DistrictID, ParcelAnalysis>,
+        seatable: Option<&HashMap<DistrictID, HashSet<String>>>,
+        rng: &mut RNG,
+    ) -> SettlementProductionResult {
         // caps to prevent extreme overproduction of certain goods that would skew the settlement's production profile
         const RAW_SURPLUS_CAP: u32 = 5;
         const INTERMEDIATE_CAP: u32 = 10;
@@ -516,7 +539,7 @@ impl ResourceRegistry {
         // resource keeps at least one parcel while overproduction is still reined in.
         let mut quota: HashMap<String, usize> = HashMap::new();
         for _ in 0..10 {
-            let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, false, &mut rng.derive());
+            let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, seatable, false, &mut rng.derive());
 
             // Compute trial supply, crediting all gather recipe outputs (handles multi-output
             // recipes like gather_bees which produces both honey and beeswax).
@@ -602,7 +625,7 @@ impl ResourceRegistry {
         // primary resource), respecting the per-resource parcel quotas computed above.
         // The primary output is credited at 2 units; co-products from multi-output recipes
         // (e.g. gather_bees → honey + beeswax) are scaled proportionally.
-        let mut parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, true, rng);
+        let mut parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, seatable, true, rng);
 
         // Competition cap: keep at most MAX_RURAL_PER_RESOURCE districts per gather
         // resource. Applied here, before supply/buildings/plan are derived, so the rest
@@ -610,6 +633,7 @@ impl ResourceRegistry {
         // for each over-represented resource we keep the lowest-ID districts and drop
         // the excess (those districts simply go unproduced). This is a *hard* cap the
         // quota system alone can't guarantee, since its diversity floor may overshoot.
+        let mut fallback_assignments: HashMap<String, Vec<(DistrictID, ParcelResourceAssignment)>> = HashMap::new();
         if COMPETITION_HARD_CAPS {
             let mut by_resource: HashMap<String, Vec<DistrictID>> = HashMap::new();
             for (id, a) in &parcel_assignments {
@@ -621,12 +645,25 @@ impl ResourceRegistry {
                 }
                 ids.sort_by_key(|id| id.0);
                 for drop_id in ids.into_iter().skip(MAX_RURAL_PER_RESOURCE) {
-                    parcel_assignments.remove(&drop_id);
+                    // Remove from the active plan, but retain it as a placement fallback
+                    // for this resource rather than discarding it entirely.
+                    if let Some(assignment) = parcel_assignments.remove(&drop_id) {
+                        fallback_assignments.entry(resource.clone()).or_default().push((drop_id, assignment));
+                    }
                     log::info!(
-                        "[resource-chain]   competition cap: dropped {:?} (resource {}) — over {} per resource",
+                        "[resource-chain]   competition cap: dropped {:?} (resource {}) — over {} per resource (kept as fallback)",
                         drop_id, resource, MAX_RURAL_PER_RESOURCE,
                     );
                 }
+            }
+            // Order each resource's fallbacks flattest-first, so the caller promotes the
+            // most placeable dropped parcel when a primary fails to seat.
+            for fallbacks in fallback_assignments.values_mut() {
+                fallbacks.sort_by(|(a, _), (b, _)| {
+                    let ra = ruggedness.get(a).copied().unwrap_or(1.0);
+                    let rb = ruggedness.get(b).copied().unwrap_or(1.0);
+                    ra.partial_cmp(&rb).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0))
+                });
             }
         }
 
@@ -703,6 +740,7 @@ impl ResourceRegistry {
             leftover_goods,
             gather_buildings,
             processing_buildings,
+            fallback_assignments,
         };
 
         // Log the full chain so multiple generation runs can be compared via the logs.
@@ -738,7 +776,7 @@ impl ResourceRegistry {
         options: &HashMap<ID, Vec<String>>,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
-        self.assign_parcel_resources_quota(options, &HashMap::new(), &HashMap::new(), false, rng)
+        self.assign_parcel_resources_quota(options, &HashMap::new(), &HashMap::new(), None, false, rng)
     }
 
     /// Like [`assign_parcel_resources`], but caps how many parcels may be assigned each
@@ -765,42 +803,53 @@ impl ResourceRegistry {
         options: &HashMap<ID, Vec<String>>,
         max_parcels: &HashMap<String, usize>,
         ruggedness: &HashMap<ID, f32>,
+        seatable: Option<&HashMap<ID, HashSet<String>>>,
         log_decisions: bool,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
-        // Filter each parcel's candidates to those with a known gather building AND whose
-        // flat-terrain requirement the parcel's terrain can satisfy (crops/pastures drop out
-        // on rough ground — see `terrain_allows`). We keep the rejected-for-terrain list per
-        // parcel only so the decision log can show what the terrain ruled out. Then sort
-        // most-constrained first.
-        let mut parcels: Vec<(ID, Vec<String>, Vec<String>)> = options.iter()
+        // Filter each parcel's candidates to those with a known gather building, whose
+        // flat-terrain requirement the parcel's terrain can satisfy (crops/pastures drop
+        // out on rough ground — see `terrain_allows`), AND whose building footprint can
+        // actually be seated in the parcel (`seatable`, when supplied — so we never plan a
+        // building placement can't physically fit). We keep the rejected-for-terrain and
+        // rejected-for-footprint lists per parcel only so the decision log can show what
+        // each filter ruled out. Then sort most-constrained first.
+        let mut parcels: Vec<(ID, Vec<String>, Vec<String>, Vec<String>)> = options.iter()
             .map(|(id, candidates)| {
                 let rugged = ruggedness.get(id).copied().unwrap_or(0.0);
                 let gatherable = candidates.iter()
                     .filter(|r| self.gather_building(r).is_some());
-                let (valid, excluded_terrain): (Vec<String>, Vec<String>) = gatherable
+                let (terrain_ok, excluded_terrain): (Vec<String>, Vec<String>) = gatherable
                     .cloned()
                     .partition(|r| self.terrain_allows(r, rugged));
-                (id.clone(), valid, excluded_terrain)
+                // A missing parcel entry means "unknown — allow"; only an explicit set
+                // that omits the resource counts as not-seatable. With `seatable = None`
+                // every resource passes, preserving the unconstrained behaviour.
+                let seatable_here = seatable.and_then(|m| m.get(id));
+                let (valid, excluded_footprint): (Vec<String>, Vec<String>) = terrain_ok
+                    .into_iter()
+                    .partition(|r| seatable_here.map_or(true, |s| s.contains(r)));
+                (id.clone(), valid, excluded_terrain, excluded_footprint)
             })
             .collect();
-        parcels.sort_by_key(|(_, candidates, _)| candidates.len());
+        parcels.sort_by_key(|(_, candidates, _, _)| candidates.len());
 
         let mut assigned_set: HashSet<String> = HashSet::new();
         let mut assigned_count: HashMap<String, usize> = HashMap::new();
         let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::new();
 
-        for (id, candidates, excluded_terrain) in parcels {
+        for (id, candidates, excluded_terrain, excluded_footprint) in parcels {
             let parcel_rugged = ruggedness.get(&id).copied().unwrap_or(0.0);
             let excluded_str = if excluded_terrain.is_empty() { "none".to_string() } else { excluded_terrain.join(", ") };
+            let footprint_str = if excluded_footprint.is_empty() { "none".to_string() } else { excluded_footprint.join(", ") };
 
             if candidates.is_empty() {
-                // No option survives (no gather building, or terrain ruled them all out) —
-                // leave this rural district unproduced.
+                // No option survives (no gather building, or terrain/footprint ruled them
+                // all out) — leave this rural district unproduced.
                 if log_decisions {
                     log::info!(
-                        "[resource-chain]   pick parcel {:?} -> (none) (ruggedness {:.3}); terrain-excluded: {}",
-                        id, parcel_rugged, excluded_str,
+                        "[resource-chain]   pick parcel {:?} -> (none) (ruggedness {:.3}); terrain-excluded: {}; footprint-excluded: {}",
+                        id, parcel_rugged, excluded_str, footprint_str,
                     );
                 }
                 continue;
@@ -863,8 +912,8 @@ impl ResourceRegistry {
                 let outcome = if skipped { format!("(none — best was {} at {})", resource, winning_score) }
                               else { format!("{} (score {})", resource, winning_score) };
                 log::info!(
-                    "[resource-chain]   pick parcel {:?} -> {} (ruggedness {:.3}); terrain-excluded: {}; balance penalties: {}",
-                    id, outcome, parcel_rugged, excluded_str, penalised,
+                    "[resource-chain]   pick parcel {:?} -> {} (ruggedness {:.3}); terrain-excluded: {}; footprint-excluded: {}; balance penalties: {}",
+                    id, outcome, parcel_rugged, excluded_str, footprint_str, penalised,
                 );
             }
 

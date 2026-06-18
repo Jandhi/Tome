@@ -21,19 +21,76 @@ use super::production_painter::{parse_params, ProductionPainter};
 
 /// Width (Chebyshev cells) of the buffer around a production district's edge.
 /// Excluded from the field interior; used as the border strip and feather band.
+/// The rural road network reuses this strip via [`border_ring_cells`].
 const EDGE_BUFFER: i32 = 3;
 
 /// How far (cells) production-area smoothing reaches into neighbouring land, to
 /// feather the field's terrain into its surroundings rather than ending in a step.
 const NEIGHBOUR_REACH: i32 = 2;
 
+/// Cells within `EDGE_BUFFER` (Chebyshev) of any of `district`'s edge cells.
+fn edge_buffer_cells(district: &District) -> HashSet<Point2D> {
+    district.data.edges.iter()
+        .flat_map(|p| {
+            let p2 = p.drop_y();
+            (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
+                (-EDGE_BUFFER..=EDGE_BUFFER).map(move |dz| Point2D::new(p2.x + dx, p2.y + dz))
+            })
+        })
+        .collect()
+}
+
+/// The production area's border ring: interior cells within `EDGE_BUFFER` of an
+/// edge that are unclaimed and not water — the strip a border-painting painter
+/// paves with `rural_road`. The single source of truth shared with
+/// [`crate::generator::paths::rural`], so the road network's *predicted* ring and
+/// the painter's *actual* ring stay in lockstep. The result depends on claim state
+/// at call time: the road network calls this before the roads are claimed (to
+/// route along the ring); the painter calls it after (so road-claimed cells are
+/// already excluded).
+pub fn border_ring_cells(district: &District, editor: &Editor) -> HashSet<Point2D> {
+    let edge_buffer = edge_buffer_cells(district);
+    district.data.points_2d.iter()
+        .filter(|&&p| edge_buffer.contains(&p))
+        .filter(|&&p| !editor.world().is_claimed(p))
+        .filter(|&&p| !editor.world().is_water(p))
+        .copied()
+        .collect()
+}
+
 /// Paints a production area across all unclaimed cells of `district` after
 /// a gathering building has been placed there. The area is claimed with
 /// `BuildClaim::ProductionArea` tied to the most-recently-placed structure on the world.
+///
+/// Use [`paint_production_area_for`] when the painting pass is decoupled from
+/// placement (e.g. all buildings placed first, then all areas painted): with the
+/// passes split, `structures.last()` no longer identifies *this* district's
+/// building, so the caller must pass the structure id explicitly.
 pub async fn paint_production_area(
     district: &District,
     painter_name: &str,
     resource: &str,
+    data: &LoadedData,
+    editor: &mut Editor,
+    rng: &mut RNG,
+) {
+    // Tie the production area to the most-recently placed structure.
+    let Some(structure_id) = editor.world().structures.last().cloned() else {
+        warn!("paint_production_area: no structure on world — was a building placed first?");
+        return;
+    };
+    paint_production_area_for(district, painter_name, resource, &structure_id, data, editor, rng).await;
+}
+
+/// As [`paint_production_area`], but the production area is tied to an explicitly
+/// supplied `structure_id` rather than `structures.last()`. Needed when buildings
+/// are all placed in one pass and their areas painted in a later pass (so the
+/// "last placed" structure is no longer the one for this district).
+pub async fn paint_production_area_for(
+    district: &District,
+    painter_name: &str,
+    resource: &str,
+    structure_id: &crate::generator::nbts::StructureID,
     data: &LoadedData,
     editor: &mut Editor,
     rng: &mut RNG,
@@ -43,22 +100,10 @@ pub async fn paint_production_area(
         return;
     };
     let painter = painter.clone();
-
-    // Tie the production area to the most-recently placed structure.
-    let Some(structure_id) = editor.world().structures.last().cloned() else {
-        warn!("paint_production_area: no structure on world — was a building placed first?");
-        return;
-    };
+    let structure_id = structure_id.clone();
 
     // Build a set of cells within EDGE_BUFFER blocks (Chebyshev) of any edge cell.
-    let edge_buffer: HashSet<Point2D> = district.data.edges.iter()
-        .flat_map(|p| {
-            let p2 = p.drop_y();
-            (-EDGE_BUFFER..=EDGE_BUFFER).flat_map(move |dx| {
-                (-EDGE_BUFFER..=EDGE_BUFFER).map(move |dz| Point2D::new(p2.x + dx, p2.y + dz))
-            })
-        })
-        .collect();
+    let edge_buffer = edge_buffer_cells(district);
 
     // Free cells: parcel interior excluding edge buffer, not yet claimed, not water.
     let raw_free_cells: HashSet<Point2D> = district.data.points_2d.iter()
@@ -81,13 +126,9 @@ pub async fn paint_production_area(
 
     // Border cells: parcel interior points that fall within the edge buffer, not
     // yet claimed, not water. Painted with the border palette (e.g. rural_road) by
-    // both the palette and function painters.
-    let border_cells: HashSet<Point2D> = district.data.points_2d.iter()
-        .filter(|&&p| edge_buffer.contains(&p))
-        .filter(|&&p| !editor.world().is_claimed(p))
-        .filter(|&&p| !editor.world().is_water(p))
-        .copied()
-        .collect();
+    // both the palette and function painters. Shared with the rural road network's
+    // ring prediction (see `border_ring_cells`).
+    let border_cells = border_ring_cells(district, editor);
 
     match painter {
         ProductionPainter::Palettes { palettes, border_palette, irrigation, flatten_strength } => {

@@ -226,6 +226,19 @@ impl Editor {
         self.world.get_block(point)
     }
 
+    /// Reads a block straight from the placement cache by its **local** coordinate
+    /// — the same space `place_block` writes with. Returns `None` when nothing has
+    /// been placed at `local` this run.
+    ///
+    /// Use this to read back blocks *this run placed*. `get_block`/`try_get_block`
+    /// subtract the build-area origin (so they expect absolute coords and, given
+    /// the pipeline's local coords, fall through to world terrain instead of the
+    /// freshly-placed block on a live server). The cache survives `flush_buffer`,
+    /// so a placed block stays readable here for the rest of the run.
+    pub fn get_cached_block(&self, local: Point3D) -> Option<Block> {
+        self.block_cache.borrow().get(&local).cloned()
+    }
+
     pub async fn flush_buffer(&self) {
         // Drain the buffer first, releasing the borrow before the await
         let buffer: Vec<_> = self.block_buffer.borrow_mut().drain(..).collect();

@@ -6,7 +6,9 @@ use crate::generator::data::LoadedData;
 use crate::generator::districts::{build_wall, generate_parcels, ParcelType, WallType};
 use crate::generator::materials::{Material, MaterialId, Placer};
 use crate::generator::nbts::Structure;
-use crate::generator::paths::{build_paths_merged, build_road_network, find_blocks, Path, PathPriority};
+use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
+use crate::generator::placement::{resolve_rural_production, try_place_rural, PlacedRural};
+use crate::generator::resource_chain::paint_production_area_for;
 use crate::generator::terrain::{flatten_urban_area, force_height, log_trees};
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::Block;
@@ -31,41 +33,32 @@ pub async fn generate_town(
 
     generate_parcels(seed, editor).await;
 
-    // EVAL AID: the live server hands out a different build area each run, and
-    // the urban classifier frequently collapses to a single parcel — too
-    // degenerate to evaluate the road network. Force a contiguous ~4-parcel
-    // urban core: keep the prime, then promote the nearest non-off-limits
-    // super-parcels to Urban.
-    {
-        const TARGET_URBAN: usize = 4;
-        let mut info: Vec<(crate::generator::districts::DistrictID, Point2D, bool)> =
-            editor.world().districts.iter()
-                .filter(|(id, sd)| {
-                    if sd.data.parcel_type == ParcelType::OffLimits {
-                        return false;
-                    }
-                    // Never force a water-heavy parcel urban — it would build the
-                    // town on a lake. (Matches URBAN_WATER_LIMIT in classification.)
-                    let water = editor.world().district_analysis_data
-                        .get(id)
-                        .map_or(0.0, |a| a.water_percentage());
-                    water <= 0.33
-                })
-                .map(|(id, sd)| {
-                    let pts = &sd.data.points_2d;
-                    let c = pts.iter().fold(Point2D::ZERO, |a, p| a + *p) / pts.len().max(1) as i32;
-                    (*id, c, sd.data.parcel_type == ParcelType::Urban)
-                })
-                .collect();
-        let anchor = info.iter().find(|(_, _, u)| *u).map(|(_, c, _)| *c)
-            .or_else(|| info.first().map(|(_, c, _)| *c));
-        if let Some(anchor) = anchor {
-            info.sort_by_key(|(_, c, _)| c.distance_squared(&anchor));
-            for (id, _, _) in info.iter().take(TARGET_URBAN) {
-                editor.world_mut().districts.get_mut(id).unwrap().data.parcel_type = ParcelType::Urban;
-            }
-        }
-    }
+    
+    let data = LoadedData::load().expect("Failed to load data");
+
+    // ── Resource chain over rural districts ──────────────────────────────
+    let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
+        .filter(|(id, _)| {
+            editor.world().districts.get(id)
+                .map(|d| d.data.parcel_type == ParcelType::Rural)
+                .unwrap_or(false)
+        })
+        .map(|(id, analysis)| (*id, analysis.clone()))
+        .collect();
+    // Resolve the rural economy with placement feasibility folded in: parcels that
+    // can't physically seat a resource's gather building (footprint too big for any
+    // flat enough pad) are excluded during assignment, so the plan never promises a
+    // building placement would later drop. (Rural terrain is still natural here —
+    // flatten/walls only touch urban.)
+    let result = resolve_rural_production(&data, editor, &rural_analysis, &mut rng);
+
+    // Phase 1 — feathered urban flatten.
+    let urban = editor.world().get_urban_points();
+    // Log (clear) the urban area of trees so roads, buildings, and houses
+    // aren't dropped into standing forest.
+    log_trees(&*editor, urban.clone()).await;
+    println!("Logged {} urban cells of trees", urban.len());
+    flatten_urban_area(editor, &urban, 16, 12, true).await;
 
     // Wall + gates — gates populate world.gate_locations, used by the network.
     let materials = Material::load().expect("Failed to load materials");
@@ -87,15 +80,103 @@ pub async fn generate_town(
         println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
     }
 
-    // Phase 1 — feathered urban flatten.
-    let urban = editor.world().get_urban_points();
-    // Log (clear) the urban area of trees so roads, buildings, and houses
-    // aren't dropped into standing forest.
-    log_trees(&*editor, urban.clone()).await;
-    println!("Logged {} urban cells of trees", urban.len());
-    flatten_urban_area(editor, &urban, 16, 12, true).await;
+    let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
+        sd_ids.sort_by_key(|id| id.0);
+        // Dropped-by-competition-cap parcels, ordered flattest-first per resource:
+        // promoted when a primary fails to seat, so a terrain miss costs us a different
+        // parcel rather than the building (and the planned economy) entirely.
+        let mut fallbacks: HashMap<String, std::collections::VecDeque<_>> = result
+            .fallback_assignments
+            .iter()
+            .map(|(res, list)| (res.clone(), list.iter().cloned().collect()))
+            .collect();
+        let mut placed = 0usize;
+        // Placed rural buildings, collected so the road network can connect them
+        // and the production painters can run *after* the roads (R3 below).
+        let mut placed_rural: Vec<PlacedRural> = Vec::new();
+        for sd_id in &sd_ids {
+            let assignment = result.parcel_assignments[sd_id].clone();
+            if let Some(p) = try_place_rural(*sd_id, &assignment, &data, editor, &mut rng).await {
+                placed += 1;
+                placed_rural.push(p);
+                continue;
+            }
+            // Primary couldn't seat — promote the best dropped same-resource parcel(s)
+            // until one places, keeping the per-resource count at its cap.
+            while let Some((fb_id, fb_assignment)) = fallbacks
+                .get_mut(&assignment.primary_resource)
+                .and_then(|q| q.pop_front())
+            {
+                log::info!(
+                    "[resource-chain]   promoting fallback {:?} for resource {} after {:?} failed to place",
+                    fb_id, assignment.primary_resource, sd_id,
+                );
+                if let Some(p) = try_place_rural(fb_id, &fb_assignment, &data, editor, &mut rng).await {
+                    placed += 1;
+                    placed_rural.push(p);
+                    break;
+                }
+            }
+        }
+        log::info!("Placed {} of {} rural buildings", placed, sd_ids.len());
 
-    let data = LoadedData::load().expect("Failed to load data");
+    // ── Rural road network (built BEFORE the production painters) ─────────
+    // Connect every placed rural building to a town gate, predicting and reusing
+    // the `rural_road` border ring each painter will lay. Realise + claim the
+    // roads here so the painters' border rings skip the cells the road owns.
+    let rural_material = MaterialId::new("rural_road".to_string());
+    let rural_buildings: Vec<RuralBuilding> = placed_rural.iter().map(|p| RuralBuilding {
+        district: p.district,
+        structure: p.structure.clone(),
+        has_border_ring: p.has_border_ring,
+    }).collect();
+    let rural_paths = build_rural_road_network(&*editor, &rural_buildings, rural_material, 1).await;
+    if !rural_paths.is_empty() {
+        // Flatten the routed corridor to the road heights (skipping building /
+        // wall cells so a placed structure isn't re-graded), then meld the
+        // surface — mirrors the urban road realization.
+        let mut corridor: HashMap<Point2D, i32> = HashMap::new();
+        for path in &rural_paths {
+            let w = path.width() as i32;
+            for pt in path.points() {
+                let base = pt.drop_y();
+                for dx in -w..=w {
+                    for dz in -w..=w {
+                        let c = Point2D::new(base.x + dx, base.y + dz);
+                        corridor.entry(c).and_modify(|y| *y = (*y).min(pt.y)).or_insert(pt.y);
+                    }
+                }
+            }
+        }
+        let corridor_pts: HashSet<Point3D> = corridor.iter()
+            .filter(|(c, _)| !matches!(
+                editor.world().get_claim(**c),
+                Some(crate::generator::BuildClaim::Structure(_)
+                    | crate::generator::BuildClaim::Building(_)
+                    | crate::generator::BuildClaim::Wall)
+            ))
+            .map(|(c, &y)| Point3D::new(c.x, y, c.y))
+            .collect();
+        force_height(editor, &corridor_pts, false).await;
+        build_paths_merged(&*editor, &data, &rural_paths, &mut rng).await;
+        for path in &rural_paths {
+            let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
+            let mut paved = crate::geometry::get_surrounding_set(&centre, path.width().saturating_sub(1));
+            paved.extend(centre);
+            for c in paved {
+                editor.world_mut().claim(c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Road));
+            }
+        }
+    }
+    println!("Rural roads: {} segments", rural_paths.len());
+
+    // ── R3: paint rural production areas (after the roads) ────────────────
+    for p in &placed_rural {
+        let Some(painter) = &p.painter else { continue };
+        let Some(district) = editor.world().districts.get(&p.district).cloned() else { continue };
+        paint_production_area_for(&district, painter, &p.resource, &p.structure, &data, editor, &mut rng).await;
+    }
+
 
     // ---- Industrial buildings FIRST ----
     // Place a handful of big processing buildings on the flattened ground (no

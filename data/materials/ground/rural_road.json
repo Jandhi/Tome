@@ -1,0 +1,14 @@
+{
+    "id" : "rural_road",
+    "connections" : {},
+    "blocks" : {
+        "block" : {
+            "minecraft:packed_mud" : 5,
+            "minecraft:coarse_dirt" : 3,
+            "minecraft:dirt" : 2,
+            "minecraft:rooted_dirt" : 2
+        },
+        "slab" : "minecraft:mud_brick_slab",
+        "stairs" : "minecraft:mud_brick_stairs"
+    }
+}

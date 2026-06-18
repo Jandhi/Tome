@@ -32,6 +32,26 @@ pub enum ProductionPainter {
     },
 }
 
+impl ProductionPainter {
+    /// Whether this painter lays a border ring — the `rural_road` strip painted
+    /// around the production area's edge buffer. The rural road network predicts
+    /// and reuses that ring, so it needs to know which areas will have one.
+    ///
+    /// `palettes` painters have a ring iff they declare a `border_palette`; the
+    /// `pasture` and `sugarcane` function painters always paint one (their
+    /// `border_palette` param defaults to `rural_road`). Other function painters
+    /// (logging, bees, mine) lay no border.
+    pub fn paints_border(&self) -> bool {
+        match self {
+            ProductionPainter::Palettes { border_palette, .. } => border_palette.is_some(),
+            ProductionPainter::Function { function, .. } => matches!(
+                function.as_str(),
+                "pasture_production_painter" | "sugarcane_production_painter"
+            ),
+        }
+    }
+}
+
 /// Deserialize a painter's free-form `params` value into a function-specific
 /// struct. Optional fields rely on the target's `#[serde(default)]`. A null
 /// (absent) params value deserializes to the target's `Default` where derived.
