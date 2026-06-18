@@ -46,6 +46,16 @@ impl BlockID {
         self.name().contains("leaves")
     }
 
+    /// The blocks that make up huge mushrooms (e.g. dark oak forests): the red /
+    /// brown caps plus the stem. The stem also matches `is_tree` via `_stem`, but
+    /// the cap blocks do not, so the logger needs this to clear them too.
+    pub fn is_mushroom(&self) -> bool {
+        matches!(
+            self.name(),
+            "red_mushroom_block" | "brown_mushroom_block" | "mushroom_stem"
+        )
+    }
+
     /// A log / stripped log / wood / stem / hyphae — the axis-rotatable wood
     /// pillars. Goes through `name()` so it matches `minecraft:`-namespaced ids.
     pub fn is_log(&self) -> bool {

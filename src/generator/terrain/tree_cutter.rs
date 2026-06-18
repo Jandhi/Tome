@@ -33,13 +33,13 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
         let point3d = point.add_y(height);
         let mut block_id = editor.get_block(point3d).id;
 
-        if !block_id.is_tree() {
+        if !block_id.is_tree() && !block_id.is_mushroom() {
             continue;
         }
         editor.place_block(&"air".into(), point3d).await;
         for y in 1..40 {
             block_id = editor.get_block(Point3D::new(point.x, height - y, point.y)).id;
-            if block_id.is_tree() {
+            if block_id.is_tree() || block_id.is_mushroom() {
                 editor.place_block(&"air".into(), Point3D::new(point.x, height - y, point.y)).await;
             } else if block_id == "dirt".into() {
                 editor.place_block(&"grass_block".into(), Point3D::new(point.x, height - y, point.y)).await;
