@@ -104,6 +104,12 @@ impl BlockForm {
             // `oak_shelf`, `spruce_shelf`, … — the 1.21.9+ display shelf. The
             // `_` guards against `bookshelf` (no underscore before "shelf").
             BlockForm::Shelf
+        } else if id_string.contains("leaves") {
+            // Leaves yield to any structural block already in place (stairs,
+            // walls, beams) so tree canopies never punch through a building
+            // unless the placement is forced. Without this they default to
+            // `Block` (density 1.0) and overwrite everything.
+            BlockForm::Sparse
         } else if id_string.contains("air") || id_string.contains("water") || id_string.contains("lava") || id_string.contains("snow") {
             BlockForm::Sparse
         } else {

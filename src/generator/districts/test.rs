@@ -1140,12 +1140,15 @@ mod tests {
         ).await;
     }
 
-    /// DEBUG: generate a town, then detect the leftover green (unclaimed urban)
-    /// open-space regions and float a wool marker above each so we can eyeball
-    /// where the dead space falls before building any real decoration on it.
+    /// DEBUG: generate a town, detect the open-space regions, furnish the nooks
+    /// for real (biome tree + benches + planters + lantern) and wool-paint the
+    /// other types so the split is still eyeballable beside the furnished nooks.
     #[tokio::test]
     async fn open_space_regions() {
-        use crate::generator::open_space::{detect_regions, paint_regions_debug};
+        use crate::generator::open_space::{detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, RegionType};
+        use crate::generator::terrain::{Forest, ForestId};
+        use crate::generator::materials::Material;
+        use crate::noise::RNG;
 
         init_logger();
         let provider = GDMCHTTPProvider::new();
@@ -1160,7 +1163,6 @@ mod tests {
         let urban = editor.world().get_urban_points();
         let regions = detect_regions(editor.world(), &urban);
 
-        use crate::generator::open_space::RegionType;
         let total_cells: usize = regions.iter().map(|r| r.area).sum();
         let count = |t: RegionType| regions.iter().filter(|r| r.region_type() == t).count();
         println!(
@@ -1173,7 +1175,25 @@ mod tests {
             count(RegionType::Yard),
         );
 
-        paint_regions_debug(&editor, &regions).await;
+        // Furnish all four open-space types for real.
+        let forests = Forest::load().expect("Failed to load forests");
+        let forest = forests
+            .get(&ForestId::new("small_mixed".to_string()))
+            .expect("small_mixed forest")
+            .clone();
+        let materials = Material::load().expect("Failed to load materials");
+        let mut rng = RNG::new(Seed(777));
+        for region in &regions {
+            match region.region_type() {
+                RegionType::Nook => furnish_nook(&editor, region, &mut rng, &forest).await,
+                RegionType::Plaza => {
+                    furnish_plaza(&editor, region, &mut rng, &forest, &materials).await
+                }
+                RegionType::Yard => furnish_yard(&editor, region, &mut rng).await,
+                RegionType::Park => furnish_park(&editor, region, &mut rng, &forests).await,
+            }
+        }
+
         editor.flush_buffer().await;
     }
 }
