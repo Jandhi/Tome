@@ -56,6 +56,11 @@ async fn plaza_types_gallery() {
         types.len(),
     );
 
+    // NPC scenes harvested from every plot, staffed in one pass after the grid
+    // is built so the gallery shows the stage performers, market vendors, and
+    // onlookers in place.
+    let mut all_scenes: Vec<crate::generator::population::AnchorScene> = Vec::new();
+
     println!("\n=== Plaza gallery: {COPIES} of each type ===");
     for (row, &t) in types.iter().enumerate() {
         let bz = MARGIN + row as i32 * STRIDE;
@@ -79,7 +84,8 @@ async fn plaza_types_gallery() {
             // A monument fallback means the plot's terrain left too small a flat
             // plateau for that type (e.g. a 5×5 fountain on bumpy ground); flag it
             // rather than panic, so the rest of the gallery still builds.
-            let built = furnish_plaza_as(&editor, &region, &mut rng, &theme, t).await;
+            let (built, scenes) = furnish_plaza_as(&editor, &region, &mut rng, &theme, t).await;
+            all_scenes.extend(scenes);
             let c = region.centroid();
             let (wx, wz) = (origin.x + c.x, origin.z + c.y); // absolute centre for /tp
             if built == t {
@@ -91,6 +97,26 @@ async fn plaza_types_gallery() {
         println!();
     }
     println!("=== end gallery — each row above is one type; /tp to any centre ===\n");
+
+    // Flush the blocks first so the NPCs spawn into finished plazas (entities
+    // bypass the block buffer, so a stale buffer would otherwise drop them onto
+    // not-yet-placed paving).
+    editor.flush_buffer().await;
+
+    // Staff the harvested anchors: vendors at stalls, a performer on each stage,
+    // a scatter of onlookers in the crowd. Roster supplies names/dialogue/biome.
+    use crate::generator::population::{build_roster, populate_npcs, NpcData};
+    let scene_count = all_scenes.len();
+    match NpcData::load() {
+        Ok(data) => {
+            let roster = build_roster(scene_count, Culture::Desert, &data, &mut rng.derive());
+            let placed = populate_npcs(&editor, all_scenes, roster, scene_count, &data, &mut rng)
+                .await
+                .expect("populate plaza NPCs");
+            println!("Spawned {placed} plaza NPCs across the gallery");
+        }
+        Err(e) => println!("skipped NPC staffing (npcs.yaml load failed: {e})"),
+    }
 
     editor.flush_buffer().await;
 }

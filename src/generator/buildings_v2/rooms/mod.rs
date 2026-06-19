@@ -21,7 +21,9 @@ mod build;
 mod invariants;
 mod plan;
 
-pub use constraints::{CellState, ConstraintMap, PlacedFurniture};
+pub use constraints::{
+    AnchorCandidate, AnchorSlotCandidate, CellState, ConstraintMap, PlacedFurniture,
+};
 pub use annotate::{mark_gable_doorways, mark_windows};
 pub use assign::{assign_attic_types, assign_room_floors, assign_types_to_rooms};
 pub use attic::place_attic_ladders;

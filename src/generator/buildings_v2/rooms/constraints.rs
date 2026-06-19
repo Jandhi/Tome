@@ -1,3 +1,4 @@
+use crate::generator::population::{SceneKind, SlotRole};
 use crate::geometry::Rect2D;
 
 /// State of a cell in a room's interior.
@@ -112,4 +113,35 @@ pub struct PlacedFurniture {
     pub name: String,
     /// World (x, z) cells occupied by this item.
     pub cells: Vec<(i32, i32)>,
+    /// NPC standing-spot scenes this item contributes, resolved to world cells
+    /// + facing at placement time but not yet validated against the final room
+    /// layout (see [`AnchorCandidate`]).
+    pub anchors: Vec<AnchorCandidate>,
+}
+
+/// A candidate NPC scene contributed by one placed furniture item: where people
+/// would stand around it and which way they'd face. Resolved to world cells at
+/// placement time, then validated after the whole room is furnished — a slot is
+/// kept only if its cell ended up walkable (not `Blocked`) and isn't already
+/// claimed by another anchor, so NPCs never spawn in furniture, walls, or on
+/// top of each other.
+#[derive(Debug, Clone)]
+pub struct AnchorCandidate {
+    pub kind: SceneKind,
+    pub slots: Vec<AnchorSlotCandidate>,
+}
+
+/// One person's candidate spot within an [`AnchorCandidate`].
+#[derive(Debug, Clone)]
+pub struct AnchorSlotCandidate {
+    /// World (x, z) cell the NPC would stand on.
+    pub cell: (i32, i32),
+    /// Yaw (degrees) the NPC faces — baked toward the furniture at emit time.
+    pub facing: f32,
+    pub role: SlotRole,
+    /// If false, an unusable cell drops just this slot; if true, it drops the
+    /// whole scene (e.g. one half of a two-person table is optional).
+    pub required: bool,
+    /// Context dialogue key for whoever stands here (e.g. `tending_furnace`).
+    pub dialogue: Option<String>,
 }

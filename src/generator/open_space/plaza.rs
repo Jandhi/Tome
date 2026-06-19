@@ -10,7 +10,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
-use crate::geometry::{Point2D, CARDINALS_2D};
+use crate::generator::npc::DialogueVolume;
+use crate::generator::population::{yaw_toward, AnchorScene, SlotRole};
+use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::noise::RNG;
 
 use super::props::{
@@ -97,14 +99,16 @@ fn centre_cell(region: &Region, cells: &HashSet<Point2D>) -> (Point2D, i32) {
 }
 
 /// Furnish one plaza region in place, returning the [`PlazaType`] it was built
-/// as (so the caller can name it for what it is). The type is rolled from the
-/// open room at the centre.
+/// as (so the caller can name it for what it is) plus the NPC standing-spot
+/// scenes it offers — a stage performer, market vendors at their stalls, and a
+/// scatter of onlookers in the crowd. The type is rolled from the open room at
+/// the centre. The caller staffs the scenes via the population pass.
 pub async fn furnish_plaza(
     editor: &Editor,
     region: &Region,
     rng: &mut RNG,
     theme: &Theme,
-) -> PlazaType {
+) -> (PlazaType, Vec<AnchorScene>) {
     furnish_plaza_inner(editor, region, rng, theme, None).await
 }
 
@@ -117,7 +121,7 @@ pub(crate) async fn furnish_plaza_as(
     rng: &mut RNG,
     theme: &Theme,
     plaza_type: PlazaType,
-) -> PlazaType {
+) -> (PlazaType, Vec<AnchorScene>) {
     furnish_plaza_inner(editor, region, rng, theme, Some(plaza_type)).await
 }
 
@@ -127,7 +131,7 @@ async fn furnish_plaza_inner(
     rng: &mut RNG,
     theme: &Theme,
     forced: Option<PlazaType>,
-) -> PlazaType {
+) -> (PlazaType, Vec<AnchorScene>) {
     let world = editor.world();
     let cells: HashSet<Point2D> = region.cells.iter().copied().collect();
     let height_at = |c: Point2D| world.get_ocean_floor_height_at(c);
@@ -214,12 +218,17 @@ async fn furnish_plaza_inner(
     }
 
     let mut used: HashSet<Point2D> = HashSet::new();
+    // NPC scenes this plaza offers, staffed later by the population pass.
+    let mut scenes: Vec<AnchorScene> = Vec::new();
 
     // --- Centrepiece on the most-interior cell. ---
     // Bigger squares unlock the roomier types; a cramped centre falls back to a
     // monument, the only piece that fits a single cell. The centre and its
     // footprint are measured within the flat plateau so the structure sits level.
     let (centre, radius) = centre_cell(region, &flat);
+    // Yaw for an NPC at `feet` looking toward the plaza centre — the shared focal
+    // point that market vendors and onlookers all orient on.
+    let face_centre = |feet: Point3D| yaw_toward(feet, Point3D::new(centre.x, feet.y, centre.y));
     // A forced type still needs to fit: the 5×5 fountain and the 5×5 stage need
     // radius ≥ 2, the other built pieces radius ≥ 1; anything tighter falls back
     // to a monument.
@@ -252,7 +261,21 @@ async fn furnish_plaza_inner(
         PlazaType::Well => build_well(editor, centre, centre_h, theme).await,
         PlazaType::Fountain => build_fountain(editor, centre, centre_h, theme).await,
         PlazaType::Monument => build_monument(editor, centre, centre_h, radius >= 1, theme).await,
-        PlazaType::Stage => build_stage(editor, centre, centre_h, theme).await,
+        PlazaType::Stage => {
+            build_stage(editor, centre, centre_h, theme).await;
+            // A performer up on the deck, calling out over the square. The deck
+            // planks sit at `centre_h + 1`, so feet stand on top at `centre_h + 2`.
+            // Face north (−z), out over the audience away from the back-rail.
+            let feet = Point3D::new(centre.x, centre_h + 2, centre.y);
+            let facing = yaw_toward(feet, feet + Point3D::new(0, 0, -8));
+            scenes.push(AnchorScene::solo_with(
+                feet,
+                facing,
+                SlotRole::Idle,
+                Some("performing".to_string()),
+                DialogueVolume::Yelled,
+            ));
+        }
         // A market has no centrepiece — it's defined by its U-shaped stalls,
         // placed below across the whole open floor.
         PlazaType::Market => {}
@@ -356,6 +379,19 @@ async fn furnish_plaza_inner(
                 used.insert(p);
             }
             stalls.push(mouth);
+
+            // The vendor stands inside the U, one cell back from the mouth, so
+            // they look out over the front counter toward the square — and hawk
+            // their wares with a yelled line that carries across the market.
+            let stand = mouth + out;
+            let feet = Point3D::new(stand.x, surf[&mouth] + 1, stand.y);
+            scenes.push(AnchorScene::solo_with(
+                feet,
+                face_centre(feet),
+                SlotRole::Worker,
+                Some("market_cry".to_string()),
+                DialogueVolume::Yelled,
+            ));
         }
 
         // --- A cart parked on the floor, if one fits. Footprint: 2-cell bed
@@ -415,7 +451,43 @@ async fn furnish_plaza_inner(
         }
     }
 
-    plaza_type
+    // --- Crowd: a few idle onlookers milling on the open floor of the busy
+    // social squares (markets and the stage), each facing the centre — browsing
+    // the stalls or watching the performer. Quieter squares (fountain, well,
+    // monument) stay empty of standers. Cells are interior (fully surrounded by
+    // paving), clear of structures, and not against a road entrance. ---
+    if matches!(plaza_type, PlazaType::Market | PlazaType::Stage) {
+        let mut crowd_cells: Vec<Point2D> = flat
+            .iter()
+            .copied()
+            .filter(|&c| c != centre && !used.contains(&c))
+            .filter(|&c| CARDINALS_2D.iter().all(|d| flat.contains(&(c + *d))))
+            .filter(|&c| !CARDINALS_2D.iter().any(|d| is_path(world.get_claim(c + *d).as_ref())))
+            .collect();
+        rng.shuffle(&mut crowd_cells);
+        let crowd_target = (region.area / 50).clamp(2, 5);
+        let mut crowd: Vec<Point2D> = Vec::new();
+        for &c in &crowd_cells {
+            if crowd.len() >= crowd_target as usize {
+                break;
+            }
+            if crowd.iter().any(|p| chebyshev(*p, c) < 3) {
+                continue;
+            }
+            let feet = Point3D::new(c.x, surf[&c] + 1, c.y);
+            scenes.push(AnchorScene::solo_with(
+                feet,
+                face_centre(feet),
+                SlotRole::Idle,
+                Some("browsing".to_string()),
+                DialogueVolume::Normal,
+            ));
+            used.insert(c);
+            crowd.push(c);
+        }
+    }
+
+    (plaza_type, scenes)
 }
 
 /// Unit cardinal step from `from` toward `to`, biased to the longer axis so a

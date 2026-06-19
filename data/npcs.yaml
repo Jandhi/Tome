@@ -1,0 +1,134 @@
+# Placeholder NPC name + dialogue pools for the population pass.
+# (Per-culture / per-profession pools and richer lines can come later.)
+
+first_names:
+  - Hilda
+  - Bram
+  - Eda
+  - Joss
+  - Mira
+  - Tobin
+  - Greta
+  - Ansel
+  - Lena
+  - Cort
+  - Sable
+  - Wren
+  - Doral
+  - Petra
+  - Fenn
+  - Maja
+  - Roan
+  - Isolde
+  - Garr
+  - Nessa
+  - Odo
+  - Vesna
+  - Kael
+  - Bryn
+
+epithets:
+  - the Elder
+  - the Younger
+  - of the Hill
+  - Stonefoot
+  - Quickhand
+  - the Quiet
+  - Fairwind
+  - the Bold
+
+small_talk:
+  - "Fine weather for it, eh?"
+  - "Mind how you go."
+  - "Haven't seen you round here before."
+  - "Long day ahead."
+  - "The well's been low all season."
+  - "Heard there's trouble on the east road."
+  - "Spare a moment, traveller?"
+  - "Market's busy today."
+  - "Watch yourself after dark."
+  - "Good to see a new face."
+
+# Context dialogue pools, keyed by activity. A furniture anchor names one of
+# these keys (in its `anchors:` block); the same key can be shared by several
+# items — `cooking` covers the furnace, smoker, and cauldron, etc. A slot with
+# no key (or a key missing here) falls back to `small_talk` above.
+dialogue:
+  cooking:
+    - "Mind the fire — these coals run hot."
+    - "Almost ready. Won't be long now."
+    - "A good stew needs a slow flame."
+    - "Smells done, doesn't it?"
+    - "Bread's in. Come back at dusk."
+  crafting:
+    - "Steady hands, that's the trick."
+    - "One more and it's finished."
+    - "Measure twice, they always say."
+    - "This'll fetch a fair price."
+    - "Honest work, this."
+  reading:
+    - "Shh — I've nearly found the passage."
+    - "So much here I'll never read it all."
+    - "A quiet corner and a good book. Bliss."
+    - "Now where did I leave off..."
+  sorting:
+    - "Swear I had more of these yesterday."
+    - "Everything in its place, that's my way."
+    - "Plenty stocked for the winter."
+    - "Now where did that get to?"
+  conversation:
+    - "You won't believe what I heard at the market."
+    - "It's been too long, friend."
+    - "Between you and me..."
+  resting:
+    - "Long day. I've earned a sit-down."
+    - "Just turning in. Quiet night, I hope."
+    - "These old bones need their rest."
+    - "Wake me at first light, would you?"
+  # Market vendors hawking their wares from behind the stall counter. Rendered as
+  # a "yelled" bubble — bigger and visible from across the square.
+  market_cry:
+    - "Fresh today! Get it while it lasts!"
+    - "Finest wares in the whole town — come see!"
+    - "Two for the price of one, today only!"
+    - "Step up, step up! Best prices on the square!"
+    - "You'll not find better, I promise you that!"
+    - "Hot from the oven — come and get it!"
+    - "Half price before noon! Don't miss out!"
+    - "Come buy, come buy! Won't be here long!"
+  # A performer up on the stage, calling out over the crowd. Also yelled.
+  performing:
+    - "Gather round, good folk, gather round!"
+    - "A tale to chill your blood — come closer!"
+    - "Lend me your ears and I'll lend you a song!"
+    - "One night only — you'll tell your grandchildren!"
+    - "Strike up the tune! Let's have a dance!"
+    - "Hear ye! Hear ye! A story worth the telling!"
+  # Idle onlookers browsing the stalls or watching the show.
+  browsing:
+    - "Now that's a fair price, I'll give them that."
+    - "Did you hear the crier? Quite the show."
+    - "I only came for bread and look at me now."
+    - "Busy on the square today, isn't it?"
+    - "Wonder if they've any of those left..."
+    - "My coin's near spent already."
+
+# Multi-person exchanges: each entry is one back-and-forth, its lines handed to
+# a scene's slots in order (line 0 = the opener, line 1 = the reply). Keyed like
+# `dialogue` — a `conversation` anchor (two diners at a table) draws one of
+# these so the pair actually talks to each other. Keep line 0 standalone, in
+# case the scene is ever reduced to a single person.
+exchanges:
+  conversation:
+    - - "You won't believe what I heard at the market."
+      - "Go on then — don't keep me waiting!"
+    - - "Did you finish the harvest before the rain?"
+      - "Just barely. Last cart came in soaked."
+    - - "They say the smith's taking on an apprentice."
+      - "Is that so? My nephew could use the work."
+    - - "Have you tried the new baker on the square?"
+      - "Twice this week. Don't tell my wife."
+    - - "Quiet day, for once."
+      - "Don't say that too loud — you'll jinx it."
+    - - "I heard wolves on the ridge last night."
+      - "Best keep the gate barred, then."

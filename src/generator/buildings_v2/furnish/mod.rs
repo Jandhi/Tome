@@ -21,5 +21,5 @@ mod types;
 
 pub use roof::decorate_rooftops;
 pub use room::furnish_rooms;
-pub(crate) use room::furnish_interior;
+pub(crate) use room::{furnish_interior, harvest_anchors};
 pub use types::{BlockLayer, CellConstraint, FacingMode};

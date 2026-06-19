@@ -23,6 +23,10 @@ chiseled_bookshelf:
     - offset: [0, 0]
       constraint: wall
       facing: away_from_wall
+  # A reader browsing the shelf.
+  anchors:
+    - dialogue: reading
+      slots: [ { offset: [0, 1] } ]
 
 # Reading stand against a wall, lectern face (open book) toward the room.
 lectern:
@@ -34,6 +38,10 @@ lectern:
     - offset: [0, 0]
       constraint: wall
       facing: away_from_wall
+  # A reader at the lectern.
+  anchors:
+    - dialogue: reading
+      slots: [ { offset: [0, 1] } ]
 
 # 2-wide bench: two wooden stairs side by side against a wall, seats facing
 # into the room. Mirrors `chair` (oak_stairs, away_from_wall) but two cells

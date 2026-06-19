@@ -23,6 +23,11 @@ use crate::noise::{Seed, RNG};
 /// The caller is responsible for constructing the `Editor` (and the `World`
 /// behind it) and for flushing/finalising afterwards beyond the final
 /// `flush_buffer` performed here.
+/// Residents per bed of sleeping capacity. A house's population budget is
+/// `max(1, round(beds * POPULATION_PER_BED))`, so a single-bed house houses ~2
+/// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
+const POPULATION_PER_BED: f32 = 1.5;
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
@@ -536,6 +541,9 @@ pub async fn generate_town(
     ];
 
     let mut total_buildings = 0usize;
+    // Per-house NPC anchors + bed-derived population budget, gathered from every
+    // house and fed to the town-wide population pass once the town is built.
+    let mut town_anchors: Vec<crate::generator::population::HouseAnchors> = Vec::new();
     let mut tier_cells = [0usize; 3];   // frontage cells found per tier
     let mut tier_placed = [0usize; 3];  // houses placed per tier
     let mut tier_fail = [0usize; 3];    // build_house failures per tier
@@ -628,7 +636,33 @@ pub async fn generate_town(
                     bctx.base_y_override = base_lvl;
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                        Ok(_) => {
+                        Ok(output) => {
+                            // Population budget tracks sleeping capacity, not bed
+                            // furniture: a double/canopy bed sleeps two. Each
+                            // bed-tagged item's capacity is its number of
+                            // `part=foot` blocks (the head auto-spawns), min 1.
+                            let beds: usize = output
+                                .room_plan
+                                .rooms
+                                .iter()
+                                .flat_map(|r| &r.furniture)
+                                .filter_map(|f| data.furniture.items.get(&f.name))
+                                .filter(|it| it.tags.iter().any(|t| t == "bed"))
+                                .map(|it| {
+                                    it.blocks
+                                        .iter()
+                                        .filter(|b| b.block.contains("part=foot"))
+                                        .count()
+                                        .max(1)
+                                })
+                                .sum();
+                            // Scale capacity so houses feel lived-in, floored at 1.
+                            let population =
+                                ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
+                            town_anchors.push(crate::generator::population::HouseAnchors {
+                                scenes: output.npc_anchors,
+                                population,
+                            });
                             plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
                             total_buildings += 1;
                             tier_placed[ti] += 1;
@@ -732,6 +766,11 @@ pub async fn generate_town(
     // (paved civic squares), nooks (small ringed gardens), parks (large green
     // commons), and yards (perimeter kitchen gardens).
     let mut place_labels: Vec<(Point2D, String)> = Vec::new();
+    // NPC standing-spot scenes harvested from plazas (stage performers, market
+    // vendors, onlookers in the crowd). Staffed as fixtures after furnishing,
+    // independent of the resident bed budget — a market is busy regardless of
+    // how many beds the town has.
+    let mut plaza_scenes: Vec<crate::generator::population::AnchorScene> = Vec::new();
     {
         use crate::generator::open_space::{
             detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, OpenSpaceNames,
@@ -748,7 +787,8 @@ pub async fn generate_town(
         for region in &regions {
             match region.region_type() {
                 RegionType::Plaza => {
-                    let plaza_type = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
+                    let (plaza_type, scenes) = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
+                    plaza_scenes.extend(scenes);
                     if let Some(name) = names.as_ref().and_then(|n| n.name_plaza(plaza_type, culture, &mut os_rng, &mut used)) {
                         place_labels.push((region.centroid(), name));
                     }
@@ -775,6 +815,174 @@ pub async fn generate_town(
             "Furnished open spaces — plaza {} nook {} park {} yard {}",
             counts[0], counts[1], counts[2], counts[3],
         );
+    }
+
+    // ---- Plaza fixtures: staff every harvested plaza scene ----
+    // Stage performers, market vendors, and onlookers are fixtures like the
+    // industrial workers below — always placed, independent of the resident bed
+    // budget. Each scene already carries its own position, facing, dialogue key,
+    // and bubble volume (criers/performers yell), so we just hand them a roster
+    // and staff them all. Live-only: no-op offline.
+    if !plaza_scenes.is_empty() {
+        use crate::generator::population::{build_roster, populate_npcs, NpcData};
+        match NpcData::load() {
+            Ok(npc_data) => {
+                let budget = plaza_scenes.len();
+                let roster = build_roster(budget, culture, &npc_data, &mut rng.derive());
+                match populate_npcs(editor, plaza_scenes, roster, budget, &npc_data, &mut rng).await {
+                    Ok(staffed) => println!("Staffed {} plaza NPCs", staffed),
+                    Err(e) => log::warn!("plaza staffing failed: {e}"),
+                }
+            }
+            Err(e) => log::warn!("could not load npcs.yaml for plaza staffing: {e}"),
+        }
+    }
+
+    // ---- Population: size the resident crowd to beds, scatter it town-wide ----
+    // Each house's budget is max(1, beds); the town total is their sum. The
+    // town-wide draw seeds one resident per house, then fills the rest weighted
+    // by anchor weight, halving a house's weights each time it gains a resident
+    // so the crowd spreads instead of clustering. Live-only: no-op offline.
+    {
+        use crate::generator::population::{populate_town, NpcData};
+        let budget: usize = town_anchors.iter().map(|h| h.population).sum();
+        let candidate_anchors: usize = town_anchors.iter().map(|h| h.scenes.len()).sum();
+        println!(
+            "Population target: {} residents across {} houses ({} candidate anchors)",
+            budget,
+            town_anchors.len(),
+            candidate_anchors,
+        );
+        match NpcData::load() {
+            Ok(data) => match populate_town(editor, town_anchors, culture, &data, &mut rng).await {
+                Ok(placed) => println!("Populated {} NPCs", placed),
+                Err(e) => log::warn!("NPC population failed: {e}"),
+            },
+            Err(e) => log::warn!("failed to load npcs.yaml; skipping NPC population: {e}"),
+        }
+    }
+
+    // ---- Industrial worker fixtures ----
+    // Staff every industrial shop with exactly one worker NPC standing just
+    // outside it, facing the workshop, wearing the trade outfit that matches its
+    // type (a smith at the smithy, a shepherd at the weaver, ...). These are
+    // fixtures: always placed, independent of the resident budget above. The NBT
+    // interiors are opaque, so the worker stands on a clear ground cell at the
+    // footprint edge — never inside, never on a road or another building.
+    {
+        use crate::generator::npc::Profession;
+        use crate::generator::population::{build_roster, populate_npcs, AnchorScene, NpcData};
+
+        // type name -> trade outfit. smithy/carpenter roll across a small set so
+        // shops of the same kind don't all wear the identical profession.
+        let mut worker_rng = rng.derive();
+        let profession_for = |kind: &str, rng: &mut RNG| -> Option<Profession> {
+            Some(match kind {
+                "smithy" => *rng.choose(&[
+                    Profession::Weaponsmith, Profession::Toolsmith, Profession::Armorer,
+                ]),
+                "mill" => Profession::Farmer,
+                "bakery" => Profession::Butcher, // no baker profession; closest food trade
+                "carpenter" => *rng.choose(&[Profession::Fletcher, Profession::Mason]),
+                "tannery" => Profession::Leatherworker,
+                "weaver" => Profession::Shepherd,
+                _ => return None,
+            })
+        };
+
+        // Re-scan the claim map: industrial buildings are the only `Structure`
+        // claims (wall towers claim `Wall`), and claims persist, so this recovers
+        // each building's footprint + type without threading state out of the
+        // early industrial phase. Group cells by instance id.
+        let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
+        for &p in &urban {
+            if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
+                footprints
+                    .entry(id.id)
+                    .or_insert_with(|| (id.structure_type.0.clone(), Vec::new()))
+                    .1
+                    .push(p);
+            }
+        }
+
+        // A cell is a usable stand spot only if nothing else claims it — not a
+        // road, wall, or another building. `get_claim` returns `None` only out
+        // of bounds, so an in-bounds open cell reads as `BuildClaim::None`.
+        let is_clear = |c: Point2D| {
+            matches!(
+                editor.world().get_claim(c),
+                Some(BuildClaim::None) | Some(BuildClaim::Nature)
+            )
+        };
+        let road_side = |c: Point2D| {
+            crate::geometry::CARDINALS_2D
+                .iter()
+                .any(|&d| matches!(editor.world().get_claim(c + d), Some(BuildClaim::Path(_))))
+        };
+
+        // Deterministic order over buildings (HashMap iteration isn't stable).
+        let mut ids: Vec<u32> = footprints.keys().copied().collect();
+        ids.sort_unstable();
+
+        let mut worker_scenes: Vec<AnchorScene> = Vec::new();
+        for id in ids {
+            let (kind, cells) = &footprints[&id];
+            let Some(profession) = profession_for(kind, &mut worker_rng) else { continue };
+            let cell_set: HashSet<Point2D> = cells.iter().copied().collect();
+            let centroid =
+                cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
+
+            // Candidate stand cells: cardinally adjacent to the footprint, outside
+            // it, in bounds, and clear. Sort for determinism, then prefer a cell
+            // that borders a road so the worker reads as standing at the street.
+            let mut candidates: Vec<Point2D> = Vec::new();
+            let mut seen: HashSet<Point2D> = HashSet::new();
+            for &fc in cells {
+                for d in crate::geometry::CARDINALS_2D {
+                    let c = fc + d;
+                    if cell_set.contains(&c) || !editor.world().is_in_bounds_2d(c) || !is_clear(c) {
+                        continue;
+                    }
+                    if seen.insert(c) {
+                        candidates.push(c);
+                    }
+                }
+            }
+            candidates.sort_unstable_by_key(|c| (c.x, c.y));
+            let stand = candidates
+                .iter()
+                .find(|c| road_side(**c))
+                .or_else(|| candidates.first())
+                .copied();
+            let Some(stand) = stand else {
+                log::warn!("no clear stand cell for industrial '{}' (id {})", kind, id);
+                continue;
+            };
+
+            // Stand on the ground at the cell; face the footprint centroid.
+            let y = editor.world().get_ocean_floor_height_at(stand);
+            let stand3 = Point3D::new(stand.x, y, stand.y);
+            let centre3 = Point3D::new(centroid.x, y, centroid.y);
+            let facing = crate::generator::population::yaw_toward(stand3, centre3);
+            worker_scenes.push(AnchorScene::worker(stand3, facing, profession));
+        }
+
+        if !worker_scenes.is_empty() {
+            match NpcData::load() {
+                Ok(npc_data) => {
+                    // Roster supplies names/dialogue/biome; each scene's slot
+                    // overrides the profession, so the roll here is incidental.
+                    let worker_roster =
+                        build_roster(worker_scenes.len(), culture, &npc_data, &mut rng.derive());
+                    let budget = worker_scenes.len();
+                    match populate_npcs(editor, worker_scenes, worker_roster, budget, &npc_data, &mut rng).await {
+                        Ok(staffed) => println!("Staffed {} industrial workers", staffed),
+                        Err(e) => log::warn!("industrial staffing failed: {}", e),
+                    }
+                }
+                Err(e) => log::warn!("could not load npcs.yaml for staffing: {}", e),
+            }
+        }
     }
 
     // Top-down town map (SVG) for inspection: footprints + named roads coloured

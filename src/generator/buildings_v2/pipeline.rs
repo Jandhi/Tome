@@ -11,6 +11,7 @@ use std::collections::HashSet;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::Palette;
+use crate::generator::population::AnchorScene;
 use crate::geometry::{Point2D, Rect2D};
 use crate::noise::RNG;
 
@@ -81,6 +82,9 @@ pub struct HouseOutput {
     pub roof_style: RoofStyle,
     pub size_class: SizeClass,
     pub timber_pattern: TimberPattern,
+    /// Candidate per-room NPC standing positions (solo scenes), emitted after
+    /// furnishing. The settlement's population pass picks how many to staff.
+    pub npc_anchors: Vec<AnchorScene>,
 }
 
 /// Runs the full per-building pipeline. Caller owns footprint generation and
@@ -188,12 +192,15 @@ pub async fn build_house(
     place_room_floors(ctx, &frame, &room_plan, bctx).await;
 
 
-    furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
+    // Furnish, then harvest the NPC anchor scenes the placed furniture offers
+    // (validated against the final per-room CellState inside furnish_rooms).
+    // Rooftop terraces and the cellar add their own anchors below.
+    let mut npc_anchors = furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
 
     // Flat roofs are open terraces — decorate the deck (shade, seating, plants)
     // once the interior is furnished. Keeps the ladder exit clear.
     if matches!(roof_style, RoofStyle::Flat) {
-        decorate_rooftops(ctx, &frame, roof_ladder_wall).await;
+        npc_anchors.extend(decorate_rooftops(ctx, &frame, roof_ladder_wall).await);
     }
 
     // A few sparse props against the outside walls (barrels, pots, …) so the
@@ -205,8 +212,12 @@ pub async fn build_house(
     // Cellar runs last: it carves below the finished building using a derived
     // RNG, so it neither perturbs the main stream nor disturbs the room_plan
     // that blueprint/invariant code iterates.
-    let cellar_stair = cellar::maybe_build_cellar(ctx, &frame, &footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
-    let has_cellar = cellar_stair.is_some();
+    let cellar = cellar::maybe_build_cellar(ctx, &frame, &footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
+    let has_cellar = cellar.is_some();
+    let cellar_stair = cellar.map(|(stair, anchors)| {
+        npc_anchors.extend(anchors);
+        stair
+    });
 
     // Claim the structural footprint (the actual house cells, no buffer) so a
     // later building's foundation blend won't raise earth/grass into this house
@@ -230,5 +241,6 @@ pub async fn build_house(
         roof_style,
         size_class,
         timber_pattern,
+        npc_anchors,
     })
 }

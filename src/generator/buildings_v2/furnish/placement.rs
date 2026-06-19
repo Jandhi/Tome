@@ -7,11 +7,13 @@ use std::collections::{HashSet, VecDeque};
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
 use crate::minecraft::Block;
 
+use crate::generator::population::yaw_toward;
+
 use super::block::{apply_facing, parse_block, resolve_facing, resolve_offset, resolve_offset_2d, rotate_block};
 use super::data::{Furniture, PaletteSwap};
 use super::types::{BlockLayer, CellConstraint, FacingMode};
 use super::super::roof::heightmap::RoofHeightmap;
-use super::super::rooms::{CellState, ConstraintMap, Room};
+use super::super::rooms::{AnchorCandidate, AnchorSlotCandidate, CellState, ConstraintMap, Room};
 
 /// Whether a furniture item is a ceiling-only item (lanterns, etc.).
 pub(super) fn is_ceiling_item(item: &Furniture) -> bool {
@@ -241,6 +243,31 @@ pub(super) struct PlacementResult {
     pub(super) new_reserved: Vec<(i32, i32)>,
     /// EmptyReachable constraint cells: kept walkable, unplaceable.
     pub(super) new_empty_reachable: Vec<(i32, i32)>,
+    /// NPC anchor candidates this placement contributes (world cells + facing).
+    pub(super) anchors: Vec<AnchorCandidate>,
+}
+
+/// Resolve an item's declared `anchors` against its placed orientation: each
+/// slot's local `[along, away]` offset becomes a world cell, and the NPC faces
+/// the item's origin (`anchor`, where local `[0, 0]` lands). Validation against
+/// the final room layout happens later in `furnish_rooms`.
+fn resolve_anchors(item: &Furniture, anchor: Point2D, dir: Cardinal) -> Vec<AnchorCandidate> {
+    item.anchors.iter().map(|spec| {
+        let slots = spec.slots.iter().map(|s| {
+            let (dx, dz) = resolve_offset_2d(s.offset, dir);
+            let cell = (anchor.x + dx, anchor.y + dz);
+            // Face the item itself (its origin cell). yaw_toward only reads x/z,
+            // so the y here is irrelevant.
+            let facing = yaw_toward(
+                Point3D::new(cell.0, 0, cell.1),
+                Point3D::new(anchor.x, 0, anchor.y),
+            );
+            // Per-slot dialogue key wins; otherwise inherit the scene's key.
+            let dialogue = s.dialogue.clone().or_else(|| spec.dialogue.clone());
+            AnchorSlotCandidate { cell, facing, role: s.role, required: s.required, dialogue }
+        }).collect();
+        AnchorCandidate { kind: spec.kind, slots }
+    }).collect()
 }
 
 /// Try to place a furniture item anchored at a wall slot.
@@ -327,7 +354,8 @@ pub(super) fn try_place_at_wall_slot(
         });
     }
 
-    let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable };
+    let anchors = resolve_anchors(item, slot.cell, slot.wall_dir);
+    let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable, anchors };
     if let Some(rc) = roof_clearance {
         if !placement_fits_under_roof(&placement, rc) { return Option::None; }
     }
@@ -420,7 +448,8 @@ pub(super) fn try_place_freestanding(
             }
             if !ok { continue; }
 
-            let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable };
+            let anchors = resolve_anchors(item, Point2D::new(ax, az), dir);
+            let placement = PlacementResult { blocks, new_blocked, new_reserved, new_empty_reachable, anchors };
             if let Some(rc) = roof_clearance {
                 if !placement_fits_under_roof(&placement, rc) { continue; }
             }
@@ -456,5 +485,6 @@ pub(super) fn try_place_ceiling(
         });
     }
 
-    Some(PlacementResult { blocks, new_blocked: vec![], new_reserved: vec![], new_empty_reachable: vec![] })
+    // Ceiling items (lanterns, chandeliers) have nobody standing at them.
+    Some(PlacementResult { blocks, new_blocked: vec![], new_reserved: vec![], new_empty_reachable: vec![], anchors: vec![] })
 }

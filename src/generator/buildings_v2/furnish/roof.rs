@@ -9,11 +9,14 @@
 //! Runs after interior furnishing and only for `RoofStyle::Flat`. Dome rects
 //! (square, ≥ `MIN_DOME_SIDE`) have no walkable deck and are skipped.
 
+use std::collections::HashSet;
+
 use crate::editor::Editor;
+use crate::generator::population::AnchorScene;
 use crate::geometry::{Point2D, Rect2D};
 use crate::minecraft::Color;
 
-use super::room::furnish_interior;
+use super::room::{furnish_interior, harvest_anchors};
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
 use super::super::roof::dome::is_dome_eligible;
@@ -56,7 +59,7 @@ pub async fn decorate_rooftops(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
     roof_ladder_wall: Option<(i32, i32)>,
-) {
+) -> Vec<AnchorScene> {
     let mut pick_rng = ctx.rng.derive();
 
     // Every flat roof gets dressed — the variety comes from the theme, the
@@ -67,7 +70,7 @@ pub async fn decorate_rooftops(
     let key = ROOF_ROOM_KEYS[pick_rng.rand_i32_range(0, ROOF_ROOM_KEYS.len() as i32) as usize];
     let room_list = match ctx.data.furniture.rooms.get(key) {
         Some(list) => list,
-        None => return,
+        None => return Vec::new(),
     };
 
     let editor: &Editor = &*ctx.editor;
@@ -81,6 +84,11 @@ pub async fn decorate_rooftops(
     let mut roof_palette = ctx.palette.clone();
     roof_palette.primary_color = Some(fabric);
     let palette = &roof_palette;
+
+    // Terrace anchors (someone tending the roof garden, sleeping under the
+    // stars, …) harvested across all decks of this building.
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut scenes: Vec<AnchorScene> = Vec::new();
 
     let rects = top_floor_rects(frame);
     for (i, rect) in rects.iter().enumerate() {
@@ -122,7 +130,7 @@ pub async fn decorate_rooftops(
         }
 
         let mut roof_rng = ctx.rng.derive();
-        furnish_interior(
+        let placed = furnish_interior(
             editor,
             &interior,
             &mut constraints,
@@ -138,5 +146,8 @@ pub async fn decorate_rooftops(
             &mut roof_rng,
         )
         .await;
+        harvest_anchors(&placed, &constraints, floor_y, &mut claimed, &mut scenes);
     }
+
+    scenes
 }

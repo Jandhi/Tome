@@ -6,7 +6,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::materials::{Material, MaterialId, Palette};
-use crate::geometry::Rect2D;
+use crate::generator::population::{AnchorScene, AnchorSlot};
+use crate::geometry::{Point3D, Rect2D};
 use crate::noise::RNG;
 
 use super::block::swap_block_for_palette;
@@ -19,7 +20,9 @@ use super::placement::{
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
 use super::super::roof::heightmap::RoofHeightmap;
-use super::super::rooms::{CellState, ConstraintMap, PlacedFurniture, Room, RoomPlan, RoomRole};
+use super::super::rooms::{
+    AnchorCandidate, CellState, ConstraintMap, PlacedFurniture, Room, RoomPlan, RoomRole,
+};
 
 /// Default fraction of interior cells filled before stopping optional placement.
 /// Room types with `fill_threshold` set in rooms.yaml override this.
@@ -40,7 +43,7 @@ pub(super) async fn try_place_item(
     materials: &HashMap<MaterialId, Material>,
     loot_tables: &HashMap<String, LootTable>,
     rng: &mut RNG,
-) -> Option<Vec<(i32, i32)>> {
+) -> Option<(Vec<(i32, i32)>, Vec<AnchorCandidate>)> {
     let result = if is_ceiling_item(item) {
         try_place_ceiling(item, interior, constraints, ceiling_y)
     } else if needs_wall(item) {
@@ -88,7 +91,7 @@ pub(super) async fn try_place_item(
                 cells.push(cell);
             }
         }
-        Some(cells)
+        Some((cells, placement.anchors))
     } else {
         None
     }
@@ -216,7 +219,7 @@ pub(crate) async fn furnish_interior(
     for entry in &room_list.required {
         let candidates = resolve_candidates(entry, items, room_area, is_attic, &placed_tags, rng);
         for (name, item) in candidates {
-            if let Some(cells) = try_place_item(
+            if let Some((cells, anchors)) = try_place_item(
                 editor, item, interior, constraints,
                 &slots, &open_cells, floor_y, ceiling_y,
                 roof_clearance,
@@ -227,7 +230,7 @@ pub(crate) async fn furnish_interior(
                         placed_tags.insert(tag.to_string());
                     }
                 }
-                placed.push(PlacedFurniture { name: name.clone(), cells });
+                placed.push(PlacedFurniture { name: name.clone(), cells, anchors });
                 break;
             }
         }
@@ -248,7 +251,7 @@ pub(crate) async fn furnish_interior(
             if constraints.fill_ratio() >= fill_threshold { break; }
             let candidates = resolve_candidates(entry, items, room_area, is_attic, &placed_tags, rng);
             for (name, item) in candidates {
-                if let Some(cells) = try_place_item(
+                if let Some((cells, anchors)) = try_place_item(
                     editor, item, interior, constraints,
                     &slots, &open_cells, floor_y, ceiling_y,
                     roof_clearance,
@@ -259,7 +262,7 @@ pub(crate) async fn furnish_interior(
                             placed_tags.insert(tag.to_string());
                         }
                     }
-                    placed.push(PlacedFurniture { name: name.clone(), cells });
+                    placed.push(PlacedFurniture { name: name.clone(), cells, anchors });
                     placed_this_pass = true;
                     break;
                 }
@@ -273,15 +276,22 @@ pub(crate) async fn furnish_interior(
     placed
 }
 
-/// Furnish all rooms in a building using loaded furniture data.
+/// Furnish all rooms in a building using loaded furniture data, then harvest the
+/// validated NPC anchor scenes the placed furniture contributes.
+///
 /// `roof_heightmaps` is indexed by rect — used only by attic rooms to clamp
 /// furniture against the sloped roof above the attic floor.
+///
+/// Anchor harvesting runs after every room is furnished, so each room's
+/// `ConstraintMap` is final: a candidate slot is kept only if its cell isn't
+/// `Blocked` (furniture/wall) and isn't already claimed by another anchor, so
+/// NPCs never spawn inside furniture, in walls, or on top of one another.
 pub async fn furnish_rooms(
     ctx: &mut BuildCtx<'_>,
     room_plan: &mut RoomPlan,
     frame: &Frame,
     roof_heightmaps: &[RoofHeightmap],
-) {
+) -> Vec<AnchorScene> {
     let editor: &Editor = &*ctx.editor;
     let palette = ctx.palette;
     let furniture_data = &ctx.data.furniture;
@@ -302,6 +312,84 @@ pub async fn furnish_rooms(
             palette, materials, &furniture_data.loot, &mut room_rng,
         ).await;
     }
+
+    // Validate furniture anchor candidates against the finished layout. One
+    // `claimed` set spans every floor of the building (keyed in 3D, so a column
+    // shared by stacked rooms doesn't false-collide).
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut scenes: Vec<AnchorScene> = Vec::new();
+    for room in &room_plan.rooms {
+        let floor_y = frame.floor_y(room.floor);
+        harvest_anchors(&room.furniture, &room.constraints, floor_y, &mut claimed, &mut scenes);
+    }
+    scenes
+}
+
+/// Validate the anchor candidates from a furnished space (a room, rooftop deck,
+/// or cellar) against its final layout and append the surviving scenes to `out`.
+/// `constraints` is the space's finished map and `floor_y` the level its NPCs
+/// stand on; `claimed` is threaded so no two anchors share a cell.
+///
+/// Shared by [`furnish_rooms`] and the rooftop/cellar furnishers, which run the
+/// same `furnish_interior` engine and so produce the same `PlacedFurniture`.
+pub(crate) fn harvest_anchors(
+    furniture: &[PlacedFurniture],
+    constraints: &ConstraintMap,
+    floor_y: i32,
+    claimed: &mut HashSet<(i32, i32, i32)>,
+    out: &mut Vec<AnchorScene>,
+) {
+    for f in furniture {
+        for candidate in &f.anchors {
+            if let Some(scene) = validate_anchor(candidate, constraints, floor_y, claimed) {
+                out.push(scene);
+            }
+        }
+    }
+}
+
+/// Validate one furniture anchor candidate against the final layout. A slot is
+/// usable if its cell exists in the space (in-bounds) and is not `Blocked` (so
+/// `Empty`, `UnblockedReachable`, and reserved approach cells all qualify) and
+/// isn't already claimed by another accepted anchor. A required slot that can't
+/// be staffed drops the whole scene; an optional one just drops itself. Returns
+/// the resolved [`AnchorScene`] (claiming its cells) or `None`.
+fn validate_anchor(
+    candidate: &AnchorCandidate,
+    constraints: &ConstraintMap,
+    floor_y: i32,
+    claimed: &mut HashSet<(i32, i32, i32)>,
+) -> Option<AnchorScene> {
+    let mut slots: Vec<AnchorSlot> = Vec::new();
+    for slot in &candidate.slots {
+        let key = (slot.cell.0, floor_y, slot.cell.1);
+        let usable = matches!(constraints.get(slot.cell), Some(s) if s != CellState::Blocked)
+            && !claimed.contains(&key);
+        if usable {
+            slots.push(AnchorSlot {
+                pos: Point3D::new(slot.cell.0, floor_y, slot.cell.1),
+                facing: slot.facing,
+                role: slot.role,
+                required: slot.required,
+                profession: None,
+                dialogue: slot.dialogue.clone(),
+                // Furniture-driven anchors are always ordinary indoor speech;
+                // only plaza fixtures yell.
+                volume: crate::generator::npc::DialogueVolume::Normal,
+            });
+        } else if slot.required {
+            return None; // a required spot is taken/blocked → drop the scene
+        }
+    }
+    if slots.is_empty() {
+        return None;
+    }
+    // Claim the kept cells so no later anchor reuses them (a dropped optional
+    // slot leaves its cell free for someone else).
+    for slot in &slots {
+        claimed.insert((slot.pos.x, slot.pos.y, slot.pos.z));
+    }
+    Some(AnchorScene::group(candidate.kind, slots))
 }
 
 pub(super) fn shuffle<T>(items: &mut [T], rng: &mut RNG) {

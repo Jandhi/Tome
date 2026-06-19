@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -307,6 +307,29 @@ impl Editor {
         let command = format!("place feature {} {} {} {}", feature, world.x, world.y, world.z);
         self.provider.command(vec![command]).await?;
         Ok(())
+    }
+
+    /// Spawn an entity of type `id` (e.g. `"minecraft:villager"`) at build-area-
+    /// local `point`, with optional SNBT `data` (entity tags such as `NoAI`,
+    /// `CustomName`, `Rotation`, …).
+    ///
+    /// `point` is in build-area-local coordinates (the origin is added to reach
+    /// world space, matching [`place_block`](Self::place_block)). Like
+    /// [`place_feature`](Self::place_feature) this goes straight to the server and
+    /// **bypasses the block buffer/cache**; it is a no-op in offline mode.
+    pub async fn spawn_entity(&self, id: &str, point: Point3D, data: Option<&str>) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        let world = point + self.build_area.origin;
+        let entity = PositionedEntity {
+            x: Coordinate::Absolute(world.x),
+            y: Coordinate::Absolute(world.y),
+            z: Coordinate::Absolute(world.z),
+            id: id.to_string(),
+            data: data.map(|s| s.to_string()),
+        };
+        self.provider.put_entities(0, 0, 0, &vec![entity]).await
     }
 }
 
