@@ -98,23 +98,6 @@ impl DialogueVolume {
     }
 }
 
-/// The name tag is rendered as its own `text_display` rather than the villager's
-/// built-in `CustomNameVisible` tag, so it can fade with distance like the
-/// dialogue bubble — a vanilla name tag otherwise shows from far off (and
-/// through walls) at a fixed client distance, with no per-entity range. These
-/// tune the floating name: it sits just above the head, below the bubble.
-const NAME_HEIGHT: i32 = 2;
-const NAME_RAISE: f32 = 0.0;
-
-/// Uniform scale of the name tag (1.0 = vanilla size). A touch smaller than
-/// default so it reads as a tidy floating tag.
-const NAME_SCALE: f32 = 0.5;
-
-/// Render distance of the name tag, same `view_range * 64` blocks rule as the
-/// dialogue bubble. A touch further than [`DIALOGUE_VIEW_RANGE`] so the name
-/// fades in just before the dialogue does as the player approaches.
-const NAME_VIEW_RANGE: f32 = 0.05;
-
 /// The villager's biome "type" — the skin/outfit variant. These are the seven
 /// vanilla villager types. See <https://minecraft.wiki/w/Villager>.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,11 +186,9 @@ fn escape_snbt(s: &str) -> String {
 /// persistent, queryable record of which house it came from (residents have one;
 /// workplace/plaza fixtures pass `None`).
 ///
-/// The villager has `NoAI` so it won't wander or turn. Its `CustomName` is kept
-/// for identity (and the vanilla look-at hover) but not always-visible; the tag
-/// the player sees is a separate `text_display` with a `view_range`, so it (like
-/// the dialogue bubble) only shows once the player is near. Both displays are
-/// center-billboarded, so they always rotate to face the player.
+/// The villager has `NoAI` so it won't wander or turn, and `CustomNameVisible`
+/// so the name tag always shows. The bubble is a center-billboarded
+/// `text_display`, so it always rotates to face the player.
 pub async fn spawn_villager_npc(
     editor: &Editor,
     point: Point3D,
@@ -227,7 +208,7 @@ pub async fn spawn_villager_npc(
         None => String::new(),
     };
     let villager_data = format!(
-        "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:0b,Rotation:[{}f,0f],\
+        "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
          VillagerData:{{type:\"{}\",profession:\"{}\",level:1}}{}}}",
         escape_snbt(name),
         angle,
@@ -237,23 +218,6 @@ pub async fn spawn_villager_npc(
     );
     editor
         .spawn_entity("minecraft:villager", point, Some(&villager_data))
-        .await?;
-
-    // The name tag: its own text_display, just above the head, so it fades with
-    // distance instead of showing from across the map like the built-in tag.
-    let tag = point + Point3D::new(0, NAME_HEIGHT, 0);
-    let tag_data = format!(
-        "{{text:{{text:\"{}\"}},billboard:\"center\",alignment:\"center\",view_range:{}f,\
-         transformation:{{translation:[0f,{}f,0f],scale:[{s}f,{s}f,{s}f],left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f]}},\
-         Rotation:[{}f,0f]}}",
-        escape_snbt(name),
-        NAME_VIEW_RANGE,
-        NAME_RAISE,
-        angle,
-        s = NAME_SCALE,
-    );
-    editor
-        .spawn_entity("minecraft:text_display", tag, Some(&tag_data))
         .await?;
 
     // The dialogue bubble: a text display hovering above the head, styled by how
