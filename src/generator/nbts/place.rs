@@ -58,13 +58,18 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
         }
     };
 
+    // Beds are pasted without block updates: with updates on, the server runs the
+    // placement side effect of a bed foot auto-spawning its head — duplicating the
+    // half the NBT already contains, often shoved into an adjacent wall where it
+    // then breaks. Every other block is written normally.
+
     if input_palette.is_none() || output_palette.is_none() {
         for blockdata in structure.blocks {
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
-            if palette_data.name == "air".into() {
-                continue; // Skip air blocks
+            if palette_data.name == "air".into() || palette_data.name.is_structure_void() {
+                continue; // Skip air, and structure voids (leave existing terrain).
             }
 
             let mut pos = Point3D::from(blockdata.pos);
@@ -81,7 +86,12 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
                 state: palette_data.properties.clone(),
                 data, // Now contains the SNBT string if data exists
             });
-            editor.place_block(&block, transform.apply(Point3D::from(blockdata.pos))).await;
+            let point = transform.apply(Point3D::from(blockdata.pos));
+            if block.id.is_bed() {
+                editor.place_block_no_update(&block, point).await;
+            } else {
+                editor.place_block(&block, point).await;
+            }
         }
     } else {
         let placer = placer.unwrap();
@@ -90,8 +100,8 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             let palette_data = structure.palette.get(blockdata.state).expect("The block state index is out of bounds");
             let data = blockdata.nbt.as_ref().and_then(block_nbt_to_snbt);
 
-            if palette_data.name == "air".into() {
-                continue; // Skip air blocks
+            if palette_data.name == "air".into() || palette_data.name.is_structure_void() {
+                continue; // Skip air, and structure voids (leave existing terrain).
             }
 
             let mut pos = Point3D::from(blockdata.pos);
@@ -102,7 +112,7 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
             if let Some(mz) = mirror_z {
                 pos.z = mz * 2 - pos.z;
             }
-            
+
             let swap = input_palette.unwrap().swap_with(palette_data.name.clone(), output_palette.unwrap(), materials);
 
             match swap {
@@ -120,7 +130,12 @@ pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor:
                         data, // Now contains the SNBT string if data exists
                     });
 
-                    editor.place_block(&block, transform.apply(pos)).await;
+                    let point = transform.apply(pos);
+                    if block.id.is_bed() {
+                        editor.place_block_no_update(&block, point).await;
+                    } else {
+                        editor.place_block(&block, point).await;
+                    }
                 },
                 PaletteSwapResult::Material(material_id, form) => {
                     // Only log/wood/pillar forms keep an axis; for any other form

@@ -716,7 +716,7 @@ fn shortcut_edges(nodes: &[Point3D], mst: &[(usize, usize)]) -> Vec<(usize, usiz
 
 /// Prim's MST over `nodes`, edges weighted by XZ squared-distance. Returns the
 /// `(i, j)` index pairs of the tree edges.
-fn mst_edges(nodes: &[Point3D]) -> Vec<(usize, usize)> {
+pub(crate) fn mst_edges(nodes: &[Point3D]) -> Vec<(usize, usize)> {
     let n = nodes.len();
     if n < 2 {
         return Vec::new();

@@ -8,8 +8,8 @@ use super::{
     parcel::ParcelType,
     constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_RELATIVE_TO_PRIME,
         URBAN_SIZE_MIN, URBAN_SIZE_MAX, URBAN_GROWTH_CUTOFF, URBAN_GROWTH_CUTOFF_HIGH,
-        URBAN_OPTION_SCORE_MAX, RURAL_OPTION_SCORE_MAX},
-    merge::{get_candidate_score, parcel_similarity_score},
+        URBAN_OPTION_SCORE_MAX, RURAL_OPTION_SCORE_MAX, CITY_GROWTH_ADJACENCY_WEIGHT},
+    merge::{candidate_score_terms, parcel_similarity_score},
     data::HasParcelData
 };
 
@@ -84,7 +84,17 @@ pub fn classify_districts<'a>(districts: &mut HashMap<DistrictID, District>, par
             continue
         }
         let score = district_score(district, parcels);
-        if score <= URBAN_OPTION_SCORE_MAX {
+        // Absolute water gate, mirroring the per-parcel one in `classify_parcels`.
+        // `district_score` only measures the *proportion* of urban-leaning parcels, so
+        // merging can pull water-heavy (Rural) parcels into a district that still scores
+        // urban — letting rivers/lakes into the city core. Reject the whole district from
+        // the urban options when its merged water fraction is too high, regardless of
+        // score. Falls through to Rural so it's also ineligible for city growth.
+        let water = parcel_analysis_data.get(id).map(|a| a.water_percentage()).unwrap_or(0.0);
+        if water > URBAN_WATER_LIMIT {
+            district.data.parcel_type = ParcelType::Rural;
+            info!("District {:?} classified as Rural due to water {:.2} > {} ({} blocks, {} parcels)", id, water, URBAN_WATER_LIMIT, blocks, n_parcels);
+        } else if score <= URBAN_OPTION_SCORE_MAX {
             info!("District {:?} classified as Urban option with score {} ({} blocks, {} parcels)", id, score, blocks, n_parcels);
             options.push(*id);
         } else if score <= RURAL_OPTION_SCORE_MAX {
@@ -187,8 +197,16 @@ fn try_grow_city(
                 // Adjacency is measured against the whole current urban set (not just the prime), so
                 // candidates nestled into the city are preferred over lone tendrils — keeps the city compact.
                 let adjacency_ratio = set_adjacency_ratio(districts, &urban_set, id);
-                let score = get_candidate_score(parcel_analysis_data, prime, id, Some(adjacency_ratio));
-                info!("Candidate {:?} has score {} (set-adjacency {:.3})", id, score, adjacency_ratio);
+                let terms = candidate_score_terms(parcel_analysis_data, prime, id, Some(adjacency_ratio), CITY_GROWTH_ADJACENCY_WEIGHT);
+                let score = terms.total();
+                // Full per-term breakdown vs the prime: terrain similarity (each 0–1) vs the
+                // set-adjacency compactness term. `adj·w` and `terrain` are the unnormalized
+                // contributions; `total = (adj·w + terrain) / (5 + w)`.
+                info!(
+                    "Candidate {:?} score {:.4} = (adj {:.3}·{} + terrain {:.3}) / {} | biome {:.3} water {:.3} forest {:.3} gradient {:.3} roughness {:.3}",
+                    id, score, terms.adjacency, terms.weight, terms.terrain_sum(), 5.0 + terms.weight,
+                    terms.biome, terms.water, terms.forest, terms.gradient, terms.roughness,
+                );
                 (id, score)
             })
             .max_by(|(_, score1), (_, score2)| score1.partial_cmp(score2).expect("We should be able to compare scores"));

@@ -143,7 +143,7 @@ Once a winner is chosen, ground prep runs in this order:
    natural  = world.get_non_tree_height(cell)
    blended  = round(lerp(target_y, natural, t))
    ```
-   Skipped if `|natural - target_y| > MAX_BLEND_DELTA` — past that point the taper turns into a giant earthworks scar; better to leave the cliff in place. `force_height` is called with `skip_water = true` so the blend doesn't fill nearby lakes.
+   Every ring cell is graded toward natural terrain (no early bail on steep deltas), so the pad edge ramps down instead of dropping off as a cliff. Footprint steepness is bounded earlier by the `MAX_PLACEMENT_SLOPE` hard reject (except `allow_steep` structures like mines, which accept the larger earthworks), keeping the ramp reasonable. `force_height` is called with `skip_water = true` so the blend doesn't fill nearby lakes.
 4. **Place the NBT** via `nbts::place_structure`. The world-space anchor is `(centre.x, anchor_y, centre.y)`; the structure's own origin shift is handled inside `place_structure`.
 5. **Claim** every footprint cell as `BuildClaim::Structure(structure.id.clone())`. The blend ring is intentionally **not** claimed, so adjacent buildings can share blend rings and roads can cross tapered terrain near a structure.
 
@@ -155,8 +155,8 @@ Once a winner is chosen, ground prep runs in this order:
 | --------------------- | ------- | --------------------------------------------------------- |
 | `NUM_CANDIDATES`      | 10      | How many random centres to sample.                        |
 | `WATER_MARGIN_RADIUS` | 4       | Soft penalty radius around the footprint for water.       |
-| `BLEND_RADIUS`        | 4       | Width of the tapered ground-flattening ring.              |
-| `MAX_BLEND_DELTA`     | 4       | Skip blending cells where the cliff is too steep.         |
+| `BLEND_RADIUS`        | 6       | Width of the tapered ground-flattening ring.              |
+| `MAX_PLACEMENT_SLOPE` | 4       | Hard-reject footprints whose height range exceeds this (unless `allow_steep`). |
 | `YARD_RADIUS`         | 2       | How far around the footprint we clear trees.              |
 | `ROAD_SEARCH_RADIUS`  | 8       | Distance to scan for roads when computing the bonus.      |
 | `WALL_BUFFER_RADIUS`  | 1       | Minimum gap between a building and any `BuildClaim::Wall`.|

@@ -7,9 +7,58 @@ production_painters:
     flatten_strength: 0.6
 
   logging_area:
-    type: logging
-    percent: 0.7
+    type: function
+    function: logging_production_painter
+    params:
+      percent: 0.7
 
+  # mine surroundings — natural terrain dotted with rock outcrops (built from the
+  # local stone), some bearing the mined ore, plus ore seams in the ground. The
+  # ore follows the mine: iron_mine -> iron ore, coal_mine -> coal. Tunables are
+  # constants in production_area.rs (MINE_* ).
   mine_terrain:
-    type: palettes
-    palettes: [mine_ground]
+    type: function
+    function: mine_production_painter
+
+  # apiary surroundings — populated bee nests hung in the canopy of nearby trees.
+  bee_area:
+    type: function
+    function: bee_area_production_painter
+    params:
+      percent: 0.2     # fraction of trees that get a hive
+
+  # shepherd's grazing field — fenced pasture with a small flock of sheep.
+  sheep_pasture:
+    type: function
+    function: pasture_production_painter
+    params:
+      animal: minecraft:sheep
+      min_count: 10
+      max_count: 20
+      border_palette: rural_road
+      palette: oak          # fence wood follows this building palette
+      flatten_strength: 0.2
+
+  # sugar plantation — rows of varied-height sugar cane beside contained water
+  # channels; the soil under the cane keeps the existing dirt/sand where it can.
+  sugar_cane_fields:
+    type: function
+    function: sugarcane_production_painter
+    params:
+      border_palette: rural_road
+      flatten_strength: 0.7
+      water_spacing: 3     # one water row per 3 (1 water : 2 cane)
+      min_height: 1
+      max_height: 3
+
+  # cattle grazing field — fenced ranch with a small herd of cows.
+  cattle_ranch:
+    type: function
+    function: pasture_production_painter
+    params:
+      animal: minecraft:cow
+      min_count: 10
+      max_count: 20
+      border_palette: rural_road
+      palette: oak          # fence wood follows this building palette
+      flatten_strength: 0.4
