@@ -47,9 +47,9 @@ const YELL_RAISE: f32 = 0.0;
 const YELL_COLOR: &str = "#FFE9A8";
 const YELL_LINE_WIDTH: i32 = 220;
 const YELL_SCALE: f32 = 1.05;
-/// ~38 blocks (`view_range * 64`): a yell carries clear across the plaza, long
-/// before the player is close enough to read a normal bubble.
-const YELL_VIEW_RANGE: f32 = 0.6;
+/// ~10 blocks (`view_range * 64`): a yell carries noticeably further than a
+/// normal close-range aside, but still only reads once the player is fairly near.
+const YELL_VIEW_RANGE: f32 = 0.16;
 
 /// How loudly an NPC's dialogue bubble reads. `Normal` is a quiet, close-range
 /// aside; `Yelled` is a big, bold, far-visible shout for market criers and stage
@@ -171,6 +171,36 @@ impl Profession {
     }
 }
 
+/// A non-villager townsfolk mob we can drop in as a static fixture, the same way
+/// as [`spawn_villager_npc`] but without the villager-specific biome/profession.
+/// Witches and wandering traders are the colourful background characters that
+/// make a town feel lived-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mob {
+    Witch,
+    WanderingTrader,
+    Evoker,
+    Pillager,
+    Vindicator,
+    Husk,
+    ZombieVillager,
+}
+
+impl Mob {
+    /// The `minecraft:`-namespaced entity id passed to [`Editor::spawn_entity`].
+    pub fn id(self) -> &'static str {
+        match self {
+            Mob::Witch => "minecraft:witch",
+            Mob::WanderingTrader => "minecraft:wandering_trader",
+            Mob::Evoker => "minecraft:evoker",
+            Mob::Pillager => "minecraft:pillager",
+            Mob::Vindicator => "minecraft:vindicator",
+            Mob::Husk => "minecraft:husk",
+            Mob::ZombieVillager => "minecraft:zombie_villager",
+        }
+    }
+}
+
 /// Escape a user string for embedding inside a double-quoted SNBT string.
 fn escape_snbt(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
@@ -186,6 +216,10 @@ fn escape_snbt(s: &str) -> String {
 /// persistent, queryable record of which house it came from (residents have one;
 /// workplace/plaza fixtures pass `None`).
 ///
+/// `child`, when true, spawns a baby villager: `Age` is pinned to the most
+/// negative value so it never grows up (baby `Age` ticks toward 0; starting at
+/// `i32::MIN` keeps it a child for any realistic run).
+///
 /// The villager has `NoAI` so it won't wander or turn, and `CustomNameVisible`
 /// so the name tag always shows. The bubble is a center-billboarded
 /// `text_display`, so it always rotates to face the player.
@@ -199,6 +233,8 @@ pub async fn spawn_villager_npc(
     profession: Profession,
     volume: DialogueVolume,
     home: Option<usize>,
+    child: bool,
+    y_offset: f32,
 ) -> anyhow::Result<()> {
     // The villager itself: frozen, named, faced, and skinned by biome/profession.
     // level:1 so a working profession shows its job outfit (level 0 reads as none).
@@ -207,22 +243,71 @@ pub async fn spawn_villager_npc(
         Some(id) => format!(",Tags:[\"home_{id}\"]"),
         None => String::new(),
     };
+    // Babies start at the most negative Age so they never visibly grow up.
+    let age_tag = if child { format!(",Age:{}", i32::MIN) } else { String::new() };
     let villager_data = format!(
         "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
-         VillagerData:{{type:\"{}\",profession:\"{}\",level:1}}{}}}",
+         VillagerData:{{type:\"{}\",profession:\"{}\",level:1}}{}{}}}",
         escape_snbt(name),
         angle,
         biome.id(),
         profession.id(),
+        age_tag,
         home_tag,
     );
-    editor
-        .spawn_entity("minecraft:villager", point, Some(&villager_data))
-        .await?;
+    // Raise onto a slab top (e.g. a tower battlement) when asked; otherwise keep
+    // the integer-grid spawn so ground NPCs are unchanged.
+    if y_offset != 0.0 {
+        editor
+            .spawn_entity_offset("minecraft:villager", point, y_offset, Some(&villager_data))
+            .await?;
+    } else {
+        editor
+            .spawn_entity("minecraft:villager", point, Some(&villager_data))
+            .await?;
+    }
 
-    // The dialogue bubble: a text display hovering above the head, styled by how
-    // loud the line is (a quiet aside vs. a far-carrying yell). The transformation
-    // nudges it up a fractional block (entity coords are integer).
+    spawn_dialogue_bubble(editor, point, angle, dialogue, volume).await
+}
+
+/// Spawn a stationary mob NPC (e.g. a [`Mob::Witch`] or [`Mob::WanderingTrader`])
+/// at build-area-local `point` (its feet), facing `angle`, with a `name` tag and
+/// a `dialogue` bubble floating above its head.
+///
+/// This is the villager-free counterpart to [`spawn_villager_npc`]: the same
+/// frozen (`NoAI`), named, faced, talking fixture, but for the colourful
+/// non-villager townsfolk that don't carry a biome or profession.
+pub async fn spawn_mob_npc(
+    editor: &Editor,
+    point: Point3D,
+    angle: f32,
+    name: &str,
+    dialogue: &str,
+    mob: Mob,
+    volume: DialogueVolume,
+) -> anyhow::Result<()> {
+    // Frozen, named, and faced — same fixture treatment as a villager NPC.
+    let mob_data = format!(
+        "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f]}}",
+        escape_snbt(name),
+        angle,
+    );
+    editor.spawn_entity(mob.id(), point, Some(&mob_data)).await?;
+
+    spawn_dialogue_bubble(editor, point, angle, dialogue, volume).await
+}
+
+/// Spawn the dialogue bubble: a `text_display` hovering above an NPC's head,
+/// styled by how loud the line is (a quiet aside vs. a far-carrying yell). The
+/// transformation nudges it up a fractional block (entity coords are integer).
+/// Shared by [`spawn_villager_npc`] and [`spawn_mob_npc`].
+async fn spawn_dialogue_bubble(
+    editor: &Editor,
+    point: Point3D,
+    angle: f32,
+    dialogue: &str,
+    volume: DialogueVolume,
+) -> anyhow::Result<()> {
     let style = volume.style();
     let bubble = point + Point3D::new(0, style.height, 0);
     let bubble_data = format!(
@@ -283,6 +368,8 @@ mod tests {
             Profession::Butcher,
             DialogueVolume::Normal,
             Some(0),
+            false,
+            0.0,
         )
         .await
         .expect("failed to spawn NPC");

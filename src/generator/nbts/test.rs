@@ -174,14 +174,17 @@ mod tests {
         }, Point3D{
             x: match b.x {
                 Coordinate::Absolute(x) => x,
+                Coordinate::AbsoluteF(x) => x.round() as i32,
                 Coordinate::Relative(x) => build_area.origin.x + x,
             },
             y: match b.y {
                 Coordinate::Absolute(y) => y,
+                Coordinate::AbsoluteF(y) => y.round() as i32,
                 Coordinate::Relative(y) => build_area.origin.y + y,
             },
             z: match b.z {
                 Coordinate::Absolute(z) => z,
+                Coordinate::AbsoluteF(z) => z.round() as i32,
                 Coordinate::Relative(z) => build_area.origin.z + z,
             },
         } - build_area.origin)).collect::<Vec<_>>();
@@ -244,14 +247,17 @@ mod tests {
         }, Point3D{
             x: match b.x {
                 Coordinate::Absolute(x) => x,
+                Coordinate::AbsoluteF(x) => x.round() as i32,
                 Coordinate::Relative(x) => build_area.origin.x + x,
             },
             y: match b.y {
                 Coordinate::Absolute(y) => y,
+                Coordinate::AbsoluteF(y) => y.round() as i32,
                 Coordinate::Relative(y) => build_area.origin.y + y,
             },
             z: match b.z {
                 Coordinate::Absolute(z) => z,
+                Coordinate::AbsoluteF(z) => z.round() as i32,
                 Coordinate::Relative(z) => build_area.origin.z + z,
             },
         } - build_area.origin)).collect::<Vec<_>>();

@@ -112,6 +112,15 @@ dialogue:
     - "Busy on the square today, isn't it?"
     - "Wonder if they've any of those left..."
     - "My coin's near spent already."
+  # Guards posted at a gate or on a wall tower, watching the approaches.
+  guarding:
+    - "State your business at the gate."
+    - "Move along — nothing amiss here."
+    - "Keep the peace and we'll have no trouble."
+    - "Eyes on the road. You never know these days."
+    - "Halt. ...Right, on you go."
+    - "Quiet watch tonight, thank the gods."
+    - "No weapons drawn inside the walls."
 
 # Multi-person exchanges: each entry is one back-and-forth, its lines handed to
 # a scene's slots in order (line 0 = the opener, line 1 = the reply). Keyed like
@@ -132,3 +141,26 @@ exchanges:
       - "Don't say that too loud — you'll jinx it."
     - - "I heard wolves on the ridge last night."
       - "Best keep the gate barred, then."
+  # Stage performances, bucketed by cast size. The stage rolls 1–3 performers and
+  # staff_scene draws a `performing` entry with exactly that many lines (one per
+  # performer). Solos, duets, and trios live side by side here; every line is
+  # yelled out over the square, so each should stand on its own as a shout.
+  performing:
+    # — solo acts (1) —
+    - - "Gather round, good folk — a tale to chill your very blood!"
+    - - "Lend me your ears, and I'll lend you a song you'll never forget!"
+    - - "One night only! You'll be telling your grandchildren of this!"
+    # — duets (2) —
+    - - "Strike up the tune, my friend — let's give them a show!"
+      - "Aye! And I'll sing it sweet enough to still the birds!"
+    - - "I'll play the gallant knight, bold and true!"
+      - "And I the wicked dragon — flee, good people, flee!"
+    - - "Step closer for the ballad of the drowned sailor!"
+      - "And mind you weep, for it's a sorry end he met!"
+    # — trios (3) —
+    - - "A play in three parts, good people — settle in!"
+      - "I am the king, and I have lost my crown!"
+      - "And we the thieves who took it — catch us if you can!"
+    - - "Step up for the song of the three winds!"
+      - "I am the north wind, cold and cruel!"
+      - "And I the south — I'll thaw his frozen heart yet!"

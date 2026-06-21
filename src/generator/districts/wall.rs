@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use log::info;
-use crate::{generator::{data::LoadedData, districts::build_wall_gate, materials::{MaterialId, Palette, Placer}, nbts::{place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
+use crate::{generator::{data::LoadedData, districts::build_wall_gate, materials::{MaterialId, Palette, Placer}, nbts::{load_nbt_structure, place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
 use crate::editor::Editor;
 
@@ -855,6 +855,10 @@ pub async fn build_wall_towers(
     let distance_to_next_tower = 80;
     let mut tower_possible = rng.rand_i32_range(0, distance_to_next_tower / 2);
     let tower = structures.get(&"basic_tower".into()).expect("Structure not found");
+    // Decode the tower NBT once to learn its height, so guards can be posted on
+    // the battlement top. Falls back to a typical tower height if the file can't
+    // be read.
+    let tower_size_y: i32 = load_nbt_structure(&tower.meta.path).map(|s| s.size[1]).unwrap_or(12);
     let walkway_set: HashSet<Point2D> = walkway_points.iter().cloned().collect();
 
     // When a culture palette is supplied, load the generator data so the tower
@@ -891,6 +895,19 @@ pub async fn build_wall_towers(
                 // (data + output palette both present → place_structure runs the
                 // swap); otherwise place the authored blocks unchanged.
                 place_structure(editor, Some(material_placer), &tower, point.add_y(point_height+6), Cardinal::North, data.as_ref(), palette, false, false).await.expect("Failed to place tower");
+
+                // Two guard posts on the tower's battlement top, where guards
+                // stand watch. The structure's origin maps to (point, point_height
+                // + 6); its highest blocks (the merlons) sit `size_y - 1 - origin.y`
+                // above that, and the battlement floor is level with the merlon
+                // tops — so feet stand at that y on the two centre cells.
+                // Drop 5 below the computed crown so feet land on the battlement
+                // floor rather than atop the merlons / above the roofline.
+                let top_y = point_height + 6 + (tower_size_y - 1) - tower.origin.y - 5;
+                editor.world_mut().tower_guard_posts.push(vec![
+                    Point3D::new(point.x, top_y, point.y),
+                    Point3D::new(point.x + 1, top_y, point.y),
+                ]);
             }
         } else {
                 tower_possible -= 1;

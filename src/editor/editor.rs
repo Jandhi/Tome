@@ -331,6 +331,30 @@ impl Editor {
         };
         self.provider.put_entities(0, 0, 0, &vec![entity]).await
     }
+
+    /// Like [`spawn_entity`] but raises the entity by a fractional `y_offset`
+    /// blocks (entity positions are doubles) — e.g. to stand an NPC on top of a
+    /// slab. The horizontal coordinates stay on the block grid.
+    pub async fn spawn_entity_offset(
+        &self,
+        id: &str,
+        point: Point3D,
+        y_offset: f32,
+        data: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        let world = point + self.build_area.origin;
+        let entity = PositionedEntity {
+            x: Coordinate::Absolute(world.x),
+            y: Coordinate::AbsoluteF(world.y as f64 + y_offset as f64),
+            z: Coordinate::Absolute(world.z),
+            id: id.to_string(),
+            data: data.map(|s| s.to_string()),
+        };
+        self.provider.put_entities(0, 0, 0, &vec![entity]).await
+    }
 }
 
 impl Drop for Editor {

@@ -6,6 +6,9 @@ use crate::geometry::Point3D;
 #[derive(Clone, Copy, Debug)]
 pub enum Coordinate {
     Absolute(i32),
+    /// A fractional absolute coordinate (entity positions are doubles), e.g. to
+    /// stand an NPC half a block up on a slab. Serialized as a JSON float.
+    AbsoluteF(f64),
     Relative(i32),
 }
 
@@ -51,14 +54,17 @@ impl Into<Point3D> for Coordinate3D {
         Point3D {
             x: match self.x {
                 Coordinate::Absolute(value) => value,
+                Coordinate::AbsoluteF(value) => value.round() as i32,
                 Coordinate::Relative(_) => panic!("Relative coordinates cannot be converted to Point3D"),
             },
             y: match self.y {
                 Coordinate::Absolute(value) => value,
+                Coordinate::AbsoluteF(value) => value.round() as i32,
                 Coordinate::Relative(_) => panic!("Relative coordinates cannot be converted to Point3D"),
             },
             z: match self.z {
                 Coordinate::Absolute(value) => value,
+                Coordinate::AbsoluteF(value) => value.round() as i32,
                 Coordinate::Relative(_) => panic!("Relative coordinates cannot be converted to Point3D"),
             },
         }
@@ -72,6 +78,7 @@ impl Serialize for Coordinate {
     {
         match *self {
             Coordinate::Absolute(value) => serializer.serialize_i32(value),
+            Coordinate::AbsoluteF(value) => serializer.serialize_f64(value),
             Coordinate::Relative(value) => serializer.serialize_str(&format!("~{}", value)),
         }
     }
@@ -87,6 +94,7 @@ impl<'de> Deserialize<'de> for Coordinate {
         enum CoordHelper {
             Str(String),
             Int(i32),
+            Float(f64),
         }
 
         match CoordHelper::deserialize(deserializer)? {
@@ -100,6 +108,7 @@ impl<'de> Deserialize<'de> for Coordinate {
                 }
             }
             CoordHelper::Int(value) => Ok(Coordinate::Absolute(value)),
+            CoordHelper::Float(value) => Ok(Coordinate::AbsoluteF(value)),
         }
     }
 }

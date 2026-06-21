@@ -11,13 +11,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
-use crate::generator::population::{yaw_toward, AnchorScene, SlotRole};
+use crate::generator::population::{yaw_toward, AnchorScene, AnchorSlot, SceneKind, SlotRole};
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::noise::RNG;
 
 use super::props::{
-    chebyshev, edge_depth, flatten_blend, inward_dir, is_building, is_path, place_bench,
-    place_lantern_post, place_planter, place_tree, put, put_forced,
+    cardinal_facing, chebyshev, edge_depth, flatten_blend, inward_dir, is_building, is_path,
+    place_bench, place_lantern_post, place_planter, place_tree, put, put_forced,
 };
 use super::theme::Theme;
 use super::Region;
@@ -262,19 +262,35 @@ async fn furnish_plaza_inner(
         PlazaType::Fountain => build_fountain(editor, centre, centre_h, theme).await,
         PlazaType::Monument => build_monument(editor, centre, centre_h, radius >= 1, theme).await,
         PlazaType::Stage => {
-            build_stage(editor, centre, centre_h, theme).await;
-            // A performer up on the deck, calling out over the square. The deck
+            // Orient the stage toward the largest open stretch of the square, so
+            // the troupe plays to as much of the plaza as possible. `front` is the
+            // cardinal with the most plaza cells ahead of the centre — the side the
+            // audience gathers on, and the way the performers (and the stage's
+            // front step) face.
+            let front = stage_front(region, centre);
+            build_stage(editor, centre, centre_h, front, theme).await;
+            // A troupe up on the deck, calling out over the square. The deck
             // planks sit at `centre_h + 1`, so feet stand on top at `centre_h + 2`.
-            // Face north (−z), out over the audience away from the back-rail.
-            let feet = Point3D::new(centre.x, centre_h + 2, centre.y);
-            let facing = yaw_toward(feet, feet + Point3D::new(0, 0, -8));
-            scenes.push(AnchorScene::solo_with(
-                feet,
-                facing,
-                SlotRole::Idle,
-                Some("performing".to_string()),
-                DialogueVolume::Yelled,
-            ));
+            // The stage rolls its own cast — a solo act, a duet, or a trio — and
+            // `staff_scene` then draws a `performing` script with that many lines
+            // (see `NpcData::exchange_of_len`). The cast stands in a row across the
+            // deck (perpendicular to `front`), all facing `front` out over the
+            // audience.
+            let perp = Point2D::new(-front.y, front.x);
+            let cast = *rng.choose(&[1, 2, 3]);
+            let slots = (0..cast)
+                .map(|i| {
+                    let off = i - cast / 2;
+                    let stand = centre + Point2D::new(perp.x * off, perp.y * off);
+                    let feet = Point3D::new(stand.x, centre_h + 2, stand.y);
+                    let facing = yaw_toward(feet, feet + Point3D::new(front.x * 8, 0, front.y * 8));
+                    let mut slot = AnchorSlot::new(feet, facing, SlotRole::Idle);
+                    slot.dialogue = Some("performing".to_string());
+                    slot.volume = DialogueVolume::Yelled;
+                    slot
+                })
+                .collect();
+            scenes.push(AnchorScene::group(SceneKind::Performance, slots));
         }
         // A market has no centrepiece — it's defined by its U-shaped stalls,
         // placed below across the whole open floor.
@@ -656,38 +672,67 @@ async fn build_cart(editor: &Editor, base: Point2D, perp: Point2D, dir: Point2D,
     put(editor, handle.x, h, handle.y, &fence).await;
 }
 
+/// The cardinal direction a stage should face: the one with the most plaza cells
+/// ahead of the centre, so the troupe plays to the largest part of the square.
+/// Falls back to north (−z) for a perfectly symmetric plaza.
+fn stage_front(region: &Region, centre: Point2D) -> Point2D {
+    CARDINALS_2D
+        .iter()
+        .copied()
+        .max_by_key(|d| {
+            region
+                .cells
+                .iter()
+                .filter(|p| (p.x - centre.x) * d.x + (p.y - centre.y) * d.y > 0)
+                .count()
+        })
+        .unwrap_or(Point2D::new(0, -1))
+}
+
 /// A raised performance stage: a wooden 5×5 deck on fence legs (open
-/// underneath), a low back-rail, and a step up at the front. `h` is the first
-/// air cell above the (flat) centre paving.
-async fn build_stage(editor: &Editor, c: Point2D, h: i32, theme: &Theme) {
+/// underneath), a low back-rail, and an access staircase up one side. `h` is the
+/// first air cell above the (flat) centre paving. `front` is the cardinal
+/// direction the stage faces — the audience sits on this side and the performers
+/// look out over it; the back-rail is opposite, and the access stairs climb the
+/// deck's side so they never block the front.
+async fn build_stage(editor: &Editor, c: Point2D, h: i32, front: Point2D, theme: &Theme) {
     let pr = 2; // deck half-side: always a 5×5 deck
+    // Local axes: `front`/`back` run front-to-back, `perp` spans the width.
+    let perp = Point2D::new(-front.y, front.x);
+    let cell = |i: i32, j: i32| Point2D::new(c.x + perp.x * i + front.x * j, c.y + perp.y * i + front.y * j);
     let fence = format!("minecraft:{}_fence", theme.wood);
     let deck = format!("minecraft:{}_planks", theme.wood);
-    // Front-edge deck cells are stairs (rising toward the back) so the access step
-    // climbs cleanly onto the deck instead of butting against a full block.
-    let lip = format!("minecraft:{}_stairs[facing=north,half=bottom]", theme.wood);
     // Legs on the perimeter at floor level; plank deck one block up across the
-    // whole footprint (the interior is left open, held by the deck above).
-    for dx in -pr..=pr {
-        for dz in -pr..=pr {
-            let (x, z) = (c.x + dx, c.y + dz);
-            if dx.abs() == pr || dz.abs() == pr {
-                put(editor, x, h, z, &fence).await;
+    // whole footprint (the interior is left open, held by the deck above). `j`
+    // runs back (−pr) to front (+pr); `i` spans the width.
+    for i in -pr..=pr {
+        for j in -pr..=pr {
+            let p = cell(i, j);
+            if i.abs() == pr || j.abs() == pr {
+                put(editor, p.x, h, p.y, &fence).await;
             }
-            let top = if dz == pr { &lip } else { &deck };
-            put(editor, x, h + 1, z, top).await;
+            put(editor, p.x, h + 1, p.y, &deck).await;
         }
     }
     // Low back-rail along the far edge, with lanterns on its corners.
-    for dx in -pr..=pr {
-        put(editor, c.x + dx, h + 2, c.y - pr, &fence).await;
+    for i in -pr..=pr {
+        let p = cell(i, -pr);
+        put(editor, p.x, h + 2, p.y, &fence).await;
     }
-    for &dx in &[-pr, pr] {
-        put(editor, c.x + dx, h + 3, c.y - pr, "minecraft:lantern").await;
+    for &i in &[-pr, pr] {
+        let p = cell(i, -pr);
+        put(editor, p.x, h + 3, p.y, "minecraft:lantern").await;
     }
-    // A step up at the front edge: a stair just outside the deck, facing in.
-    let stair = format!("minecraft:{}_stairs[facing=north,half=bottom]", theme.wood);
-    put(editor, c.x, h, c.y + pr + 1, &stair).await;
+    // Access staircase up the `+perp` side: a two-step climb (ground stair just
+    // outside the deck, then the deck-edge cell turned into a stair) rising toward
+    // the deck centre, so the performers' front stays clear.
+    let side = perp; // the side the stairs climb (arbitrary; either flank works)
+    let toward_deck = Point2D::new(-side.x, -side.y);
+    let step = format!("minecraft:{}_stairs[facing={},half=bottom]", theme.wood, cardinal_facing(toward_deck));
+    let upper = cell(pr, 0); // deck-edge cell → stair up to deck level
+    let lower = cell(pr + 1, 0); // one cell out, sitting on the paving
+    put(editor, upper.x, h + 1, upper.y, &step).await;
+    put(editor, lower.x, h, lower.y, &step).await;
 }
 
 /// 3×3 covered well centred at `c`; `h` is the first air cell above the paving.

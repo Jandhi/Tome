@@ -22,6 +22,10 @@ pub struct World {
     pub buildings : Vec<BuildingData>,
     pub structures : Vec<StructureID>,
     pub gate_locations : Vec<(Point3D, Cardinal)>,
+    /// Walkway guard posts grouped by wall tower: each inner Vec holds the
+    /// walkable feet positions (walkway cell at surface + 1) just outside one
+    /// tower's base, where a guard NPC can stand. Populated by `build_wall_towers`.
+    pub tower_guard_posts : Vec<Vec<Point3D>>,
     /// Regularized "inside the wall" cell set. When `Some`, `get_urban_points`
     /// returns it instead of the raw district union (see districts/footprint.rs).
     pub urban_footprint : Option<HashSet<Point2D>>,
@@ -101,6 +105,7 @@ impl World {
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            tower_guard_posts: Vec::new(),
             urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
@@ -169,6 +174,7 @@ impl World {
             buildings: Vec::new(),
             structures: Vec::new(),
             gate_locations: Vec::new(),
+            tower_guard_posts: Vec::new(),
             urban_footprint: None,
             ground_height_map,
             ground_block_map,

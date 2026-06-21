@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::generator::population::{SceneKind, SlotRole};
 use crate::geometry::Rect2D;
 
@@ -25,6 +27,12 @@ pub struct ConstraintMap {
     pub ground: Vec<Vec<CellState>>,
     /// ceiling[x][z] — true if a ceiling item is placed here.
     pub ceiling: Vec<Vec<bool>>,
+    /// World (x, z) cells that belong to a staircase (steps, landings, tops, and
+    /// the stairwell air-column above). NPC anchors are never placed on these —
+    /// standing on a stair reads as a glitch — so they're tracked separately from
+    /// [`CellState`] (a stair landing is `UnblockedReachable`, indistinguishable
+    /// from a door entrance otherwise). See [`Self::is_stair`].
+    pub stairs: HashSet<(i32, i32)>,
 }
 
 impl ConstraintMap {
@@ -36,6 +44,7 @@ impl ConstraintMap {
             origin: (interior.min().x, interior.min().y),
             ground: vec![vec![CellState::Empty; h]; w],
             ceiling: vec![vec![false; h]; w],
+            stairs: HashSet::new(),
         }
     }
 
@@ -60,6 +69,16 @@ impl ConstraintMap {
         if let Some((x, z)) = self.local(cell) {
             self.ground[x][z] = state;
         }
+    }
+
+    /// Mark a world cell as part of a staircase (see [`Self::stairs`]).
+    pub fn mark_stair(&mut self, cell: (i32, i32)) {
+        self.stairs.insert(cell);
+    }
+
+    /// Whether a world cell belongs to a staircase — NPC anchors are barred here.
+    pub fn is_stair(&self, cell: (i32, i32)) -> bool {
+        self.stairs.contains(&cell)
     }
 
     pub fn ceiling_occupied(&self, cell: (i32, i32)) -> bool {

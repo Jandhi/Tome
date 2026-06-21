@@ -73,6 +73,9 @@ pub struct AnchorSlot {
     /// `Normal`; plaza criers and stage performers are `Yelled` so their line
     /// carries across the square (see [`super::npc::DialogueVolume`]).
     pub volume: DialogueVolume,
+    /// Fractional blocks to raise the spawned NPC's feet — e.g. `0.5` to stand on
+    /// a slab top (a tower battlement). `0.0` for normal full-block ground.
+    pub y_offset: f32,
 }
 
 impl AnchorSlot {
@@ -88,6 +91,7 @@ impl AnchorSlot {
             profession: None,
             dialogue: None,
             volume: DialogueVolume::Normal,
+            y_offset: 0.0,
         }
     }
 }
@@ -102,6 +106,10 @@ pub enum SceneKind {
     Haggle,
     Table,
     Mourning,
+    /// A troupe on a plaza stage — a solo act, duet, or trio. The stage rolls the
+    /// cast size and `staff_scene` draws a `performing` script with that many
+    /// lines (see [`NpcData::exchange_of_len`]).
+    Performance,
 }
 
 /// A group of slots filled as a unit.
@@ -139,6 +147,7 @@ impl AnchorScene {
                 profession: None,
                 dialogue,
                 volume,
+                y_offset: 0.0,
             }],
         }
     }
@@ -157,6 +166,7 @@ impl AnchorScene {
                 profession: Some(profession),
                 dialogue: None,
                 volume: DialogueVolume::Normal,
+                y_offset: 0.0,
             }],
         }
     }
@@ -201,6 +211,9 @@ pub struct Npc {
     pub name: String,
     pub biome: VillagerBiome,
     pub profession: Profession,
+    /// A baby villager. Children keep a roster profession for naming/dialogue but
+    /// spawn as a baby (see [`spawn_villager_npc`]).
+    pub is_child: bool,
 }
 
 /// The villager skin variant that matches a town's culture.
@@ -255,15 +268,19 @@ impl NpcData {
         }
     }
 
-    /// Pick one whole exchange (an ordered list of lines) for `key`, or `None`
-    /// if there's no exchange pool for it. The caller hands the lines out to a
-    /// scene's slots in order so the conversation reads as a single back-and-
-    /// forth.
-    pub fn exchange(&self, key: &str, rng: &mut RNG) -> Option<Vec<String>> {
-        self.exchanges
-            .get(key)
-            .filter(|pool| !pool.is_empty())
-            .map(|pool| rng.choose(pool).clone())
+    /// Pick one whole exchange (an ordered list of lines) for `key` whose cast
+    /// size matches `n` — an entry with exactly `n` lines, one per speaker — or
+    /// `None` if the pool has no `n`-line entry. The caller hands the lines out to
+    /// a scene's slots in order so the group reads as one exchange. Selecting by
+    /// length lets a single key (e.g. `performing`) hold solos, duets, and trios
+    /// side by side, and a fixed-size scene draw the script that fits its cast.
+    pub fn exchange_of_len(&self, key: &str, n: usize, rng: &mut RNG) -> Option<Vec<String>> {
+        let pool = self.exchanges.get(key)?;
+        let matching: Vec<&Vec<String>> = pool.iter().filter(|e| e.len() == n).collect();
+        if matching.is_empty() {
+            return None;
+        }
+        Some(rng.choose(&matching).to_vec())
     }
 }
 
@@ -295,7 +312,9 @@ pub fn build_roster(count: usize, culture: Culture, data: &NpcData, rng: &mut RN
                 name.push_str(rng.choose(&data.epithets).as_str());
             }
             let profession = *rng.choose(&PROFESSIONS);
-            Npc { name, biome, profession }
+            // Children aren't decided here yet — residents default to adults; the
+            // caller flips `is_child` (and the spawner's `child`) when it wants one.
+            Npc { name, biome, profession, is_child: false }
         })
         .collect()
 }
@@ -339,11 +358,14 @@ async fn staff_scene(
     if need == 0 || pool.len() < need {
         return Ok(0);
     }
-    let exchange = if scene.slots.len() >= 2 {
-        scene.slots[0].dialogue.as_deref().and_then(|k| data.exchange(k, rng))
-    } else {
-        None
-    };
+    // Draw one script sized to this scene's cast: an `n`-line exchange for `n`
+    // slots, so a duet gets two lines and a trio three (see `exchange_of_len`).
+    // `need >= 1` here (the early return covers all-optional scenes), so slot 0
+    // exists. Keys with no matching-length entry fall back to per-slot `line`s.
+    let exchange = scene.slots[0]
+        .dialogue
+        .as_deref()
+        .and_then(|k| data.exchange_of_len(k, scene.slots.len(), rng));
     let mut placed = 0usize;
     for (i, slot) in scene.slots.iter().enumerate() {
         if !slot.required && pool.is_empty() {
@@ -357,7 +379,7 @@ async fn staff_scene(
             .unwrap_or_else(|| data.line(slot.dialogue.as_deref(), rng));
         spawn_villager_npc(
             editor, slot.pos, slot.facing, &npc.name, &dialogue, npc.biome, profession, slot.volume,
-            home,
+            home, npc.is_child, slot.y_offset,
         )
         .await?;
         placed += 1;
@@ -557,6 +579,25 @@ mod tests {
         // No key at all also falls back.
         let none = data.line(None, &mut rng);
         assert!(data.small_talk.contains(&none));
+    }
+
+    /// `exchange_of_len` returns only entries with the requested line count, so a
+    /// fixed-size stage scene draws a script that fits its cast. No server.
+    #[test]
+    fn exchange_matches_cast_size() {
+        let data = NpcData::load().expect("load npcs.yaml");
+        let mut rng = RNG::new(Seed(7));
+        // The `performing` pool has solos, duets, and trios; each draw has exactly
+        // the requested number of lines.
+        for n in 1..=3 {
+            let script = data
+                .exchange_of_len("performing", n, &mut rng)
+                .unwrap_or_else(|| panic!("performing pool should have a {n}-line entry"));
+            assert_eq!(script.len(), n, "drew a {}-line script for cast {n}", script.len());
+        }
+        // No 9-line performance exists, and an unknown key has no exchanges at all.
+        assert!(data.exchange_of_len("performing", 9, &mut rng).is_none());
+        assert!(data.exchange_of_len("no_such_key", 2, &mut rng).is_none());
     }
 
     /// Build a small roster and place it along a row of solo anchors across the

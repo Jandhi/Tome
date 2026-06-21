@@ -349,11 +349,12 @@ pub(crate) fn harvest_anchors(
 }
 
 /// Validate one furniture anchor candidate against the final layout. A slot is
-/// usable if its cell exists in the space (in-bounds) and is not `Blocked` (so
-/// `Empty`, `UnblockedReachable`, and reserved approach cells all qualify) and
-/// isn't already claimed by another accepted anchor. A required slot that can't
-/// be staffed drops the whole scene; an optional one just drops itself. Returns
-/// the resolved [`AnchorScene`] (claiming its cells) or `None`.
+/// usable if its cell exists in the space (in-bounds), is not `Blocked` (so
+/// `Empty`, `UnblockedReachable`, and reserved approach cells all qualify), is
+/// not a staircase cell, and isn't already claimed by another accepted anchor. A
+/// required slot that can't be staffed drops the whole scene; an optional one
+/// just drops itself. Returns the resolved [`AnchorScene`] (claiming its cells)
+/// or `None`.
 fn validate_anchor(
     candidate: &AnchorCandidate,
     constraints: &ConstraintMap,
@@ -363,7 +364,12 @@ fn validate_anchor(
     let mut slots: Vec<AnchorSlot> = Vec::new();
     for slot in &candidate.slots {
         let key = (slot.cell.0, floor_y, slot.cell.1);
+        // Never stand an NPC on a staircase (steps, landings, tops, or the
+        // stairwell air-column) — it reads as a glitch. Stair steps are already
+        // `Blocked`, but landings/tops are `UnblockedReachable` and would
+        // otherwise slip through, so reject any stair cell explicitly.
         let usable = matches!(constraints.get(slot.cell), Some(s) if s != CellState::Blocked)
+            && !constraints.is_stair(slot.cell)
             && !claimed.contains(&key);
         if usable {
             slots.push(AnchorSlot {
@@ -376,6 +382,7 @@ fn validate_anchor(
                 // Furniture-driven anchors are always ordinary indoor speech;
                 // only plaza fixtures yell.
                 volume: crate::generator::npc::DialogueVolume::Normal,
+                y_offset: 0.0,
             });
         } else if slot.required {
             return None; // a required spot is taken/blocked → drop the scene

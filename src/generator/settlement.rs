@@ -238,6 +238,62 @@ pub async fn generate_town(
         "Placed {} / {} industrial buildings",
         editor.world().structures.len() - n_before, ind_counts.values().sum::<u32>(),
     );
+    let urban_industrial_count = editor.world().structures.len() - n_before;
+
+    // ---- Rural buildings ----
+    // Outside the wall, the resource chain assigns each rural super-parcel a
+    // gathering/processing building from its biome resources (a farm, mine,
+    // sawmill, ranch, ...). Resolve the assignments, place one building per
+    // assigned parcel, and paint its production area (fields, pasture, spoil).
+    // These sit in their own parcels — independent of the urban road network and
+    // not barriers for it — and each placement flattens its own footprint and
+    // clears its yard, so the pass is self-contained. Their `Structure` claim ids
+    // follow the urban ones, so the worker-staffing pass below picks them up too.
+    let n_rural_before = editor.world().structures.len();
+    {
+        use crate::generator::districts::DistrictID;
+        use crate::generator::placement::place_rural_building;
+        use crate::generator::resource_chain::paint_production_area;
+
+        let rural_ids: Vec<DistrictID> = editor.world().districts.iter()
+            .filter(|(_, sd)| sd.data.parcel_type == ParcelType::Rural)
+            .map(|(id, _)| *id)
+            .collect();
+        let rural_analysis: HashMap<DistrictID, _> = rural_ids.iter()
+            .filter_map(|id| editor.world().district_analysis_data.get(id).map(|a| (*id, a.clone())))
+            .collect();
+        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
+
+        // One placement per assigned rural parcel (assignments are keyed by
+        // DistrictID); sort for deterministic order.
+        let mut sd_ids: Vec<DistrictID> = result.parcel_assignments.keys().cloned().collect();
+        sd_ids.sort_by_key(|id| id.0);
+        for sd_id in &sd_ids {
+            let assignment = &result.parcel_assignments[sd_id];
+            let Some(district) = editor.world().districts.get(sd_id).cloned() else { continue };
+            let structure_type = crate::generator::nbts::StructureType(assignment.building.clone());
+            let Some(structure) = data.structures.get(&structure_type).cloned() else {
+                log::warn!("no structure for rural building '{}'", assignment.building);
+                continue;
+            };
+            match place_rural_building(&district, &structure, &mut rng, editor, &data).await {
+                Ok(()) => {
+                    if let Some(painter) = &assignment.production_painter {
+                        paint_production_area(&district, painter, &data, editor, &mut rng).await;
+                    }
+                }
+                Err(e) => log::warn!("rural placement failed for '{}': {}", assignment.building, e),
+            }
+        }
+    }
+    let rural_building_count = editor.world().structures.len() - n_rural_before;
+    let rural_parcel_count = editor.world().districts.values()
+        .filter(|sd| sd.data.parcel_type == ParcelType::Rural)
+        .count();
+    println!(
+        "Placed {} rural buildings across {} rural parcels",
+        rural_building_count, rural_parcel_count,
+    );
 
     // Footprints → a `blocked` barrier (footprint + margin) and one node per
     // building for the network to connect.
@@ -817,6 +873,24 @@ pub async fn generate_town(
         );
     }
 
+    // Count plaza employment for the jobs summary: a stall is any scene with a
+    // `Worker` slot (market vendors), a stage is a `Performance` scene, and its
+    // performer slots are the per-stage cast. Onlookers/browsers aren't jobs.
+    let (market_stall_count, stage_count, performer_slot_count) = {
+        use crate::generator::population::{SceneKind, SlotRole};
+        let stalls = plaza_scenes.iter()
+            .filter(|s| s.slots.iter().any(|sl| sl.role == SlotRole::Worker))
+            .count();
+        let stages = plaza_scenes.iter()
+            .filter(|s| s.kind == SceneKind::Performance)
+            .count();
+        let performers: usize = plaza_scenes.iter()
+            .filter(|s| s.kind == SceneKind::Performance)
+            .map(|s| s.slots.len())
+            .sum();
+        (stalls, stages, performers)
+    };
+
     // ---- Plaza fixtures: staff every harvested plaza scene ----
     // Stage performers, market vendors, and onlookers are fixtures like the
     // industrial workers below — always placed, independent of the resident bed
@@ -862,40 +936,75 @@ pub async fn generate_town(
         }
     }
 
-    // ---- Industrial worker fixtures ----
-    // Staff every industrial shop with exactly one worker NPC standing just
-    // outside it, facing the workshop, wearing the trade outfit that matches its
-    // type (a smith at the smithy, a shepherd at the weaver, ...). These are
-    // fixtures: always placed, independent of the resident budget above. The NBT
-    // interiors are opaque, so the worker stands on a clear ground cell at the
-    // footprint edge — never inside, never on a road or another building.
+    // ---- Worker fixtures: staff every workplace ----
+    // Stand a small crew of worker NPCs just outside each placed building (urban
+    // processing shop or rural gather building), facing it, wearing the trade
+    // outfit that matches its type. These are fixtures: always placed, independent
+    // of the resident budget above. The NBT interiors are opaque, so workers stand
+    // on clear ground cells at the footprint edge — never inside, never on a road
+    // or another building. A workplace can employ several hands (see `workers_for`).
     {
         use crate::generator::npc::Profession;
-        use crate::generator::population::{build_roster, populate_npcs, AnchorScene, NpcData};
+        use crate::generator::population::{
+            build_roster, populate_npcs, AnchorScene, AnchorSlot, NpcData, SceneKind, SlotRole,
+        };
 
-        // type name -> trade outfit. smithy/carpenter roll across a small set so
-        // shops of the same kind don't all wear the identical profession.
+        // Building type -> trade outfit. Shops with a set roll across it so two of
+        // the same kind don't always match. Covers urban processing shops and rural
+        // gather buildings; the default keeps any unmapped workplace staffed.
         let mut worker_rng = rng.derive();
         let profession_for = |kind: &str, rng: &mut RNG| -> Option<Profession> {
             Some(match kind {
-                "smithy" => *rng.choose(&[
-                    Profession::Weaponsmith, Profession::Toolsmith, Profession::Armorer,
-                ]),
-                "mill" => Profession::Farmer,
-                "bakery" => Profession::Butcher, // no baker profession; closest food trade
-                "carpenter" => *rng.choose(&[Profession::Fletcher, Profession::Mason]),
+                // — urban processing shops —
+                "smithy" | "smelter" => {
+                    *rng.choose(&[Profession::Weaponsmith, Profession::Toolsmith, Profession::Armorer])
+                }
+                "mill" | "sawmill" | "sugar_mill" | "paper_mill_wood" | "paper_mill_sugar" => {
+                    Profession::Farmer
+                }
+                "bakery" | "confectionery" | "butcher" => Profession::Butcher,
+                "carpenter" | "woodcutter_hut" => {
+                    *rng.choose(&[Profession::Fletcher, Profession::Mason])
+                }
                 "tannery" => Profession::Leatherworker,
-                "weaver" => Profession::Shepherd,
-                _ => return None,
+                "weaver" | "tailor" => Profession::Shepherd,
+                "scriptorium" => Profession::Librarian,
+                "brewery" | "chandlery" | "apiary" => Profession::Farmer,
+                // — rural gather buildings —
+                "farm" | "sugar_plantation" => Profession::Farmer,
+                "ranch" | "shepherds_hut" => Profession::Shepherd,
+                "iron_mine" | "coal_mine" | "charcoal_burner" => Profession::Mason,
+                // sensible default so every placed workplace gets a worker
+                _ => Profession::Farmer,
             })
         };
 
-        // Re-scan the claim map: industrial buildings are the only `Structure`
-        // claims (wall towers claim `Wall`), and claims persist, so this recovers
-        // each building's footprint + type without threading state out of the
-        // early industrial phase. Group cells by instance id.
+        // How many hands a workplace employs, capped later by available stand
+        // cells. Big farms field a full crew; processing shops a standard crew;
+        // small gather huts/mines a pair.
+        let workers_for = |kind: &str| -> usize {
+            match kind {
+                "farm" | "ranch" | "sugar_plantation" => 4,
+                "iron_mine" | "coal_mine" | "charcoal_burner" | "woodcutter_hut"
+                | "shepherds_hut" | "apiary" => 2,
+                // processing shops and anything unmapped run a standard crew
+                _ => 3,
+            }
+        };
+
+        // Re-scan the claim map: placed buildings are the only `Structure` claims
+        // (wall towers claim `Wall`), and claims persist, so this recovers each
+        // building's footprint + type without threading state out of the placement
+        // phases. Scan the urban area *and* every rural parcel so rural gather
+        // buildings get staffed alongside urban shops. Group cells by instance id.
+        let mut scan_cells: Vec<Point2D> = urban.iter().copied().collect();
+        for sd in editor.world().districts.values() {
+            if sd.data.parcel_type == ParcelType::Rural {
+                scan_cells.extend(sd.data.points_2d.iter().copied());
+            }
+        }
         let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
-        for &p in &urban {
+        for &p in &scan_cells {
             if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
                 footprints
                     .entry(id.id)
@@ -925,16 +1034,17 @@ pub async fn generate_town(
         ids.sort_unstable();
 
         let mut worker_scenes: Vec<AnchorScene> = Vec::new();
+        // Tally placed workers by trade for the employment-by-job breakdown.
+        let mut worker_by_prof: HashMap<String, usize> = HashMap::new();
         for id in ids {
             let (kind, cells) = &footprints[&id];
-            let Some(profession) = profession_for(kind, &mut worker_rng) else { continue };
             let cell_set: HashSet<Point2D> = cells.iter().copied().collect();
             let centroid =
                 cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
 
             // Candidate stand cells: cardinally adjacent to the footprint, outside
-            // it, in bounds, and clear. Sort for determinism, then prefer a cell
-            // that borders a road so the worker reads as standing at the street.
+            // it, in bounds, and clear. Road-bordering cells sort first (so workers
+            // read as standing at the street), then deterministic order.
             let mut candidates: Vec<Point2D> = Vec::new();
             let mut seen: HashSet<Point2D> = HashSet::new();
             for &fc in cells {
@@ -948,24 +1058,82 @@ pub async fn generate_town(
                     }
                 }
             }
-            candidates.sort_unstable_by_key(|c| (c.x, c.y));
-            let stand = candidates
-                .iter()
-                .find(|c| road_side(**c))
-                .or_else(|| candidates.first())
-                .copied();
-            let Some(stand) = stand else {
-                log::warn!("no clear stand cell for industrial '{}' (id {})", kind, id);
-                continue;
-            };
+            candidates.sort_unstable_by_key(|c| (!road_side(*c), c.x, c.y));
 
-            // Stand on the ground at the cell; face the footprint centroid.
-            let y = editor.world().get_ocean_floor_height_at(stand);
-            let stand3 = Point3D::new(stand.x, y, stand.y);
-            let centre3 = Point3D::new(centroid.x, y, centroid.y);
-            let facing = crate::generator::population::yaw_toward(stand3, centre3);
-            worker_scenes.push(AnchorScene::worker(stand3, facing, profession));
+            // Staff up to `workers_for` hands on distinct stand cells, each with a
+            // freshly rolled trade so a multi-worker shop isn't uniform.
+            let want = workers_for(kind).min(candidates.len());
+            if want == 0 {
+                log::warn!("no clear stand cell for building '{}' (id {})", kind, id);
+                continue;
+            }
+            for &stand in candidates.iter().take(want) {
+                let Some(profession) = profession_for(kind, &mut worker_rng) else { continue };
+                // Stand on the ground at the cell; face the footprint centroid.
+                let y = editor.world().get_ocean_floor_height_at(stand);
+                let stand3 = Point3D::new(stand.x, y, stand.y);
+                let centre3 = Point3D::new(centroid.x, y, centroid.y);
+                let facing = crate::generator::population::yaw_toward(stand3, centre3);
+                worker_scenes.push(AnchorScene::worker(stand3, facing, profession));
+                *worker_by_prof.entry(format!("{:?}", profession)).or_insert(0) += 1;
+            }
         }
+
+        let industrial_job_slots = worker_scenes.len();
+        let workplace_count = footprints.len();
+
+        // ---- Guard posts: gates + wall towers ----
+        // Gates get 1–2 guards each; each tower has a 10% chance of 2 guards and a
+        // 20% chance of 1 (else none). Guards are Armorer-skinned fixtures with
+        // their own dialogue, watching the approaches.
+        let guard_scene = |feet: Point3D, facing: f32| -> AnchorScene {
+            let mut slot = AnchorSlot::new(feet, facing, SlotRole::Worker);
+            slot.profession = Some(Profession::Armorer);
+            slot.dialogue = Some("guarding".to_string());
+            AnchorScene::group(SceneKind::Solo, vec![slot])
+        };
+        let town_centre = {
+            let n = urban.len().max(1) as i32;
+            urban.iter().fold(Point2D::ZERO, |a, &p| a + p) / n
+        };
+        // Gates: one guard a couple cells inside the opening; when a gate gets a
+        // second, it stands the same distance outside — a guard on each side of
+        // the gate. Both face the opening.
+        for (gate_point, dir) in editor.world().gate_locations.clone() {
+            let base = gate_point.drop_y();
+            let fwd: Point2D = dir.into();
+            // One cell to each side of the gate centre — in the opening, not the
+            // wall a couple cells away.
+            let inside = Point2D::new(base.x - fwd.x, base.y - fwd.y);
+            let outside = Point2D::new(base.x + fwd.x, base.y + fwd.y);
+            let stands: Vec<Point2D> = if worker_rng.percent(50) {
+                vec![inside, outside]
+            } else {
+                vec![inside]
+            };
+            for s in stands {
+                let y = editor.world().get_ocean_floor_height_at(s);
+                let feet = Point3D::new(s.x, y, s.y);
+                let facing =
+                    crate::generator::population::yaw_toward(feet, Point3D::new(base.x, y, base.y));
+                worker_scenes.push(guard_scene(feet, facing));
+            }
+        }
+        // Towers: weighted small chance of 1–2 guards on the walkway beside each.
+        for posts in editor.world().tower_guard_posts.clone() {
+            let roll = worker_rng.rand_i32(100);
+            let n: usize = if roll < 10 { 2 } else if roll < 30 { 1 } else { 0 };
+            for feet in posts.into_iter().take(n) {
+                let facing = crate::generator::population::yaw_toward(
+                    Point3D::new(town_centre.x, feet.y, town_centre.y),
+                    feet,
+                );
+                let mut scene = guard_scene(feet, facing);
+                scene.slots[0].y_offset = 0.5; // stand on the battlement slab, not sunk in it
+                worker_scenes.push(scene);
+            }
+        }
+        let guard_count = worker_scenes.len() - industrial_job_slots;
 
         if !worker_scenes.is_empty() {
             match NpcData::load() {
@@ -976,12 +1144,51 @@ pub async fn generate_town(
                         build_roster(worker_scenes.len(), culture, &npc_data, &mut rng.derive());
                     let budget = worker_scenes.len();
                     match populate_npcs(editor, worker_scenes, worker_roster, budget, &npc_data, &mut rng).await {
-                        Ok(staffed) => println!("Staffed {} industrial workers", staffed),
-                        Err(e) => log::warn!("industrial staffing failed: {}", e),
+                        Ok(staffed) => println!(
+                            "Staffed {} fixture NPCs ({} workers across {} workplaces + {} guards)",
+                            staffed, industrial_job_slots, workplace_count, guard_count,
+                        ),
+                        Err(e) => log::warn!("worker/guard staffing failed: {}", e),
                     }
                 }
                 Err(e) => log::warn!("could not load npcs.yaml for staffing: {}", e),
             }
+        }
+
+        // ---- Jobs summary ----
+        let total_industrial = urban_industrial_count + rural_building_count;
+        let approx_jobs =
+            industrial_job_slots + guard_count + market_stall_count + performer_slot_count;
+        println!("=== JOBS SUMMARY ===");
+        println!(
+            "Industrial/resource buildings: {} ({} urban + {} rural)",
+            total_industrial, urban_industrial_count, rural_building_count,
+        );
+        println!("Workers: {}", industrial_job_slots);
+        println!("Guards: {} (gates + towers)", guard_count);
+        println!("Market stalls: {}", market_stall_count);
+        println!("Stages: {} ({} performer slots)", stage_count, performer_slot_count);
+        println!(
+            "Approx jobs available: {} (workers {} + guards {} + vendors {} + performers {})",
+            approx_jobs, industrial_job_slots, guard_count, market_stall_count, performer_slot_count,
+        );
+
+        // Employment by job: building trades (sorted by count), then the
+        // non-building roles (guards, vendors, performers).
+        println!("--- Employment by job ---");
+        let mut by_job: Vec<(String, usize)> = worker_by_prof.into_iter().collect();
+        if guard_count > 0 {
+            by_job.push(("Guard".to_string(), guard_count));
+        }
+        if market_stall_count > 0 {
+            by_job.push(("Vendor".to_string(), market_stall_count));
+        }
+        if performer_slot_count > 0 {
+            by_job.push(("Performer".to_string(), performer_slot_count));
+        }
+        by_job.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        for (job, count) in &by_job {
+            println!("  {:<14} {}", job, count);
         }
     }
 
