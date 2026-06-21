@@ -38,7 +38,7 @@ use super::rooms::{
 use super::walls::{
     TimberPattern, WallInfill, WallSegments, build_segments, boundary_cell_set,
     place_doors, place_frame, place_openings, place_terrace_doors,
-    place_wall_infill, place_windows,
+    place_wall_infill, place_windows, segment_cells,
 };
 
 /// Shared context threaded through every placer stage. Reborrow the fields
@@ -219,6 +219,16 @@ pub async fn build_house(
         stair
     });
 
+    // Drop any anchor whose feet sit in a doorway — the interior cell directly
+    // behind a door (where someone stepping through stands) or the exterior cell
+    // directly in front. An NPC anchored there blocks ingress/egress.
+    let door_keepout = door_keepout_cells(&wall_segs);
+    npc_anchors.retain(|scene| {
+        !scene.slots.iter().any(|slot| {
+            door_keepout.contains(&(slot.pos.y, Point2D::new(slot.pos.x, slot.pos.z)))
+        })
+    });
+
     // Claim the structural footprint (the actual house cells, no buffer) so a
     // later building's foundation blend won't raise earth/grass into this house
     // — `blend_terrain` skips Building-claimed cells.
@@ -243,4 +253,25 @@ pub async fn build_house(
         timber_pattern,
         npc_anchors,
     })
+}
+
+/// `(floor_base_y, cell)` pairs that NPC anchors must avoid: the interior step
+/// and the exterior step of every door. `seg.facing` is the wall's INWARD normal
+/// (see `WallSegment::facing`), so the interior side is `door_cell + facing` and
+/// the exterior side is `door_cell - facing`. Floor-aware so an upper-room cell
+/// directly above a ground-floor door is still eligible.
+fn door_keepout_cells(wall_segs: &WallSegments) -> HashSet<(i32, Point2D)> {
+    let mut out = HashSet::new();
+    for (seg, opening) in wall_segs.doors() {
+        let seg_cells = segment_cells(seg);
+        let inward: Point2D = seg.facing.into();
+        for w in 0..opening.width as usize {
+            let idx = opening.offset as usize + w;
+            if let Some(&door_cell) = seg_cells.get(idx) {
+                out.insert((seg.base_y, door_cell + inward));
+                out.insert((seg.base_y, door_cell - inward));
+            }
+        }
+    }
+    out
 }

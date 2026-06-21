@@ -1,6 +1,5 @@
-//! NPC population: turn a town into a roster of residents, collect placement
-//! anchors emitted while the town is built, and distribute the roster across
-//! them.
+//! NPC population: turn a town into households of NPCs with kinship, then
+//! distribute them across placement anchors emitted while the town was built.
 //!
 //! The placement unit is an [`AnchorScene`] — a group of [`AnchorSlot`]s filled
 //! together. v1 only emits **solo** scenes (one slot), but the model is built
@@ -12,6 +11,28 @@
 //!
 //! NPCs are entities, so the whole pass is a no-op in offline/dry-run mode —
 //! only a live `cargo run` actually spawns them.
+//!
+//! ## Household model
+//!
+//! Residents are generated as [`Household`]s (per house, sized to bed budget),
+//! not as a flat roster. Each [`Npc`] carries: a town-wide unique [`NpcId`],
+//! first name + surname (always stored), optional epithet, three-bucket
+//! [`LifeStage`] (Child/Adult/Elder), and a `Vec<Relationship>` whose targets
+//! reference any NPC in town by [`NpcId`] — relationships freely cross
+//! household boundaries (in-laws, siblings who moved across town, an adult
+//! child who inherited a neighbour's plot).
+//!
+//! Generation runs in four passes:
+//!   1. [`build_households`] — open-shape households, sized to bed budget,
+//!      with intra-household kin (parent↔child, spouse↔spouse, sibling↔sibling)
+//!      wired reciprocally. `profession: None` everywhere.
+//!   2. [`link_cross_household`] — in-laws, married-out siblings, adult
+//!      children whose parents live elsewhere. All edges reciprocal.
+//!   3. [`assign_employment`] — fills `profession` for adults (children stay
+//!      None; elders mostly retire). v1 rolls random trades; future passes
+//!      will consume a workplace jobs board.
+//!   4. [`populate_town`] — the existing seeded + weighted anchor draw, but
+//!      the per-house pool now reads from `population.households[h].members`.
 
 use std::collections::HashMap;
 
@@ -19,7 +40,9 @@ use serde_derive::Deserialize;
 
 use crate::data::load_yaml;
 use crate::editor::Editor;
+use crate::generator::buildings_v2::footprint::SizeClass;
 use crate::generator::buildings_v2::Culture;
+use crate::generator::nbts::{Structure, StructureType};
 use crate::geometry::Point3D;
 use crate::noise::RNG;
 
@@ -204,16 +227,189 @@ impl AnchorScene {
     }
 }
 
+// ============================================================================
+// NPC data model
+// ============================================================================
+
+/// Town-wide unique identifier for an NPC. Relationships reference this so an
+/// edge can freely cross household boundaries — a sibling who moved across
+/// town, in-laws from another family, the smith's adult son living next door.
+/// Allocated by [`IdAllocator`].
+pub type NpcId = u32;
+
+/// Hands out fresh [`NpcId`]s. One allocator threads through the whole town's
+/// generation (residents, workplace fixtures, guards) so every NPC has a
+/// unique id regardless of which subsystem spawned it.
+#[derive(Debug)]
+pub struct IdAllocator {
+    next: u32,
+}
+
+impl Default for IdAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl IdAllocator {
+    pub fn new() -> Self {
+        // Start at 1 so id 0 can stay a sentinel if anything needs one.
+        IdAllocator { next: 1 }
+    }
+
+    pub fn next_id(&mut self) -> NpcId {
+        let id = self.next;
+        self.next += 1;
+        id
+    }
+}
+
+/// Three-bucket age model. Minecraft only renders adult-vs-baby visually, so
+/// `Elder` is flavour (epithets, retired trade) but still spawns as an adult
+/// villager — `Child` is the only stage that maps to the baby model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LifeStage {
+    Child,
+    Adult,
+    Elder,
+}
+
+/// A household's wealth tier, derived from the building's [`SizeClass`] at
+/// placement time. Drives downstream skew in employment (wealthy households
+/// favour prestige trades; poor favour subsistence) and household shape
+/// (wealthy households more often house servants/lodgers and multigen
+/// elders; poor lean solo / sibling / lodger). Ordered Poor < … < Elite so
+/// callers can compare with `>=`/`<` when expressing thresholds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Wealth {
+    /// Cottage tier — rural / outskirts / subsistence.
+    Poor,
+    /// Standard town house — the majority of the population.
+    Modest,
+    /// Hall tier — a craftsman or notable family with means.
+    Wealthy,
+    /// Manor tier — the elite, capped at 1–2 per town.
+    Elite,
+}
+
+impl Wealth {
+    /// Map a [`SizeClass`] to the wealth tier of the household that lives
+    /// there. The only wealth signal currently flowing into population
+    /// generation, so the mapping is 1:1.
+    pub fn from_size_class(sc: SizeClass) -> Self {
+        match sc {
+            SizeClass::Cottage => Wealth::Poor,
+            SizeClass::House => Wealth::Modest,
+            SizeClass::Hall => Wealth::Wealthy,
+            SizeClass::Manor => Wealth::Elite,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Wealth::Poor => "Poor",
+            Wealth::Modest => "Modest",
+            Wealth::Wealthy => "Wealthy",
+            Wealth::Elite => "Elite",
+        }
+    }
+}
+
+/// Kinship between two NPCs. Designed open: new variants (grandparent, in-law,
+/// lodger) can land without reshaping the data model.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelationshipKind {
+    Spouse,
+    Parent,
+    Child,
+    Sibling,
+}
+
+/// One directed edge in the kinship graph. Both directions are stored on the
+/// respective NPCs as a reciprocal pair (Parent on Alice, Child on Bob).
+#[derive(Clone, Debug)]
+pub struct Relationship {
+    pub kind: RelationshipKind,
+    /// Whom the edge points at — by town-wide id, so the target may live in any
+    /// household (including none — fixtures aren't registered in
+    /// [`Population::by_id`], so kin edges only target residents).
+    pub to: NpcId,
+}
+
 /// A resolved NPC identity, ready to spawn. Dialogue isn't baked here — it's
 /// chosen per placement from the slot's context key (see [`NpcData::line`]).
 #[derive(Clone, Debug)]
 pub struct Npc {
-    pub name: String,
+    pub id: NpcId,
+    pub first_name: String,
+    pub surname: String,
+    /// Flavour add-on ("the Quiet", "Stonefoot"). When present, the displayed
+    /// name tag uses `first epithet` instead of `first surname` — but the
+    /// surname is *still stored* so kin/household lookups stay intact.
+    /// Rolled heavily toward elders; rare on adults; almost never on children.
+    pub epithet: Option<String>,
+    pub life_stage: LifeStage,
     pub biome: VillagerBiome,
-    pub profession: Profession,
-    /// A baby villager. Children keep a roster profession for naming/dialogue but
-    /// spawn as a baby (see [`spawn_villager_npc`]).
-    pub is_child: bool,
+    /// `None` until [`assign_employment`] fills it (and stays `None` for
+    /// children and most elders). Spawns as the green "unemployed" robe.
+    pub profession: Option<Profession>,
+    pub relationships: Vec<Relationship>,
+}
+
+impl Npc {
+    /// The name tag shown above the NPC in-game. Epithets replace the surname
+    /// in the displayed form; the surname is still stored on the struct.
+    pub fn display_name(&self) -> String {
+        match &self.epithet {
+            Some(e) => format!("{} {}", self.first_name, e),
+            None => format!("{} {}", self.first_name, self.surname),
+        }
+    }
+
+    pub fn is_child(&self) -> bool {
+        matches!(self.life_stage, LifeStage::Child)
+    }
+}
+
+/// One family unit living in a single house. Members usually share `surname`,
+/// but a married-in spouse who kept their name or an unrelated lodger keeps
+/// their own — `Npc.surname` is the source of truth per-member.
+#[derive(Clone, Debug)]
+pub struct Household {
+    /// The household's primary surname (usually the head's). Members may carry
+    /// a different one.
+    pub surname: String,
+    /// Which house this household lives in — the index used for the
+    /// `home_<id>` entity tag on spawned residents.
+    pub home: usize,
+    /// Wealth tier derived from the building's size class at placement time.
+    /// Biases [`assign_employment`] and [`pick_household_shape`].
+    pub wealth: Wealth,
+    pub members: Vec<Npc>,
+}
+
+/// The whole town's NPC population: households plus a flat id→location index
+/// so cross-household passes (and the employment pass) can resolve an
+/// [`NpcId`] in O(1).
+#[derive(Debug, Default)]
+pub struct Population {
+    pub households: Vec<Household>,
+    /// `id → (household_idx, member_idx)`. Only household members are
+    /// registered here; anonymous fixtures (workplace workers, guards) get an
+    /// id from the same allocator but aren't kin-resolvable.
+    pub by_id: HashMap<NpcId, (usize, usize)>,
+}
+
+impl Population {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Look up a member by id. `None` for fixture ids (not registered).
+    pub fn get(&self, id: NpcId) -> Option<&Npc> {
+        let &(h, m) = self.by_id.get(&id)?;
+        Some(&self.households[h].members[m])
+    }
 }
 
 /// The villager skin variant that matches a town's culture.
@@ -225,10 +421,40 @@ fn villager_biome_for(culture: Culture) -> VillagerBiome {
     }
 }
 
+/// Workplace fixture spec: how to dress and size a building's worker crew.
+/// `professions` is rolled across (so two of the same shop don't always match),
+/// `workers` is the target crew size (capped later by available stand cells).
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkplaceSpec {
+    pub professions: Vec<Profession>,
+    pub workers: usize,
+}
+
+/// Key in `NpcData::workplaces` used as the fallback when a building kind has
+/// no explicit entry. Must always exist (enforced by `NpcData::validate`).
+const DEFAULT_WORKPLACE_KEY: &str = "default";
+
 /// Name + dialogue pools, loaded from `data/npcs.yaml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct NpcData {
-    pub first_names: Vec<String>,
+    /// Consonant-ending stems that open a generated first name (Ael, Cor,
+    /// Hild, Theod, …). Combined with [`Self::first_name_suffixes`] in
+    /// [`roll_first_name`] to mint first names — Aelric, Coran, Hilda,
+    /// Theodwyn. Keeping prefixes consonant-terminal avoids awkward double
+    /// vowels when paired with a vowel-initial suffix.
+    pub first_name_prefixes: Vec<String>,
+    /// Endings appended to a [`Self::first_name_prefixes`] stem (-a, -ric,
+    /// -wyn, …). See [`roll_first_name`].
+    pub first_name_suffixes: Vec<String>,
+    /// Capitalized noun-like roots that lead a generated surname (Ash, Oak,
+    /// Stone, Hawk, Under, …). Combined with [`Self::surname_suffixes`] in
+    /// [`roll_surname`] to mint family names — Ashwood, Stonebrook, Hawkridge.
+    /// The two pools together give ~prefix*suffix possible surnames, so
+    /// collisions across a town of ~100 residents stay rare.
+    pub surname_prefixes: Vec<String>,
+    /// Lowercase place-name endings that close a generated surname (-wood,
+    /// -ford, -ridge, -ham, …). See [`Self::surname_prefixes`].
+    pub surname_suffixes: Vec<String>,
     pub epithets: Vec<String>,
     /// Generic fallback lines, used when a slot has no dialogue key (or the key
     /// isn't in `dialogue`).
@@ -245,6 +471,13 @@ pub struct NpcData {
     /// exchange should stand alone, in case the scene is reduced to one person.
     #[serde(default)]
     pub exchanges: HashMap<String, Vec<Vec<String>>>,
+    /// Trade outfit for gate and tower guard fixtures.
+    pub guard_profession: Profession,
+    /// Workplace (building NBT id) → trade outfit + crew size for worker
+    /// fixtures placed at the building's footprint edge. An unknown kind falls
+    /// back to the `default` entry; the key list is validated at load against
+    /// the loaded `Structure` map (see [`NpcData::validate`]).
+    pub workplaces: HashMap<String, WorkplaceSpec>,
 }
 
 impl NpcData {
@@ -282,11 +515,53 @@ impl NpcData {
         }
         Some(rng.choose(&matching).to_vec())
     }
+
+    /// Trade outfit pool + crew size for a worker fixture at a building of
+    /// `kind`. Unknown kinds fall back to the required `default` entry. The
+    /// caller rolls a profession per worker from `spec.professions` so a
+    /// multi-worker shop isn't uniform.
+    pub fn workplace_spec(&self, kind: &str) -> &WorkplaceSpec {
+        self.workplaces
+            .get(kind)
+            .or_else(|| self.workplaces.get(DEFAULT_WORKPLACE_KEY))
+            .expect("npcs.yaml workplaces.default must exist (enforced by validate)")
+    }
+
+    /// Validate the workplaces map: the `default` entry must exist; every
+    /// entry must have a non-empty `professions` list and at least one worker;
+    /// and every key other than `default` must match a loaded building NBT id
+    /// (so a typo like `copper_smleter` fails at startup instead of silently
+    /// falling through to the default).
+    pub fn validate(&self, structures: &HashMap<StructureType, Structure>) -> anyhow::Result<()> {
+        if !self.workplaces.contains_key(DEFAULT_WORKPLACE_KEY) {
+            anyhow::bail!(
+                "npcs.yaml: workplaces is missing required `{DEFAULT_WORKPLACE_KEY}` entry",
+            );
+        }
+        for (kind, spec) in &self.workplaces {
+            if spec.professions.is_empty() {
+                anyhow::bail!("npcs.yaml: workplaces.{kind} has an empty `professions` list");
+            }
+            if spec.workers == 0 {
+                anyhow::bail!("npcs.yaml: workplaces.{kind} has `workers: 0`");
+            }
+            if kind == DEFAULT_WORKPLACE_KEY {
+                continue;
+            }
+            if !structures.contains_key(&StructureType(kind.clone())) {
+                anyhow::bail!(
+                    "npcs.yaml: workplaces.{kind} doesn't match any loaded building NBT id",
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
-/// Professions a random resident may take (v1 — no workplace binding yet). These
-/// stay in code rather than YAML since they're enum-bound; the duplicate
-/// `Farmer` skews the roll toward common trades.
+/// Professions an adult resident may take. Stays in code (not YAML) since it's
+/// enum-bound. Used by [`build_roster`] for anonymous fixture NPCs (workplace
+/// workers, plaza vendors) where wealth has no meaning; residents draw from
+/// the wealth-tiered pools below instead. Duplicates skew toward common trades.
 const PROFESSIONS: [Profession; 10] = [
     Profession::Farmer,
     Profession::Farmer,
@@ -300,32 +575,1039 @@ const PROFESSIONS: [Profession; 10] = [
     Profession::Nitwit,
 ];
 
-/// Generate a roster of `count` residents for a town of `culture`, drawing names
-/// and dialogue from `data`.
-pub fn build_roster(count: usize, culture: Culture, data: &NpcData, rng: &mut RNG) -> Vec<Npc> {
+/// Wealth-tiered profession pools, used by [`assign_employment`] so each
+/// household's adults read as plausible for their station. Same enum-bound
+/// rationale as [`PROFESSIONS`]; duplicates skew the roll within each tier.
+const PROFESSIONS_POOR: &[Profession] = &[
+    Profession::Farmer,
+    Profession::Farmer,
+    Profession::Farmer,
+    Profession::Shepherd,
+    Profession::Shepherd,
+    Profession::Fisherman,
+    Profession::None,
+    Profession::None,
+    Profession::Nitwit,
+    Profession::Nitwit,
+];
+
+const PROFESSIONS_MODEST: &[Profession] = &[
+    Profession::Farmer,
+    Profession::Farmer,
+    Profession::Shepherd,
+    Profession::Fisherman,
+    Profession::Mason,
+    Profession::Butcher,
+    Profession::Fletcher,
+    Profession::Leatherworker,
+    Profession::None,
+    Profession::Nitwit,
+];
+
+const PROFESSIONS_WEALTHY: &[Profession] = &[
+    Profession::Mason,
+    Profession::Mason,
+    Profession::Butcher,
+    Profession::Leatherworker,
+    Profession::Toolsmith,
+    Profession::Weaponsmith,
+    Profession::Armorer,
+    Profession::Cleric,
+    Profession::Librarian,
+    Profession::Cartographer,
+];
+
+const PROFESSIONS_ELITE: &[Profession] = &[
+    Profession::Cleric,
+    Profession::Cleric,
+    Profession::Librarian,
+    Profession::Librarian,
+    Profession::Cartographer,
+    Profession::Cartographer,
+    Profession::Armorer,
+    Profession::Toolsmith,
+];
+
+fn professions_for(wealth: Wealth) -> &'static [Profession] {
+    match wealth {
+        Wealth::Poor => PROFESSIONS_POOR,
+        Wealth::Modest => PROFESSIONS_MODEST,
+        Wealth::Wealthy => PROFESSIONS_WEALTHY,
+        Wealth::Elite => PROFESSIONS_ELITE,
+    }
+}
+
+// ============================================================================
+// Name + epithet rolls
+// ============================================================================
+
+/// Mint a first name by combining a random stem prefix with a random suffix —
+/// "Cor" + "an" → "Coran", "Hild" + "a" → "Hilda", "Theod" + "ric" →
+/// "Theodric". Falls back to `"Stranger"` if either pool is empty (so a
+/// partial yaml doesn't panic).
+fn roll_first_name(data: &NpcData, rng: &mut RNG) -> String {
+    if data.first_name_prefixes.is_empty() || data.first_name_suffixes.is_empty() {
+        return "Stranger".to_string();
+    }
+    let prefix = rng.choose(&data.first_name_prefixes);
+    let suffix = rng.choose(&data.first_name_suffixes);
+    format!("{}{}", prefix, suffix)
+}
+
+/// Mint a family name by combining a random prefix with a random suffix —
+/// "Ash" + "wood" → "Ashwood", "Under" + "hill" → "Underhill". Falls back to
+/// `"Townsfolk"` if either pool is empty (so a partial yaml doesn't panic).
+fn roll_surname(data: &NpcData, rng: &mut RNG) -> String {
+    if data.surname_prefixes.is_empty() || data.surname_suffixes.is_empty() {
+        return "Townsfolk".to_string();
+    }
+    let prefix = rng.choose(&data.surname_prefixes);
+    let suffix = rng.choose(&data.surname_suffixes);
+    format!("{}{}", prefix, suffix)
+}
+
+/// Roll an epithet for a member of `stage`, weighted toward elders. Elders
+/// almost always pick one up; adults rarely; children effectively never.
+fn roll_epithet(stage: LifeStage, data: &NpcData, rng: &mut RNG) -> Option<String> {
+    if data.epithets.is_empty() {
+        return None;
+    }
+    let chance = match stage {
+        LifeStage::Elder => 60,
+        LifeStage::Adult => 8,
+        LifeStage::Child => 0,
+    };
+    if chance > 0 && rng.percent(chance) {
+        Some(rng.choose(&data.epithets).clone())
+    } else {
+        None
+    }
+}
+
+// ============================================================================
+// Household construction (intra-household kin)
+// ============================================================================
+
+/// Shapes a household may take, sized by bed budget. Picked once per house and
+/// expanded into members + intra-household relationships by [`expand_shape`].
+#[derive(Debug, Clone, Copy)]
+enum HouseholdShape {
+    /// Lone adult.
+    SoloAdult,
+    /// Lone elder ("the old hermit on the hill").
+    SoloElder,
+    /// Two adults, married.
+    Couple,
+    /// Single parent + N children.
+    SingleParent(u8),
+    /// Couple + N children.
+    CoupleWithKids(u8),
+    /// Couple + one elder (typically a parent of one spouse).
+    CoupleWithElder,
+    /// Couple + N children + one elder.
+    CoupleWithKidsAndElder(u8),
+    /// N adult siblings sharing a roof (no parents present).
+    AdultSiblings(u8),
+    /// N unrelated adults sharing a roof.
+    Lodgers(u8),
+    /// An elder living with an adult child.
+    ElderWithAdultChild,
+}
+
+/// Roll a household shape sized to `budget`, biased by `wealth`:
+/// * **Poor** — more solo elders, sibling clusters, and lodgers; fewer
+///   intact couples (precarious life expectancy / migration).
+/// * **Modest** — the baseline distribution (nuclear-heavy).
+/// * **Wealthy** — couples stay intact; more multigen (elders cared for in
+///   the household); more lodgers (semantically, live-in servants).
+/// * **Elite** — heavy lodgers (household staff) on top of a strong couple +
+///   multigen core.
+fn pick_household_shape(budget: usize, wealth: Wealth, rng: &mut RNG) -> HouseholdShape {
+    use HouseholdShape::*;
+    match budget {
+        0 | 1 => {
+            // Solo. Poor see more lonely elders; wealthier are likelier to be
+            // an adult living alone (a junior heir, an unmarried scholar).
+            let elder_chance = match wealth {
+                Wealth::Poor => 55,
+                Wealth::Modest => 35,
+                Wealth::Wealthy | Wealth::Elite => 25,
+            };
+            if rng.percent(elder_chance) { SoloElder } else { SoloAdult }
+        }
+        2 => {
+            let r = rng.rand_i32(100);
+            match wealth {
+                Wealth::Poor => {
+                    // Couples fragile; single-parent and sibling/lodger shares lift.
+                    if r < 35 { Couple }
+                    else if r < 60 { SingleParent(1) }
+                    else if r < 75 { AdultSiblings(2) }
+                    else if r < 92 { Lodgers(2) }
+                    else { ElderWithAdultChild }
+                }
+                Wealth::Modest => {
+                    if r < 55 { Couple }
+                    else if r < 75 { SingleParent(1) }
+                    else if r < 85 { AdultSiblings(2) }
+                    else if r < 95 { Lodgers(2) }
+                    else { ElderWithAdultChild }
+                }
+                Wealth::Wealthy => {
+                    // Strong couples; some lodgers (a maid + cook).
+                    if r < 60 { Couple }
+                    else if r < 70 { SingleParent(1) }
+                    else if r < 75 { AdultSiblings(2) }
+                    else if r < 95 { Lodgers(2) }
+                    else { ElderWithAdultChild }
+                }
+                Wealth::Elite => {
+                    // Many lodgers (household staff) even at small head counts.
+                    if r < 50 { Couple }
+                    else if r < 55 { SingleParent(1) }
+                    else if r < 58 { AdultSiblings(2) }
+                    else if r < 95 { Lodgers(2) }
+                    else { ElderWithAdultChild }
+                }
+            }
+        }
+        3 => {
+            let r = rng.rand_i32(100);
+            match wealth {
+                Wealth::Poor => {
+                    if r < 35 { CoupleWithKids(1) }
+                    else if r < 60 { SingleParent(2) }
+                    else if r < 70 { CoupleWithElder }
+                    else if r < 85 { AdultSiblings(3) }
+                    else { Lodgers(3) }
+                }
+                Wealth::Modest => {
+                    if r < 50 { CoupleWithKids(1) }
+                    else if r < 70 { SingleParent(2) }
+                    else if r < 82 { CoupleWithElder }
+                    else if r < 92 { AdultSiblings(3) }
+                    else { Lodgers(3) }
+                }
+                Wealth::Wealthy => {
+                    // More multigen (CoupleWithElder), some staff (Lodgers).
+                    if r < 45 { CoupleWithKids(1) }
+                    else if r < 55 { SingleParent(2) }
+                    else if r < 80 { CoupleWithElder }
+                    else if r < 85 { AdultSiblings(3) }
+                    else { Lodgers(3) }
+                }
+                Wealth::Elite => {
+                    if r < 35 { CoupleWithKids(1) }
+                    else if r < 40 { SingleParent(2) }
+                    else if r < 65 { CoupleWithElder }
+                    else if r < 68 { AdultSiblings(3) }
+                    else { Lodgers(3) } // ~32% staff
+                }
+            }
+        }
+        n => {
+            // 4+ beds. Big houses are where wealth most differentiates:
+            // wealthier households much more likely to host elders alongside kids.
+            let kids = (n.saturating_sub(2)) as u8;
+            let multigen_chance = match wealth {
+                Wealth::Poor => 15,
+                Wealth::Modest => 30,
+                Wealth::Wealthy => 55,
+                Wealth::Elite => 65,
+            };
+            if rng.percent(multigen_chance) && kids >= 1 {
+                CoupleWithKidsAndElder(kids.saturating_sub(1).max(1))
+            } else {
+                CoupleWithKids(kids.max(1))
+            }
+        }
+    }
+}
+
+/// Append a member to `members` and register it in `by_id`, returning its
+/// in-household index. Id is freshly allocated; relationships start empty.
+#[allow(clippy::too_many_arguments)]
+fn push_member(
+    h_idx: usize,
+    members: &mut Vec<Npc>,
+    by_id: &mut HashMap<NpcId, (usize, usize)>,
+    alloc: &mut IdAllocator,
+    first_name: String,
+    surname: String,
+    epithet: Option<String>,
+    stage: LifeStage,
+    biome: VillagerBiome,
+) -> usize {
+    let m_idx = members.len();
+    let id = alloc.next_id();
+    by_id.insert(id, (h_idx, m_idx));
+    members.push(Npc {
+        id,
+        first_name,
+        surname,
+        epithet,
+        life_stage: stage,
+        biome,
+        profession: None,
+        relationships: Vec::new(),
+    });
+    m_idx
+}
+
+/// Wire a reciprocal relationship pair: `a` gets a `forward` edge to `b`, and
+/// `b` gets a `back` edge to `a`. (Spouse↔Spouse, Parent→Child + Child→Parent,
+/// Sibling↔Sibling.) Both members must already be in `members`.
+fn link_pair(
+    members: &mut [Npc],
+    a: usize,
+    b: usize,
+    forward: RelationshipKind,
+    back: RelationshipKind,
+) {
+    let id_a = members[a].id;
+    let id_b = members[b].id;
+    members[a].relationships.push(Relationship { kind: forward, to: id_b });
+    members[b].relationships.push(Relationship { kind: back, to: id_a });
+}
+
+/// Realize one shape into `members`, returning when done. Surname goes to the
+/// "primary line"; lodgers and a couple's married-in spouse pick a different
+/// one from the pool so the household isn't uniformly one name.
+#[allow(clippy::too_many_arguments)]
+fn expand_shape(
+    shape: HouseholdShape,
+    h_idx: usize,
+    members: &mut Vec<Npc>,
+    by_id: &mut HashMap<NpcId, (usize, usize)>,
+    alloc: &mut IdAllocator,
+    primary_surname: &str,
+    data: &NpcData,
+    biome: VillagerBiome,
+    rng: &mut RNG,
+) {
+    // Pick a surname distinct from `primary_surname` if the pool allows; falls
+    // back to the primary if every roll matches (small surname pool).
+    let alt_surname = |rng: &mut RNG| -> String {
+        for _ in 0..6 {
+            let s = roll_surname(data, rng);
+            if s != primary_surname {
+                return s;
+            }
+        }
+        primary_surname.to_string()
+    };
+
+    match shape {
+        HouseholdShape::SoloAdult => {
+            let stage = LifeStage::Adult;
+            push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(stage, data, rng), stage, biome);
+        }
+        HouseholdShape::SoloElder => {
+            let stage = LifeStage::Elder;
+            push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(stage, data, rng), stage, biome);
+        }
+        HouseholdShape::Couple => {
+            // Spouse A keeps the household surname; spouse B has a chance to
+            // have married in from another family (different surname).
+            let married_in = rng.percent(40);
+            let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
+            let stage = LifeStage::Adult;
+            let a = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(stage, data, rng), stage, biome);
+            let b = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), sn_b,
+                roll_epithet(stage, data, rng), stage, biome);
+            link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
+        }
+        HouseholdShape::SingleParent(n_kids) => {
+            let parent = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            let mut kid_idxs = Vec::with_capacity(n_kids as usize);
+            for _ in 0..n_kids {
+                let k = push_member(h_idx, members, by_id, alloc,
+                    roll_first_name(data, rng), primary_surname.to_string(),
+                    None, LifeStage::Child, biome);
+                link_pair(members, parent, k, RelationshipKind::Child, RelationshipKind::Parent);
+                kid_idxs.push(k);
+            }
+            link_siblings(members, &kid_idxs);
+        }
+        HouseholdShape::CoupleWithKids(n_kids) => {
+            let married_in = rng.percent(40);
+            let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
+            let a = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            let b = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), sn_b,
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
+            // Kids take the primary surname (the family name).
+            let mut kid_idxs = Vec::with_capacity(n_kids as usize);
+            for _ in 0..n_kids {
+                let k = push_member(h_idx, members, by_id, alloc,
+                    roll_first_name(data, rng), primary_surname.to_string(),
+                    None, LifeStage::Child, biome);
+                link_pair(members, a, k, RelationshipKind::Child, RelationshipKind::Parent);
+                link_pair(members, b, k, RelationshipKind::Child, RelationshipKind::Parent);
+                kid_idxs.push(k);
+            }
+            link_siblings(members, &kid_idxs);
+        }
+        HouseholdShape::CoupleWithElder => {
+            let married_in = rng.percent(40);
+            let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
+            let a = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            let b = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), sn_b,
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
+            // Elder is a parent of whichever spouse shares the family name.
+            let elder = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
+            link_pair(members, elder, a, RelationshipKind::Child, RelationshipKind::Parent);
+        }
+        HouseholdShape::CoupleWithKidsAndElder(n_kids) => {
+            let married_in = rng.percent(40);
+            let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
+            let a = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            let b = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), sn_b,
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
+            let elder = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
+            link_pair(members, elder, a, RelationshipKind::Child, RelationshipKind::Parent);
+            let mut kid_idxs = Vec::with_capacity(n_kids as usize);
+            for _ in 0..n_kids {
+                let k = push_member(h_idx, members, by_id, alloc,
+                    roll_first_name(data, rng), primary_surname.to_string(),
+                    None, LifeStage::Child, biome);
+                link_pair(members, a, k, RelationshipKind::Child, RelationshipKind::Parent);
+                link_pair(members, b, k, RelationshipKind::Child, RelationshipKind::Parent);
+                // Elder is also a grandparent — not modeled with its own
+                // RelationshipKind yet, but the Parent→Spouse→Child chain
+                // already encodes it via traversal.
+                kid_idxs.push(k);
+            }
+            link_siblings(members, &kid_idxs);
+        }
+        HouseholdShape::AdultSiblings(n) => {
+            let mut idxs = Vec::with_capacity(n as usize);
+            for _ in 0..n {
+                let i = push_member(h_idx, members, by_id, alloc,
+                    roll_first_name(data, rng), primary_surname.to_string(),
+                    roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+                idxs.push(i);
+            }
+            link_siblings(members, &idxs);
+        }
+        HouseholdShape::Lodgers(n) => {
+            // Unrelated adults sharing rent. First keeps primary surname; rest
+            // get distinct ones so the household reads as "the Hollins house,
+            // plus two boarders".
+            for k in 0..n {
+                let sn = if k == 0 {
+                    primary_surname.to_string()
+                } else {
+                    alt_surname(rng)
+                };
+                push_member(h_idx, members, by_id, alloc,
+                    roll_first_name(data, rng), sn,
+                    roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            }
+        }
+        HouseholdShape::ElderWithAdultChild => {
+            let elder = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
+            let child = push_member(h_idx, members, by_id, alloc,
+                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
+            link_pair(members, elder, child, RelationshipKind::Child, RelationshipKind::Parent);
+        }
+    }
+}
+
+/// Link every pair in `idxs` as siblings (reciprocal). Idempotent on an empty
+/// or single-element slice.
+fn link_siblings(members: &mut [Npc], idxs: &[usize]) {
+    for i in 0..idxs.len() {
+        for j in (i + 1)..idxs.len() {
+            link_pair(members, idxs[i], idxs[j], RelationshipKind::Sibling, RelationshipKind::Sibling);
+        }
+    }
+}
+
+/// Build a [`Population`] for the whole town: one [`Household`] per house,
+/// sized to that house's bed budget. Intra-household kin (parent/child, spouse,
+/// sibling) are wired reciprocally; cross-household links come later in
+/// [`link_cross_household`]. Professions are left `None` for the
+/// [`assign_employment`] pass.
+pub fn build_households(
+    houses: &[HouseAnchors],
+    culture: Culture,
+    data: &NpcData,
+    alloc: &mut IdAllocator,
+    rng: &mut RNG,
+) -> Population {
+    let biome = villager_biome_for(culture);
+    let mut pop = Population::new();
+    // Every household's primary surname is unique within the town: each draw
+    // re-rolls until it hits a combination not yet used. With ~prefixes *
+    // suffixes ≈ 900 combos against ~50 households, this terminates in 1-2
+    // tries per house on average; the cap below is defensive in case the
+    // pool is ever shrunk below the household count.
+    let mut used_surnames: std::collections::HashSet<String> =
+        std::collections::HashSet::with_capacity(houses.len());
+    const SURNAME_MAX_TRIES: usize = 64;
+    for (h_idx, house) in houses.iter().enumerate() {
+        let budget = house.population.max(1);
+        let wealth = house.wealth;
+        let mut primary_surname = roll_surname(data, rng);
+        for _ in 0..SURNAME_MAX_TRIES {
+            if !used_surnames.contains(&primary_surname) {
+                break;
+            }
+            primary_surname = roll_surname(data, rng);
+        }
+        used_surnames.insert(primary_surname.clone());
+        let mut members: Vec<Npc> = Vec::new();
+        let shape = pick_household_shape(budget, wealth, rng);
+        expand_shape(
+            shape, h_idx, &mut members, &mut pop.by_id, alloc,
+            &primary_surname, data, biome, rng,
+        );
+        pop.households.push(Household {
+            surname: primary_surname,
+            home: h_idx,
+            wealth,
+            members,
+        });
+    }
+    pop
+}
+
+// ============================================================================
+// Cross-household linking
+// ============================================================================
+
+/// Attach reciprocal kinship across household boundaries. Three opportunistic
+/// passes — all probabilistic, all reciprocal:
+///   * **in-laws**: for each married couple, ~30% one spouse gets a "birth
+///     family" elsewhere (Parent edges from 1-2 adults of that house; Sibling
+///     edges to any of *their* children);
+///   * **adult siblings across town**: ~15% of adults with no sibling yet gain
+///     one from another household;
+///   * **adult-child elsewhere**: ~20% of adults with no Parent edge yet get
+///     a parent (or two) in another household — the multigen pattern where
+///     grown children live separately but kin is recorded.
+pub fn link_cross_household(pop: &mut Population, rng: &mut RNG) {
+    if pop.households.len() < 2 {
+        return;
+    }
+
+    // ---- Pass A: in-laws ----
+    let spouse_pairs: Vec<(NpcId, NpcId)> = collect_spouse_pairs(pop);
+    for (a_id, b_id) in spouse_pairs {
+        if !rng.percent(30) {
+            continue;
+        }
+        let in_law = if rng.percent(50) { a_id } else { b_id };
+        let in_law_house = pop.by_id.get(&in_law).map(|&(h, _)| h);
+        let candidate_houses: Vec<usize> = (0..pop.households.len())
+            .filter(|&i| Some(i) != in_law_house)
+            .filter(|&i| {
+                pop.households[i]
+                    .members
+                    .iter()
+                    .any(|m| matches!(m.life_stage, LifeStage::Adult | LifeStage::Elder))
+            })
+            .collect();
+        if candidate_houses.is_empty() {
+            continue;
+        }
+        let other_h = *rng.choose(&candidate_houses);
+        let other_adults: Vec<NpcId> = pop.households[other_h]
+            .members
+            .iter()
+            .filter(|m| matches!(m.life_stage, LifeStage::Adult | LifeStage::Elder))
+            .map(|m| m.id)
+            .collect();
+        let n_parents = if other_adults.len() >= 2 && rng.percent(70) { 2 } else { 1 };
+        let parents: Vec<NpcId> = other_adults.iter().copied().take(n_parents).collect();
+        for &pid in &parents {
+            add_reciprocal(pop, pid, in_law, RelationshipKind::Child, RelationshipKind::Parent);
+        }
+        // Siblings: any other resident of `other_h` who already has a Parent
+        // edge to one of these in-law parents reads as a sibling-in-law to the
+        // newcomer.
+        let siblings: Vec<NpcId> = pop.households[other_h]
+            .members
+            .iter()
+            .filter(|m| m.id != in_law)
+            .filter(|m| {
+                m.relationships.iter().any(|r| {
+                    r.kind == RelationshipKind::Parent && parents.contains(&r.to)
+                })
+            })
+            .map(|m| m.id)
+            .collect();
+        for sib in siblings {
+            add_reciprocal(pop, sib, in_law, RelationshipKind::Sibling, RelationshipKind::Sibling);
+        }
+    }
+
+    // ---- Pass B: adult siblings across town ----
+    let solo_adults: Vec<NpcId> = collect_adults_without(pop, RelationshipKind::Sibling);
+    for a_id in solo_adults {
+        if !rng.percent(15) {
+            continue;
+        }
+        let cur_h = pop.by_id.get(&a_id).map(|&(h, _)| h);
+        let mut candidates: Vec<NpcId> = Vec::new();
+        for (i, h) in pop.households.iter().enumerate() {
+            if Some(i) == cur_h {
+                continue;
+            }
+            for m in &h.members {
+                if matches!(m.life_stage, LifeStage::Adult)
+                    && m.id != a_id
+                    && !m.relationships.iter().any(|r| r.kind == RelationshipKind::Sibling)
+                {
+                    candidates.push(m.id);
+                }
+            }
+        }
+        if candidates.is_empty() {
+            continue;
+        }
+        let b_id = *rng.choose(&candidates);
+        add_reciprocal(pop, a_id, b_id, RelationshipKind::Sibling, RelationshipKind::Sibling);
+    }
+
+    // ---- Pass C: adult children whose parents live elsewhere ----
+    let parentless_adults: Vec<NpcId> = collect_adults_without(pop, RelationshipKind::Parent);
+    for a_id in parentless_adults {
+        if !rng.percent(20) {
+            continue;
+        }
+        let cur_h = pop.by_id.get(&a_id).map(|&(h, _)| h);
+        let mut candidate_houses: Vec<usize> = Vec::new();
+        for (i, h) in pop.households.iter().enumerate() {
+            if Some(i) == cur_h {
+                continue;
+            }
+            if h.members.iter().any(|m| {
+                matches!(m.life_stage, LifeStage::Elder | LifeStage::Adult)
+            }) {
+                candidate_houses.push(i);
+            }
+        }
+        if candidate_houses.is_empty() {
+            continue;
+        }
+        let other_h = *rng.choose(&candidate_houses);
+        let parent_pool: Vec<NpcId> = pop.households[other_h]
+            .members
+            .iter()
+            .filter(|m| matches!(m.life_stage, LifeStage::Elder | LifeStage::Adult))
+            .map(|m| m.id)
+            .collect();
+        let n_parents = if parent_pool.len() >= 2 && rng.percent(60) { 2 } else { 1 };
+        for &pid in parent_pool.iter().take(n_parents) {
+            add_reciprocal(pop, pid, a_id, RelationshipKind::Child, RelationshipKind::Parent);
+        }
+    }
+}
+
+fn collect_spouse_pairs(pop: &Population) -> Vec<(NpcId, NpcId)> {
+    let mut out = Vec::new();
+    for h in &pop.households {
+        for m in &h.members {
+            for r in &m.relationships {
+                // Emit each pair once: lower id is the canonical "left".
+                if r.kind == RelationshipKind::Spouse && m.id < r.to {
+                    out.push((m.id, r.to));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn collect_adults_without(pop: &Population, kind: RelationshipKind) -> Vec<NpcId> {
+    let mut out = Vec::new();
+    for h in &pop.households {
+        for m in &h.members {
+            if matches!(m.life_stage, LifeStage::Adult)
+                && !m.relationships.iter().any(|r| r.kind == kind)
+            {
+                out.push(m.id);
+            }
+        }
+    }
+    out
+}
+
+/// Add a reciprocal edge pair across the town. Either id may be a fixture
+/// (not registered in `by_id`) — in that case the missing end is skipped, and
+/// the relationship lands one-sided. Fixtures don't currently appear here, but
+/// the guard keeps the function safe if they ever do.
+fn add_reciprocal(
+    pop: &mut Population,
+    from: NpcId,
+    to: NpcId,
+    forward: RelationshipKind,
+    back: RelationshipKind,
+) {
+    if let Some(&(h, m)) = pop.by_id.get(&from) {
+        pop.households[h].members[m]
+            .relationships
+            .push(Relationship { kind: forward, to });
+    }
+    if let Some(&(h, m)) = pop.by_id.get(&to) {
+        pop.households[h].members[m]
+            .relationships
+            .push(Relationship { kind: back, to: from });
+    }
+}
+
+// ============================================================================
+// Employment
+// ============================================================================
+
+/// Assign a `profession` to every resident. v1 rolls trades randomly from
+/// [`PROFESSIONS`]; children stay `None` (they're not employed); most elders
+/// retire (None), with 20% retaining their old trade for flavour. A later
+/// patch can swap this out for a workplace jobs board without changing the
+/// surrounding pipeline.
+pub fn assign_employment(pop: &mut Population, rng: &mut RNG) {
+    for h in pop.households.iter_mut() {
+        let pool = professions_for(h.wealth);
+        for m in h.members.iter_mut() {
+            match m.life_stage {
+                LifeStage::Child => {
+                    m.profession = None;
+                }
+                LifeStage::Elder => {
+                    // Most elders retire to `None`; 20% retain a trade — drawn
+                    // from the household's tier so a wealthy retiree keeps a
+                    // prestige outfit (the old librarian still wears the robe).
+                    m.profession = if rng.percent(20) {
+                        Some(*rng.choose(pool))
+                    } else {
+                        None
+                    };
+                }
+                LifeStage::Adult => {
+                    m.profession = Some(*rng.choose(pool));
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Diagnostics
+// ============================================================================
+
+/// Print a town-wide population breakdown: household counts, life-stage mix,
+/// kin-edge counts (with cross-household share), surname diversity, and
+/// employment distribution. Emits via `println!` so it lands in the same
+/// console stream as the rest of the pipeline summaries. Cheap — a few passes
+/// over members.
+pub fn log_population_stats(pop: &Population) {
+    if pop.households.is_empty() {
+        println!("=== POPULATION STATS: empty (no households) ===");
+        return;
+    }
+
+    let n_households = pop.households.len();
+    let total_residents: usize = pop.households.iter().map(|h| h.members.len()).sum();
+    let pct = |n: usize| -> f32 {
+        if total_residents == 0 {
+            0.0
+        } else {
+            100.0 * n as f32 / total_residents as f32
+        }
+    };
+
+    // Life-stage breakdown.
+    let mut children = 0usize;
+    let mut adults = 0usize;
+    let mut elders = 0usize;
+    for h in &pop.households {
+        for m in &h.members {
+            match m.life_stage {
+                LifeStage::Child => children += 1,
+                LifeStage::Adult => adults += 1,
+                LifeStage::Elder => elders += 1,
+            }
+        }
+    }
+
+    println!("=== POPULATION STATS ===");
+    println!(
+        "Households: {} | Total residents: {} | Avg household size: {:.2}",
+        n_households,
+        total_residents,
+        total_residents as f32 / n_households as f32,
+    );
+    println!("Life stages:");
+    println!("  Children: {:>4} ({:5.1}%)", children, pct(children));
+    println!("  Adults:   {:>4} ({:5.1}%)", adults, pct(adults));
+    println!("  Elders:   {:>4} ({:5.1}%)", elders, pct(elders));
+
+    // Wealth tier distribution across households.
+    let mut wealth_counts = [0usize; 4]; // Poor, Modest, Wealthy, Elite
+    for h in &pop.households {
+        let idx = match h.wealth {
+            Wealth::Poor => 0,
+            Wealth::Modest => 1,
+            Wealth::Wealthy => 2,
+            Wealth::Elite => 3,
+        };
+        wealth_counts[idx] += 1;
+    }
+    println!("Wealth tiers (households):");
+    for (label, n) in ["Poor", "Modest", "Wealthy", "Elite"].iter().zip(wealth_counts.iter()) {
+        let pct_h = 100.0 * *n as f32 / n_households as f32;
+        println!("  {:<8} {:>3} ({:5.1}%)", label, n, pct_h);
+    }
+
+    // Household size distribution.
+    let mut size_dist: HashMap<usize, usize> = HashMap::new();
+    for h in &pop.households {
+        *size_dist.entry(h.members.len()).or_insert(0) += 1;
+    }
+    let mut sizes: Vec<usize> = size_dist.keys().copied().collect();
+    sizes.sort_unstable();
+    println!("Household size distribution:");
+    for s in sizes {
+        let n = size_dist[&s];
+        let pct_h = 100.0 * n as f32 / n_households as f32;
+        println!("  {} members: {:>3} houses ({:5.1}%)", s, n, pct_h);
+    }
+
+    // Kin edges (each undirected edge counted once: Spouse/Sibling use id<to,
+    // Parent edges are unique by direction since Child is the back-edge).
+    let mut spouse_edges = 0usize;
+    let mut sibling_edges = 0usize;
+    let mut parent_edges = 0usize;
+    let mut cross_spouse = 0usize;
+    let mut cross_sibling = 0usize;
+    let mut cross_parent = 0usize;
+    let house_of = |id: NpcId| -> Option<usize> { pop.by_id.get(&id).map(|&(h, _)| h) };
+    for h in &pop.households {
+        for m in &h.members {
+            let src_h = house_of(m.id);
+            for r in &m.relationships {
+                let dst_h = house_of(r.to);
+                let cross = src_h.is_some() && dst_h.is_some() && src_h != dst_h;
+                match r.kind {
+                    RelationshipKind::Spouse if m.id < r.to => {
+                        spouse_edges += 1;
+                        if cross {
+                            cross_spouse += 1;
+                        }
+                    }
+                    RelationshipKind::Sibling if m.id < r.to => {
+                        sibling_edges += 1;
+                        if cross {
+                            cross_sibling += 1;
+                        }
+                    }
+                    RelationshipKind::Parent => {
+                        parent_edges += 1;
+                        if cross {
+                            cross_parent += 1;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    let total_edges = spouse_edges + sibling_edges + parent_edges;
+    let cross_edges = cross_spouse + cross_sibling + cross_parent;
+    println!("Kin edges (undirected): {}", total_edges);
+    println!("  Spouse:  {:>4} (cross-household: {})", spouse_edges, cross_spouse);
+    println!("  Parent:  {:>4} (cross-household: {})", parent_edges, cross_parent);
+    println!("  Sibling: {:>4} (cross-household: {})", sibling_edges, cross_sibling);
+    if total_edges > 0 {
+        println!(
+            "  Cross-household share: {}/{} ({:.1}%)",
+            cross_edges, total_edges,
+            100.0 * cross_edges as f32 / total_edges as f32,
+        );
+    }
+    if total_residents > 0 {
+        println!(
+            "  Avg edges/person: {:.2}",
+            (total_edges * 2) as f32 / total_residents as f32,
+        );
+    }
+
+    // Surname diversity (top 5 by count).
+    let mut surname_counts: HashMap<String, usize> = HashMap::new();
+    for h in &pop.households {
+        for m in &h.members {
+            *surname_counts.entry(m.surname.clone()).or_insert(0) += 1;
+        }
+    }
+    let mut sn: Vec<(String, usize)> = surname_counts.into_iter().collect();
+    sn.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!("Surnames: {} distinct across {} residents", sn.len(), total_residents);
+    let top: Vec<String> = sn.iter().take(5).map(|(s, c)| format!("{} ({})", s, c)).collect();
+    if !top.is_empty() {
+        println!("  Most common: {}", top.join(", "));
+    }
+
+    // Employment breakdown (full sorted by count).
+    let mut emp_counts: HashMap<String, usize> = HashMap::new();
+    let mut unemployed = 0usize;
+    for h in &pop.households {
+        for m in &h.members {
+            match m.profession {
+                None => unemployed += 1,
+                Some(p) => *emp_counts.entry(format!("{:?}", p)).or_insert(0) += 1,
+            }
+        }
+    }
+    let mut emp: Vec<(String, usize)> = emp_counts.into_iter().collect();
+    emp.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    println!("Employment:");
+    println!("  {:<14} {:>4} ({:5.1}%)", "Unemployed", unemployed, pct(unemployed));
+    for (k, c) in &emp {
+        println!("  {:<14} {:>4} ({:5.1}%)", k, c, pct(*c));
+    }
+    let unemp_children_share = if children > 0 {
+        100.0 * children.min(unemployed) as f32 / unemployed as f32
+    } else {
+        0.0
+    };
+    println!(
+        "  (Children account for {:.0}% of unemployed; rest is elders + adult nitwits/None)",
+        unemp_children_share,
+    );
+}
+
+/// Print a handful of sample households in detail (members + their kin links
+/// by name). Picks `n` households spaced through the list so the sample
+/// spans small, medium, and large families rather than the first `n`.
+pub fn log_sample_households(pop: &Population, n: usize) {
+    if pop.households.is_empty() || n == 0 {
+        return;
+    }
+    println!("=== SAMPLE HOUSEHOLDS ({} of {}) ===", n.min(pop.households.len()), pop.households.len());
+    let n = n.min(pop.households.len());
+    let step = (pop.households.len() / n).max(1);
+    let look_name = |id: NpcId| -> String {
+        pop.get(id).map(|m| m.display_name()).unwrap_or_else(|| format!("npc#{}", id))
+    };
+    for h_idx in (0..pop.households.len()).step_by(step).take(n) {
+        let h = &pop.households[h_idx];
+        println!(
+            "House #{:<3} {:<14} [{:<7}] ({} members):",
+            h_idx, format!("\"{}\"", h.surname), h.wealth.label(), h.members.len(),
+        );
+        for m in &h.members {
+            let prof = m
+                .profession
+                .map(|p| format!("{:?}", p))
+                .unwrap_or_else(|| "—".to_string());
+            let kin: Vec<String> = m
+                .relationships
+                .iter()
+                .map(|r| {
+                    let kind = format!("{:?}", r.kind).to_lowercase();
+                    // Mark cross-household kin so the sample shows them.
+                    let dst_h = pop.by_id.get(&r.to).map(|&(h, _)| h);
+                    let mark = if dst_h.is_some() && dst_h != Some(h_idx) {
+                        " (cross)"
+                    } else {
+                        ""
+                    };
+                    format!("{}: {}{}", kind, look_name(r.to), mark)
+                })
+                .collect();
+            let kin_str = if kin.is_empty() {
+                "—".to_string()
+            } else {
+                kin.join(", ")
+            };
+            println!(
+                "  {:<24} {:<6} {:<14} | {}",
+                m.display_name(),
+                format!("{:?}", m.life_stage),
+                prof,
+                kin_str,
+            );
+        }
+    }
+}
+
+// ============================================================================
+// Flat fixture roster (workplaces, plaza)
+// ============================================================================
+
+/// Generate a flat roster of `count` adult NPCs for fixture placement (plaza
+/// vendors, workplace workers, guards). Unlike household members, these are
+/// not registered in any [`Population`] — they have unique ids but no kin
+/// edges, no home, and a profession rolled up front (since fixtures are
+/// usually overridden by the scene's slot anyway).
+pub fn build_roster(
+    count: usize,
+    culture: Culture,
+    data: &NpcData,
+    alloc: &mut IdAllocator,
+    rng: &mut RNG,
+) -> Vec<Npc> {
     let biome = villager_biome_for(culture);
     (0..count)
         .map(|_| {
-            let mut name = rng.choose(&data.first_names).clone();
-            if !data.epithets.is_empty() && rng.percent(35) {
-                name.push(' ');
-                name.push_str(rng.choose(&data.epithets).as_str());
+            let stage = LifeStage::Adult;
+            Npc {
+                id: alloc.next_id(),
+                first_name: roll_first_name(data, rng),
+                surname: roll_surname(data, rng),
+                epithet: roll_epithet(stage, data, rng),
+                life_stage: stage,
+                biome,
+                profession: Some(*rng.choose(&PROFESSIONS)),
+                relationships: Vec::new(),
             }
-            let profession = *rng.choose(&PROFESSIONS);
-            // Children aren't decided here yet — residents default to adults; the
-            // caller flips `is_child` (and the spawner's `child`) when it wants one.
-            Npc { name, biome, profession, is_child: false }
         })
         .collect()
 }
+
+// ============================================================================
+// Placement
+// ============================================================================
 
 /// One house's harvested anchor scenes plus the population budget its beds
 /// imply. `population` is the count of anchors the town-wide draw aims to staff
 /// for this house — derived by the caller from sleeping capacity (see
 /// `POPULATION_PER_BED` in `settlement`), so a double bed counts for two.
+/// `wealth` is the building's SizeClass mapped through
+/// [`Wealth::from_size_class`] and drives household-shape and employment skew.
 pub struct HouseAnchors {
     pub scenes: Vec<AnchorScene>,
     pub population: usize,
+    pub wealth: Wealth,
 }
 
 /// One candidate scene in the town-wide draw, tagged with the house it belongs
@@ -344,8 +1626,9 @@ struct Entry {
 /// (keyed by the first slot's dialogue key) and hand its lines out in slot
 /// order, so a pair reads as one back-and-forth; solo scenes fall back to a
 /// per-slot line. A slot may force a profession (workplace fixtures); otherwise
-/// the NPC keeps the roster's random trade. `home`, when set, tags every NPC in
-/// the scene with the house they belong to (see [`spawn_villager_npc`]).
+/// the NPC's own profession is used (defaulting to [`Profession::None`] for
+/// children and unemployed residents). `home`, when set, tags every NPC in the
+/// scene with the house they belong to (see [`spawn_villager_npc`]).
 async fn staff_scene(
     editor: &Editor,
     scene: &AnchorScene,
@@ -372,14 +1655,18 @@ async fn staff_scene(
             continue; // optional slots fill only if roster remains
         }
         let Some(npc) = pool.pop() else { break };
-        let profession = slot.profession.unwrap_or(npc.profession);
+        let profession = slot
+            .profession
+            .or(npc.profession)
+            .unwrap_or(Profession::None);
         let dialogue = exchange
             .as_ref()
             .and_then(|lines| lines.get(i).cloned())
             .unwrap_or_else(|| data.line(slot.dialogue.as_deref(), rng));
+        let display_name = npc.display_name();
         spawn_villager_npc(
-            editor, slot.pos, slot.facing, &npc.name, &dialogue, npc.biome, profession, slot.volume,
-            home, npc.is_child, slot.y_offset,
+            editor, slot.pos, slot.facing, &display_name, &dialogue, npc.biome,
+            profession, slot.volume, home, npc.is_child(), slot.y_offset,
         )
         .await?;
         placed += 1;
@@ -418,19 +1705,22 @@ fn decay_house(entries: &mut [Entry], house: usize) {
     }
 }
 
-/// Populate a whole town from per-house anchors, sizing the crowd to beds.
+/// Populate a whole town: per-house anchors paired with the pre-built
+/// [`Population`].
 ///
-/// The budget is `Σ max(1, beds)` over all houses. A seed pass staffs one anchor
-/// in every house that has any (so each populated house gets at least one
-/// resident), then a town-wide weighted draw fills the rest: anchors are picked
-/// in proportion to their current weight (multi-person scenes weigh more), and
-/// each placement halves the rest of that house's weights so the crowd flows off
-/// filled houses onto emptier ones. Returns the number of NPCs spawned. No-op
-/// (returns 0) in offline mode.
+/// `houses` and `population.households` must be parallel (same length, same
+/// ordering by house index). For each house, the candidate NPC pool is its
+/// household's members. A seed pass staffs one anchor in every house that has
+/// any (so each populated house gets at least one resident), then a town-wide
+/// weighted draw fills the rest: anchors are picked in proportion to their
+/// current weight (multi-person scenes weigh more), and each placement halves
+/// the rest of that house's weights so the crowd flows off filled houses onto
+/// emptier ones. Returns the number of NPCs spawned. No-op (returns 0) in
+/// offline mode.
 pub async fn populate_town(
     editor: &Editor,
     houses: Vec<HouseAnchors>,
-    culture: Culture,
+    population: Population,
     data: &NpcData,
     rng: &mut RNG,
 ) -> anyhow::Result<usize> {
@@ -456,17 +1746,27 @@ pub async fn populate_town(
     }
     let num_houses = entries.iter().map(|e| e.house).max().map_or(0, |m| m + 1);
 
-    // Roster: names/professions for up to two NPCs per staffed anchor (v1's max
-    // slot count). Drained from the back as scenes are staffed.
-    let mut pool = build_roster((budget * 2).max(1), culture, data, &mut rng.derive());
+    // Per-house NPC pools, taken from the population. A house with no household
+    // entry (shouldn't happen if parallel) ends up with an empty pool — its
+    // anchors will simply skip.
+    let mut households = population.households;
+    let mut pools: Vec<Vec<Npc>> = (0..num_houses)
+        .map(|i| {
+            if i < households.len() {
+                std::mem::take(&mut households[i].members)
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
 
     let mut placed_anchors = 0usize;
     let mut placed_npcs = 0usize;
 
     // Seed pass: one anchor per house that has any, before the town-wide draw.
     for house in 0..num_houses {
-        if pool.is_empty() || placed_anchors >= budget {
-            break;
+        if pools[house].is_empty() || placed_anchors >= budget {
+            continue;
         }
         let live: Vec<usize> = entries
             .iter()
@@ -474,8 +1774,11 @@ pub async fn populate_town(
             .filter(|(_, e)| e.house == house && !e.used)
             .map(|(i, _)| i)
             .collect();
-        let Some(idx) = weighted_pick(&entries, &live, rng) else { continue };
-        let n = staff_scene(editor, &entries[idx].scene, &mut pool, data, rng, Some(house)).await?;
+        let Some(idx) = weighted_pick(&entries, &live, rng) else {
+            continue;
+        };
+        let n = staff_scene(editor, &entries[idx].scene, &mut pools[house], data, rng, Some(house))
+            .await?;
         entries[idx].used = true;
         if n > 0 {
             placed_npcs += n;
@@ -485,16 +1788,19 @@ pub async fn populate_town(
     }
 
     // Town-wide draw for the remaining budget.
-    while placed_anchors < budget && !pool.is_empty() {
+    while placed_anchors < budget && pools.iter().any(|p| !p.is_empty()) {
         let live: Vec<usize> = entries
             .iter()
             .enumerate()
-            .filter(|(_, e)| !e.used)
+            .filter(|(_, e)| !e.used && !pools[e.house].is_empty())
             .map(|(i, _)| i)
             .collect();
-        let Some(idx) = weighted_pick(&entries, &live, rng) else { break };
+        let Some(idx) = weighted_pick(&entries, &live, rng) else {
+            break;
+        };
         let house = entries[idx].house;
-        let n = staff_scene(editor, &entries[idx].scene, &mut pool, data, rng, Some(house)).await?;
+        let n = staff_scene(editor, &entries[idx].scene, &mut pools[house], data, rng, Some(house))
+            .await?;
         entries[idx].used = true;
         if n > 0 {
             placed_npcs += n;
@@ -563,10 +1869,24 @@ mod tests {
     use crate::noise::{Seed, RNG};
     use crate::util::init_logger;
 
-    /// `npcs.yaml` parses and the context dialogue pools resolve. No server.
+    /// `npcs.yaml` parses (including the surname prefix/suffix pools) and
+    /// `roll_surname` produces a non-empty concatenation. No server.
     #[test]
     fn npc_dialogue_pools_resolve() {
         let data = NpcData::load().expect("load npcs.yaml");
+        assert!(!data.surname_prefixes.is_empty(), "surname_prefixes must be non-empty");
+        assert!(!data.surname_suffixes.is_empty(), "surname_suffixes must be non-empty");
+        // The combined surname is the literal prefix+suffix concat (no separator).
+        let mut sn_rng = RNG::new(Seed(123));
+        let sn = roll_surname(&data, &mut sn_rng);
+        assert!(
+            data.surname_prefixes.iter().any(|p| sn.starts_with(p)),
+            "generated surname '{sn}' should start with one of the prefixes",
+        );
+        assert!(
+            data.surname_suffixes.iter().any(|s| sn.ends_with(s)),
+            "generated surname '{sn}' should end with one of the suffixes",
+        );
         let mut rng = RNG::new(Seed(1));
         // A known context key returns a line from its own pool, not small_talk.
         let cooking = &data.dialogue["cooking"];
@@ -600,6 +1920,105 @@ mod tests {
         assert!(data.exchange_of_len("no_such_key", 2, &mut rng).is_none());
     }
 
+    /// `display_name` renders epithet-or-surname per spec, but `surname` is
+    /// always stored regardless.
+    #[test]
+    fn display_name_picks_epithet_over_surname() {
+        let with_epithet = Npc {
+            id: 1,
+            first_name: "Doral".into(),
+            surname: "Carter".into(),
+            epithet: Some("the Quiet".into()),
+            life_stage: LifeStage::Elder,
+            biome: VillagerBiome::Plains,
+            profession: None,
+            relationships: Vec::new(),
+        };
+        assert_eq!(with_epithet.display_name(), "Doral the Quiet");
+        assert_eq!(with_epithet.surname, "Carter"); // still stored
+
+        let without = Npc { epithet: None, ..with_epithet.clone() };
+        assert_eq!(without.display_name(), "Doral Carter");
+    }
+
+    /// Build a small batch of households and assert intra-household kinship is
+    /// reciprocal (every Parent has a matching Child, every Spouse is mutual,
+    /// every Sibling is mutual) and member counts hit each bed budget. No
+    /// server.
+    #[test]
+    fn intra_household_kin_is_reciprocal() {
+        let data = NpcData::load().expect("load npcs.yaml");
+        let mut rng = RNG::new(Seed(11));
+        let mut alloc = IdAllocator::new();
+        // A mix of bed budgets covering every shape branch.
+        let houses: Vec<HouseAnchors> = (1..=6)
+            .map(|pop| HouseAnchors { scenes: Vec::new(), population: pop, wealth: Wealth::Modest })
+            .collect();
+        let pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
+        assert_eq!(pop.households.len(), houses.len());
+
+        // Every household's primary surname is unique within the town.
+        let mut seen = std::collections::HashSet::new();
+        for h in &pop.households {
+            assert!(
+                seen.insert(h.surname.clone()),
+                "duplicate primary surname '{}' across households",
+                h.surname,
+            );
+        }
+
+        // Every member is registered in by_id and the lookup round-trips.
+        for (h_idx, h) in pop.households.iter().enumerate() {
+            for (m_idx, m) in h.members.iter().enumerate() {
+                let entry = pop.by_id.get(&m.id).expect("member registered in by_id");
+                assert_eq!(*entry, (h_idx, m_idx));
+            }
+            assert!(!h.members.is_empty(), "every household has at least one member");
+        }
+
+        // Every edge has a reciprocal counterpart.
+        for h in &pop.households {
+            for m in &h.members {
+                for r in &m.relationships {
+                    let target = pop.get(r.to).expect("relationship target exists");
+                    let expected_back = match r.kind {
+                        RelationshipKind::Spouse => RelationshipKind::Spouse,
+                        RelationshipKind::Sibling => RelationshipKind::Sibling,
+                        RelationshipKind::Parent => RelationshipKind::Child,
+                        RelationshipKind::Child => RelationshipKind::Parent,
+                    };
+                    assert!(
+                        target.relationships.iter().any(|tr| tr.kind == expected_back && tr.to == m.id),
+                        "missing reciprocal {:?} from {} back to {}", expected_back, target.id, m.id,
+                    );
+                }
+            }
+        }
+    }
+
+    /// `assign_employment` leaves children unemployed, mostly retires elders,
+    /// and gives every adult a profession. No server.
+    #[test]
+    fn employment_pass_respects_life_stage() {
+        let data = NpcData::load().expect("load npcs.yaml");
+        let mut rng = RNG::new(Seed(13));
+        let mut alloc = IdAllocator::new();
+        let houses: Vec<HouseAnchors> = (1..=6)
+            .map(|pop| HouseAnchors { scenes: Vec::new(), population: pop, wealth: Wealth::Modest })
+            .collect();
+        let mut pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
+        assign_employment(&mut pop, &mut rng);
+        for h in &pop.households {
+            for m in &h.members {
+                match m.life_stage {
+                    LifeStage::Child => assert!(m.profession.is_none(), "child stays unemployed"),
+                    LifeStage::Adult => assert!(m.profession.is_some(), "every adult gets a trade"),
+                    LifeStage::Elder => {} // either None (retired) or Some (kept)
+                }
+            }
+        }
+    }
+
     /// Build a small roster and place it along a row of solo anchors across the
     /// middle of the build area, so the variety (names, professions, dialogue)
     /// can be eyeballed in-game. Needs a live server.
@@ -613,6 +2032,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let editor = Editor::new(build_area, world);
         let mut rng = RNG::new(Seed(42));
+        let mut alloc = IdAllocator::new();
 
         let size = editor.world().world_rect_2d().size;
         let cz = size.y / 2;
@@ -630,7 +2050,7 @@ mod tests {
             .collect();
 
         let data = NpcData::load().expect("load npcs.yaml");
-        let roster = build_roster(count as usize, Culture::Desert, &data, &mut rng);
+        let roster = build_roster(count as usize, Culture::Desert, &data, &mut alloc, &mut rng);
         let placed = populate_npcs(&editor, scenes, roster, count as usize, &data, &mut rng)
             .await
             .expect("populate failed");

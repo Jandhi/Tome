@@ -1,32 +1,144 @@
 # Placeholder NPC name + dialogue pools for the population pass.
 # (Per-culture / per-profession pools and richer lines can come later.)
 
-first_names:
-  - Hilda
-  - Bram
-  - Eda
-  - Joss
-  - Mira
-  - Tobin
-  - Greta
-  - Ansel
-  - Lena
-  - Cort
-  - Sable
-  - Wren
-  - Doral
-  - Petra
-  - Fenn
-  - Maja
-  - Roan
-  - Isolde
+# First names are generated on demand by concatenating a `first_name_prefix`
+# (consonant-ending stem) with a `first_name_suffix` (ending). All prefixes
+# are consonant-terminal so suffixes starting with a vowel don't produce
+# awkward double-vowels ("Edra"/"Mira" land naturally; we don't get "Edraa").
+# ~22 × ~12 ≈ 260 effective first names — collisions across a town of ~120
+# residents should be uncommon. See `roll_first_name` in
+# `src/generator/population.rs`.
+first_name_prefixes:
+  - Ael
+  - Bran
+  - Cael
+  - Cor
+  - Dor
+  - Edr
+  - Eldr
+  - Faer
   - Garr
-  - Nessa
-  - Odo
-  - Vesna
+  - Hild
+  - Iol
   - Kael
-  - Bryn
+  - Lor
+  - Mir
+  - Nael
+  - Orin
+  - Per
+  - Rael
+  - Sel
+  - Theod
+  - Vael
+  - Wen
+  - Yor
 
+first_name_suffixes:
+  - a
+  - ad
+  - an
+  - ar
+  - ed
+  - el
+  - en
+  - er
+  - ic
+  - in
+  - ric
+  - wyn
+
+# Surnames are generated on demand by concatenating a `surname_prefix` (capitalized,
+# noun-like root) with a `surname_suffix` (lowercase place-name ending). All
+# combinations are designed to read as plausible English family names —
+# Ashwood, Underhill, Hawkridge, Brightford, etc. With ~35 prefixes and ~25
+# suffixes the effective name space is ~875 surnames, so collisions across a
+# town of ~120 residents are rare. See `Npc.surname` and `roll_surname` in
+# `src/generator/population.rs`.
+surname_prefixes:
+  # — trees & growth —
+  - Ash
+  - Oak
+  - Elm
+  - Birch
+  - Yew
+  - Holly
+  - Thorn
+  - Willow
+  - Briar
+  - Hazel
+  # — ground, stone, element —
+  - Moss
+  - Fern
+  - Heath
+  - Marsh
+  - Fen
+  - Reed
+  - Stone
+  - Flint
+  - Marble
+  - Chalk
+  # — colour / quality —
+  - Bright
+  - White
+  - Black
+  - Grey
+  - Gold
+  - Silver
+  - Fair
+  - Dark
+  # — beast —
+  - Hawk
+  - Fox
+  - Wolf
+  - Raven
+  - Hart
+  - Dove
+  # — position —
+  - Under
+  - Over
+  - North
+  - High
+  - Long
+  - Old
+
+surname_suffixes:
+  # — land form —
+  - wood
+  - field
+  - hollow
+  - hill
+  - ridge
+  - dale
+  - vale
+  - glen
+  - shaw
+  - dell
+  - moor
+  - heath
+  - grove
+  - fell
+  # — water —
+  - brook
+  - ford
+  - burn
+  - bank
+  - mere
+  # — built —
+  - ton
+  - ham
+  - wick
+  - worth
+  - bury
+  - stead
+  - bridge
+  # — stone —
+  - stone
+  - crag
+
+# Epithets are flavour add-ons. When an NPC has an epithet, the display
+# replaces the surname with it ("Doral the Quiet") — but the surname is still
+# stored on the NPC for kin/family lookups. Most epithets are biased toward
+# elders (see `Npc::display_name` and household generation).
 epithets:
   - the Elder
   - the Younger
@@ -164,3 +276,54 @@ exchanges:
     - - "Step up for the song of the three winds!"
       - "I am the north wind, cold and cruel!"
       - "And I the south — I'll thaw his frozen heart yet!"
+
+# Trade outfit for gate and tower guard fixtures.
+guard_profession: Armorer
+
+# Workplace (building NBT id) → trade outfit + crew size for worker fixtures
+# placed at the building's footprint edge. `professions` is rolled across, so
+# two of the same kind of shop don't always match. Unknown kinds fall back to
+# `default` (which must exist); every other key must match a loaded building
+# NBT id, validated at startup by `NpcData::validate`.
+workplaces:
+  default:          { professions: [Farmer], workers: 3 }
+
+  # — metal & stone —
+  smithy:           { professions: [Weaponsmith, Toolsmith, Armorer], workers: 3 }
+  smelter:          { professions: [Weaponsmith, Toolsmith, Armorer], workers: 3 }
+  iron_mine:        { professions: [Mason], workers: 2 }
+  coal_mine:        { professions: [Mason], workers: 2 }
+  charcoal_burner:  { professions: [Mason], workers: 2 }
+
+  # — wood —
+  carpenter:        { professions: [Fletcher, Mason], workers: 3 }
+  woodcutter_hut:   { professions: [Fletcher, Mason], workers: 2 }
+  sawmill:          { professions: [Farmer], workers: 3 }
+
+  # — grain, food, drink —
+  mill:             { professions: [Farmer], workers: 3 }
+  bakery:           { professions: [Butcher], workers: 3 }
+  butcher:          { professions: [Butcher], workers: 3 }
+  confectionery:    { professions: [Butcher], workers: 3 }
+  brewery:          { professions: [Farmer], workers: 3 }
+  apiary:           { professions: [Farmer], workers: 2 }
+  chandlery:        { professions: [Farmer], workers: 3 }
+
+  # — textile & hide —
+  weaver:           { professions: [Shepherd], workers: 3 }
+  tailor:           { professions: [Shepherd], workers: 3 }
+  tannery:          { professions: [Leatherworker], workers: 3 }
+
+  # — sugar & paper —
+  sugar_mill:       { professions: [Farmer], workers: 3 }
+  sugar_plantation: { professions: [Farmer], workers: 4 }
+  paper_mill_sugar: { professions: [Farmer], workers: 3 }
+  paper_mill_wood:  { professions: [Farmer], workers: 3 }
+
+  # — rural gather —
+  farm:             { professions: [Farmer], workers: 4 }
+  ranch:            { professions: [Shepherd], workers: 4 }
+  shepherds_hut:    { professions: [Shepherd], workers: 2 }
+
+  # — knowledge —
+  scriptorium:      { professions: [Librarian], workers: 3 }

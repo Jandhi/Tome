@@ -105,11 +105,13 @@ async fn plaza_types_gallery() {
 
     // Staff the harvested anchors: vendors at stalls, a performer on each stage,
     // a scatter of onlookers in the crowd. Roster supplies names/dialogue/biome.
-    use crate::generator::population::{build_roster, populate_npcs, NpcData};
+    use crate::generator::population::{build_roster, populate_npcs, IdAllocator, NpcData};
     let scene_count = all_scenes.len();
     match NpcData::load() {
         Ok(data) => {
-            let roster = build_roster(scene_count, Culture::Desert, &data, &mut rng.derive());
+            let mut id_alloc = IdAllocator::new();
+            let roster =
+                build_roster(scene_count, Culture::Desert, &data, &mut id_alloc, &mut rng.derive());
             let placed = populate_npcs(&editor, all_scenes, roster, scene_count, &data, &mut rng)
                 .await
                 .expect("populate plaza NPCs");

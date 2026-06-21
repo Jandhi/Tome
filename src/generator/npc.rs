@@ -10,6 +10,8 @@
 //! 1.21.5+ form the server (1.21.11) expects for `text_display` and entity
 //! `CustomName`.
 
+use serde_derive::Deserialize;
+
 use crate::editor::Editor;
 use crate::geometry::Point3D;
 
@@ -129,7 +131,7 @@ impl VillagerBiome {
 /// The villager's profession — sets its outfit (and, in vanilla, its trades).
 /// `None` is the unemployed green robe and `Nitwit` the lazy green-robe variant;
 /// the rest are the working professions. See <https://minecraft.wiki/w/Villager>.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum Profession {
     None,
     Armorer,
@@ -267,7 +269,7 @@ pub async fn spawn_villager_npc(
             .await?;
     }
 
-    spawn_dialogue_bubble(editor, point, angle, dialogue, volume).await
+    spawn_dialogue_bubble(editor, point, angle, dialogue, volume, child).await
 }
 
 /// Spawn a stationary mob NPC (e.g. a [`Mob::Witch`] or [`Mob::WanderingTrader`])
@@ -294,22 +296,27 @@ pub async fn spawn_mob_npc(
     );
     editor.spawn_entity(mob.id(), point, Some(&mob_data)).await?;
 
-    spawn_dialogue_bubble(editor, point, angle, dialogue, volume).await
+    spawn_dialogue_bubble(editor, point, angle, dialogue, volume, false).await
 }
 
 /// Spawn the dialogue bubble: a `text_display` hovering above an NPC's head,
 /// styled by how loud the line is (a quiet aside vs. a far-carrying yell). The
 /// transformation nudges it up a fractional block (entity coords are integer).
 /// Shared by [`spawn_villager_npc`] and [`spawn_mob_npc`].
+///
+/// `child` drops the bubble one block — baby villagers are roughly a block
+/// shorter than adults, so the adult bubble height would float over empty air.
 async fn spawn_dialogue_bubble(
     editor: &Editor,
     point: Point3D,
     angle: f32,
     dialogue: &str,
     volume: DialogueVolume,
+    child: bool,
 ) -> anyhow::Result<()> {
     let style = volume.style();
-    let bubble = point + Point3D::new(0, style.height, 0);
+    let height = if child { style.height - 1 } else { style.height };
+    let bubble = point + Point3D::new(0, height, 0);
     let bubble_data = format!(
         "{{text:{{text:\"{}\",color:\"{}\",bold:{}b}},line_width:{},billboard:\"center\",see_through:1b,alignment:\"center\",view_range:{}f,\
          transformation:{{translation:[0f,{}f,0f],scale:[{s}f,{s}f,{s}f],left_rotation:[0f,0f,0f,1f],right_rotation:[0f,0f,0f,1f]}},\
