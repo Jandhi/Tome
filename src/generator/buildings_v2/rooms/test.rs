@@ -958,6 +958,33 @@ async fn build_furnished_desert_houses() {
     println!("Done — {} furnished desert buildings placed", count);
 }
 
+/// Online Japanese variant: places the new hipped-roof houses in a live
+/// Minecraft world so the upturned eave corners can be inspected. Requires a
+/// live Minecraft server with the GDMC HTTP mod.
+#[tokio::test]
+async fn build_furnished_japanese_houses() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Japanese).await;
+    println!("Done — {} furnished japanese buildings placed", count);
+}
+
 /// Offline / dry-run variant: runs the same buildings_v2 pipeline against a
 /// synthetic flat world, without any HTTP traffic. Produces the same blueprint
 /// SVGs under `output/` as `build_furnished_houses` but does not require a
@@ -1048,6 +1075,34 @@ async fn build_furnished_desert_houses_offline() {
     use crate::generator::buildings_v2::Culture;
     let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Desert).await;
     println!("Done — {} furnished desert buildings placed (offline)", count);
+}
+
+/// Offline Japanese variant: blackstone palette and the new hipped roof with
+/// upturned eave corners. Use this to eyeball the new RoofStyle::Hipped output
+/// via the ASCII/SVG blueprints written under `output/`.
+#[tokio::test]
+async fn build_furnished_japanese_houses_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(
+        Point3D::new(0, 0, 0),
+        Point3D::new(255, 127, 255),
+    );
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let bounds = Rect2D::from_points(
+        Point2D::new(64, 64),
+        Point2D::new(191, 191),
+    );
+
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Japanese).await;
+    println!("Done — {} furnished japanese buildings placed (offline)", count);
 }
 
 /// Dome regression: a desert (flat-roof) house on a square footprint must grow

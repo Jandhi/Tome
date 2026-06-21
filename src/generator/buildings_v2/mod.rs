@@ -19,6 +19,7 @@ use crate::generator::materials::PaletteId;
 use footprint::SizeClass;
 use roof::RoofStyle;
 use roof::gable::GablePitch;
+use roof::hipped::HippedPitch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildingType {
@@ -53,8 +54,8 @@ impl Culture {
             ],
             Culture::Desert => vec![RoofStyle::Flat],
             Culture::Japanese => vec![
-                RoofStyle::Gable(GablePitch::Stairs),
-                RoofStyle::Gable(GablePitch::Double),
+                RoofStyle::Hipped(HippedPitch::Slab),
+                RoofStyle::Hipped(HippedPitch::Stairs),
             ],
         }
     }
