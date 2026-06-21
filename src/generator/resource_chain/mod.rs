@@ -3,7 +3,7 @@ mod registry;
 mod production_painter;
 mod production_area;
 #[cfg(test)]
-mod tests;
+mod test;
 
 pub use types::{ResourceDef, RecipeDef, ParcelResourceAssignment};
 pub use registry::{ResourceRegistry, ResolvedChains, NearMiss, ChainSelection, ProductionPlan, SettlementProductionResult};

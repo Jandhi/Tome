@@ -3,7 +3,7 @@ mod command_response;
 mod positioned_block;
 mod buildarea;
 mod biome;
-mod tests;
+mod test;
 mod entity;
 mod height_map;
 mod coordinate;
