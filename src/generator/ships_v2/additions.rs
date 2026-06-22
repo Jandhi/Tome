@@ -13,6 +13,7 @@
 
 use super::deck::DeckModel;
 use super::hull::HullModel;
+use super::keel::KeelModel;
 use super::palette::ShipPalette;
 use super::{Placement, ShipV2Ctx};
 
@@ -134,6 +135,7 @@ pub enum DeckAddition {
 /// alongside.
 pub struct DeckContext<'a> {
     pub placement: &'a Placement,
+    pub keel: &'a KeelModel,
     pub hull: &'a HullModel,
     pub deck: &'a DeckModel,
     pub ship_palette: &'a ShipPalette,

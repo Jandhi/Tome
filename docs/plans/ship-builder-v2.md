@@ -203,16 +203,21 @@ each arrives only with the user's algorithm for it.
    (hull ~35 → bowsprit ~15). The mast that pokes out the front; sits on the
    bowsprit support; figurehead/decoration later.
 
-   **Bowsprit — implemented** (`additions/bowsprit.rs`). The bow is **extended into a
-   solid tapered prow** — a fully-filled nose (no hollow interior, per the user) whose
-   **underside is a curve anchored at the keel crest where it peeks out at the bow**
-   (local `deck_y` = waterline = the keel bow-rake top) sweeping up via `(1−t)^1.5` to
-   meet the **bowsprit underside** at the point; `beak_len` is stretched to
-   `max(0.18·length, 1.5·height)` so that curve never rises >1/column and eases to
-   horizontal into the spar. Plan half-width tapers `base_hw → 0` over the same span, so
-   the mass narrows in both plan and section. It starts `BACK_OVERLAP` stations behind
-   the bow so it merges solidly with the hull/deck, and its top sits flush with the
-   weather deck (`plat_y`). Underside steps are smoothed with upside-down stairs (`prow_bevel`); the
+   **Bowsprit — Approach B (`additions/bowsprit.rs`).** Reverse-engineered from the
+   user's hand-fixed NBTs (`analyze_bowsprit_nbt`, ignored test): the prow is **the hull
+   continued forward** — a flared cross-section (rounded bilge, `PROW_FLARE_POW`)
+   tapering in plan to a **stem point** and in section to a **keel point**, decked +
+   railed on top, **solid for Small ships / a hollow shell** (with a deck-floor slab)
+   for larger. It rebuilds the forward `~0.30·length` of the bow (blending from
+   `hull_top_half` at `x0`) and runs out `ext` past the bow to the stem, with the keel
+   point sweeping up from the keel crest (`keel_top`) to the deck. The spar projects on
+   from the stem (`reach_factor`-shortened by rake). Threaded `keel` into `DeckContext`
+   for the crest. **Shell smoothing** added: the flaring bilge outer edge and the deck
+   rim are beveled with inboard-facing upside-down stairs, and the deck surface is top
+   slabs (matching the ship deck) — the `//---//` look from the NBT. Stair facings are
+   stored per cell (`stair_at`), decoupled from the spar's flip. Checkpoint commit
+   `c8bed1b` precedes this; if the hull seam looks bad, revert and move to Approach A
+   (fold into `hull.rs`). Underside steps are smoothed with upside-down stairs (`prow_bevel`); the
    prow-top edges get `rail` fences. The centerline (z=0) spar projects on from the prow
    point (`REACH_FRACTION = 0.4·length`, **shortened by `rake.reach_factor()`** so steep
    rakes don't climb away). Rake is still `BowspritRake::pick` (all four with a deck). **Smoothed:** the spar (z=0) is tracked at **half-block

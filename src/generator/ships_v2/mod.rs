@@ -171,6 +171,7 @@ pub async fn build_ship_v2(
     let tier = SizeTier::from_length(context.length);
     let deck_ctx = additions::DeckContext {
         placement: &placement,
+        keel: &keel,
         hull: &hull,
         deck: &deck,
         ship_palette: &ship_palette,
