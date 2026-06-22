@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::data::Loadable;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
-use crate::generator::districts::{build_wall, generate_parcels, ParcelType, WallType};
+use crate::generator::districts::{build_wall, generate_parcels, ParcelType, TowerSkin, WallType};
 use crate::generator::materials::{Material, MaterialId, Placer};
 use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
@@ -94,9 +94,10 @@ pub async fn generate_town(
             p
         }
     });
+    let tower_skin = tower_palette.as_ref().map(|p| TowerSkin { data: &data, palette: p });
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
-        &mut placer, &wall_material, &structures, WallType::Standard, tower_palette.as_ref(),
+        &mut placer, &wall_material, &structures, WallType::Standard, tower_skin.as_ref(),
     ).await;
     drop(placer);
 
