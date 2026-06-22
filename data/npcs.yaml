@@ -348,6 +348,18 @@ guards:
   employment: guard
   looks: [Armorer, pillager]
 
+# Plaza fixtures: the vendor hawking wares behind a market stall, and a troupe
+# member up on a stage. Same shape as `guards` — an `employment` job label plus a
+# `looks` skin pool rolled per fixture (villager Professions and/or Mobs; a
+# wandering_trader vendor or a witch performer reads nicely). `looks` non-empty.
+vendors:
+  employment: vendor
+  looks: [Farmer, Butcher, Fletcher, wandering_trader]
+
+performers:
+  employment: performer
+  looks: [Cartographer, Cleric, witch]
+
 # Fallback worker staffing for buildings whose structure JSON declares no
 # `staffing` block of its own. Per-building staffing now lives on each building's
 # sidecar (e.g. data/structures/resource_buildings/woodcutter_hut.json); this

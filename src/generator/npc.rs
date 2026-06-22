@@ -307,8 +307,10 @@ pub async fn spawn_villager_npc(
     };
     // Babies start at the most negative Age so they never visibly grow up.
     let age_tag = if child { format!(",Age:{}", i32::MIN) } else { String::new() };
+    // `Invulnerable` so a fixture never dies — no suffocation if it ends up a
+    // hair inside a block, no mob/fire/fall damage in a persistent town.
     let villager_data = format!(
-        "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
+        "{{NoAI:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
          VillagerData:{{type:\"{}\",profession:\"{}\",level:1}}{}{}}}",
         escape_snbt(name),
         angle,
@@ -353,9 +355,10 @@ pub async fn spawn_mob_npc(
     volume: DialogueVolume,
     y_offset: f32,
 ) -> anyhow::Result<()> {
-    // Frozen, named, and faced — same fixture treatment as a villager NPC.
+    // Frozen, named, faced, and invulnerable — same fixture treatment as a
+    // villager NPC (see `spawn_villager_npc` for why `Invulnerable`).
     let mob_data = format!(
-        "{{NoAI:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f]}}",
+        "{{NoAI:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f]}}",
         escape_snbt(name),
         angle,
     );

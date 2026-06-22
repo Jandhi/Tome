@@ -989,6 +989,25 @@ pub async fn generate_town(
             "Furnished open spaces — plaza {} nook {} park {} yard {}",
             counts[0], counts[1], counts[2], counts[3],
         );
+
+        // Skin the plaza fixtures from data: a stage's performers and a stall's
+        // vendor each roll a look from their fixture pool. Onlookers/browsers in
+        // the crowd keep the roster's own look (their slots are left untouched).
+        use crate::generator::population::{SceneKind, SlotRole};
+        let mut plaza_look_rng = rng.derive();
+        for scene in plaza_scenes.iter_mut() {
+            let performance = scene.kind == SceneKind::Performance;
+            for slot in scene.slots.iter_mut() {
+                let fixture = if performance {
+                    &data.npc_data.performers
+                } else if slot.role == SlotRole::Worker {
+                    &data.npc_data.vendors
+                } else {
+                    continue;
+                };
+                slot.look = Some(*plaza_look_rng.choose(&fixture.looks));
+            }
+        }
     }
 
     // Count plaza employment for the jobs summary: a stall is any scene with a
@@ -1180,7 +1199,11 @@ pub async fn generate_town(
                 vec![inside]
             };
             for s in stands {
-                let y = editor.world().get_ocean_floor_height_at(s);
+                // Stand on the gate's own cleared floor (`gate_point.y`), which is
+                // where the gateway punched its air column upward. Re-deriving the
+                // height from the ocean-floor heightmap dropped feet below the
+                // threshold, burying — and suffocating — the guard in gate blocks.
+                let y = gate_point.y;
                 let feet = Point3D::new(s.x, y, s.y);
                 let facing =
                     crate::generator::population::yaw_toward(feet, Point3D::new(base.x, y, base.y));
@@ -1259,10 +1282,10 @@ pub async fn generate_town(
             by_job.push((npc_data.guards.employment.clone(), guard_count));
         }
         if market_stall_count > 0 {
-            by_job.push(("vendor".to_string(), market_stall_count));
+            by_job.push((npc_data.vendors.employment.clone(), market_stall_count));
         }
         if performer_slot_count > 0 {
-            by_job.push(("performer".to_string(), performer_slot_count));
+            by_job.push((npc_data.performers.employment.clone(), performer_slot_count));
         }
         by_job.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         for (job, count) in &by_job {

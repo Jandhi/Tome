@@ -523,6 +523,12 @@ pub struct NpcData {
     /// pool rolled per guard (mix villager and mob skins; repeat to weight).
     /// `looks` must be non-empty (enforced by [`NpcData::validate`]).
     pub guards: Fixture,
+    /// Market-stall vendor fixture — the skin pool and job label for the trader
+    /// hawking wares behind a plaza stall. `looks` must be non-empty.
+    pub vendors: Fixture,
+    /// Stage performer fixture — the skin pool and job label for a troupe member
+    /// up on a plaza stage. `looks` must be non-empty.
+    pub performers: Fixture,
     /// Fallback worker [`Staffing`] for buildings whose structure JSON declares
     /// no `staffing` block of its own. Workplace staffing now lives on each
     /// building's structure sidecar; this only covers the unstated ones.
@@ -607,6 +613,12 @@ impl NpcData {
     pub fn validate(&self, structures: &HashMap<StructureType, Structure>) -> anyhow::Result<()> {
         if self.guards.looks.is_empty() {
             anyhow::bail!("npcs.yaml: `guards.looks` must list at least one entry");
+        }
+        if self.vendors.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `vendors.looks` must list at least one entry");
+        }
+        if self.performers.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `performers.looks` must list at least one entry");
         }
         if self.default_staffing.looks.is_empty() {
             anyhow::bail!("npcs.yaml: `default_staffing.looks` must list at least one entry");
