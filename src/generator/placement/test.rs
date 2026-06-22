@@ -192,7 +192,7 @@ mod tests {
         let mut placer = Placer::new(&materials, &mut rng);
         build_wall(
             &editor.world().get_urban_points(), &mut editor, &mut rng2,
-            &mut placer, &wall_material, &structures, WallType::Standard,
+            &mut placer, &wall_material, &structures, WallType::Standard, None,
         ).await;
         drop(placer);
 
@@ -367,7 +367,7 @@ mod tests {
         let mut placer = Placer::new(&materials, &mut rng);
         build_wall(
             &urban, &mut editor, &mut wall_rng,
-            &mut placer, &wall_material, &structures, WallType::Standard,
+            &mut placer, &wall_material, &structures, WallType::Standard, None,
         ).await;
         drop(placer);
 
@@ -1096,99 +1096,14 @@ mod tests {
         // the named road network coloured per road (same 16-hue palette as the
         // in-world wool labels), with each road's id printed at its centroid.
         {
-            use std::fmt::Write as _;
-            const ROAD_SVG: [&str; 16] = [
-                "#e9ecec", "#f9801d", "#c74ebd", "#3ab3da", "#fed83d", "#80c71f",
-                "#f38baa", "#474f52", "#9d9d97", "#169c9c", "#8932b8", "#3c44aa",
-                "#835432", "#5e7c16", "#b02e26", "#1d1d21",
-            ];
-            // Bounds from the urban footprint, padded.
-            let (mut minx, mut minz, mut maxx, mut maxz) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-            for c in &urban {
-                minx = minx.min(c.x); maxx = maxx.max(c.x);
-                minz = minz.min(c.y); maxz = maxz.max(c.y);
-            }
-            let pad = 3;
-            minx -= pad; minz -= pad; maxx += pad; maxz += pad;
-            let (w, h) = (maxx - minx + 1, maxz - minz + 1);
-
-            let mut svg = String::new();
-            let _ = write!(svg,
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\" \
-                 width=\"{}\" height=\"{}\" shape-rendering=\"crispEdges\">\n",
-                w * 4, h * 4);
-            let _ = write!(svg, "<rect x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\" fill=\"#b9d68a\"/>\n");
-
-            // Base layer: water / footprints / wall / alleys (roads drawn on top).
-            for z in minz..=maxz {
-                for x in minx..=maxx {
-                    let c = P2::new(x, z);
-                    if !editor.world().is_in_bounds_2d(c) { continue; }
-                    let fill = if full_alleys.contains(&c) {
-                        "#b8b8b8"
-                    } else {
-                        match editor.world().get_claim(c) {
-                            Some(crate::generator::BuildClaim::Wall) => "#3a3a3a",
-                            Some(crate::generator::BuildClaim::Gate) => "#6a6a6a",
-                            Some(crate::generator::BuildClaim::Building(_)
-                                | crate::generator::BuildClaim::Structure(_)) => "#d9cfa3",
-                            // Pavement: named roads get recoloured on top; this
-                            // keeps discarded (unnamed) short roads visible as grey.
-                            Some(crate::generator::BuildClaim::Path(_)) => "#c4c4c4",
-                            _ if editor.world().is_water(c) => "#4a6fb0",
-                            _ => continue,
-                        }
-                    };
-                    let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                        x - minx, z - minz, fill);
-                }
-            }
-
-            // Road layer + per-road centroid for the id label.
-            let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
-            for (c, (_, _, rid, _)) in &label {
-                let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                    c.x - minx, c.y - minz, ROAD_SVG[*rid as usize % ROAD_SVG.len()]);
-                let e = centroid.entry(*rid).or_insert((0, 0, 0));
-                e.0 += (c.x - minx) as i64; e.1 += (c.y - minz) as i64; e.2 += 1;
-            }
-            for (rid, (sx, sz, n)) in &centroid {
-                if *n == 0 { continue; }
-                let _ = write!(svg,
-                    "<text x=\"{}\" y=\"{}\" font-size=\"7\" font-weight=\"bold\" fill=\"#000\" \
-                     stroke=\"#fff\" stroke-width=\"0.4\" paint-order=\"stroke\" text-anchor=\"middle\">{}</text>\n",
-                    sx / n, sz / n + 2, rid);
-            }
-
-            // Abstract graph overlay: the MST + shortcut edges drawn as straight
-            // thin lines between their nodes (the data structure, before A* curved
-            // it onto the terrain). Arterial edges thicker; shortcuts dashed.
-            let nx = |p: Point3D| p.x - minx;
-            let nz = |p: Point3D| p.z - minz;
-            for e in &road_network.edges {
-                let (pa, pb) = (road_network.nodes[e.a], road_network.nodes[e.b]);
-                let (sw, dash) = (
-                    if e.arterial { "1.2" } else { "0.6" },
-                    if e.shortcut { " stroke-dasharray=\"2,2\"" } else { "" },
-                );
-                let _ = write!(svg,
-                    "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#111\" \
-                     stroke-width=\"{}\" stroke-opacity=\"0.85\"{}/>\n",
-                    nx(pa), nz(pa), nx(pb), nz(pb), sw, dash);
-            }
-            for (i, p) in road_network.nodes.iter().enumerate() {
-                let _ = write!(svg,
-                    "<circle cx=\"{}\" cy=\"{}\" r=\"1.6\" fill=\"#111\" stroke=\"#fff\" stroke-width=\"0.4\"/>\n",
-                    nx(*p), nz(*p));
-                let _ = write!(svg,
-                    "<text x=\"{}\" y=\"{}\" font-size=\"4\" fill=\"#fff\" text-anchor=\"middle\">{}</text>\n",
-                    nx(*p), nz(*p) + 1, i);
-            }
-            let _ = write!(svg, "</svg>\n");
-
+            // Shared renderer (also used by the live generate_town pipeline).
+            let svg = crate::generator::paths::render_town_map(
+                editor.world(), &urban, &all_paths, &road_network.road_labels,
+                &std::collections::HashMap::new(), &full_alleys, Some(&road_network), &[], &[],
+            );
             std::fs::create_dir_all("output").ok();
             match std::fs::write("output/town.svg", &svg) {
-                Ok(_) => println!("Wrote town map to output/town.svg ({}x{} cells)", w, h),
+                Ok(_) => println!("Wrote town map to output/town.svg"),
                 Err(e) => println!("Failed to write town.svg: {}", e),
             }
         }
@@ -1501,7 +1416,7 @@ mod tests {
             &mut placer,
             &material,
             &data.structures,
-            WallType::StandardWithInner,
+            WallType::StandardWithInner, None,
         )
         .await;
 

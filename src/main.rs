@@ -59,7 +59,7 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
 
     // === Walls ===
     server.update_phase(visualizer::GenerationPhase::Walls);
-    build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
+    build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade, None).await;
     let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Walls);
     server.update_snapshot(snap);
 
@@ -86,7 +86,7 @@ async fn run_generation_once() {
     crate::generator::settlement::generate_town(
         &mut editor,
         crate::noise::Seed(12345),
-        crate::generator::buildings_v2::Culture::Medieval,
+        crate::generator::buildings_v2::Culture::Desert,
     ).await;
 }
 

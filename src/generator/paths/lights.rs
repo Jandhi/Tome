@@ -18,9 +18,11 @@ use super::path::Path;
 /// sides each interval, so a single side sees a lamp roughly every `2 * SPACING`.
 const SPACING: f64 = 10.0;
 
-/// Two lamps closer than this (squared XZ distance) are treated as the same
-/// spot — kills clustering where paths overlap or merge at junctions.
-const MIN_GAP_SQ: i32 = 16; // 4 blocks
+/// Minimum separation (squared XZ distance) enforced between any two lamps
+/// across every road. A candidate closer than this to an already-placed lamp is
+/// skipped — kills clustering where paths overlap at junctions *and* where
+/// separate roads run close to one another.
+const MIN_GAP_SQ: i32 = 64; // 8 blocks
 
 /// Fence blocks in the vertical post (heights `ground..ground + POST_FENCES`).
 /// An arm fence sits on top reaching toward the road, with the lantern hung

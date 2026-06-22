@@ -29,6 +29,17 @@ impl BlockID {
         )
     }
 
+    pub fn is_lava(&self) -> bool {
+        matches!(self.name(), "lava" | "flowing_lava")
+    }
+
+    /// Any fluid the city terraform must drain — water (and its column blocks)
+    /// plus lava. Used by `force_height` so the settlement is left with NO
+    /// standing liquid, not just no water.
+    pub fn is_liquid(&self) -> bool {
+        self.is_water() || self.is_lava()
+    }
+
     pub fn is_tree(&self) -> bool {
         let name = self.name();
         name.contains("log")
@@ -44,6 +55,16 @@ impl BlockID {
 
     pub fn is_leaves(&self) -> bool {
         self.name().contains("leaves")
+    }
+
+    /// The blocks that make up huge mushrooms (e.g. dark oak forests): the red /
+    /// brown caps plus the stem. The stem also matches `is_tree` via `_stem`, but
+    /// the cap blocks do not, so the logger needs this to clear them too.
+    pub fn is_mushroom(&self) -> bool {
+        matches!(
+            self.name(),
+            "red_mushroom_block" | "brown_mushroom_block" | "mushroom_stem"
+        )
     }
 
     /// A log / stripped log / wood / stem / hyphae — the axis-rotatable wood

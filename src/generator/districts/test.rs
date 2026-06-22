@@ -294,7 +294,7 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
         println!("Structures: {:?}", structures.keys());
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner, None).await;
 
         editor.flush_buffer().await;
     }
@@ -1065,7 +1065,7 @@ mod tests {
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Palisade).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Palisade, None).await;
 
     }
 
@@ -1093,7 +1093,7 @@ mod tests {
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Standard).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Standard, None).await;
 
     }
 
@@ -1122,7 +1122,7 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
         println!("Structures: {:?}", structures.keys());
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner, None).await;
 
     }
 
@@ -1139,5 +1139,39 @@ mod tests {
             Seed(12345),
             crate::generator::buildings_v2::Culture::Medieval,
         ).await;
+    }
+
+    /// Generate a full town (which now furnishes the open spaces itself) and
+    /// report the region-type split for a quick sanity check.
+    #[tokio::test]
+    async fn open_space_regions() {
+        use crate::generator::open_space::{detect_regions, RegionType};
+
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+        crate::generator::settlement::generate_town(
+            &mut editor,
+            Seed(12345),
+            crate::generator::buildings_v2::Culture::Desert,
+        ).await;
+
+        let urban = editor.world().get_urban_points();
+        let regions = detect_regions(editor.world(), &urban);
+
+        let total_cells: usize = regions.iter().map(|r| r.area).sum();
+        let count = |t: RegionType| regions.iter().filter(|r| r.region_type() == t).count();
+        println!(
+            "Open-space regions: {} ({} cells) | plaza {} nook {} park {} yard {}",
+            regions.len(),
+            total_cells,
+            count(RegionType::Plaza),
+            count(RegionType::Nook),
+            count(RegionType::Park),
+            count(RegionType::Yard),
+        );
+
+        editor.flush_buffer().await;
     }
 }

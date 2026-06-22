@@ -167,7 +167,7 @@ mod tests {
 
         place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()], &info).await;
         info = SettlementInfo::new(editor.world());
-        build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
+        build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade, None).await;
         let _ = generate_chronicle(&mut editor, &mut info).await;
         editor.flush_buffer().await;
     }

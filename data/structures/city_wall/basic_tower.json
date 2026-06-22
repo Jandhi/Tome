@@ -1,6 +1,7 @@
 {
     "id" : "basic_tower",
     "path" : "data/structures/city_wall/basic_tower.nbt",
+    "palette" : "wall_base",
     "origin" : {
         "x" : 3,
         "y" : 1,

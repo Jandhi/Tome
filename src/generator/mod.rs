@@ -13,6 +13,7 @@ pub mod placement;
 pub mod style;
 pub mod chronicle;
 pub mod settlement;
+pub mod open_space;
 
 pub use build_claim::BuildClaim;
 pub use settlement::generate_town;

@@ -6,7 +6,7 @@ mod tests {
     use log::info;
     
 
-    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::districts::plant_forest,  geometry::{Point2D, Point3D}};
+    use crate::{data::Loadable, editor::{World, Editor}, generator::terrain::{generate_tree, generate_tree_feature, Forest, Tree, ForestId, log_trees}, util::init_logger, noise::{RNG, Seed}, http_mod::GDMCHTTPProvider, generator::districts::plant_forest,  geometry::{Point2D, Point3D}};
 
     #[test]
     fn deserialize_tree() {
@@ -114,6 +114,64 @@ mod tests {
         generate_tree(Tree::MegaPine, &mut editor, Point3D::new(100, 0, 150), &mut rng, &palette).await;
 
         editor.flush_buffer().await;
+    }
+
+    /// Scatter a bunch of random vanilla trees (every species/size in the `Tree`
+    /// enum, mapped to a `place feature` call) across the build area, each rooted
+    /// at ground height. Needs a live server.
+    /// Run with: `cargo test scatter_feature_trees -- --nocapture`.
+    #[tokio::test]
+    async fn scatter_feature_trees() {
+        init_logger();
+
+        let seed = Seed(12345);
+        let mut rng = RNG::new(seed);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let editor = Editor::new(build_area, world);
+
+        const SPECIES: [Tree; 24] = [
+            Tree::SmallOak, Tree::MediumOak, Tree::LargeOak, Tree::MegaOak,
+            Tree::SmallBirch, Tree::MediumBirch, Tree::LargeBirch, Tree::MegaBirch,
+            Tree::SmallPine, Tree::MediumPine, Tree::LargePine, Tree::MegaPine,
+            Tree::SmallJungle, Tree::MediumJungle, Tree::LargeJungle, Tree::MegaJungle,
+            Tree::SmallHedge, Tree::MediumHedge, Tree::LargeHedge, Tree::MegaHedge,
+            Tree::SmallBaobab, Tree::MediumBaobab, Tree::LargeBaobab, Tree::MegaBaobab,
+        ];
+
+        // Work in build-area-local coordinates (see World::new — heightmaps are
+        // local to origin.y, and the editor adds the origin back on placement).
+        let size = editor.world().world_rect_2d().size;
+        let margin = 6;
+        if size.x <= 2 * margin || size.y <= 2 * margin {
+            panic!("Build area {:?} too small to scatter trees", size);
+        }
+
+        let target = 40;
+        let min_gap = 7;
+        let mut planted: Vec<Point2D> = Vec::new();
+        let mut attempts = 0;
+        while planted.len() < target && attempts < target * 30 {
+            attempts += 1;
+            let c = Point2D::new(
+                rng.rand_i32_range(margin, size.x - margin),
+                rng.rand_i32_range(margin, size.y - margin),
+            );
+            if planted.iter().any(|p| (p.x - c.x).abs() < min_gap && (p.y - c.y).abs() < min_gap) {
+                continue;
+            }
+            planted.push(c);
+
+            let tree = SPECIES[rng.rand_i32(SPECIES.len() as i32) as usize];
+            let height = editor.world().get_ocean_floor_height_at(c);
+            generate_tree_feature(tree, &editor, Point3D::new(c.x, height, c.y))
+                .await
+                .expect("place feature failed");
+        }
+
+        info!("Planted {} feature trees in {} attempts", planted.len(), attempts);
     }
 
     #[tokio::test]

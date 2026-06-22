@@ -760,6 +760,7 @@ mod tests {
             &material,
             &data.structures,
             WallType::StandardWithInner,
+            None,
         )
         .await;
 
