@@ -9,7 +9,7 @@
 //! reproducible from our seed), and it **bypasses the editor's block cache**
 //! (so it's invisible to later `get_block` reads and to offline/dry-run mode).
 
-use crate::{editor::Editor, geometry::Point3D};
+use crate::{editor::Editor, geometry::Point3D, noise::RNG};
 
 use super::Tree;
 
@@ -51,14 +51,13 @@ pub fn tree_feature_id(tree: Tree) -> &'static str {
 }
 
 /// Build a short cactus column (1–3 tall) on a sand footing, in place of a
-/// vanilla feature (there's no cactus equivalent). Height varies by position
-/// since no RNG is threaded through the feature path.
-async fn place_cactus_column(editor: &Editor, point: Point3D) {
+/// vanilla feature (there's no cactus equivalent). Height is rolled from `rng`.
+async fn place_cactus_column(editor: &Editor, point: Point3D, rng: &mut RNG) {
     let (x, y, z) = (point.x, point.y, point.z);
     editor
         .place_block_forced(&"minecraft:sand".into(), Point3D { x, y: y - 1, z })
         .await;
-    let height = 1 + (x * 2 + z).rem_euclid(3); // 1..=3, varied by position
+    let height = 1 + rng.rand_i32(3); // 1..=3
     for i in 0..height {
         editor
             .place_block(&"minecraft:cactus".into(), Point3D { x, y: y + i, z })
@@ -67,15 +66,18 @@ async fn place_cactus_column(editor: &Editor, point: Point3D) {
 }
 
 /// Grow a vanilla tree feature for `tree` at `point` (build-area-local
-/// coordinates) by asking the server to `place feature`.
+/// coordinates) by asking the server to `place feature`. `rng` is only consumed
+/// by the cactus path (which we build ourselves); vanilla features are seeded by
+/// the world.
 pub async fn generate_tree_feature(
     tree: Tree,
     editor: &Editor,
     point: Point3D,
+    rng: &mut RNG,
 ) -> anyhow::Result<()> {
     // Cactus has no vanilla `place feature` — build the column ourselves.
     if matches!(tree, Tree::Cactus) {
-        place_cactus_column(editor, point).await;
+        place_cactus_column(editor, point, rng).await;
         return Ok(());
     }
     editor.place_feature(tree_feature_id(tree), point).await
