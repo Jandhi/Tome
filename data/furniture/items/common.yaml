@@ -482,7 +482,7 @@ desk:
   # Someone seated at the desk, facing the writing surface.
   anchors:
     - dialogue: reading
-      slots: [ { offset: [0, 1] } ]
+      slots: [ { offset: [0, 1], occupant: any_age } ]
 
 # Wooden stairs as a chair, facing into the room.
 chair:

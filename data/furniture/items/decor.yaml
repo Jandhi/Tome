@@ -26,7 +26,7 @@ chiseled_bookshelf:
   # A reader browsing the shelf.
   anchors:
     - dialogue: reading
-      slots: [ { offset: [0, 1] } ]
+      slots: [ { offset: [0, 1], occupant: any_age } ]
 
 # Reading stand against a wall, lectern face (open book) toward the room.
 lectern:
@@ -41,7 +41,7 @@ lectern:
   # A reader at the lectern.
   anchors:
     - dialogue: reading
-      slots: [ { offset: [0, 1] } ]
+      slots: [ { offset: [0, 1], occupant: any_age } ]
 
 # 2-wide bench: two wooden stairs side by side against a wall, seats facing
 # into the room. Mirrors `chair` (oak_stairs, away_from_wall) but two cells

@@ -25,12 +25,13 @@
 //! Generation runs in four passes:
 //!   1. [`build_households`] — open-shape households, sized to bed budget,
 //!      with intra-household kin (parent↔child, spouse↔spouse, sibling↔sibling)
-//!      wired reciprocally. `profession: None` everywhere.
+//!      wired reciprocally. Everyone starts a plain, unemployed villager.
 //!   2. [`link_cross_household`] — in-laws, married-out siblings, adult
 //!      children whose parents live elsewhere. All edges reciprocal.
-//!   3. [`assign_employment`] — fills `profession` for adults (children stay
-//!      None; elders mostly retire). v1 rolls random trades; future passes
-//!      will consume a workplace jobs board.
+//!   3. [`assign_employment`] — sets each adult's `look` (villager outfit) and
+//!      `employment` (the job it implies); children stay plain villagers, elders
+//!      mostly retire. v1 rolls random trades; future passes will consume a
+//!      workplace jobs board.
 //!   4. [`populate_town`] — the existing seeded + weighted anchor draw, but
 //!      the per-house pool now reads from `population.households[h].members`.
 
@@ -43,10 +44,12 @@ use crate::editor::Editor;
 use crate::generator::buildings_v2::footprint::SizeClass;
 use crate::generator::buildings_v2::Culture;
 use crate::generator::nbts::{Structure, StructureType};
-use crate::geometry::Point3D;
+use crate::geometry::{Point2D, Point3D};
 use crate::noise::RNG;
 
-use super::npc::{spawn_villager_npc, DialogueVolume, Profession, VillagerBiome};
+use super::npc::{
+    spawn_mob_npc, spawn_villager_npc, DialogueVolume, NpcLook, Profession, Staffing, VillagerBiome,
+};
 
 /// How much more a multi-person scene weighs than a solo one, per person. A
 /// two-slot scene starts at `2 * BOOST`, so conversations and tables are picked
@@ -71,6 +74,25 @@ pub enum SlotRole {
     Idle,
 }
 
+/// Which age of NPC may fill a slot. Deserialized from furniture `anchors:`
+/// specs (snake_case: `adult_only`, `any_age`, `child_only`). Defaults to
+/// `AdultOnly`: most posts are adult work (anvils, stalls, guard posts), so a
+/// slot opts *into* children. Mark domestic and social slots `any_age`, and
+/// child-led scenes (playing in the yard) `child_only`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Occupant {
+    AdultOnly,
+    AnyAge,
+    ChildOnly,
+}
+
+impl Default for Occupant {
+    fn default() -> Self {
+        Occupant::AdultOnly
+    }
+}
+
 /// One person's spot within a scene: where they stand, which way they face, and
 /// what kind of NPC belongs there.
 #[derive(Clone, Debug)]
@@ -81,13 +103,19 @@ pub struct AnchorSlot {
     /// scenes this is baked toward the other slots at emit time.
     pub facing: f32,
     pub role: SlotRole,
+    /// Which age of NPC may stand here. Most slots are `AdultOnly`; domestic and
+    /// social slots are marked `AnyAge` and play scenes `ChildOnly`, so a child
+    /// only ever spawns where a furniture/scene author allowed one.
+    pub occupant: Occupant,
     /// If true, the whole scene is skipped unless this slot can be filled.
     pub required: bool,
-    /// Force a specific profession on the spawned NPC, overriding the roster's
-    /// random one. `None` keeps the roster's profession. Used by workplace
-    /// fixtures (the smithy worker is a smith regardless of who the roster
-    /// hands us) — name and dialogue still come from the roster.
-    pub profession: Option<Profession>,
+    /// Force how the spawned NPC looks — a villager with a specific profession,
+    /// or a non-villager mob (e.g. a pillager guard) — overriding the default.
+    /// `None` derives the look from the roster NPC (a villager wearing its own
+    /// rolled profession). Either way, name and dialogue come from the roster.
+    /// Used by workplace fixtures (the smithy worker is a smith regardless of who
+    /// the roster hands us) and guard posts. See [`NpcLook`].
+    pub look: Option<NpcLook>,
     /// Context dialogue key (e.g. `tending_furnace`, `conversation`) indexing a
     /// pool in `NpcData::dialogue`. `None` falls back to generic small talk.
     /// Set from the furniture anchor that produced this slot.
@@ -110,8 +138,9 @@ impl AnchorSlot {
             pos,
             facing,
             role,
+            occupant: Occupant::AdultOnly,
             required: true,
-            profession: None,
+            look: None,
             dialogue: None,
             volume: DialogueVolume::Normal,
             y_offset: 0.0,
@@ -166,8 +195,9 @@ impl AnchorScene {
                 pos,
                 facing,
                 role,
+                occupant: Occupant::AdultOnly,
                 required: true,
-                profession: None,
+                look: None,
                 dialogue,
                 volume,
                 y_offset: 0.0,
@@ -176,17 +206,18 @@ impl AnchorScene {
     }
 
     /// A one-person workplace fixture: a single required [`SlotRole::Worker`]
-    /// with a profession bound to the workplace (smith at a smithy, etc.). Name
-    /// and dialogue still come from the roster; only the outfit is forced.
-    pub fn worker(pos: Point3D, facing: f32, profession: Profession) -> Self {
+    /// with a skin bound to the workplace (a smith look at a smithy, etc.). Name
+    /// and dialogue still come from the roster; only the look is forced.
+    pub fn worker(pos: Point3D, facing: f32, look: NpcLook) -> Self {
         AnchorScene {
             kind: SceneKind::Solo,
             slots: vec![AnchorSlot {
                 pos,
                 facing,
                 role: SlotRole::Worker,
+                occupant: Occupant::AdultOnly,
                 required: true,
-                profession: Some(profession),
+                look: Some(look),
                 dialogue: None,
                 volume: DialogueVolume::Normal,
                 y_offset: 0.0,
@@ -350,9 +381,23 @@ pub struct Npc {
     pub epithet: Option<String>,
     pub life_stage: LifeStage,
     pub biome: VillagerBiome,
-    /// `None` until [`assign_employment`] fills it (and stays `None` for
-    /// children and most elders). Spawns as the green "unemployed" robe.
-    pub profession: Option<Profession>,
+    /// How the NPC *looks* — a villager in some Minecraft profession outfit, or a
+    /// mob (a witch, a pillager). This is the costume, not the job: "is it a
+    /// villager, a witch, a weaponsmith." Residents default to a plain villager
+    /// and are dressed by [`assign_employment`]; the mob half is allowed (those
+    /// are just NPCs that look like a mob). Distinct from `employment`.
+    pub look: NpcLook,
+    /// What the NPC *does* — its literal town job ("guard", "woodcutter",
+    /// "farmer", …), or `None` when unemployed (children, retired elders,
+    /// nitwits, plain villagers). Residents get a trade label from
+    /// [`assign_employment`]; fixtures get the label their data entry declares.
+    /// Distinct from `look`: a weaponsmith-outfit villager can work as a guard.
+    pub employment: Option<String>,
+    /// Set once the NPC has been committed to a fixed spot in the world — today
+    /// only by [`bind_workers`] when a resident is drafted to a workplace — so
+    /// [`populate_town`] won't also seat them at home. Keeps the "each resident
+    /// appears exactly once" invariant without disturbing [`Population::by_id`].
+    pub placed: bool,
     pub relationships: Vec<Relationship>,
 }
 
@@ -382,6 +427,10 @@ pub struct Household {
     /// Which house this household lives in — the index used for the
     /// `home_<id>` entity tag on spawned residents.
     pub home: usize,
+    /// Footprint centre (X/Z) of this household's house — copied from its
+    /// [`HouseAnchors`] so proximity passes (work-binding, friendship) don't
+    /// need to thread the house list around.
+    pub pos: Point2D,
     /// Wealth tier derived from the building's size class at placement time.
     /// Biases [`assign_employment`] and [`pick_household_shape`].
     pub wealth: Wealth,
@@ -421,18 +470,17 @@ fn villager_biome_for(culture: Culture) -> VillagerBiome {
     }
 }
 
-/// Workplace fixture spec: how to dress and size a building's worker crew.
-/// `professions` is rolled across (so two of the same shop don't always match),
-/// `workers` is the target crew size (capped later by available stand cells).
+/// A staffed post defined in data: the job it fills and the skins it can wear.
+/// `employment` is the job label baked onto the NPC (and tallied in the jobs
+/// summary); `looks` is rolled per spawn, so a post can mix villager and mob
+/// skins. Used for guard posts. Workplaces use [`Staffing`] (this plus a crew
+/// size), declared on each building's structure JSON.
 #[derive(Debug, Clone, Deserialize)]
-pub struct WorkplaceSpec {
-    pub professions: Vec<Profession>,
-    pub workers: usize,
+pub struct Fixture {
+    pub employment: String,
+    pub looks: Vec<NpcLook>,
 }
 
-/// Key in `NpcData::workplaces` used as the fallback when a building kind has
-/// no explicit entry. Must always exist (enforced by `NpcData::validate`).
-const DEFAULT_WORKPLACE_KEY: &str = "default";
 
 /// Name + dialogue pools, loaded from `data/npcs.yaml`.
 #[derive(Debug, Clone, Deserialize)]
@@ -471,13 +519,14 @@ pub struct NpcData {
     /// exchange should stand alone, in case the scene is reduced to one person.
     #[serde(default)]
     pub exchanges: HashMap<String, Vec<Vec<String>>>,
-    /// Trade outfit for gate and tower guard fixtures.
-    pub guard_profession: Profession,
-    /// Workplace (building NBT id) → trade outfit + crew size for worker
-    /// fixtures placed at the building's footprint edge. An unknown kind falls
-    /// back to the `default` entry; the key list is validated at load against
-    /// the loaded `Structure` map (see [`NpcData::validate`]).
-    pub workplaces: HashMap<String, WorkplaceSpec>,
+    /// Gate and tower guard fixture: its `employment` job label and the `looks`
+    /// pool rolled per guard (mix villager and mob skins; repeat to weight).
+    /// `looks` must be non-empty (enforced by [`NpcData::validate`]).
+    pub guards: Fixture,
+    /// Fallback worker [`Staffing`] for buildings whose structure JSON declares
+    /// no `staffing` block of its own. Workplace staffing now lives on each
+    /// building's structure sidecar; this only covers the unstated ones.
+    pub default_staffing: Staffing,
 }
 
 impl NpcData {
@@ -501,6 +550,26 @@ impl NpcData {
         }
     }
 
+    /// Like [`line`](Self::line), but for a child it first tries a `{key}_child`
+    /// pool — so a kid at a `conversation` slot draws from `conversation_child`
+    /// when that pool exists, and otherwise falls back to the normal line. Adults
+    /// (and missing child pools) behave exactly like [`line`](Self::line).
+    pub fn line_aged(&self, key: Option<&str>, is_child: bool, rng: &mut RNG) -> String {
+        if is_child {
+            if let Some(k) = key {
+                let child_key = format!("{k}_child");
+                if let Some(pool) = self
+                    .dialogue
+                    .get(&child_key)
+                    .filter(|lines| !lines.is_empty())
+                {
+                    return rng.choose(pool).clone();
+                }
+            }
+        }
+        self.line(key, rng)
+    }
+
     /// Pick one whole exchange (an ordered list of lines) for `key` whose cast
     /// size matches `n` — an entry with exactly `n` lines, one per speaker — or
     /// `None` if the pool has no `n`-line entry. The caller hands the lines out to
@@ -516,42 +585,43 @@ impl NpcData {
         Some(rng.choose(&matching).to_vec())
     }
 
-    /// Trade outfit pool + crew size for a worker fixture at a building of
-    /// `kind`. Unknown kinds fall back to the required `default` entry. The
-    /// caller rolls a profession per worker from `spec.professions` so a
-    /// multi-worker shop isn't uniform.
-    pub fn workplace_spec(&self, kind: &str) -> &WorkplaceSpec {
-        self.workplaces
-            .get(kind)
-            .or_else(|| self.workplaces.get(DEFAULT_WORKPLACE_KEY))
-            .expect("npcs.yaml workplaces.default must exist (enforced by validate)")
+    /// The worker [`Staffing`] for a building of `kind`: its structure JSON's own
+    /// `staffing` block when present, else the town-wide `default_staffing`. The
+    /// caller rolls a skin per worker from `staffing.looks` so a multi-worker
+    /// shop isn't uniform.
+    pub fn staffing_for<'a>(
+        &'a self,
+        kind: &str,
+        structures: &'a HashMap<StructureType, Structure>,
+    ) -> &'a Staffing {
+        structures
+            .get(&StructureType(kind.to_string()))
+            .and_then(|s| s.staffing.as_ref())
+            .unwrap_or(&self.default_staffing)
     }
 
-    /// Validate the workplaces map: the `default` entry must exist; every
-    /// entry must have a non-empty `professions` list and at least one worker;
-    /// and every key other than `default` must match a loaded building NBT id
-    /// (so a typo like `copper_smleter` fails at startup instead of silently
-    /// falling through to the default).
+    /// Validate the NPC data against the loaded structures: the guard and default
+    /// staffing pools must be non-empty, and every building that declares its own
+    /// `staffing` block must have a non-empty `looks` pool and at least one
+    /// worker (so a malformed sidecar fails at startup, not silently).
     pub fn validate(&self, structures: &HashMap<StructureType, Structure>) -> anyhow::Result<()> {
-        if !self.workplaces.contains_key(DEFAULT_WORKPLACE_KEY) {
-            anyhow::bail!(
-                "npcs.yaml: workplaces is missing required `{DEFAULT_WORKPLACE_KEY}` entry",
-            );
+        if self.guards.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `guards.looks` must list at least one entry");
         }
-        for (kind, spec) in &self.workplaces {
-            if spec.professions.is_empty() {
-                anyhow::bail!("npcs.yaml: workplaces.{kind} has an empty `professions` list");
-            }
-            if spec.workers == 0 {
-                anyhow::bail!("npcs.yaml: workplaces.{kind} has `workers: 0`");
-            }
-            if kind == DEFAULT_WORKPLACE_KEY {
-                continue;
-            }
-            if !structures.contains_key(&StructureType(kind.clone())) {
-                anyhow::bail!(
-                    "npcs.yaml: workplaces.{kind} doesn't match any loaded building NBT id",
-                );
+        if self.default_staffing.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `default_staffing.looks` must list at least one entry");
+        }
+        if self.default_staffing.workers == 0 {
+            anyhow::bail!("npcs.yaml: `default_staffing.workers` must be > 0");
+        }
+        for (ty, s) in structures {
+            if let Some(staffing) = &s.staffing {
+                if staffing.looks.is_empty() {
+                    anyhow::bail!("structure {}: `staffing.looks` is empty", ty.0);
+                }
+                if staffing.workers == 0 {
+                    anyhow::bail!("structure {}: `staffing.workers` is 0", ty.0);
+                }
             }
         }
         Ok(())
@@ -848,7 +918,10 @@ fn push_member(
         epithet,
         life_stage: stage,
         biome,
-        profession: None,
+        // Plain villager until `assign_employment` dresses and employs them.
+        look: NpcLook::Villager(Profession::None),
+        employment: None,
+        placed: false,
         relationships: Vec::new(),
     });
     m_idx
@@ -1093,6 +1166,7 @@ pub fn build_households(
         pop.households.push(Household {
             surname: primary_surname,
             home: h_idx,
+            pos: house.pos,
             wealth,
             members,
         });
@@ -1289,33 +1363,27 @@ fn add_reciprocal(
 // Employment
 // ============================================================================
 
-/// Assign a `profession` to every resident. v1 rolls trades randomly from
-/// [`PROFESSIONS`]; children stay `None` (they're not employed); most elders
-/// retire (None), with 20% retaining their old trade for flavour. A later
-/// patch can swap this out for a workplace jobs board without changing the
-/// surrounding pipeline.
+/// Dress and employ every resident. Rolls a villager look-profession per member
+/// (children stay plain villagers; most elders retire to a plain robe, 20%
+/// keeping their old trade outfit for flavour; adults draw from their wealth
+/// tier), then sets `look` to that villager outfit and `employment` to the job
+/// it implies (see [`Profession::employment`] — the jobless `None`/`Nitwit`
+/// looks carry no employment). A later patch can swap the roll for a workplace
+/// jobs board without changing the surrounding pipeline.
 pub fn assign_employment(pop: &mut Population, rng: &mut RNG) {
     for h in pop.households.iter_mut() {
         let pool = professions_for(h.wealth);
         for m in h.members.iter_mut() {
-            match m.life_stage {
-                LifeStage::Child => {
-                    m.profession = None;
-                }
-                LifeStage::Elder => {
-                    // Most elders retire to `None`; 20% retain a trade — drawn
-                    // from the household's tier so a wealthy retiree keeps a
-                    // prestige outfit (the old librarian still wears the robe).
-                    m.profession = if rng.percent(20) {
-                        Some(*rng.choose(pool))
-                    } else {
-                        None
-                    };
-                }
-                LifeStage::Adult => {
-                    m.profession = Some(*rng.choose(pool));
-                }
-            }
+            let outfit = match m.life_stage {
+                LifeStage::Child => Profession::None,
+                // Most elders retire to a plain robe; 20% retain a trade — drawn
+                // from the household's tier so a wealthy retiree keeps a prestige
+                // outfit (the old librarian still wears the robe).
+                LifeStage::Elder if !rng.percent(20) => Profession::None,
+                LifeStage::Elder | LifeStage::Adult => *rng.choose(pool),
+            };
+            m.look = NpcLook::Villager(outfit);
+            m.employment = outfit.employment().map(String::from);
         }
     }
 }
@@ -1481,9 +1549,9 @@ pub fn log_population_stats(pop: &Population) {
     let mut unemployed = 0usize;
     for h in &pop.households {
         for m in &h.members {
-            match m.profession {
+            match &m.employment {
                 None => unemployed += 1,
-                Some(p) => *emp_counts.entry(format!("{:?}", p)).or_insert(0) += 1,
+                Some(e) => *emp_counts.entry(e.clone()).or_insert(0) += 1,
             }
         }
     }
@@ -1525,10 +1593,7 @@ pub fn log_sample_households(pop: &Population, n: usize) {
             h_idx, format!("\"{}\"", h.surname), h.wealth.label(), h.members.len(),
         );
         for m in &h.members {
-            let prof = m
-                .profession
-                .map(|p| format!("{:?}", p))
-                .unwrap_or_else(|| "—".to_string());
+            let job = m.employment.clone().unwrap_or_else(|| "—".to_string());
             let kin: Vec<String> = m
                 .relationships
                 .iter()
@@ -1553,7 +1618,7 @@ pub fn log_sample_households(pop: &Population, n: usize) {
                 "  {:<24} {:<6} {:<14} | {}",
                 m.display_name(),
                 format!("{:?}", m.life_stage),
-                prof,
+                job,
                 kin_str,
             );
         }
@@ -1564,22 +1629,37 @@ pub fn log_sample_households(pop: &Population, n: usize) {
 // Flat fixture roster (workplaces, plaza)
 // ============================================================================
 
-/// Generate a flat roster of `count` adult NPCs for fixture placement (plaza
-/// vendors, workplace workers, guards). Unlike household members, these are
-/// not registered in any [`Population`] — they have unique ids but no kin
-/// edges, no home, and a profession rolled up front (since fixtures are
-/// usually overridden by the scene's slot anyway).
+/// Generate a flat roster of `count` NPCs for fixture placement (plaza vendors
+/// and onlookers, workplace workers, guards), `children` of them kids and the
+/// rest working adults. Children are plain villagers with no trade — they exist
+/// to fill `ChildOnly` slots (e.g. kids in a market crowd); pass `0` for
+/// adult-only fixtures. Unlike household members, these are not registered in
+/// any [`Population`] — they have unique ids but no kin edges, no home, and a
+/// look/employment rolled up front (since fixtures usually override the look via
+/// the scene's slot anyway). Callers shuffle before placing, so the kids-first
+/// ordering here doesn't cluster them.
 pub fn build_roster(
     count: usize,
+    children: usize,
     culture: Culture,
     data: &NpcData,
     alloc: &mut IdAllocator,
     rng: &mut RNG,
 ) -> Vec<Npc> {
     let biome = villager_biome_for(culture);
+    let children = children.min(count);
     (0..count)
-        .map(|_| {
-            let stage = LifeStage::Adult;
+        .map(|i| {
+            let (stage, look, employment) = if i < children {
+                (LifeStage::Child, NpcLook::Villager(Profession::None), None)
+            } else {
+                let outfit = *rng.choose(&PROFESSIONS);
+                (
+                    LifeStage::Adult,
+                    NpcLook::Villager(outfit),
+                    outfit.employment().map(String::from),
+                )
+            };
             Npc {
                 id: alloc.next_id(),
                 first_name: roll_first_name(data, rng),
@@ -1587,7 +1667,9 @@ pub fn build_roster(
                 epithet: roll_epithet(stage, data, rng),
                 life_stage: stage,
                 biome,
-                profession: Some(*rng.choose(&PROFESSIONS)),
+                look,
+                employment,
+                placed: false,
                 relationships: Vec::new(),
             }
         })
@@ -1608,6 +1690,10 @@ pub struct HouseAnchors {
     pub scenes: Vec<AnchorScene>,
     pub population: usize,
     pub wealth: Wealth,
+    /// Footprint centre (X/Z) of this house, used by the household it seeds for
+    /// cheap proximity queries (work-binding to nearby workplaces, friendship
+    /// drafting between neighbours).
+    pub pos: Point2D,
 }
 
 /// One candidate scene in the town-wide draw, tagged with the house it belongs
@@ -1638,7 +1724,7 @@ async fn staff_scene(
     home: Option<usize>,
 ) -> anyhow::Result<usize> {
     let need = scene.required_count();
-    if need == 0 || pool.len() < need {
+    if need == 0 {
         return Ok(0);
     }
     // Draw one script sized to this scene's cast: an `n`-line exchange for `n`
@@ -1649,29 +1735,82 @@ async fn staff_scene(
         .dialogue
         .as_deref()
         .and_then(|k| data.exchange_of_len(k, scene.slots.len(), rng));
+
+    // Select an NPC per slot *before* spawning, so the scene stays atomic: a
+    // required slot that can't be matched by age drops the whole scene with
+    // nothing placed. Match age-restricted slots first so an `AnyAge` slot can't
+    // grab the only adult a later `AdultOnly` slot needs (or the only child a
+    // `ChildOnly` slot needs).
+    let mut assigned: Vec<Option<Npc>> = (0..scene.slots.len()).map(|_| None).collect();
+    let mut order: Vec<usize> = (0..scene.slots.len()).collect();
+    order.sort_by_key(|&i| {
+        let s = &scene.slots[i];
+        (matches!(s.occupant, Occupant::AnyAge) as u8, !s.required)
+    });
+    for &i in &order {
+        let slot = &scene.slots[i];
+        match take_for(pool, slot.occupant) {
+            Some(npc) => assigned[i] = Some(npc),
+            None if slot.required => {
+                // Infeasible — restore what we took and drop the scene.
+                for npc in assigned.into_iter().flatten() {
+                    pool.push(npc);
+                }
+                return Ok(0);
+            }
+            None => {} // optional slot with no acceptable NPC left → skip it
+        }
+    }
+
     let mut placed = 0usize;
     for (i, slot) in scene.slots.iter().enumerate() {
-        if !slot.required && pool.is_empty() {
-            continue; // optional slots fill only if roster remains
-        }
-        let Some(npc) = pool.pop() else { break };
-        let profession = slot
-            .profession
-            .or(npc.profession)
-            .unwrap_or(Profession::None);
+        let Some(npc) = assigned[i].take() else { continue };
+        // The slot may force a look (workplace trade, guard mob); otherwise the
+        // NPC keeps its own rolled look. Name and dialogue always come from the
+        // roster; a child draws a `{key}_child` line when the pool defines one.
+        let look = slot.look.unwrap_or(npc.look);
         let dialogue = exchange
             .as_ref()
             .and_then(|lines| lines.get(i).cloned())
-            .unwrap_or_else(|| data.line(slot.dialogue.as_deref(), rng));
+            .unwrap_or_else(|| data.line_aged(slot.dialogue.as_deref(), npc.is_child(), rng));
         let display_name = npc.display_name();
-        spawn_villager_npc(
-            editor, slot.pos, slot.facing, &display_name, &dialogue, npc.biome,
-            profession, slot.volume, home, npc.is_child(), slot.y_offset,
-        )
-        .await?;
+        match look {
+            NpcLook::Villager(profession) => {
+                spawn_villager_npc(
+                    editor, slot.pos, slot.facing, &display_name, &dialogue, npc.biome,
+                    profession, slot.volume, home, npc.is_child(), slot.y_offset,
+                )
+                .await?;
+            }
+            // The mob path is villager-free: biome/profession/home/child don't
+            // apply, but the roster still supplies the name and dialogue.
+            NpcLook::Mob(mob) => {
+                spawn_mob_npc(
+                    editor, slot.pos, slot.facing, &display_name, &dialogue, mob,
+                    slot.volume, slot.y_offset,
+                )
+                .await?;
+            }
+        }
         placed += 1;
     }
     Ok(placed)
+}
+
+/// Remove and return the last pool NPC whose age the slot's [`Occupant`] rule
+/// accepts, preferring an adult for `AnyAge` so children are left for any
+/// `ChildOnly` slots in the same scene. `None` if the pool has no acceptable
+/// NPC. Takes from the back to mirror the old `pool.pop()` draw order.
+fn take_for(pool: &mut Vec<Npc>, occupant: Occupant) -> Option<Npc> {
+    let pos = match occupant {
+        Occupant::AdultOnly => pool.iter().rposition(|n| !n.is_child()),
+        Occupant::ChildOnly => pool.iter().rposition(|n| n.is_child()),
+        Occupant::AnyAge => pool
+            .iter()
+            .rposition(|n| !n.is_child())
+            .or_else(|| pool.iter().rposition(|n| n.is_child())),
+    }?;
+    Some(pool.remove(pos))
 }
 
 /// Pick the index (into `entries`) of one of `live` weighted by its current
@@ -1753,7 +1892,12 @@ pub async fn populate_town(
     let mut pools: Vec<Vec<Npc>> = (0..num_houses)
         .map(|i| {
             if i < households.len() {
+                // Residents already committed elsewhere (bound to a workplace by
+                // `bind_workers`) are filtered out so they aren't seated twice.
                 std::mem::take(&mut households[i].members)
+                    .into_iter()
+                    .filter(|m| !m.placed)
+                    .collect()
             } else {
                 Vec::new()
             }
@@ -1848,6 +1992,156 @@ pub async fn populate_npcs(
     Ok(placed)
 }
 
+// ============================================================================
+// Employment binding — workplaces draft nearby residents
+// ============================================================================
+
+/// One worker post at a placed workplace: where the worker stands and which way
+/// they face, the building centre used for proximity scoring, the skin pool the
+/// post dresses its worker from, and the job label baked onto whoever fills it.
+/// The settlement layer's claim scan produces these (see `discover_worker_slots`)
+/// and [`bind_workers`] consumes them; posts left unfilled are handed back so the
+/// caller can backfill them with anonymous fixtures.
+pub struct WorkerSlot {
+    pub stand: Point3D,
+    pub facing: f32,
+    pub workplace: Point2D,
+    pub looks: Vec<NpcLook>,
+    pub employment: String,
+}
+
+/// Distance falloff for the work draft. A resident next door to a workplace is
+/// far likelier to staff it than one across town; exponential decay over this
+/// many blocks keeps the pull strong but never absolute.
+const WORK_PROXIMITY_SCALE: f32 = 48.0;
+/// Weight multiplier for a resident whose flavour outfit already matches the
+/// post's trade (a weaponsmith villager staffing the smithy). Mild on purpose,
+/// so proximity stays the lead term and a nearby non-specialist can still be
+/// hired — and re-dressed in the trade.
+const WORK_AFFINITY_MATCH: f32 = 3.0;
+
+/// Per-NPC base employability, independent of any particular workplace. Today
+/// every working-age adult scores the same; this is the seam where skill,
+/// trait, or age terms will multiply in later. Proximity and trade affinity are
+/// applied per-workplace at draft time (see [`draft_worker`]), not here.
+fn base_qualification(_npc: &Npc) -> f32 {
+    1.0
+}
+
+/// Proximity weight between a household's house and a workplace.
+fn work_proximity(home: Point2D, workplace: Point2D) -> f32 {
+    let dx = (home.x - workplace.x) as f32;
+    let dz = (home.y - workplace.y) as f32;
+    let dist = (dx * dx + dz * dz).sqrt();
+    (-dist / WORK_PROXIMITY_SCALE).exp()
+}
+
+/// Trade-affinity weight: a bonus when the resident's current look is one the
+/// post would hire for, else neutral.
+fn work_affinity(npc: &Npc, looks: &[NpcLook]) -> f32 {
+    if looks.iter().any(|l| *l == npc.look) {
+        WORK_AFFINITY_MATCH
+    } else {
+        1.0
+    }
+}
+
+/// Weighted pick over `(household_idx, member_idx, weight)` candidates. Mirrors
+/// [`weighted_pick`]'s tolerance of an all-zero total (returns the first).
+fn weighted_choice(cands: &[(usize, usize, f32)], rng: &mut RNG) -> Option<(usize, usize)> {
+    if cands.is_empty() {
+        return None;
+    }
+    let total: f32 = cands.iter().map(|c| c.2).sum();
+    if total <= 0.0 {
+        return cands.first().map(|c| (c.0, c.1));
+    }
+    let mut r = rng.rand_i32(100_000) as f32 / 100_000.0 * total;
+    for c in cands {
+        if r < c.2 {
+            return Some((c.0, c.1));
+        }
+        r -= c.2;
+    }
+    cands.last().map(|c| (c.0, c.1))
+}
+
+/// The pure core of the work draft: choose which unplaced working-age adult
+/// staffs a post at `workplace`, weighting each candidate by
+/// `base_qualification * proximity * affinity`. Returns the chosen member's
+/// `(household_idx, member_idx)`, or `None` if no eligible adult remains. Pure
+/// (no I/O), so the qualification model is unit-testable without a server.
+fn draft_worker(
+    households: &[Household],
+    workplace: Point2D,
+    looks: &[NpcLook],
+    rng: &mut RNG,
+) -> Option<(usize, usize)> {
+    let mut cands: Vec<(usize, usize, f32)> = Vec::new();
+    for (hi, h) in households.iter().enumerate() {
+        for (mi, m) in h.members.iter().enumerate() {
+            if m.placed || m.life_stage != LifeStage::Adult {
+                continue;
+            }
+            let w = base_qualification(m)
+                * work_proximity(h.pos, workplace)
+                * work_affinity(m, looks);
+            if w > 0.0 {
+                cands.push((hi, mi, w));
+            }
+        }
+    }
+    weighted_choice(&cands, rng)
+}
+
+/// Staff each workplace from the resident population *before* residential
+/// placement, so a resident drafted into a shop isn't also seated at home. For
+/// every [`WorkerSlot`], [`draft_worker`] picks an unplaced working-age adult
+/// (proximity-led qualification); the chosen resident is dressed in the post's
+/// trade, given its job label, marked `placed`, and spawned at the post tagged
+/// with their home. Posts with no eligible adult left (more posts than adults)
+/// are returned unfilled for the caller to backfill with anonymous fixtures.
+/// Returns `(residents_bound, unfilled_posts)`. Offline: binds nothing, hands
+/// every post back.
+pub async fn bind_workers(
+    editor: &Editor,
+    population: &mut Population,
+    slots: Vec<WorkerSlot>,
+    data: &NpcData,
+    rng: &mut RNG,
+) -> anyhow::Result<(usize, Vec<WorkerSlot>)> {
+    if editor.is_offline() {
+        return Ok((0, slots));
+    }
+    let mut bound = 0usize;
+    let mut unfilled: Vec<WorkerSlot> = Vec::new();
+    for slot in slots {
+        let Some((hi, mi)) =
+            draft_worker(&population.households, slot.workplace, &slot.looks, rng)
+        else {
+            unfilled.push(slot);
+            continue;
+        };
+        // Dress the resident in the post's trade and bake its job label, then
+        // mark them placed so `populate_town` skips them.
+        let look = *rng.choose(&slot.looks);
+        let home = population.households[hi].home;
+        {
+            let m = &mut population.households[hi].members[mi];
+            m.look = look;
+            m.employment = Some(slot.employment.clone());
+            m.placed = true;
+        }
+        // Spawn this specific resident via the shared scene path (name, dialogue,
+        // home tag) with the post's look forced.
+        let npc = population.households[hi].members[mi].clone();
+        let scene = AnchorScene::worker(slot.stand, slot.facing, look);
+        let mut one = vec![npc];
+        bound += staff_scene(editor, &scene, &mut one, data, rng, Some(home)).await?;
+    }
+    Ok((bound, unfilled))
+}
+
 /// Minecraft yaw (degrees) for an NPC at `from` looking toward `to`. Use this
 /// when emitting anchors so the NPC faces something meaningful (a door, a
 /// counter, the other half of a conversation). 0 = south, 90 = west.
@@ -1931,7 +2225,9 @@ mod tests {
             epithet: Some("the Quiet".into()),
             life_stage: LifeStage::Elder,
             biome: VillagerBiome::Plains,
-            profession: None,
+            look: NpcLook::Villager(Profession::None),
+            employment: None,
+            placed: false,
             relationships: Vec::new(),
         };
         assert_eq!(with_epithet.display_name(), "Doral the Quiet");
@@ -1939,6 +2235,55 @@ mod tests {
 
         let without = Npc { epithet: None, ..with_epithet.clone() };
         assert_eq!(without.display_name(), "Doral Carter");
+    }
+
+    /// The work draft favours nearby unplaced adults, skips placed/non-adults,
+    /// and yields `None` once the pool is exhausted.
+    #[test]
+    fn work_draft_prefers_nearby_unplaced_adults() {
+        let workplace = Point2D::new(0, 0);
+        let adult = |id: NpcId, pos: Point2D| Household {
+            surname: "X".into(),
+            home: id as usize,
+            pos,
+            wealth: Wealth::Modest,
+            members: vec![Npc {
+                id,
+                first_name: "A".into(),
+                surname: "X".into(),
+                epithet: None,
+                life_stage: LifeStage::Adult,
+                biome: VillagerBiome::Plains,
+                look: NpcLook::Villager(Profession::None),
+                employment: None,
+                placed: false,
+                relationships: Vec::new(),
+            }],
+        };
+        // House 0 sits beside the workplace; house 1 is far across town.
+        let mut households = vec![adult(0, Point2D::new(2, 0)), adult(1, Point2D::new(400, 0))];
+        let looks = [NpcLook::Villager(Profession::None)];
+        let mut rng = RNG::new(Seed(7));
+
+        let near = (0..200)
+            .filter(|_| draft_worker(&households, workplace, &looks, &mut rng) == Some((0, 0)))
+            .count();
+        assert!(near > 180, "near household should dominate, got {near}/200");
+
+        // Once the near adult is committed, the draft falls to the far one.
+        households[0].members[0].placed = true;
+        assert_eq!(draft_worker(&households, workplace, &looks, &mut rng), Some((1, 0)));
+
+        // Both committed → nothing left to draft.
+        households[1].members[0].placed = true;
+        assert_eq!(draft_worker(&households, workplace, &looks, &mut rng), None);
+
+        // A lone child is never working-age, so still nothing.
+        households[0].members[0].placed = false;
+        households[0].members[0].life_stage = LifeStage::Child;
+        households[1].members[0].placed = false;
+        households[1].members[0].life_stage = LifeStage::Child;
+        assert_eq!(draft_worker(&households, workplace, &looks, &mut rng), None);
     }
 
     /// Build a small batch of households and assert intra-household kinship is
@@ -1952,7 +2297,12 @@ mod tests {
         let mut alloc = IdAllocator::new();
         // A mix of bed budgets covering every shape branch.
         let houses: Vec<HouseAnchors> = (1..=6)
-            .map(|pop| HouseAnchors { scenes: Vec::new(), population: pop, wealth: Wealth::Modest })
+            .map(|pop| HouseAnchors {
+                scenes: Vec::new(),
+                population: pop,
+                wealth: Wealth::Modest,
+                pos: Point2D::new(pop as i32 * 16, 0),
+            })
             .collect();
         let pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
         assert_eq!(pop.households.len(), houses.len());
@@ -1996,24 +2346,40 @@ mod tests {
         }
     }
 
-    /// `assign_employment` leaves children unemployed, mostly retires elders,
-    /// and gives every adult a profession. No server.
+    /// `assign_employment` leaves children unemployed plain villagers, mostly
+    /// retires elders, and dresses every adult as a villager. No server.
     #[test]
     fn employment_pass_respects_life_stage() {
         let data = NpcData::load().expect("load npcs.yaml");
         let mut rng = RNG::new(Seed(13));
         let mut alloc = IdAllocator::new();
         let houses: Vec<HouseAnchors> = (1..=6)
-            .map(|pop| HouseAnchors { scenes: Vec::new(), population: pop, wealth: Wealth::Modest })
+            .map(|pop| HouseAnchors {
+                scenes: Vec::new(),
+                population: pop,
+                wealth: Wealth::Modest,
+                pos: Point2D::new(pop as i32 * 16, 0),
+            })
             .collect();
         let mut pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
         assign_employment(&mut pop, &mut rng);
         for h in &pop.households {
             for m in &h.members {
                 match m.life_stage {
-                    LifeStage::Child => assert!(m.profession.is_none(), "child stays unemployed"),
-                    LifeStage::Adult => assert!(m.profession.is_some(), "every adult gets a trade"),
-                    LifeStage::Elder => {} // either None (retired) or Some (kept)
+                    LifeStage::Child => {
+                        assert!(m.employment.is_none(), "child stays unemployed");
+                        assert_eq!(
+                            m.look,
+                            NpcLook::Villager(Profession::None),
+                            "child is a plain villager",
+                        );
+                    }
+                    // Adults are dressed as villagers; whether they hold a job
+                    // depends on the roll (None/Nitwit looks are unemployed).
+                    LifeStage::Adult => {
+                        assert!(matches!(m.look, NpcLook::Villager(_)), "adult is a villager");
+                    }
+                    LifeStage::Elder => {} // retired (None) or kept a trade
                 }
             }
         }
@@ -2050,7 +2416,7 @@ mod tests {
             .collect();
 
         let data = NpcData::load().expect("load npcs.yaml");
-        let roster = build_roster(count as usize, Culture::Desert, &data, &mut alloc, &mut rng);
+        let roster = build_roster(count as usize, 0, Culture::Desert, &data, &mut alloc, &mut rng);
         let placed = populate_npcs(&editor, scenes, roster, count as usize, &data, &mut rng)
             .await
             .expect("populate failed");

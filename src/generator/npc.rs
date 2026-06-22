@@ -171,13 +171,44 @@ impl Profession {
             Profession::Weaponsmith => "minecraft:weaponsmith",
         }
     }
+
+    /// The town job a resident of this look works, if any — the bridge from the
+    /// *look* axis (this Minecraft outfit) to the *employment* axis (a free-form
+    /// job label). Real trades map across to their lowercase name; the jobless
+    /// green-robe `None` and the lazy `Nitwit` look have no employment.
+    ///
+    /// Employment is a plain string, not an enum: it's presentation data we only
+    /// display and tally (never branch on), and fixtures declare arbitrary job
+    /// labels in `npcs.yaml` ("woodcutter", "smith", …), so an open vocabulary
+    /// fits better than ~30 enum variants. A resident villager's employment is a
+    /// villager trade; a fixture's comes from its data entry.
+    pub fn employment(self) -> Option<&'static str> {
+        Some(match self {
+            Profession::None | Profession::Nitwit => return None,
+            Profession::Armorer => "armorer",
+            Profession::Butcher => "butcher",
+            Profession::Cartographer => "cartographer",
+            Profession::Cleric => "cleric",
+            Profession::Farmer => "farmer",
+            Profession::Fisherman => "fisherman",
+            Profession::Fletcher => "fletcher",
+            Profession::Leatherworker => "leatherworker",
+            Profession::Librarian => "librarian",
+            Profession::Mason => "mason",
+            Profession::Shepherd => "shepherd",
+            Profession::Toolsmith => "toolsmith",
+            Profession::Weaponsmith => "weaponsmith",
+        })
+    }
 }
 
 /// A non-villager townsfolk mob we can drop in as a static fixture, the same way
 /// as [`spawn_villager_npc`] but without the villager-specific biome/profession.
 /// Witches and wandering traders are the colourful background characters that
-/// make a town feel lived-in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// make a town feel lived-in. Deserialized from data (e.g. a `guard_mob:
+/// pillager` in `npcs.yaml`) in snake_case.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Mob {
     Witch,
     WanderingTrader,
@@ -201,6 +232,35 @@ impl Mob {
             Mob::ZombieVillager => "minecraft:zombie_villager",
         }
     }
+}
+
+/// How an NPC looks when spawned: either a villager wearing a [`Profession`] or a
+/// non-villager [`Mob`]. This is the render axis — orthogonal to a resident's
+/// *employment* (`Npc::profession`), which a mob-look NPC simply doesn't carry.
+///
+/// Deserialized untagged from a single string, so a config list can mix the two —
+/// a `Profession` name (PascalCase, e.g. `Armorer`) parses as `Villager`, a `Mob`
+/// name (snake_case, e.g. `pillager`) as `Mob`. The two name sets are disjoint,
+/// so there's no ambiguity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum NpcLook {
+    Villager(Profession),
+    Mob(Mob),
+}
+
+/// Worker staffing for a building, declared in the structure's own JSON sidecar
+/// (e.g. `data/structures/resource_buildings/woodcutter_hut.json`). `employment`
+/// is the job label shared by the whole crew (and tallied in the jobs summary);
+/// `looks` is the skin pool rolled per worker, so a shop's crew isn't uniform
+/// and can mix villager and mob skins; `workers` is the target crew size (capped
+/// by the stand cells actually available at placement). A building with no
+/// `staffing` block falls back to the town-wide default in `npcs.yaml`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Staffing {
+    pub employment: String,
+    pub looks: Vec<NpcLook>,
+    pub workers: usize,
 }
 
 /// Escape a user string for embedding inside a double-quoted SNBT string.
@@ -279,6 +339,10 @@ pub async fn spawn_villager_npc(
 /// This is the villager-free counterpart to [`spawn_villager_npc`]: the same
 /// frozen (`NoAI`), named, faced, talking fixture, but for the colourful
 /// non-villager townsfolk that don't carry a biome or profession.
+///
+/// `y_offset` raises the mob's feet by a fractional block (e.g. `0.5` to stand a
+/// pillager guard on a battlement slab), matching [`spawn_villager_npc`]; `0.0`
+/// keeps the integer-grid spawn.
 pub async fn spawn_mob_npc(
     editor: &Editor,
     point: Point3D,
@@ -287,6 +351,7 @@ pub async fn spawn_mob_npc(
     dialogue: &str,
     mob: Mob,
     volume: DialogueVolume,
+    y_offset: f32,
 ) -> anyhow::Result<()> {
     // Frozen, named, and faced — same fixture treatment as a villager NPC.
     let mob_data = format!(
@@ -294,7 +359,13 @@ pub async fn spawn_mob_npc(
         escape_snbt(name),
         angle,
     );
-    editor.spawn_entity(mob.id(), point, Some(&mob_data)).await?;
+    if y_offset != 0.0 {
+        editor
+            .spawn_entity_offset(mob.id(), point, y_offset, Some(&mob_data))
+            .await?;
+    } else {
+        editor.spawn_entity(mob.id(), point, Some(&mob_data)).await?;
+    }
 
     spawn_dialogue_bubble(editor, point, angle, dialogue, volume, false).await
 }

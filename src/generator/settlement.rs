@@ -803,6 +803,7 @@ pub async fn generate_town(
                                 scenes: output.npc_anchors,
                                 population,
                                 wealth: crate::generator::population::Wealth::from_size_class(size_class),
+                                pos: output.footprint.bounds().midpoint(),
                             });
                             // Mark every rect in the footprint (core + wings)
                             // as used so subsequent placements on this lot
@@ -1020,15 +1021,31 @@ pub async fn generate_town(
     // and bubble volume (criers/performers yell), so we just hand them a roster
     // and staff them all. Live-only: no-op offline.
     if !plaza_scenes.is_empty() {
-        use crate::generator::population::{build_roster, populate_npcs};
+        use crate::generator::population::{build_roster, populate_npcs, Occupant};
         let npc_data = &data.npc_data;
         let budget = plaza_scenes.len();
-        let roster = build_roster(budget, culture, npc_data, &mut id_alloc, &mut rng.derive());
+        // Some market/stage onlookers are kid slots; mint exactly that many
+        // children in the roster so those scenes can be staffed (rest adults).
+        let kids = plaza_scenes
+            .iter()
+            .flat_map(|s| &s.slots)
+            .filter(|sl| sl.occupant == Occupant::ChildOnly)
+            .count();
+        let roster = build_roster(budget, kids, culture, npc_data, &mut id_alloc, &mut rng.derive());
         match populate_npcs(editor, plaza_scenes, roster, budget, npc_data, &mut rng).await {
             Ok(staffed) => println!("Staffed {} plaza NPCs", staffed),
             Err(e) => log::warn!("plaza staffing failed: {e}"),
         }
     }
+
+    // Worker binding runs inside the population pass below (before residential
+    // placement). These outlive that scope so the worker-fixture block can
+    // backfill the posts binding couldn't fill from residents, and the jobs
+    // summary can report the full per-trade tally.
+    let mut workplace_backfill: Vec<crate::generator::population::WorkerSlot> = Vec::new();
+    let mut bound_worker_count = 0usize;
+    let mut workplace_count = 0usize;
+    let mut worker_by_job: HashMap<String, usize> = HashMap::new();
 
     // ---- Population: size the resident crowd to beds, scatter it town-wide ----
     // Each house's budget is max(1, beds); the town total is their sum.
@@ -1066,6 +1083,31 @@ pub async fn generate_town(
         log_population_stats(&population);
         log_sample_households(&population, 8);
 
+        // Bind residents to workplaces before seating anyone at home. The draft
+        // weights each unplaced adult by qualification (proximity-led) and spawns
+        // the winner at the post; posts with no taker left fall through to
+        // anonymous fixtures (`workplace_backfill`). Bound workers are marked
+        // `placed`, so `populate_town` skips them — each resident appears once.
+        // Every post (resident-filled or not) is tallied by trade for the summary.
+        use crate::generator::population::bind_workers;
+        let (work_slots, n_workplaces) = discover_worker_slots(editor, &data);
+        workplace_count = n_workplaces;
+        for s in &work_slots {
+            *worker_by_job.entry(s.employment.clone()).or_insert(0) += 1;
+        }
+        match bind_workers(editor, &mut population, work_slots, npc_data, &mut rng.derive()).await {
+            Ok((bound, unfilled)) => {
+                println!(
+                    "Bound {} residents to workplaces; {} posts need fixtures",
+                    bound,
+                    unfilled.len(),
+                );
+                bound_worker_count = bound;
+                workplace_backfill = unfilled;
+            }
+            Err(e) => log::warn!("worker binding failed: {e}"),
+        }
+
         match populate_town(editor, town_anchors, population, npc_data, &mut rng).await {
             Ok(placed) => println!("Populated {} NPCs", placed),
             Err(e) => log::warn!("NPC population failed: {e}"),
@@ -1085,113 +1127,36 @@ pub async fn generate_town(
             build_roster, populate_npcs, AnchorScene, AnchorSlot, SceneKind, SlotRole,
         };
 
-        // Building type -> trade outfit. Looked up in `data/npcs.yaml` via
-        // `workplace_spec`: each entry carries a `professions` list (rolled
-        // across so two of the same kind don't always match) and a `workers`
-        // count. Unknown kinds fall back to the `default` entry.
+        // Workplace posts that binding couldn't fill from residents get an
+        // anonymous fixture: a fresh skin rolled from the post's pool, standing
+        // where binding would have seated the resident. (Residents bound to
+        // workplaces were already spawned in the population pass above; the claim
+        // scan + stand-cell geometry now lives in `discover_worker_slots`.)
         let npc_data = &data.npc_data;
         let mut worker_rng = rng.derive();
 
-        // Re-scan the claim map: placed buildings are the only `Structure` claims
-        // (wall towers claim `Wall`), and claims persist, so this recovers each
-        // building's footprint + type without threading state out of the placement
-        // phases. Scan the urban area *and* every rural parcel so rural gather
-        // buildings get staffed alongside urban shops. Group cells by instance id.
-        let mut scan_cells: Vec<Point2D> = urban.iter().copied().collect();
-        for sd in editor.world().districts.values() {
-            if sd.data.parcel_type == ParcelType::Rural {
-                scan_cells.extend(sd.data.points_2d.iter().copied());
-            }
-        }
-        let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
-        for &p in &scan_cells {
-            if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
-                footprints
-                    .entry(id.id)
-                    .or_insert_with(|| (id.structure_type.0.clone(), Vec::new()))
-                    .1
-                    .push(p);
-            }
-        }
-
-        // A cell is a usable stand spot only if nothing else claims it — not a
-        // road, wall, or another building. `get_claim` returns `None` only out
-        // of bounds, so an in-bounds open cell reads as `BuildClaim::None`.
-        let is_clear = |c: Point2D| {
-            matches!(
-                editor.world().get_claim(c),
-                Some(BuildClaim::None) | Some(BuildClaim::Nature)
-            )
-        };
-        let road_side = |c: Point2D| {
-            crate::geometry::CARDINALS_2D
-                .iter()
-                .any(|&d| matches!(editor.world().get_claim(c + d), Some(BuildClaim::Path(_))))
-        };
-
-        // Deterministic order over buildings (HashMap iteration isn't stable).
-        let mut ids: Vec<u32> = footprints.keys().copied().collect();
-        ids.sort_unstable();
-
         let mut worker_scenes: Vec<AnchorScene> = Vec::new();
-        // Tally placed workers by trade for the employment-by-job breakdown.
-        let mut worker_by_prof: HashMap<String, usize> = HashMap::new();
-        for id in ids {
-            let (kind, cells) = &footprints[&id];
-            let cell_set: HashSet<Point2D> = cells.iter().copied().collect();
-            let centroid =
-                cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
-
-            // Candidate stand cells: cardinally adjacent to the footprint, outside
-            // it, in bounds, and clear. Road-bordering cells sort first (so workers
-            // read as standing at the street), then deterministic order.
-            let mut candidates: Vec<Point2D> = Vec::new();
-            let mut seen: HashSet<Point2D> = HashSet::new();
-            for &fc in cells {
-                for d in crate::geometry::CARDINALS_2D {
-                    let c = fc + d;
-                    if cell_set.contains(&c) || !editor.world().is_in_bounds_2d(c) || !is_clear(c) {
-                        continue;
-                    }
-                    if seen.insert(c) {
-                        candidates.push(c);
-                    }
-                }
-            }
-            candidates.sort_unstable_by_key(|c| (!road_side(*c), c.x, c.y));
-
-            // Staff up to the per-kind crew size on distinct stand cells, each
-            // with a freshly rolled trade so a multi-worker shop isn't uniform.
-            let spec = npc_data.workplace_spec(kind);
-            let want = spec.workers.min(candidates.len());
-            if want == 0 {
-                log::warn!("no clear stand cell for building '{}' (id {})", kind, id);
-                continue;
-            }
-            for &stand in candidates.iter().take(want) {
-                let profession = *worker_rng.choose(&spec.professions);
-                // Stand on the ground at the cell; face the footprint centroid.
-                let y = editor.world().get_ocean_floor_height_at(stand);
-                let stand3 = Point3D::new(stand.x, y, stand.y);
-                let centre3 = Point3D::new(centroid.x, y, centroid.y);
-                let facing = crate::generator::population::yaw_toward(stand3, centre3);
-                worker_scenes.push(AnchorScene::worker(stand3, facing, profession));
-                *worker_by_prof.entry(format!("{:?}", profession)).or_insert(0) += 1;
-            }
+        for slot in &workplace_backfill {
+            let look = *worker_rng.choose(&slot.looks);
+            worker_scenes.push(AnchorScene::worker(slot.stand, slot.facing, look));
         }
 
-        let industrial_job_slots = worker_scenes.len();
-        let workplace_count = footprints.len();
+        // Total worker posts = residents bound in the population pass + the
+        // anonymous backfill scenes just built; guards are appended below.
+        let backfill_slots = worker_scenes.len();
+        let industrial_job_slots = bound_worker_count + backfill_slots;
 
         // ---- Guard posts: gates + wall towers ----
         // Gates get 1–2 guards each; each tower has a 10% chance of 2 guards and a
-        // 20% chance of 1 (else none). Guards wear the trade outfit set by
-        // `guard_profession` in `data/npcs.yaml` (default Armorer) and carry
-        // their own `guarding` dialogue, watching the approaches.
-        let guard_profession = npc_data.guard_profession;
-        let guard_scene = |feet: Point3D, facing: f32| -> AnchorScene {
+        // 20% chance of 1 (else none). Guards carry their own `guarding` dialogue,
+        // watching the approaches. Each guard's appearance is rolled from the
+        // guards fixture's `looks` pool (villager professions and/or mobs like
+        // pillagers), so a post can mix both.
+        use crate::generator::npc::NpcLook;
+        let guard_looks = &npc_data.guards.looks;
+        let guard_scene = |feet: Point3D, facing: f32, look: NpcLook| -> AnchorScene {
             let mut slot = AnchorSlot::new(feet, facing, SlotRole::Worker);
-            slot.profession = Some(guard_profession);
+            slot.look = Some(look);
             slot.dialogue = Some("guarding".to_string());
             AnchorScene::group(SceneKind::Solo, vec![slot])
         };
@@ -1219,7 +1184,8 @@ pub async fn generate_town(
                 let feet = Point3D::new(s.x, y, s.y);
                 let facing =
                     crate::generator::population::yaw_toward(feet, Point3D::new(base.x, y, base.y));
-                let mut scene = guard_scene(feet, facing);
+                let look = *worker_rng.choose(guard_looks);
+                let mut scene = guard_scene(feet, facing, look);
                 // Gates often sit on a slabbed threshold (sandstone slabs on a
                 // desert gateway, stair-and-slab approach on a stone one). When
                 // the block beneath the guard's feet is a slab, lift them half
@@ -1243,24 +1209,25 @@ pub async fn generate_town(
                     Point3D::new(town_centre.x, feet.y, town_centre.y),
                     feet,
                 );
-                let mut scene = guard_scene(feet, facing);
+                let look = *worker_rng.choose(guard_looks);
+                let mut scene = guard_scene(feet, facing, look);
                 scene.slots[0].y_offset = 0.5; // stand on the battlement slab, not sunk in it
                 worker_scenes.push(scene);
             }
         }
-        let guard_count = worker_scenes.len() - industrial_job_slots;
+        let guard_count = worker_scenes.len() - backfill_slots;
 
         if !worker_scenes.is_empty() {
             // Roster supplies names/dialogue/biome; each scene's slot
             // overrides the profession, so the roll here is incidental.
             let worker_roster = build_roster(
-                worker_scenes.len(), culture, npc_data, &mut id_alloc, &mut rng.derive(),
+                worker_scenes.len(), 0, culture, npc_data, &mut id_alloc, &mut rng.derive(),
             );
             let budget = worker_scenes.len();
             match populate_npcs(editor, worker_scenes, worker_roster, budget, npc_data, &mut rng).await {
                 Ok(staffed) => println!(
-                    "Staffed {} fixture NPCs ({} workers across {} workplaces + {} guards)",
-                    staffed, industrial_job_slots, workplace_count, guard_count,
+                    "Staffed {} fixture NPCs ({} backfill workers + {} guards); {} of {} posts across {} workplaces filled by residents",
+                    staffed, backfill_slots, guard_count, bound_worker_count, industrial_job_slots, workplace_count,
                 ),
                 Err(e) => log::warn!("worker/guard staffing failed: {}", e),
             }
@@ -1287,15 +1254,15 @@ pub async fn generate_town(
         // Employment by job: building trades (sorted by count), then the
         // non-building roles (guards, vendors, performers).
         println!("--- Employment by job ---");
-        let mut by_job: Vec<(String, usize)> = worker_by_prof.into_iter().collect();
+        let mut by_job: Vec<(String, usize)> = worker_by_job.into_iter().collect();
         if guard_count > 0 {
-            by_job.push(("Guard".to_string(), guard_count));
+            by_job.push((npc_data.guards.employment.clone(), guard_count));
         }
         if market_stall_count > 0 {
-            by_job.push(("Vendor".to_string(), market_stall_count));
+            by_job.push(("vendor".to_string(), market_stall_count));
         }
         if performer_slot_count > 0 {
-            by_job.push(("Performer".to_string(), performer_slot_count));
+            by_job.push(("performer".to_string(), performer_slot_count));
         }
         by_job.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         for (job, count) in &by_job {
@@ -1322,4 +1289,109 @@ pub async fn generate_town(
     }
 
     editor.flush_buffer().await;
+}
+
+/// Scan the claim map for every placed workplace (urban shop or rural gather
+/// building) and produce one [`WorkerSlot`](crate::generator::population::WorkerSlot)
+/// per crew position: a clear stand cell at the footprint edge facing the
+/// building, the building centre for proximity scoring, and the post's skin pool
+/// + job label from `staffing_for`. Returns the slots plus the number of distinct
+/// workplaces that yielded any. This is the geometry half of worker staffing;
+/// who fills each post is decided by
+/// [`bind_workers`](crate::generator::population::bind_workers).
+fn discover_worker_slots(
+    editor: &Editor,
+    data: &LoadedData,
+) -> (Vec<crate::generator::population::WorkerSlot>, usize) {
+    use crate::generator::population::{yaw_toward, WorkerSlot};
+    use crate::generator::BuildClaim;
+    let npc_data = &data.npc_data;
+
+    // Placed buildings are the only `Structure` claims (wall towers claim
+    // `Wall`), and claims persist, so this recovers each building's footprint +
+    // type without threading placement state out. Scan the urban area *and*
+    // every rural parcel so rural gather buildings get staffed too.
+    let mut scan_cells: Vec<Point2D> = editor.world().get_urban_points().into_iter().collect();
+    for sd in editor.world().districts.values() {
+        if sd.data.parcel_type == ParcelType::Rural {
+            scan_cells.extend(sd.data.points_2d.iter().copied());
+        }
+    }
+    let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
+    for &p in &scan_cells {
+        if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
+            footprints
+                .entry(id.id)
+                .or_insert_with(|| (id.structure_type.0.clone(), Vec::new()))
+                .1
+                .push(p);
+        }
+    }
+
+    // A usable stand spot is an in-bounds open cell — not a road, wall, or
+    // building. Road-bordering cells sort first so workers read as street-side.
+    let is_clear = |c: Point2D| {
+        matches!(
+            editor.world().get_claim(c),
+            Some(BuildClaim::None) | Some(BuildClaim::Nature)
+        )
+    };
+    let road_side = |c: Point2D| {
+        crate::geometry::CARDINALS_2D
+            .iter()
+            .any(|&d| matches!(editor.world().get_claim(c + d), Some(BuildClaim::Path(_))))
+    };
+
+    // Deterministic order over buildings (HashMap iteration isn't stable).
+    let mut ids: Vec<u32> = footprints.keys().copied().collect();
+    ids.sort_unstable();
+
+    let mut slots: Vec<WorkerSlot> = Vec::new();
+    let mut workplaces = 0usize;
+    for id in ids {
+        let (kind, cells) = &footprints[&id];
+        let cell_set: HashSet<Point2D> = cells.iter().copied().collect();
+        let centroid =
+            cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
+
+        let mut candidates: Vec<Point2D> = Vec::new();
+        let mut seen: HashSet<Point2D> = HashSet::new();
+        for &fc in cells {
+            for d in crate::geometry::CARDINALS_2D {
+                let c = fc + d;
+                if cell_set.contains(&c) || !editor.world().is_in_bounds_2d(c) || !is_clear(c) {
+                    continue;
+                }
+                if seen.insert(c) {
+                    candidates.push(c);
+                }
+            }
+        }
+        candidates.sort_unstable_by_key(|c| (!road_side(*c), c.x, c.y));
+
+        // Staffing comes from the building's own structure JSON (its `staffing`
+        // block), falling back to the town-wide default.
+        let staffing = npc_data.staffing_for(kind, &data.structures);
+        let want = staffing.workers.min(candidates.len());
+        if want == 0 {
+            log::warn!("no clear stand cell for building '{}' (id {})", kind, id);
+            continue;
+        }
+        workplaces += 1;
+        for &stand in candidates.iter().take(want) {
+            // Stand on the ground at the cell; face the footprint centroid.
+            let y = editor.world().get_ocean_floor_height_at(stand);
+            let stand3 = Point3D::new(stand.x, y, stand.y);
+            let centre3 = Point3D::new(centroid.x, y, centroid.y);
+            let facing = yaw_toward(stand3, centre3);
+            slots.push(WorkerSlot {
+                stand: stand3,
+                facing,
+                workplace: centroid,
+                looks: staffing.looks.clone(),
+                employment: staffing.employment.clone(),
+            });
+        }
+    }
+    (slots, workplaces)
 }

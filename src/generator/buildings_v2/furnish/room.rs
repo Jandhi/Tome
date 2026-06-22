@@ -376,8 +376,9 @@ fn validate_anchor(
                 pos: Point3D::new(slot.cell.0, floor_y, slot.cell.1),
                 facing: slot.facing,
                 role: slot.role,
+                occupant: slot.occupant,
                 required: slot.required,
-                profession: None,
+                look: None,
                 dialogue: slot.dialogue.clone(),
                 // Furniture-driven anchors are always ordinary indoor speech;
                 // only plaza fixtures yell.

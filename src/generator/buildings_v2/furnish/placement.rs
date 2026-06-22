@@ -264,7 +264,14 @@ fn resolve_anchors(item: &Furniture, anchor: Point2D, dir: Cardinal) -> Vec<Anch
             );
             // Per-slot dialogue key wins; otherwise inherit the scene's key.
             let dialogue = s.dialogue.clone().or_else(|| spec.dialogue.clone());
-            AnchorSlotCandidate { cell, facing, role: s.role, required: s.required, dialogue }
+            AnchorSlotCandidate {
+                cell,
+                facing,
+                role: s.role,
+                occupant: s.occupant,
+                required: s.required,
+                dialogue,
+            }
         }).collect();
         AnchorCandidate { kind: spec.kind, slots }
     }).collect()

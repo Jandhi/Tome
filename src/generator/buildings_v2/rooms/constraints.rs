@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::generator::population::{SceneKind, SlotRole};
+use crate::generator::population::{Occupant, SceneKind, SlotRole};
 use crate::geometry::Rect2D;
 
 /// State of a cell in a room's interior.
@@ -158,6 +158,8 @@ pub struct AnchorSlotCandidate {
     /// Yaw (degrees) the NPC faces — baked toward the furniture at emit time.
     pub facing: f32,
     pub role: SlotRole,
+    /// Which age of NPC may stand here (carried from the furniture anchor spec).
+    pub occupant: Occupant,
     /// If false, an unusable cell drops just this slot; if true, it drops the
     /// whole scene (e.g. one half of a two-person table is optional).
     pub required: bool,

@@ -11,5 +11,12 @@
     23,
     15
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "papermaker",
+    "looks": [
+      "Farmer"
+    ],
+    "workers": 3
+  }
 }

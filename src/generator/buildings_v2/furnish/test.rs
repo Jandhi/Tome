@@ -127,6 +127,23 @@ fn test_bookshelf() -> Furniture {
 // interior_rect
 // ---------------------------------------------------------------------------
 
+/// Guards the `occupant: any_age` wiring end to end: the furniture YAML parses
+/// (the loader silently skips items it can't deserialize, so a bad `occupant`
+/// value would drop the bed rather than error), and at least one anchor slot —
+/// the beds we opened to children — comes through as `AnyAge`.
+#[test]
+fn any_age_occupant_parses_from_furniture_yaml() {
+    use crate::generator::population::Occupant;
+    let data = FurnitureData::load().expect("load furniture YAML");
+    let any_age = data
+        .items
+        .values()
+        .flat_map(|it| &it.anchors)
+        .flat_map(|a| &a.slots)
+        .any(|s| s.occupant == Occupant::AnyAge);
+    assert!(any_age, "expected at least one any_age anchor slot (beds) from furniture YAML");
+}
+
 #[test]
 fn interior_rect_normal() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 6));

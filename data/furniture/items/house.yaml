@@ -34,7 +34,7 @@ single_bed:
   # Standing at the foot of the bed (one past the foot block), facing it.
   anchors:
     - dialogue: resting
-      slots: [ { offset: [0, 2] } ]
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 
 double_bed:
   unique: true
@@ -65,7 +65,7 @@ double_bed:
   # Standing at the foot of the bed, facing it.
   anchors:
     - dialogue: resting
-      slots: [ { offset: [0, 2] } ]
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 
 canopy_bed:
   unique: true
@@ -263,5 +263,5 @@ bed_with_nightstand:
   # Standing at the foot of the bed, facing it.
   anchors:
     - dialogue: resting
-      slots: [ { offset: [0, 2] } ]
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 

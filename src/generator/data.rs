@@ -72,7 +72,10 @@ mod tests {
         assert!(!data.furniture.rooms.is_empty(), "no room furniture lists loaded");
         assert!(!data.paint_palettes.is_empty(), "no paint palettes loaded");
         assert!(!data.resource_registry.production_painters.is_empty(), "no production painters loaded");
-        assert!(!data.npc_data.workplaces.is_empty(), "no npc workplaces loaded");
-        assert!(data.npc_data.workplaces.contains_key("default"), "npc workplaces missing default");
+        assert!(!data.npc_data.guards.looks.is_empty(), "no guard looks loaded");
+        assert!(!data.npc_data.default_staffing.looks.is_empty(), "no default staffing looks loaded");
+        // Inline staffing: resource buildings declare their own crew on the JSON.
+        let staffed = data.structures.values().filter(|s| s.staffing.is_some()).count();
+        assert!(staffed > 0, "no structures declare staffing");
     }
 }

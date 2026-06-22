@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde_derive::Deserialize;
 
 use crate::data::{load_yaml, load_yaml_dir};
-use crate::generator::population::{SceneKind, SlotRole};
+use crate::generator::population::{Occupant, SceneKind, SlotRole};
 use super::{BlockLayer, CellConstraint, FacingMode};
 
 // ---------------------------------------------------------------------------
@@ -159,6 +159,11 @@ pub struct AnchorSlotSpec {
     /// informational until the workplace pass.
     #[serde(default = "default_role")]
     pub role: SlotRole,
+    /// Which age of NPC may stand here (`adult_only` default, `any_age`,
+    /// `child_only`). Lets a furniture/scene author open a domestic slot to
+    /// children or reserve a play scene for them.
+    #[serde(default)]
+    pub occupant: Occupant,
     /// If false, this slot drops out individually when its cell isn't usable;
     /// if true (default), an unusable cell drops the whole scene.
     #[serde(default = "default_true")]

@@ -11,7 +11,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
-use crate::generator::population::{yaw_toward, AnchorScene, AnchorSlot, SceneKind, SlotRole};
+use crate::generator::population::{
+    yaw_toward, AnchorScene, AnchorSlot, Occupant, SceneKind, SlotRole,
+};
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::noise::RNG;
 
@@ -32,7 +34,7 @@ pub enum PlazaType {
     Fountain,
     /// 3×3 covered well: rim wall, water, corner posts, slab roof, hung lantern.
     Well,
-    /// Stepped plinth with a pillar and a lantern on top — a dry landmark.
+    /// Stepped plinth and a tall stone spire with a wall finial — a dry landmark.
     Monument,
     /// A raised wooden performance deck on fence legs, with back-rail and steps.
     Stage,
@@ -467,12 +469,20 @@ async fn furnish_plaza_inner(
         }
     }
 
-    // --- Crowd: a few idle onlookers milling on the open floor of the busy
-    // social squares (markets and the stage), each facing the centre — browsing
-    // the stalls or watching the performer. Quieter squares (fountain, well,
-    // monument) stay empty of standers. Cells are interior (fully surrounded by
-    // paving), clear of structures, and not against a road entrance. ---
-    if matches!(plaza_type, PlazaType::Market | PlazaType::Stage) {
+    // --- Crowd: idle folk gathered on the open floor, each facing the centre.
+    // Markets and stages draw the biggest crowds (shoppers, an audience); the
+    // quiet civic squares get a lighter scatter loitering at the well, fountain,
+    // or monument, with their own dialogue. Cells are interior (fully surrounded
+    // by paving), clear of structures, and not against a road entrance. ---
+    {
+        // Per-type character: how big the crowd is and what they're doing there.
+        let (browse_key, crowd_target) = match plaza_type {
+            PlazaType::Market => ("browsing", (region.area / 50).clamp(2, 5)),
+            PlazaType::Stage => ("browsing", (region.area / 50).clamp(2, 5)),
+            PlazaType::Fountain => ("by_the_fountain", (region.area / 70).clamp(2, 4)),
+            PlazaType::Well => ("at_the_well", (region.area / 80).clamp(1, 3)),
+            PlazaType::Monument => ("at_the_monument", (region.area / 90).clamp(1, 2)),
+        };
         let mut crowd_cells: Vec<Point2D> = flat
             .iter()
             .copied()
@@ -481,7 +491,6 @@ async fn furnish_plaza_inner(
             .filter(|&c| !CARDINALS_2D.iter().any(|d| is_path(world.get_claim(c + *d).as_ref())))
             .collect();
         rng.shuffle(&mut crowd_cells);
-        let crowd_target = (region.area / 50).clamp(2, 5);
         let mut crowd: Vec<Point2D> = Vec::new();
         for &c in &crowd_cells {
             if crowd.len() >= crowd_target as usize {
@@ -491,13 +500,22 @@ async fn furnish_plaza_inner(
                 continue;
             }
             let feet = Point3D::new(c.x, surf[&c] + 1, c.y);
-            scenes.push(AnchorScene::solo_with(
+            let mut scene = AnchorScene::solo_with(
                 feet,
                 face_centre(feet),
                 SlotRole::Idle,
-                Some("browsing".to_string()),
+                Some(browse_key.to_string()),
                 DialogueVolume::Normal,
-            ));
+            );
+            // Roughly a third of any crowd are children — kids tagging along,
+            // browsing the stalls, watching the show, or playing by the water.
+            // Marked `ChildOnly` so the plaza roster staffs them with an actual
+            // child (it mints exactly as many kids as there are such slots; see
+            // `build_roster`).
+            if rng.percent(34) {
+                scene.slots[0].occupant = Occupant::ChildOnly;
+            }
+            scenes.push(scene);
             used.insert(c);
             crowd.push(c);
         }
@@ -807,19 +825,38 @@ async fn build_fountain(editor: &Editor, c: Point2D, h: i32, theme: &Theme) {
 }
 
 /// Stepped plinth + pillar + lantern. `wide` builds a 3×3 base, else a 1×1.
+/// A tall spire: a stepped stone plinth, a slim worked-stone shaft, and a
+/// slender finial of wall blocks tapering to a point. Walls render as a thin
+/// central post, so the cap reads as a spike rather than a flat pillar — and
+/// there's no light on top. `wide` squares get a broader 3×3 base, a socle
+/// course, and a taller shaft than cramped ones.
 async fn build_monument(editor: &Editor, c: Point2D, h: i32, wide: bool, theme: &Theme) {
+    // Stepped plinth: a broad base, and (when there's room) a 1×1 accent socle
+    // the shaft rises from.
     if wide {
         for dx in -1..=1 {
             for dz in -1..=1 {
                 put(editor, c.x + dx, h, c.y + dz, theme.stone).await;
             }
         }
+        put(editor, c.x, h + 1, c.y, theme.stone_accent).await;
     } else {
         put(editor, c.x, h, c.y, theme.stone).await;
     }
-    let base = if wide { h + 1 } else { h };
-    put(editor, c.x, base, c.y, theme.stone_accent).await;
-    put(editor, c.x, base + 1, c.y, theme.stone).await;
-    put(editor, c.x, base + 2, c.y, theme.stone_accent).await;
-    put(editor, c.x, base + 3, c.y, "minecraft:lantern").await;
+
+    // Slim shaft of worked stone, tall enough to be seen across the square.
+    let shaft_base = if wide { h + 2 } else { h + 1 };
+    let shaft_height = if wide { 3 } else { 2 };
+    let shaft_top = shaft_base + shaft_height - 1;
+    for y in shaft_base..=shaft_top {
+        put(editor, c.x, y, c.y, theme.stone).await;
+    }
+
+    // Spire: an accent capital, then the shaft narrows into a slender needle of
+    // wall blocks tapering to a point (a thin post, not a full column).
+    put(editor, c.x, shaft_top + 1, c.y, theme.stone_accent).await;
+    let spire_height = 2;
+    for i in 1..=spire_height {
+        put(editor, c.x, shaft_top + 1 + i, c.y, theme.wall).await;
+    }
 }

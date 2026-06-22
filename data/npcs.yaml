@@ -172,6 +172,12 @@ dialogue:
     - "A good stew needs a slow flame."
     - "Smells done, doesn't it?"
     - "Bread's in. Come back at dusk."
+  # A child at the hearth (an `any_age` cooking slot — house/rooftop only).
+  cooking_child:
+    - "Is it ready yet? I'm starving!"
+    - "Can I stir it? Pleeease?"
+    - "It smells so good. Just one taste?"
+    - "Ow — the fire's too hot to sit near."
   crafting:
     - "Steady hands, that's the trick."
     - "One more and it's finished."
@@ -183,6 +189,12 @@ dialogue:
     - "So much here I'll never read it all."
     - "A quiet corner and a good book. Bliss."
     - "Now where did I leave off..."
+  # A child with a book at an `any_age` reading slot (shelf, lectern, desk).
+  reading_child:
+    - "Look at the pictures in this one!"
+    - "What's this big word mean?"
+    - "I read a whole page all by myself!"
+    - "Is this the one with the sea monster?"
   sorting:
     - "Swear I had more of these yesterday."
     - "Everything in its place, that's my way."
@@ -197,6 +209,13 @@ dialogue:
     - "Just turning in. Quiet night, I hope."
     - "These old bones need their rest."
     - "Wake me at first light, would you?"
+  # Spoken by a child filling a `resting` slot (an `any_age` bed). When a
+  # `<key>_child` pool exists, children draw from it instead of the adult lines.
+  resting_child:
+    - "I'm not even sleepy yet!"
+    - "Can I stay up just a little longer?"
+    - "Five more minutes, pleeease?"
+    - "Tell me the one about the dragon again!"
   # Market vendors hawking their wares from behind the stall counter. Rendered as
   # a "yelled" bubble — bigger and visible from across the square.
   market_cry:
@@ -224,6 +243,48 @@ dialogue:
     - "Busy on the square today, isn't it?"
     - "Wonder if they've any of those left..."
     - "My coin's near spent already."
+  # A child loose in the market crowd (a `ChildOnly` onlooker slot).
+  browsing_child:
+    - "Can we get the honey cakes? Pleeease?"
+    - "Look at all the shiny things!"
+    - "I want to see the puppets!"
+    - "Mama said stay close, but look over there!"
+    - "Are those sweets? Can I have one?"
+  # Folk loitering at the village well — fetching water, trading gossip.
+  at_the_well:
+    - "Cold and clear today — good water this year."
+    - "Heard the miller's daughter is to be wed."
+    - "Mind the bucket, the rope's frayed near the top."
+    - "Always someone to talk to at the well."
+    - "Three trips already and the trough's still low."
+  at_the_well_child:
+    - "Can I drop the bucket down? I'll be careful!"
+    - "Hellooo! Hear it echo?"
+    - "How deep does it go all the way down?"
+    - "I carried the little pail all by myself!"
+  # Folk idling around the fountain — resting, chatting, enjoying the spray.
+  by_the_fountain:
+    - "Nothing finer than the sound of water on a hot day."
+    - "I come here to sit and think a while."
+    - "They say a coin in the basin brings luck."
+    - "Cooler by the water, isn't it?"
+    - "A fine spot to meet a friend."
+  by_the_fountain_child:
+    - "Watch me splash! Look, look!"
+    - "I threw a coin in — now I get a wish!"
+    - "The water's so cold! Feel it!"
+    - "Can we stay just a bit longer?"
+  # Folk pausing at the monument — paying respects, gazing up at the pillar.
+  at_the_monument:
+    - "They built it before my grandfather's time, they say."
+    - "We owe the old names more than a glance."
+    - "Stand a moment. It's only right."
+    - "Quiet here. I like to stop and remember."
+  at_the_monument_child:
+    - "Who's it for? Were they very brave?"
+    - "It's so tall! Did giants make it?"
+    - "Why do we have to be quiet here?"
+    - "I can see the whole square from the steps!"
   # Guards posted at a gate or on a wall tower, watching the approaches.
   guarding:
     - "State your business at the gate."
@@ -277,53 +338,18 @@ exchanges:
       - "I am the north wind, cold and cruel!"
       - "And I the south — I'll thaw his frozen heart yet!"
 
-# Trade outfit for gate and tower guard fixtures.
-guard_profession: Armorer
+# Gate and tower guard fixture. `employment` is the job label baked onto each
+# guard and shown in the jobs summary; `looks` is the skin pool, rolled per guard
+# (mix villager and mob skins; repeat an entry to weight it, e.g.
+# [Armorer, Armorer, pillager] ≈ 2:1 villagers to pillagers). Each look is either
+# a villager Profession (PascalCase, e.g. Armorer) or a Mob (snake_case, e.g.
+# pillager, vindicator) spawned through the mob path. `looks` must be non-empty.
+guards:
+  employment: guard
+  looks: [Armorer, pillager]
 
-# Workplace (building NBT id) → trade outfit + crew size for worker fixtures
-# placed at the building's footprint edge. `professions` is rolled across, so
-# two of the same kind of shop don't always match. Unknown kinds fall back to
-# `default` (which must exist); every other key must match a loaded building
-# NBT id, validated at startup by `NpcData::validate`.
-workplaces:
-  default:          { professions: [Farmer], workers: 3 }
-
-  # — metal & stone —
-  smithy:           { professions: [Weaponsmith, Toolsmith, Armorer], workers: 3 }
-  smelter:          { professions: [Weaponsmith, Toolsmith, Armorer], workers: 3 }
-  iron_mine:        { professions: [Mason], workers: 2 }
-  coal_mine:        { professions: [Mason], workers: 2 }
-  charcoal_burner:  { professions: [Mason], workers: 2 }
-
-  # — wood —
-  carpenter:        { professions: [Fletcher, Mason], workers: 3 }
-  woodcutter_hut:   { professions: [Fletcher, Mason], workers: 2 }
-  sawmill:          { professions: [Farmer], workers: 3 }
-
-  # — grain, food, drink —
-  mill:             { professions: [Farmer], workers: 3 }
-  bakery:           { professions: [Butcher], workers: 3 }
-  butcher:          { professions: [Butcher], workers: 3 }
-  confectionery:    { professions: [Butcher], workers: 3 }
-  brewery:          { professions: [Farmer], workers: 3 }
-  apiary:           { professions: [Farmer], workers: 2 }
-  chandlery:        { professions: [Farmer], workers: 3 }
-
-  # — textile & hide —
-  weaver:           { professions: [Shepherd], workers: 3 }
-  tailor:           { professions: [Shepherd], workers: 3 }
-  tannery:          { professions: [Leatherworker], workers: 3 }
-
-  # — sugar & paper —
-  sugar_mill:       { professions: [Farmer], workers: 3 }
-  sugar_plantation: { professions: [Farmer], workers: 4 }
-  paper_mill_sugar: { professions: [Farmer], workers: 3 }
-  paper_mill_wood:  { professions: [Farmer], workers: 3 }
-
-  # — rural gather —
-  farm:             { professions: [Farmer], workers: 4 }
-  ranch:            { professions: [Shepherd], workers: 4 }
-  shepherds_hut:    { professions: [Shepherd], workers: 2 }
-
-  # — knowledge —
-  scriptorium:      { professions: [Librarian], workers: 3 }
+# Fallback worker staffing for buildings whose structure JSON declares no
+# `staffing` block of its own. Per-building staffing now lives on each building's
+# sidecar (e.g. data/structures/resource_buildings/woodcutter_hut.json); this
+# only covers the unstated ones. Same shape as a structure's `staffing`.
+default_staffing: { employment: laborer, looks: [Farmer], workers: 3 }
