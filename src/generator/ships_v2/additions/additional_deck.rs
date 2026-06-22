@@ -16,7 +16,7 @@ use crate::noise::RNG;
 
 use super::super::palette::ShipPart;
 use super::super::{ShipDir, ShipV2Ctx};
-use super::{DeckContext, SizeTier};
+use super::{DeckContext, DeckState, SizeTier};
 
 /// Gun ports every this many stations along the side (≈ a 2-block gap).
 const GUN_PORT_STEP: i32 = 3;
@@ -36,8 +36,10 @@ fn num_levels(tier: SizeTier, rng: &mut RNG) -> i32 {
 }
 
 /// Build the additional deck(s): one or more stacked topside levels of varied
-/// height. Each level's inset top outline becomes the next level's base.
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>) {
+/// height. Each level's inset top outline becomes the next level's base. The final
+/// level's inset top outline + floor Y are written back into [`DeckState`] so later
+/// additions (the railing) sit on the new top weather deck.
+pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let levels = num_levels(dc.tier, ctx.rng);
     // Decide once per ship whether the gun ports are trapdoor lids or open holes.
     let ports_are_trapdoors = ctx.rng.rand_i32_range(0, 2) == 0;
@@ -49,6 +51,10 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>) {
         base = build_level(ctx, dc, &base, base_y, height, ports_are_trapdoors).await;
         base_y += height;
     }
+
+    // Hand the raised top deck to subsequent additions.
+    state.top_outline = base;
+    state.top_y = base_y;
 }
 
 /// Build a single topside level on top of `base` (half-beam per station) at
@@ -86,11 +92,28 @@ async fn build_level(
             (2.0 * (1.0 - t)).round() as i32 // half-width ramps 2 → 0 over the zone
         }
     };
-    let half_at = |r: i32, x: i32| -> i32 {
+    let raw_half = |r: i32, x: i32| -> i32 {
         if x < 0 || x as usize >= base.len() {
             return 0;
         }
         (base[x as usize] - inset_at(r, x)).max(stern_min(x)).max(0)
+    };
+    // The widest station (≈ ⅓ from the bow on a teardrop). The hull rises to it from
+    // the stern, but injecting `stern_min` (which falls toward the bow) on top of that
+    // rising taper carves a V-shaped *pinch* in the stern outline. Enforce the stern
+    // side (x ≤ peak) to be **non-decreasing** so the transom blends into the hull as a
+    // clean flat-ish wall instead of pinching in — otherwise the deck/walls/railing all
+    // follow the notch and the stern reads as weird stepped terraces.
+    let peak_x = (0..length).max_by_key(|&x| raw_half(height, x)).unwrap_or(0);
+    let half_at = |r: i32, x: i32| -> i32 {
+        if x < 0 || x >= length {
+            return 0;
+        }
+        if x <= peak_x {
+            (0..=x).map(|x2| raw_half(r, x2)).max().unwrap_or(0)
+        } else {
+            raw_half(r, x)
+        }
     };
     let in_ring = |r: i32, x: i32, z: i32| -> bool {
         let h = half_at(r, x);

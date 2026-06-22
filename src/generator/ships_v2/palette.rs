@@ -21,6 +21,11 @@ pub enum ShipPart {
     Deck,
     /// Above-water topsides (additional deck walls) — one material.
     Topside,
+    /// The main railing (bulwark + rail cap) around the top weather deck.
+    Railing,
+    /// Spars — the bowsprit (and later yards/booms). Drawn with slabs/stairs for a
+    /// smooth taper, so this needs a plank wood (a log has no stair/slab variant).
+    Spar,
 }
 
 /// Maps each [`ShipPart`] to a base-palette [`MaterialRole`]. Swap entries here to
@@ -43,6 +48,8 @@ impl ShipPalette {
             (ShipPart::Rudder, MaterialRole::PrimaryWood),
             (ShipPart::Deck, MaterialRole::PrimaryWood),
             (ShipPart::Topside, MaterialRole::PrimaryWood),
+            (ShipPart::Railing, MaterialRole::PrimaryWood),
+            (ShipPart::Spar, MaterialRole::PrimaryWood),
         ]))
     }
 

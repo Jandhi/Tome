@@ -33,6 +33,8 @@ pub use super::ships::{Placement, ShipDir};
 
 pub use additions::{DeckAddition, SizeTier};
 pub use hull::HullShape;
+use additions::bowsprit::BowspritModel;
+use additions::railing::RailingModel;
 use deck::DeckModel;
 use hull::HullModel;
 use keel::KeelModel;
@@ -99,6 +101,10 @@ pub struct ShipV2Output {
     pub hull: HullModel,
     pub rudder: RudderModel,
     pub deck: DeckModel,
+    /// The main railing around the top weather deck (built by the additions pipeline).
+    pub railing: Option<RailingModel>,
+    /// The bowsprit off the bow (built by the additions pipeline).
+    pub bowsprit: Option<BowspritModel>,
     /// Size tier derived from length — gates which deck additions are built.
     pub tier: SizeTier,
     /// `true` if the anchor was over water (built below the surface), `false` if on
@@ -158,8 +164,10 @@ pub async fn build_ship_v2(
     let deck = deck::build_deck_model(&hull);
     deck::place_deck(ctx, &deck, &placement, &ship_palette).await;
 
-    // 7. Deck additions — each a modular submodule, run in order. Size gating is
-    //    deferred for now, so every addition runs (no-op until implemented).
+    // 7. Deck additions — each a modular submodule, run in order. The additional deck
+    //    now respects size gating (Small ships, length ≤20, skip it → just a railed
+    //    main deck); the other additions still build for all sizes until their gating
+    //    is wired up.
     let tier = SizeTier::from_length(context.length);
     let deck_ctx = additions::DeckContext {
         placement: &placement,
@@ -169,10 +177,17 @@ pub async fn build_ship_v2(
         tier,
         on_water,
     };
+    // Running top-weather-deck state: structural additions raise it, fittings read it.
+    let mut deck_state = additions::DeckState::initial(&hull, &deck);
     for &addition in &additions::BUILD_ORDER {
-        additions::build_addition(addition, ctx, &deck_ctx).await;
+        if addition == DeckAddition::AdditionalDeck && !tier.has(addition) {
+            continue; // Small ships have no additional deck.
+        }
+        additions::build_addition(addition, ctx, &deck_ctx, &mut deck_state).await;
     }
     drop(deck_ctx);
+    let railing = deck_state.railing;
+    let bowsprit = deck_state.bowsprit;
 
-    ShipV2Output { placement, keel, hull, rudder, deck, tier, on_water }
+    ShipV2Output { placement, keel, hull, rudder, deck, railing, bowsprit, tier, on_water }
 }

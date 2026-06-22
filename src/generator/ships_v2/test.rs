@@ -4,6 +4,146 @@
 
 use crate::generator::ships_v2::keel;
 
+/// One-off analysis of the user's hand-fixed bowsprit/prow structure blocks, to
+/// reverse-engineer the pattern. Run with:
+/// `cargo test analyze_bowsprit_nbt -- --nocapture --ignored`
+#[test]
+#[ignore]
+fn analyze_bowsprit_nbt() {
+    use fastnbt::Value;
+    use std::collections::HashMap;
+    use std::io::Read;
+
+    fn read_nbt(path: &str) -> Value {
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
+        let mut buf = Vec::new();
+        flate2::read::GzDecoder::new(bytes.as_slice())
+            .read_to_end(&mut buf)
+            .expect("gunzip");
+        fastnbt::from_bytes(&buf).expect("parse nbt")
+    }
+    fn as_i32(v: &Value) -> i32 {
+        match v {
+            Value::Byte(b) => *b as i32,
+            Value::Short(s) => *s as i32,
+            Value::Int(i) => *i,
+            Value::Long(l) => *l as i32,
+            _ => panic!("not int: {v:?}"),
+        }
+    }
+    fn comp(v: &Value) -> &HashMap<String, Value> {
+        match v {
+            Value::Compound(c) => c,
+            _ => panic!("not compound"),
+        }
+    }
+    fn list(v: &Value) -> &Vec<Value> {
+        match v {
+            Value::List(l) => l,
+            _ => panic!("not list"),
+        }
+    }
+    fn s(v: &Value) -> &str {
+        match v {
+            Value::String(s) => s,
+            _ => panic!("not string"),
+        }
+    }
+
+    fn dump(path: &str) {
+        let root = read_nbt(path);
+        let c = comp(&root);
+        let size = list(&c["size"]);
+        let (sx, sy, sz) = (as_i32(&size[0]), as_i32(&size[1]), as_i32(&size[2]));
+        let palette = if let Some(p) = c.get("palette") {
+            list(p).clone()
+        } else {
+            list(&list(&c["palettes"])[0]).clone()
+        };
+        let legend: Vec<(String, String)> = palette
+            .iter()
+            .map(|e| {
+                let ec = comp(e);
+                let nm = s(&ec["Name"]).replace("minecraft:", "");
+                let props = ec
+                    .get("Properties")
+                    .map(|p| {
+                        let mut kv: Vec<String> =
+                            comp(p).iter().map(|(k, v)| format!("{k}={}", s(v))).collect();
+                        kv.sort();
+                        kv.join(",")
+                    })
+                    .unwrap_or_default();
+                (nm, props)
+            })
+            .collect();
+        // form char per palette index
+        let charof = |i: usize| -> char {
+            let nm = &legend[i].0;
+            if nm == "air" || nm == "structure_void" || nm == "cave_air" {
+                ' '
+            } else if nm.contains("stairs") {
+                '/'
+            } else if nm.contains("slab") {
+                '-'
+            } else if nm.contains("fence") || nm.contains("wall") {
+                '|'
+            } else if nm.contains("log") {
+                'O'
+            } else {
+                '#'
+            }
+        };
+        let mut occ: HashMap<(i32, i32, i32), usize> = HashMap::new();
+        for b in list(&c["blocks"]) {
+            let bc = comp(b);
+            let st = as_i32(&bc["state"]) as usize;
+            let pos = list(&bc["pos"]);
+            occ.insert((as_i32(&pos[0]), as_i32(&pos[1]), as_i32(&pos[2])), st);
+        }
+        let is_solid = |st: usize| charof(st) != ' ';
+
+        println!("\n================ {path}");
+        println!("size = {sx} x {sy} x {sz}  (placed blocks = {})", occ.len());
+        for (i, (nm, pr)) in legend.iter().enumerate() {
+            println!("  [{i:2}] {} {nm}{}", charof(i), if pr.is_empty() { String::new() } else { format!("  [{pr}]") });
+        }
+
+        // Top-down (collapse Y): X across, Z down.
+        println!("-- top-down (X→, Z↓), any block --");
+        for z in 0..sz {
+            let mut row = String::new();
+            for x in 0..sx {
+                let any = (0..sy).any(|y| occ.get(&(x, y, z)).map_or(false, |&st| is_solid(st)));
+                row.push(if any { '#' } else { '.' });
+            }
+            println!("  z{z:2} {row}");
+        }
+
+        // Side profile per Z slice: X across, Y up (row 0 = top).
+        for z in 0..sz {
+            let has = (0..sx).any(|x| (0..sy).any(|y| occ.get(&(x, y, z)).map_or(false, |&st| is_solid(st))));
+            if !has {
+                continue;
+            }
+            println!("-- side z={z} (X→, Y↑) --");
+            for y in (0..sy).rev() {
+                let mut row = String::new();
+                for x in 0..sx {
+                    row.push(occ.get(&(x, y, z)).map_or('.', |&st| charof(st)));
+                }
+                println!("  y{y:2} {row}");
+            }
+        }
+    }
+
+    let dir = "C:/Users/timdo/AppData/Roaming/ModrinthApp/profiles/GDMC 2026/saves/Test flatworld/generated/minecraft/structures";
+    dump(&format!("{dir}/small_ship_bowsprit_before.nbt"));
+    dump(&format!("{dir}/small_ship_bowsprit_after.nbt"));
+    dump(&format!("{dir}/large_ship_bowsprit_before.nbt"));
+    dump(&format!("{dir}/large_ship_bowsprit_after.nbt"));
+}
+
 /// The keel geometry is well-formed across a range of (no-rowboat) lengths,
 /// including several random sizes.
 #[test]
@@ -170,6 +310,43 @@ async fn build_ship_v2_offline() {
     }
     assert!(above_deck, "additional deck should place blocks above the main deck");
 
+    // Main railing: a fence rail caps the top weather deck (above the additional deck).
+    let railing = ship.railing.as_ref().expect("railing should be built");
+    assert!(!railing.cap.is_empty(), "railing should have a fence rail cap");
+    let cap_world = place.to_world(railing.cap[0]);
+    assert!(
+        editor.try_get_block(cap_world).map_or(false, |b| b.id.as_str().contains("fence")),
+        "expected a fence rail at {cap_world:?}, got {:?}",
+        editor.try_get_block(cap_world).map(|b| b.id),
+    );
+
+    // Bowsprit: a solid tapered prow extends the bow, carrying a smoothed spar that
+    // projects forward past the bow tip.
+    let bowsprit = ship.bowsprit.as_ref().expect("bowsprit should be built");
+    assert!(!bowsprit.spar.is_empty(), "bowsprit should have a spar");
+    assert!(!bowsprit.prow.is_empty(), "bowsprit should have a solid prow");
+    let prow_world = place.to_world(bowsprit.prow[0]);
+    assert!(
+        editor.try_get_block(prow_world).as_ref().map_or(false, |b| !is_air(b)),
+        "expected a solid prow block at {prow_world:?}, got {:?}",
+        editor.try_get_block(prow_world).map(|b| b.id),
+    );
+    assert!(
+        bowsprit.tip.x > keel.length - 1,
+        "bowsprit tip ({}) should project past the bow tip ({})",
+        bowsprit.tip.x,
+        keel.length - 1,
+    );
+    let spar_world = place.to_world(bowsprit.spar[bowsprit.spar.len() / 2].local);
+    assert!(
+        editor.try_get_block(spar_world).map_or(false, |b| {
+            let id = b.id.as_str();
+            id.contains("slab") || id.contains("stairs")
+        }),
+        "expected a slab/stair spar at {spar_world:?}, got {:?}",
+        editor.try_get_block(spar_world).map(|b| b.id),
+    );
+
     // Deck: a top slab caps the hull's open top.
     let deck = &ship.deck;
     assert!(!deck.cells.is_empty(), "deck should have slabs");
@@ -302,9 +479,12 @@ async fn build_ship_v2_live() {
         .expect("ship_oak palette (data/palettes/ships/)")
         .clone();
 
-    // A row of randomly-sized ships (no rowboat: ~14–46), centred in the build
-    // area. Ships are spaced along x; the hull beam is also along x, so spacing must
-    // clear the widest possible hull (max length / beam ratio) plus a gap.
+    // A row of ships spanning the size range (no rowboat: ~14–46), centred in the
+    // build area. Lengths are spread evenly across the range so every size tier is
+    // represented — including a couple of **Small** ships (≤20) that get no additional
+    // deck (just a railed main deck). Ships are spaced along x; the hull beam is also
+    // along x, so spacing must clear the widest possible hull (max length / beam ratio)
+    // plus a gap.
     const KEEL_COUNT: usize = 6;
     const MIN_LEN: i32 = 14;
     const MAX_LEN: i32 = 46;
@@ -324,7 +504,8 @@ async fn build_ship_v2_live() {
     let mut rng = RNG::new(3);
 
     for i in 0..KEEL_COUNT {
-        let length = rng.rand_i32_range(MIN_LEN, MAX_LEN + 1);
+        // Even spread MIN_LEN..=MAX_LEN → 14, 20, 26, 32, 38, 44 (Small … Huge).
+        let length = MIN_LEN + (MAX_LEN - MIN_LEN) * i as i32 / (KEEL_COUNT as i32 - 1);
         let x = (start_x + spacing * i as i32).clamp(0, size.x - 1);
         let anchor_z = (center_z + length / 2).clamp(0, size.y - 1);
         let anchor = Point2D::new(x, anchor_z);

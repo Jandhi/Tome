@@ -17,6 +17,36 @@ use super::palette::ShipPalette;
 use super::{Placement, ShipV2Ctx};
 
 pub mod additional_deck;
+pub mod bowsprit;
+pub mod railing;
+
+/// Mutable state threaded through the addition pipeline: the current **topmost open
+/// weather deck** — its edge outline (half-beam per station) and floor Y. Later
+/// additions (railing, masts, fittings) build against this rather than the raw main
+/// deck, so they sit on whatever the structural additions raised. Initialised to the
+/// main deck; the additional deck(s) raise it as they stack.
+pub struct DeckState {
+    /// Half-beam per station (`length` entries) of the topmost open deck's edge.
+    pub top_outline: Vec<i32>,
+    /// Local Y of the topmost open deck floor.
+    pub top_y: i32,
+    /// The railing built around the top weather deck (`None` until `MainRailing`).
+    pub railing: Option<railing::RailingModel>,
+    /// The bowsprit off the bow (`None` until `Bowsprit`).
+    pub bowsprit: Option<bowsprit::BowspritModel>,
+}
+
+impl DeckState {
+    /// Start at the main deck (before any structural additions raise it).
+    pub fn initial(hull: &HullModel, deck: &DeckModel) -> Self {
+        Self {
+            top_outline: hull.top_half.clone(),
+            top_y: deck.deck_y,
+            railing: None,
+            bowsprit: None,
+        }
+    }
+}
 
 /// Ship size tier, derived from tip-to-tip length. Drives which deck additions
 /// (and how many masts) a ship gets. Thresholds are tunable.
@@ -127,10 +157,20 @@ pub const BUILD_ORDER: [DeckAddition; 9] = [
 
 /// Dispatch a single addition to its submodule. Add a match arm here (and the
 /// `pub mod`) as each addition is implemented; unimplemented ones are no-ops.
+///
+/// `state` carries the running top-weather-deck info between additions: structural
+/// additions (the additional deck) raise it; fittings (the railing) read it.
 #[allow(unused_variables)]
-pub async fn build_addition(addition: DeckAddition, ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>) {
+pub async fn build_addition(
+    addition: DeckAddition,
+    ctx: &mut ShipV2Ctx<'_>,
+    dc: &DeckContext<'_>,
+    state: &mut DeckState,
+) {
     match addition {
-        DeckAddition::AdditionalDeck => additional_deck::build(ctx, dc).await,
+        DeckAddition::AdditionalDeck => additional_deck::build(ctx, dc, state).await,
+        DeckAddition::MainRailing => railing::build(ctx, dc, state).await,
+        DeckAddition::Bowsprit => bowsprit::build(ctx, dc, state).await,
         _ => {}
     }
 }

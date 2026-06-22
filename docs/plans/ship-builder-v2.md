@@ -172,18 +172,76 @@ each arrives only with the user's algorithm for it.
 
    Tumblehome curves **inward at the very top** (cubic), stays **near-vertical at
    the stern** (aft ramp), and the step is **stair-bevelled on both faces** (inside
-   upside-down + outside bottom). Stern is a **mix**: a small transom (`stern_min`
-   ramps 2→0 over the aft ~10%) blended into the natural stern taper, so the back is
-   clean and stacked levels align. Gun ports sit 2 above the deck floor. Levels
+   upside-down + outside bottom). Stern is a **mix**: a small transom (`stern_min`)
+   blended into the natural stern taper. Because `stern_min` *falls* toward the bow
+   while the hull taper *rises*, their `max` used to carve a V-shaped **pinch** in the
+   stern outline (the deck/walls/railing then followed the notch → weird stepped
+   terraces); the stern side (`x ≤ peak_x`) is now forced **non-decreasing** via a
+   cumulative max, so the transom blends into the hull as a clean flat-ish wall and
+   stacked levels align. Gun ports sit 2 above the deck floor. Levels
    **stack** (`num_levels`: Large+ may get 2) with **varied heights** (random 3–5),
    each level's inset top becoming the next level's base — rng-driven variation.
 
    _Above-water detailing TODO:_ rail/trim, windows, more refined topsides — per the
    "more detail above water" principle below.
 
+   **Main railing — implemented** (`additions/railing.rs`). A short solid **bulwark**
+   course (`BULWARK_HEIGHT`, 1 for now) capped with a **fence rail** around the
+   **topmost open weather deck**. To sit on whatever the structural additions raised
+   (not the raw main deck), the additions pipeline now threads a mutable
+   `additions::DeckState { top_outline, top_y, railing }` — initialised to the main
+   deck, updated by the additional deck(s) to their inset top outline + floor Y, and
+   read by the railing. `ShipV2Output.railing` carries the built `RailingModel`. So
+   once size gating is on, a Small ship (no additional deck) gets the rail on its main
+   deck; larger ships get it around the raised top deck — no manual coordination.
+
+   _Verify on the live screenshot:_ rail follows the top-deck edge cleanly; bulwark
+   height reads right (tune `BULWARK_HEIGHT`); no gaps/double-walls where it meets the
+   additional-deck wall top.
+
    **Bowsprit tips (user):** length ≈ **a little less than half the hull length**
    (hull ~35 → bowsprit ~15). The mast that pokes out the front; sits on the
    bowsprit support; figurehead/decoration later.
+
+   **Bowsprit — implemented** (`additions/bowsprit.rs`). The bow is **extended into a
+   solid tapered prow** — a fully-filled nose (no hollow interior, per the user) whose
+   **underside is a curve anchored at the keel crest where it peeks out at the bow**
+   (local `deck_y` = waterline = the keel bow-rake top) sweeping up via `(1−t)^1.5` to
+   meet the **bowsprit underside** at the point; `beak_len` is stretched to
+   `max(0.18·length, 1.5·height)` so that curve never rises >1/column and eases to
+   horizontal into the spar. Plan half-width tapers `base_hw → 0` over the same span, so
+   the mass narrows in both plan and section. It starts `BACK_OVERLAP` stations behind
+   the bow so it merges solidly with the hull/deck, and its top sits flush with the
+   weather deck (`plat_y`). Underside steps are smoothed with upside-down stairs (`prow_bevel`); the
+   prow-top edges get `rail` fences. The centerline (z=0) spar projects on from the prow
+   point (`REACH_FRACTION = 0.4·length`, **shortened by `rake.reach_factor()`** so steep
+   rakes don't climb away). Rake is still `BowspritRake::pick` (all four with a deck). **Smoothed:** the spar (z=0) is tracked at **half-block
+   resolution** (`ramp`) — per column a slab (flat), a single stair on a half-block step
+   (upside-down in the cell's upper half, right-side-up in the lower), or, on a
+   **full-block step**, a **double-stair wedge** (`push_step`): an upside-down stair on
+   the lower cell + a right-side-up stair on the upper, facings flipped opposite so the
+   two bevels meet into one continuous diagonal (stairs "on both sides"). Top/bottom
+   slabs across columns give the shallow "two slabs" ramp. The knee is the same 45°
+   wedge brace from the bow to the spar underside. `RAKE_STAIR_FACE` is the stair-facing
+   flip candidate (upside-down stairs auto-face its opposite). This needs
+   stair/slab variants, so the `Spar` palette role is **plank wood** (`PrimaryWood`),
+   not a log. **Two roots converge** (per the user): primary at the **hull bow tip /
+   stem**; with a raised deck, a secondary at the **deck bow**, the knee rising from
+   the bow tip to meet the forward spar.
+   **Rake** (`BowspritRake` enum: Straight/Gentle/Medium/Steep) is **chosen by
+   `BowspritRake::pick(has_deck, rng)`**: a raised deck gives a high anchor so **all
+   four** are allowed (Straight = horizontal at `top_y + DECK_CLEARANCE`, clearing the
+   bow rail); without a deck, Straight is excluded and we pick among the **angled**
+   rakes (rakes up from the low stem). Randomised for now — _later a higher-level
+   system may decide which parts/rake go together per ship_ (so the selection lives in
+   one `pick` fn, separate from the pure `build_bowsprit_model`). `BowspritModel`
+   (spar + knee + tip) is recorded on `ShipV2Output.bowsprit`. Built for all ships for
+   now (Medium+ gating deferred, like the additional deck).
+
+   _Verify on the live screenshot:_ spar clears the bow rail and reads as a beam; knee
+   converges cleanly (tune the `k` offset / `DECK_CLEARANCE`); forward reach length
+   looks right (tune `REACH_FRACTION`); log **axis** is along the spar (heading-derived
+   x/z) not stacked; on a deckless/Small ship the Medium up-rake reads right.
 
    **Mast tips (user):** masts run down to the **very bottom of the ship**
    (keel-stepped) and stand **as tall as the hull length** (hull ~35 → main mast
