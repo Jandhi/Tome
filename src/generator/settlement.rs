@@ -241,52 +241,12 @@ pub async fn generate_town(
     let urban_industrial_count = editor.world().structures.len() - n_before;
 
     // ---- Rural buildings ----
-    // Outside the wall, the resource chain assigns each rural super-parcel a
-    // gathering/processing building from its biome resources (a farm, mine,
-    // sawmill, ranch, ...). Resolve the assignments, place one building per
-    // assigned parcel, and paint its production area (fields, pasture, spoil).
-    // These sit in their own parcels — independent of the urban road network and
-    // not barriers for it — and each placement flattens its own footprint and
-    // clears its yard, so the pass is self-contained. Their `Structure` claim ids
-    // follow the urban ones, so the worker-staffing pass below picks them up too.
-    let n_rural_before = editor.world().structures.len();
-    {
-        use crate::generator::districts::DistrictID;
-        use crate::generator::placement::place_rural_building;
-        use crate::generator::resource_chain::paint_production_area;
-
-        let rural_ids: Vec<DistrictID> = editor.world().districts.iter()
-            .filter(|(_, sd)| sd.data.parcel_type == ParcelType::Rural)
-            .map(|(id, _)| *id)
-            .collect();
-        let rural_analysis: HashMap<DistrictID, _> = rural_ids.iter()
-            .filter_map(|id| editor.world().district_analysis_data.get(id).map(|a| (*id, a.clone())))
-            .collect();
-        let result = data.resource_registry.resolve_for_parcels(&rural_analysis, &mut rng);
-
-        // One placement per assigned rural parcel (assignments are keyed by
-        // DistrictID); sort for deterministic order.
-        let mut sd_ids: Vec<DistrictID> = result.parcel_assignments.keys().cloned().collect();
-        sd_ids.sort_by_key(|id| id.0);
-        for sd_id in &sd_ids {
-            let assignment = &result.parcel_assignments[sd_id];
-            let Some(district) = editor.world().districts.get(sd_id).cloned() else { continue };
-            let structure_type = crate::generator::nbts::StructureType(assignment.building.clone());
-            let Some(structure) = data.structures.get(&structure_type).cloned() else {
-                log::warn!("no structure for rural building '{}'", assignment.building);
-                continue;
-            };
-            match place_rural_building(&district, &structure, &mut rng, editor, &data).await {
-                Ok(()) => {
-                    if let Some(painter) = &assignment.production_painter {
-                        paint_production_area(&district, painter, &data, editor, &mut rng).await;
-                    }
-                }
-                Err(e) => log::warn!("rural placement failed for '{}': {}", assignment.building, e),
-            }
-        }
-    }
-    let rural_building_count = editor.world().structures.len() - n_rural_before;
+    // The rural resource-chain pass above already placed each gathering/
+    // processing building (farm, mine, sawmill, ranch, ...) in its own parcel and
+    // painted its production area. Their `Structure` claim ids follow the urban
+    // ones, so the worker-staffing pass below picks them up alongside the urban
+    // shops.
+    let rural_building_count = placed_rural.len();
     let rural_parcel_count = editor.world().districts.values()
         .filter(|sd| sd.data.parcel_type == ParcelType::Rural)
         .count();
