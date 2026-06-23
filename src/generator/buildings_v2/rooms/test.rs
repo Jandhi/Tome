@@ -662,6 +662,47 @@ async fn build_irimoya_house_live() {
     );
 }
 
+/// Japanese floors are bamboo mosaic, not the frame wood. Guards both silent
+/// failure modes: the `bamboo_mosaic` material file must actually load (a bad
+/// JSON would be skipped at debug level), and the palette's `ground_floor` role
+/// must resolve to it (an unknown id would leave the floor unplaced). `UpperFloor`
+/// falls back to `GroundFloor`, so this covers every interior floor.
+#[test]
+fn japanese_floor_is_bamboo_mosaic() {
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::MaterialRole;
+    use crate::generator::buildings_v2::Culture;
+    use crate::minecraft::BlockForm;
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data
+        .palettes
+        .get(&Culture::Japanese.palette_id())
+        .expect("japanese palette");
+
+    let floor_mat = palette
+        .get_material(MaterialRole::GroundFloor)
+        .expect("ground floor material");
+    assert_eq!(floor_mat.as_str(), "bamboo_mosaic", "ground floor should be bamboo");
+    assert_eq!(
+        palette.get_material(MaterialRole::UpperFloor).unwrap().as_str(),
+        "bamboo_mosaic",
+        "upper floor should fall back to bamboo",
+    );
+    // The frame wood is untouched — bamboo is the floor, not the timber.
+    assert_ne!(
+        palette.get_material(MaterialRole::PrimaryWood).unwrap().as_str(),
+        "bamboo_mosaic",
+        "primary wood must stay the frame timber",
+    );
+
+    // The material loaded and its block form resolves to the real MC block.
+    let material = data.materials.get(floor_mat).expect("bamboo_mosaic material loaded");
+    let mut rng = RNG::new(0);
+    let block = material.get_block(&BlockForm::Block, &mut rng).expect("block form");
+    assert_eq!(block.as_str().trim_start_matches("minecraft:"), "bamboo_mosaic");
+}
+
 /// Live: fill the build area with Japanese irimoya houses of varied sizes
 /// (Cottage / House / Hall / Manor). Run against a running GDMC server:
 /// `cargo test build_japanese_houses_live -- --nocapture`.

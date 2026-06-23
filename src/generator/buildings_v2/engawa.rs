@@ -215,10 +215,11 @@ pub fn apply_overhang(frame: Frame, plan: &EngawaPlan) -> Frame {
 pub async fn place_engawa(ctx: &mut BuildCtx<'_>, frame: &Frame, plan: &EngawaPlan) {
     let editor: &Editor = &*ctx.editor;
 
-    let floor_material = ctx.palette
-        .get_material(MaterialRole::GroundFloor)
-        .or_else(|| ctx.palette.get_material(MaterialRole::PrimaryWood))
-        .expect("No ground-floor / primary-wood material for engawa deck")
+    // The veranda is a timber deck, so use the frame wood (PrimaryWood) — not the
+    // GroundFloor material, which is the interior flooring (e.g. bamboo mosaic).
+    let deck_material = ctx.palette
+        .get_material(MaterialRole::PrimaryWood)
+        .expect("No primary-wood material for engawa deck")
         .clone();
     let roof_material = ctx.palette
         .get_material(MaterialRole::PrimaryRoof)
@@ -228,7 +229,7 @@ pub async fn place_engawa(ctx: &mut BuildCtx<'_>, frame: &Frame, plan: &EngawaPl
     let mut deck_rng = ctx.rng.derive();
     let mut deck_placer = MaterialPlacer::new(
         Placer::new(&ctx.data.materials, &mut deck_rng),
-        floor_material,
+        deck_material,
     );
     let mut roof_rng = ctx.rng.derive();
     let mut roof_placer = MaterialPlacer::new(
