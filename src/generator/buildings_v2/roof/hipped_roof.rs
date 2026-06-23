@@ -108,7 +108,7 @@ pub(super) async fn place_hipped_roof(
 /// placer for interior cells, but the eave overhang gets only a single top
 /// slab (the lower of the two slabs the shared placer would stack) so the
 /// rim reads as a thin tile edge rather than a 1-block-thick lip.
-async fn place_hipped_blocks(
+pub(super) async fn place_hipped_blocks(
     editor: &Editor,
     hm: &RoofHeightmap,
     roof_y: i32,

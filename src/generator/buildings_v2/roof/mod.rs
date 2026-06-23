@@ -2,8 +2,9 @@
 //!
 //! - [`gable_roof`] — pitched gable roofs (+ chimney, attic lantern).
 //! - [`hipped_roof`] — four-sided pyramidal roofs with upturned eave corners.
+//! - [`irimoya_roof`] — hip-and-gable roofs: a hipped skirt closed by a central gable.
 //! - [`flat_roof`] — slab decks with parapets (+ roof-access ladder).
-//! - [`blocks`] / [`gable`] / [`hipped`] / [`heightmap`] — shared roof geometry primitives.
+//! - [`blocks`] / [`gable`] / [`hipped`] / [`irimoya`] / [`heightmap`] — shared roof geometry primitives.
 
 #[cfg(test)]
 mod test;
@@ -13,10 +14,12 @@ pub mod dome;
 pub mod gable;
 pub mod heightmap;
 pub mod hipped;
+pub mod irimoya;
 
 mod flat_roof;
 mod gable_roof;
 mod hipped_roof;
+mod irimoya_roof;
 
 use crate::geometry::{Point2D, Rect2D};
 
@@ -33,6 +36,8 @@ pub use flat_roof::place_roof_ladder;
 pub enum RoofStyle {
     Gable(GablePitch),
     Hipped(HippedPitch),
+    /// Hip-and-gable (irimoya): a hipped skirt closed by a central long-axis gable.
+    Irimoya,
     Flat,
 }
 
@@ -60,6 +65,7 @@ pub async fn place_roof(
     match style {
         RoofStyle::Gable(pitch) => gable_roof::place_gable_roof(ctx, frame, pitch).await,
         RoofStyle::Hipped(pitch) => hipped_roof::place_hipped_roof(ctx, frame, pitch).await,
+        RoofStyle::Irimoya => irimoya_roof::place_irimoya_roof(ctx, frame).await,
         RoofStyle::Flat => flat_roof::place_flat_roof(ctx, frame).await,
     }
 }

@@ -536,7 +536,6 @@ pub async fn generate_town(
     let roof_ids: Vec<PaletteId> = vec![
         "acacia_wood_roof".into(), "brick_roof".into(), "oak_wood_roof".into(), "red_wood_roof".into(),
     ];
-    let roof_styles = culture.roof_styles();
 
     fn roll_palette(rng: &mut RNG, base: &Palette, data: &LoadedData, woods: &[PaletteId], stones: &[PaletteId], roofs: &[PaletteId]) -> Palette {
         let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
@@ -699,6 +698,9 @@ pub async fn generate_town(
                         Culture::Desert => base_palette.clone(),
                         _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
                     };
+                    // Roof style weighted by culture + size (irimoya skews to the
+                    // grander buildings; see `roof_styles_for`).
+                    let roof_styles = culture.roof_styles_for(size_class);
                     let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
                     let footprint = crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
                         &mut rng, &plot, rect, frontage.outward, &size_class, culture.square_bias(),
@@ -735,6 +737,12 @@ pub async fn generate_town(
                     };
                     let mut bctx = BuildingContext::new(culture, size_class, roof_style);
                     bctx.base_y_override = base_lvl;
+                    // Roll the engawa veranda per the culture/size taste (every
+                    // Japanese Manor, a third of Halls; see `engawa_chance`).
+                    // `build_house` / `plan_engawa` still gate on the core rect
+                    // staying large enough and fall back to plain walls otherwise.
+                    let (en, ed) = culture.engawa_chance(size_class);
+                    bctx.engawa = ed > 0 && rng.rand_i32_range(0, ed as i32) < en as i32;
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
