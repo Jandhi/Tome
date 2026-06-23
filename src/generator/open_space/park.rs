@@ -21,6 +21,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::editor::Editor;
+use crate::generator::npc::DialogueVolume;
+use crate::generator::population::{yaw_toward, AnchorScene, Occupant, SlotRole};
 use crate::generator::terrain::{generate_tree_feature, Tree};
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::minecraft::Biome;
@@ -247,8 +249,16 @@ async fn flatten_region(editor: &mut Editor, region: &Region, theme: &Theme) {
     editor.world_mut().set_heights(&points);
 }
 
-/// Furnish one park region in place.
-pub async fn furnish_park(editor: &mut Editor, region: &Region, rng: &mut RNG, theme: &Theme) -> ParkType {
+/// Furnish one park region in place, returning the [`ParkType`] it was built as
+/// plus the NPC standing-spot scenes it offers — a sparse scatter of idle folk
+/// strolling the green, each facing the park's central feature. The caller staffs
+/// the scenes via the population pass (the same one that staffs plaza crowds).
+pub async fn furnish_park(
+    editor: &mut Editor,
+    region: &Region,
+    rng: &mut RNG,
+    theme: &Theme,
+) -> (ParkType, Vec<AnchorScene>) {
     // Level the ground first so everything below sits on a clean, flat park.
     flatten_region(editor, region, theme).await;
 
@@ -350,7 +360,67 @@ pub async fn furnish_park(editor: &mut Editor, region: &Region, rng: &mut RNG, t
     place_benches(editor, &cells, &seat, &mut used, region.area, theme.wood).await;
     place_lamps(editor, &perimeter, &mut used, region.area, theme.wood).await;
 
-    park_type
+    // Idle park-goers strolling the green, all facing the park's central feature.
+    // A cemetery is a somber plot, not a place to loiter, so it draws no crowd.
+    let scenes = if park_type == ParkType::Cemetery {
+        Vec::new()
+    } else {
+        scatter_park_visitors(editor, region, &interior, &used, rng)
+    };
+
+    (park_type, scenes)
+}
+
+/// A sparse scatter of idle visitors over the park's open interior, each facing
+/// the region centroid (its central feature — the grand tree, fountain, pond, or
+/// monument). Candidates are unused interior cells fully surrounded by region
+/// cells (clear open ground), kept well apart. Roughly a third are children.
+/// Standing spots only — staffed later by the population pass.
+fn scatter_park_visitors(
+    editor: &Editor,
+    region: &Region,
+    interior: &[Point2D],
+    used: &HashSet<Point2D>,
+    rng: &mut RNG,
+) -> Vec<AnchorScene> {
+    let world = editor.world();
+    let region_cells: HashSet<Point2D> = region.cells.iter().copied().collect();
+
+    let sum = region.cells.iter().fold(Point2D::ZERO, |a, p| a + *p);
+    let centroid = sum / region.cells.len().max(1) as i32;
+
+    // Sparser than a market crowd — a park is a calm green, not a busy square.
+    let target = (region.area / 60).clamp(1, 4) as usize;
+    let mut scenes: Vec<AnchorScene> = Vec::new();
+    let mut placed: Vec<Point2D> = Vec::new();
+    for &c in interior {
+        if placed.len() >= target {
+            break;
+        }
+        // Clear ground, off any feature, with elbow room from the next visitor.
+        if used.contains(&c) || placed.iter().any(|p| chebyshev(*p, c) < 4) {
+            continue;
+        }
+        if !CARDINALS_2D.iter().all(|d| region_cells.contains(&(c + *d))) {
+            continue;
+        }
+        let feet = Point3D::new(c.x, world.get_ocean_floor_height_at(c), c.y);
+        let facing = yaw_toward(feet, Point3D::new(centroid.x, feet.y, centroid.y));
+        let mut scene = AnchorScene::solo_with(
+            feet,
+            facing,
+            SlotRole::Idle,
+            Some("in_the_park".to_string()),
+            DialogueVolume::Normal,
+        );
+        // Roughly a third are children, out playing in the green.
+        if rng.percent(34) {
+            scene.slots[0].occupant = Occupant::ChildOnly;
+        }
+        scenes.push(scene);
+        placed.push(c);
+    }
+    scenes
 }
 
 // --- Type recipes -----------------------------------------------------------
