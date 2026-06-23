@@ -101,11 +101,43 @@ const DESERT: Theme = Theme {
     arid: true,
 };
 
+/// Japanese: a green garden town whose worked stone is deepslate, matching the
+/// blackstone walls and deepslate roads. Keeps grass and dark-oak woodwork.
+const JAPANESE: Theme = Theme {
+    ground: "minecraft:grass_block",
+    subsoil: "minecraft:dirt",
+    pave: "minecraft:cobbled_deepslate",
+    pave_border: "minecraft:deepslate_bricks",
+    stone: "minecraft:deepslate_bricks",
+    stone_accent: "minecraft:chiseled_deepslate",
+    wall: "minecraft:deepslate_brick_wall",
+    slab: "minecraft:deepslate_brick_slab",
+    path: "minecraft:gravel",
+    rake: "minecraft:gravel",
+    hedge: "minecraft:oak_leaves[persistent=true]",
+    grave_mound: "minecraft:podzol",
+    wood: "dark_oak",
+    rocks: &[
+        "minecraft:cobbled_deepslate",
+        "minecraft:deepslate",
+        "minecraft:polished_blackstone",
+        "minecraft:basalt",
+    ],
+    graves: &[
+        "minecraft:deepslate_bricks",
+        "minecraft:cobbled_deepslate",
+        "minecraft:polished_deepslate",
+        "minecraft:cracked_deepslate_bricks",
+    ],
+    arid: false,
+};
+
 impl Theme {
     /// The material theme matching a settlement's culture.
     pub fn for_culture(culture: Culture) -> Theme {
         match culture {
             Culture::Desert => DESERT,
+            Culture::Japanese => JAPANESE,
             _ => MEDIEVAL,
         }
     }

@@ -5,8 +5,8 @@
 //! ringed by flared bottom slabs. The stone comes from the culture palette (so
 //! it blends with the town's masonry); the cage is always oak.
 //!
-//! They're scattered across the interior of green open spaces — parks, yards,
-//! and nooks — by [`scatter_garden_lanterns`], called from the open-space
+//! They're scattered across the interior of green open spaces — parks and
+//! nooks — by [`scatter_garden_lanterns`], called from the open-space
 //! furnishing pass. Japanese-only; a no-op for every other culture.
 
 use std::collections::HashMap;
@@ -33,7 +33,7 @@ const AREA_PER_LANTERN: usize = 130;
 /// The four cardinal rings of the pedestal.
 const RING: [Cardinal; 4] = [Cardinal::North, Cardinal::East, Cardinal::South, Cardinal::West];
 
-/// Scatter tōrō across the interior of a garden `region` (park, yard, or nook),
+/// Scatter tōrō across the interior of a garden `region` (park or nook),
 /// built from `stone_block` so they match the surrounding open-space masonry —
 /// pass the garden [`Theme`](crate::generator::open_space::Theme)'s `stone`
 /// (the same worked stone its monuments and graves use). Japanese-only — a
