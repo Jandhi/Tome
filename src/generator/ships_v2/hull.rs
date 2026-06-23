@@ -10,12 +10,14 @@
 //!
 //! **Blocks only for now** — slab/stair smoothing of the shell comes later.
 
+use std::collections::HashMap;
+
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
 use crate::minecraft::{Block, BlockForm};
 
 use super::palette::{ShipPalette, ShipPart};
-use super::{Placement, ShipV2Ctx};
+use super::{Placement, ShipDir, ShipV2Ctx};
 
 /// Vertical flare exponent: beam = max · (y/depth)^p. `< 1` → a rounded bilge that
 /// widens quickly off the keel then eases toward the waterline.
@@ -76,11 +78,21 @@ pub struct HullModel {
     /// Half-beam of the hull outline at the waterline per station x (`length`
     /// entries). The base the above-water topsides sit on (and tumble in from).
     pub top_half: Vec<i32>,
-    /// Perimeter shell cells (all full blocks for now).
+    /// Perimeter shell cells placed as full blocks.
     pub cells: Vec<Point3D>,
+    /// Flare-bevel shell cells — where the bilge widens going up, an upside-down stair
+    /// (facing inboard, `dir`) smooths the outer curve instead of a blocky step.
+    pub bevel: Vec<HullBevel>,
     /// Hollow interior cells (inside the shell) — cleared to air so the hull stays
     /// dry on water.
     pub interior: Vec<Point3D>,
+}
+
+/// A bilge-flare bevel cell: an upside-down stair facing inboard (`dir`).
+#[derive(Debug, Clone, Copy)]
+pub struct HullBevel {
+    pub local: Point3D,
+    pub dir: ShipDir,
 }
 
 /// Build the hull shell for a keel of `length` × `depth`. `beam_ratio` is the
@@ -130,6 +142,7 @@ pub fn build_hull_model(
     };
 
     let mut cells = Vec::new();
+    let mut bevel = Vec::new();
     let mut interior = Vec::new();
     for y in 1..=depth {
         for x in 0..length {
@@ -148,10 +161,20 @@ pub fn build_hull_model(
                     || !in_vol(x, y, z - 1)
                     || !in_vol(x, y, z + 1)
                     || !in_vol(x, y - 1, z);
-                if exposed {
-                    cells.push(Point3D::new(x, y, z));
-                } else {
+                if !exposed {
                     interior.push(Point3D::new(x, y, z)); // hollow → cleared to air
+                    continue;
+                }
+                // Smooth the bilge: an outer side cell below the waterline that flares
+                // out past the row beneath it becomes an inboard-facing upside-down
+                // stair (curve below, solid top) rather than a blocky step. The
+                // waterline row stays a full block (the gunwale the deck sits on).
+                let flares = y < depth && z != 0 && z.abs() == h && h > half_at(x, y - 1);
+                if flares {
+                    let dir = if z > 0 { ShipDir::Port } else { ShipDir::Starboard };
+                    bevel.push(HullBevel { local: Point3D::new(x, y, z), dir });
+                } else {
+                    cells.push(Point3D::new(x, y, z));
                 }
             }
         }
@@ -160,7 +183,7 @@ pub fn build_hull_model(
     // The waterline outline (half-beam per station) for the above-water topsides.
     let top_half: Vec<i32> = (0..length).map(|x| half_at(x, depth).max(0)).collect();
 
-    HullModel { length, depth, shape, max_beam, top_half, cells, interior }
+    HullModel { length, depth, shape, max_beam, top_half, cells, bevel, interior }
 }
 
 /// Place the hull shell cells as full blocks (from the `Hull` palette role) and,
@@ -185,6 +208,20 @@ pub async fn place_hull(
     for &cell in &model.cells {
         placer
             .place_block(ctx.editor, placement.to_world(cell), BlockForm::Block, None, None)
+            .await;
+    }
+
+    // Bilge-flare bevels: upside-down stairs facing inboard, waterlogged on water.
+    for b in &model.bevel {
+        let mut state = HashMap::from([
+            ("facing".to_string(), placement.world_cardinal(b.dir).to_string()),
+            ("half".to_string(), "top".to_string()),
+        ]);
+        if on_water {
+            state.insert("waterlogged".to_string(), "true".to_string());
+        }
+        placer
+            .place_block(ctx.editor, placement.to_world(b.local), BlockForm::Stairs, Some(&state), None)
             .await;
     }
 

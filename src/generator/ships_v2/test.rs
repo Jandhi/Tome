@@ -192,7 +192,9 @@ async fn build_ship_v2_offline() {
     use crate::editor::World;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::ships_v2::blueprint::{render_hull_plan, render_keel_ascii};
+    use crate::generator::ships_v2::blueprint::{
+        render_hull_plan, render_hull_section, render_keel_ascii,
+    };
     use crate::generator::ships_v2::{build_ship_v2, ShipV2Context, ShipV2Ctx};
     use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
     use crate::minecraft::Block;
@@ -368,10 +370,12 @@ async fn build_ship_v2_offline() {
         &keel.top_profile(),
     );
     let oval_plan = render_hull_plan(&oval);
+    let section = render_hull_section(hull);
     std::fs::create_dir_all("output/ships_v2").ok();
     std::fs::write("output/ships_v2/keel.txt", &ascii).expect("write ASCII");
     std::fs::write("output/ships_v2/hull.txt", &plan).expect("write hull plan");
     std::fs::write("output/ships_v2/hull_oval.txt", &oval_plan).expect("write oval plan");
+    std::fs::write("output/ships_v2/hull_section.txt", &section).expect("write hull section");
 
     println!(
         "Keel OK: length={}, depth={}, bow_rake={}, cells={}",

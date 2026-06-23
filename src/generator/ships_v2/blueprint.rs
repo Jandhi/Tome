@@ -79,3 +79,66 @@ pub fn render_hull_plan(model: &HullModel) -> String {
     }
     out
 }
+
+/// Cross-section of the hull at the widest station: beam (z) across, keel→waterline
+/// (y) up. `#` = full-block shell, `/`/`\` = bilge-flare bevel stair (facing inboard),
+/// `.` = hollow interior. The fast pre-check for the bilge smoothing before a live
+/// screenshot.
+pub fn render_hull_section(model: &HullModel) -> String {
+    // Widest station = the one with the most shell+bevel cells across all layers.
+    let station = {
+        let mut counts = vec![0usize; model.length.max(1) as usize];
+        for c in &model.cells {
+            if (0..model.length).contains(&c.x) {
+                counts[c.x as usize] += 1;
+            }
+        }
+        for b in &model.bevel {
+            if (0..model.length).contains(&b.local.x) {
+                counts[b.local.x as usize] += 1;
+            }
+        }
+        counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, n)| **n)
+            .map(|(x, _)| x as i32)
+            .unwrap_or(0)
+    };
+
+    let max_hw = (model.max_beam / 2).max(0);
+    let zspan = (max_hw * 2 + 1).max(1) as usize; // -max_hw..=max_hw
+    let h = (model.depth + 1).max(1) as usize;
+    let mut grid = vec![vec![' '; zspan]; h];
+
+    let plot = |grid: &mut Vec<Vec<char>>, y: i32, z: i32, ch: char| {
+        let zi = z + max_hw;
+        if y >= 0 && (y as usize) < grid.len() && zi >= 0 && (zi as usize) < zspan {
+            grid[y as usize][zi as usize] = ch;
+        }
+    };
+
+    for c in model.cells.iter().filter(|c| c.x == station) {
+        plot(&mut grid, c.y, c.z, '#');
+    }
+    for c in model.interior.iter().filter(|c| c.x == station) {
+        plot(&mut grid, c.y, c.z, '.');
+    }
+    for b in model.bevel.iter().filter(|b| b.local.x == station) {
+        // Bevel faces inboard: a port-side cell (z>0) reads as `\`, starboard as `/`.
+        let ch = if b.local.z > 0 { '\\' } else { '/' };
+        plot(&mut grid, b.local.y, b.local.z, ch);
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "hull section @ x={station}  max_beam={}  depth={}\n",
+        model.max_beam, model.depth
+    ));
+    out.push_str("(beam across, keel bottom → waterline up; # block  / \\ bilge bevel  . hollow)\n");
+    for y in (0..h).rev() {
+        out.extend(grid[y].iter());
+        out.push('\n');
+    }
+    out
+}
