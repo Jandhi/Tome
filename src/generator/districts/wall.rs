@@ -184,11 +184,19 @@ fn parapet_is_outer(cell: Point2D, region: &HashSet<Point2D>, ring: &HashSet<Poi
     })
 }
 
-/// `palette` is the culture's output palette used to re-skin placed wall
-/// structures (towers) into the settlement's look — e.g. a desert town swaps the
-/// stone-brick/oak tower NBT to smooth_sandstone/birch. `None` leaves structures
-/// in their authored blocks.
-pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, wall_type: WallType, palette: Option<&Palette>) {
+/// The inputs needed to re-skin placed wall structures (towers) into a culture's
+/// look — e.g. swapping the stone-brick/oak tower NBT to smooth_sandstone/birch.
+/// Both the loaded generator data and the output palette are required for the
+/// swap, so they're bundled to keep them from desyncing; pass `None` to leave
+/// structures in their authored blocks.
+pub struct TowerSkin<'a> {
+    pub data: &'a LoadedData,
+    pub palette: &'a Palette,
+}
+
+/// `skin` re-skins placed wall structures (towers) into the settlement's look;
+/// `None` leaves them in their authored blocks. See [`TowerSkin`].
+pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rng : &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, wall_type: WallType, skin: Option<&TowerSkin<'_>>) {
     let ordered_wall_points = trace_wall_loops(urban_points);
     let total_points: usize = ordered_wall_points.iter().map(|loop_| loop_.len()).sum();
     info!(
@@ -207,11 +215,11 @@ pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rn
 
     for wall_point_list in ordered_wall_points {
         if wall_type == WallType::Standard {
-            build_wall_standard(&wall_point_list, editor, rng, material_placer, material_id, structures, urban_points, palette).await;
+            build_wall_standard(&wall_point_list, editor, rng, material_placer, material_id, structures, urban_points, skin).await;
         } else if wall_type == WallType::Palisade {
             build_wall_palisade(&wall_point_list, editor, rng, material_placer, material_id, structures).await;
         } else if wall_type == WallType::StandardWithInner {
-            build_wall_standard_with_inner(&wall_point_list, editor, rng, material_placer, material_id, structures, urban_points, palette).await;
+            build_wall_standard_with_inner(&wall_point_list, editor, rng, material_placer, material_id, structures, urban_points, skin).await;
         }
     }
 }
@@ -261,7 +269,7 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 }
 
-pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>, palette: Option<&Palette>) {
+pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>, skin: Option<&TowerSkin<'_>>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let wall_set: HashSet<Point2D> = wall_points.iter().cloned().collect();
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
@@ -348,14 +356,14 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
         editor.world_mut().claim(*p, BuildClaim::Wall);
     }
     //add towers
-    build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, palette).await;
+    build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
     build_wall_gate(&wall_points_with_height, editor, rng, material_placer, true, false, None, None, structures, 6).await
 
 }
 
 
-pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>, palette: Option<&Palette>) {
+pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>, urban_points: &HashSet<Point2D>, skin: Option<&TowerSkin<'_>>) {
     let wall_points_with_height = add_wall_points_height(wall_points, editor);
     let wall_set: HashSet<Point2D> = wall_points.iter().cloned().collect();
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
@@ -502,7 +510,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
         editor.world_mut().claim(p.drop_y(), BuildClaim::Wall);
     }
     //add towers
-    build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, palette).await;
+    build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
     build_wall_gate(&wall_points_with_height, editor, rng, material_placer, false, false, Some(&enhanced_wall_points), Some(&inner_wall_points), structures, 6).await
 
@@ -850,7 +858,7 @@ pub async fn build_wall_towers(
     material_id: &MaterialId,
     structures: & HashMap<StructureType, Structure>,
     rng: &mut RNG,
-    palette: Option<&Palette>,
+    skin: Option<&TowerSkin<'_>>,
 ) {
     let distance_to_next_tower = 80;
     let mut tower_possible = rng.rand_i32_range(0, distance_to_next_tower / 2);
@@ -860,12 +868,6 @@ pub async fn build_wall_towers(
     // be read.
     let tower_size_y: i32 = load_nbt_structure(&tower.meta.path).map(|s| s.size[1]).unwrap_or(12);
     let walkway_set: HashSet<Point2D> = walkway_points.iter().cloned().collect();
-
-    // When a culture palette is supplied, load the generator data so the tower
-    // NBT (authored in the `wall_base` input palette) can be palette-swapped
-    // into the settlement's look — e.g. desert → smooth_sandstone/birch. Loaded
-    // once here, not per tower.
-    let data = palette.map(|_| LoadedData::load().expect("Failed to load data for tower palette swap"));
 
     for point in walkway_points {
         if tower_possible == 0 {
@@ -891,10 +893,10 @@ pub async fn build_wall_towers(
                     editor.world_mut().claim(*neighbour, BuildClaim::Wall);
                 }
                 info!("Placing tower at: {:?}", point.add_y(point_height+6));
-                // Re-skin the tower into the culture palette when one was given
+                // Re-skin the tower into the culture palette when a skin was given
                 // (data + output palette both present → place_structure runs the
                 // swap); otherwise place the authored blocks unchanged.
-                place_structure(editor, Some(material_placer), &tower, point.add_y(point_height+6), Cardinal::North, data.as_ref(), palette, false, false).await.expect("Failed to place tower");
+                place_structure(editor, Some(material_placer), &tower, point.add_y(point_height+6), Cardinal::North, skin.map(|s| s.data), skin.map(|s| s.palette), false, false).await.expect("Failed to place tower");
 
                 // Two guard posts on the tower's battlement top, where guards
                 // stand watch. The structure's origin maps to (point, point_height

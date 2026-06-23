@@ -159,7 +159,7 @@ pub(super) async fn place_tree(
         return false;
     };
     lay_soil_patch(editor, c, h).await;
-    let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y)).await;
+    let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y), rng).await;
     true
 }
 

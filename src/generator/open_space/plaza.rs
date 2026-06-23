@@ -7,7 +7,7 @@
 //! little greenery in the corners. The roomier types need a bigger open centre;
 //! a cramped plaza falls back to the single-cell monument.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
@@ -74,24 +74,9 @@ fn max_square_radius(cells: &HashSet<Point2D>, c: Point2D, limit: i32) -> i32 {
 /// The most-interior region cell (max distance from the perimeter), with the
 /// largest odd-square half-radius that fits there.
 fn centre_cell(region: &Region, cells: &HashSet<Point2D>) -> (Point2D, i32) {
-    let mut dist: HashMap<Point2D, i32> = HashMap::new();
-    let mut queue: VecDeque<Point2D> = VecDeque::new();
-    for &c in &region.cells {
-        if CARDINALS_2D.iter().any(|d| !cells.contains(&(c + *d))) {
-            dist.insert(c, 0);
-            queue.push_back(c);
-        }
-    }
-    while let Some(c) = queue.pop_front() {
-        let dc = dist[&c];
-        for d in CARDINALS_2D {
-            let n = c + d;
-            if cells.contains(&n) && !dist.contains_key(&n) {
-                dist.insert(n, dc + 1);
-                queue.push_back(n);
-            }
-        }
-    }
+    // Distance of each `cells` member from the perimeter; region cells outside
+    // `cells` (e.g. the stepped border) fall back to 0 and so never win.
+    let dist = edge_depth(cells);
     let centre = *region
         .cells
         .iter()

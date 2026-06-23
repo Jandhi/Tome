@@ -451,7 +451,7 @@ async fn furnish_lawn(
         if grand_tree {
             if let Some(tree) = park_tree(theme, &world.get_surface_biome_at(centre), rng) {
                 lay_soil_patch(editor, centre, h).await;
-                let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y)).await;
+                let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y), rng).await;
             } else {
                 place_monument(editor, centre, h, theme).await;
             }
@@ -533,7 +533,7 @@ async fn furnish_zen(
         if let Some(tree) = park_tree(theme, &world.get_surface_biome_at(centre), rng) {
             let h = world.get_ocean_floor_height_at(centre);
             lay_soil_patch(editor, centre, h).await;
-            let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y)).await;
+            let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y), rng).await;
             used.insert(centre);
             for d in CARDINALS_2D {
                 used.insert(centre + d);
@@ -689,7 +689,7 @@ async fn furnish_cactus(
         }
         let h = world.get_ocean_floor_height_at(c);
         // Grow the cactus through the Tree system; it lays its own sand footing.
-        let _ = generate_tree_feature(Tree::Cactus, editor, Point3D::new(c.x, h, c.y)).await;
+        let _ = generate_tree_feature(Tree::Cactus, editor, Point3D::new(c.x, h, c.y), rng).await;
         used.insert(c);
         // Keep the four sides clear so the cactus survives the next tick.
         for d in CARDINALS_2D {
@@ -866,7 +866,7 @@ async fn scatter_trees(
         };
         let h = world.get_ocean_floor_height_at(c);
         lay_soil_patch(editor, c, h).await;
-        let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y)).await;
+        let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y), rng).await;
         used.insert(c);
         for d in CARDINALS_2D {
             used.insert(c + d);

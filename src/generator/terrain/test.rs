@@ -166,7 +166,7 @@ mod tests {
 
             let tree = SPECIES[rng.rand_i32(SPECIES.len() as i32) as usize];
             let height = editor.world().get_ocean_floor_height_at(c);
-            generate_tree_feature(tree, &editor, Point3D::new(c.x, height, c.y))
+            generate_tree_feature(tree, &editor, Point3D::new(c.x, height, c.y), &mut rng)
                 .await
                 .expect("place feature failed");
         }
