@@ -30,22 +30,8 @@ use crate::geometry::Point3D;
 use crate::minecraft::BlockForm;
 
 use super::palette::{ShipPalette, ShipPart};
+use super::tuning::{BOW_CURVE_POW, BOW_RAKE_STAIR_FACE};
 use super::{Placement, ShipDir, ShipV2Ctx};
-
-/// Which ship-local direction the rake stairs face (bow rake → bow, stern rake →
-/// stern). With upside-down stairs the curve falls on the underside. This is the
-/// classic MC stair flip point — if a screenshot shows a rake's curve on the wrong
-/// face, swap the facing (and/or the `top_half`) for that rake.
-// Upside-down bow stairs: the full-height side faces *down-slope* (toward the
-// stern), so the solid top continues the keel line and the notch rounds the
-// underside. The bow climbs toward +x, so its stairs face Stern. (Classic MC
-// stair flip point — swap if a screenshot shows the notch on the wrong face.)
-const BOW_RAKE_STAIR_FACE: ShipDir = ShipDir::Stern;
-
-/// Exponent of the parabolic bow-stem curve `y = depth · t^p`. `2.0` = a classic
-/// parabola (tangent to the flat run, steepening to the stem). Tune for a gentler
-/// (lower) or sharper (higher) sweep.
-const BOW_CURVE_POW: f32 = 2.0;
 
 /// One placed keel block in the local frame.
 #[derive(Debug, Clone)]

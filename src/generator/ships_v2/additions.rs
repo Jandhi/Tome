@@ -27,8 +27,13 @@ pub mod railing;
 /// deck, so they sit on whatever the structural additions raised. Initialised to the
 /// main deck; the additional deck(s) raise it as they stack.
 pub struct DeckState {
-    /// Half-beam per station (`length` entries) of the topmost open deck's edge.
+    /// Half-beam per station (`length` entries) of the topmost open deck's edge — the
+    /// **inset** structural outline that later levels stack on.
     pub top_outline: Vec<i32>,
+    /// Half-beam per station of the topmost deck's **outer rim** (the outermost solid
+    /// cell at `top_y`, including the outer bevel — wider than `top_outline` where the
+    /// wall bevels in). The railing sits on this so it caps the real edge.
+    pub rail_outline: Vec<i32>,
     /// Local Y of the topmost open deck floor.
     pub top_y: i32,
     /// The railing built around the top weather deck (`None` until `MainRailing`).
@@ -42,6 +47,7 @@ impl DeckState {
     pub fn initial(hull: &HullModel, deck: &DeckModel) -> Self {
         Self {
             top_outline: hull.top_half.clone(),
+            rail_outline: hull.top_half.clone(),
             top_y: deck.deck_y,
             railing: None,
             bowsprit: None,
@@ -143,6 +149,11 @@ pub struct DeckContext<'a> {
     pub on_water: bool,
 }
 
+/// **Debug toggle** — additions to skip building, for isolating issues. Normally empty;
+/// e.g. set to `&[DeckAddition::Bowsprit, DeckAddition::MainRailing]` to build a ship
+/// without the bowsprit or railing. The build pipeline skips anything listed here.
+pub const DEBUG_SKIP: &[DeckAddition] = &[];
+
 /// Order in which additions are built (structure first, then rig, then fittings).
 /// Tunable; the pipeline iterates this.
 pub const BUILD_ORDER: [DeckAddition; 9] = [
@@ -150,10 +161,12 @@ pub const BUILD_ORDER: [DeckAddition; 9] = [
     DeckAddition::Forecastle,
     DeckAddition::Gallery,
     DeckAddition::Cabin,
+    // Bowsprit before the railing: it extends the weather-deck outline forward over the
+    // prow (`DeckState::top_outline`), and the shared main railing then wraps that too.
+    DeckAddition::Bowsprit,
     DeckAddition::MainRailing,
     DeckAddition::CargoHatch,
     DeckAddition::Masts,
-    DeckAddition::Bowsprit,
     DeckAddition::HelmCapstan,
 ];
 

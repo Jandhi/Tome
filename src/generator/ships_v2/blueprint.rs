@@ -3,6 +3,7 @@
 
 use crate::minecraft::BlockForm;
 
+use super::additions::bowsprit::BowspritModel;
 use super::hull::HullModel;
 use super::keel::KeelModel;
 use super::ShipDir;
@@ -136,6 +137,46 @@ pub fn render_hull_section(model: &HullModel) -> String {
         model.max_beam, model.depth
     ));
     out.push_str("(beam across, keel bottom → waterline up; # block  / \\ bilge bevel  . hollow)\n");
+    for y in (0..h).rev() {
+        out.extend(grid[y].iter());
+        out.push('\n');
+    }
+    out
+}
+
+/// Side profile of the bowsprit **spar** (the centerline z=0 beam): stem at the left,
+/// forward tip at the right; `x` →, `y` up. `#` = full block, `^` = top slab (upper
+/// half), `_` = bottom slab (lower half). The fast pre-check for the block/slab step
+/// pattern before a live screenshot.
+pub fn render_spar_profile(model: &BowspritModel) -> String {
+    let cells = &model.spar;
+    let (mut x0, mut x1, mut y0, mut y1) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    for c in cells {
+        x0 = x0.min(c.local.x);
+        x1 = x1.max(c.local.x);
+        y0 = y0.min(c.local.y);
+        y1 = y1.max(c.local.y);
+    }
+    if cells.is_empty() {
+        return format!("spar {:?}: (empty)\n", model.rake);
+    }
+    let w = (x1 - x0 + 1) as usize;
+    let h = (y1 - y0 + 1) as usize;
+    let mut grid = vec![vec![' '; w]; h];
+    for c in cells {
+        let ch = match (c.form, c.top_half) {
+            (BlockForm::Slab, true) => '^',
+            (BlockForm::Slab, false) => '_',
+            _ => '#',
+        };
+        grid[(c.local.y - y0) as usize][(c.local.x - x0) as usize] = ch;
+    }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "spar {:?}  (stem left → tip right;  # block  ^ top slab  _ bottom slab)\n",
+        model.rake
+    ));
     for y in (0..h).rev() {
         out.extend(grid[y].iter());
         out.push('\n');

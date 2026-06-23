@@ -15,23 +15,35 @@ use crate::minecraft::BlockForm;
 use crate::noise::RNG;
 
 use super::super::palette::ShipPart;
+use super::super::tuning::GUN_PORT_STEP;
 use super::super::{ShipDir, ShipV2Ctx};
 use super::{DeckContext, DeckState, SizeTier};
-
-/// Gun ports every this many stations along the side (≈ a 2-block gap).
-const GUN_PORT_STEP: i32 = 3;
 
 /// A randomly varied level height.
 fn random_height(rng: &mut RNG) -> i32 {
     rng.rand_i32_range(3, 6) // 3..=5
 }
 
-/// How many stacked additional decks: larger ships may carry a second one.
-fn num_levels(tier: SizeTier, rng: &mut RNG) -> i32 {
-    if tier >= SizeTier::Large {
-        rng.rand_i32_range(1, 3) // 1 or 2
+/// How many stacked additional decks. Capped at 1 for now (stacking multiple levels is
+/// a follow-up); larger ships will later carry a second one.
+fn num_levels(_tier: SizeTier, _rng: &mut RNG) -> i32 {
+    1
+}
+
+/// The bow/stern direction a length-end perimeter cell should bevel toward, if any: a
+/// cell whose forward or aft neighbour leaves the ring while **both** sides stay in it is
+/// a fore/aft length step — a stair facing the open end rakes the taper smooth (the hull
+/// bilge bevel idea, applied along x). Returns `None` for side cells (handled elsewhere).
+fn plan_step_dir(in_ring: &impl Fn(i32, i32, i32) -> bool, r: i32, x: i32, z: i32) -> Option<ShipDir> {
+    if !(in_ring(r, x, z + 1) && in_ring(r, x, z - 1)) {
+        return None; // a side cell, not a fore/aft end
+    }
+    if !in_ring(r, x + 1, z) {
+        Some(ShipDir::Bow)
+    } else if !in_ring(r, x - 1, z) {
+        Some(ShipDir::Stern)
     } else {
-        1
+        None
     }
 }
 
@@ -46,19 +58,26 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
 
     let mut base: Vec<i32> = dc.hull.top_half.clone();
     let mut base_y = dc.deck.deck_y;
+    let mut rim = state.rail_outline.clone();
     for _ in 0..levels {
         let height = random_height(ctx.rng);
-        base = build_level(ctx, dc, &base, base_y, height, ports_are_trapdoors).await;
+        let (inset, outer) = build_level(ctx, dc, &base, base_y, height, ports_are_trapdoors).await;
+        base = inset;
+        rim = outer;
         base_y += height;
     }
 
-    // Hand the raised top deck to subsequent additions.
+    // Hand the raised top deck to subsequent additions: the inset outline for stacking,
+    // the outer rim for the railing.
     state.top_outline = base;
+    state.rail_outline = rim;
     state.top_y = base_y;
 }
 
 /// Build a single topside level on top of `base` (half-beam per station) at
-/// `base_y`, `height` tall. Returns the inset **top outline** (for stacking).
+/// `base_y`, `height` tall. Returns `(inset top outline, outer rim outline)` — the inset
+/// for stacking the next level, the rim (outermost solid half-beam at the top) for the
+/// railing.
 async fn build_level(
     ctx: &mut ShipV2Ctx<'_>,
     dc: &DeckContext<'_>,
@@ -66,7 +85,7 @@ async fn build_level(
     base_y: i32,
     height: i32,
     ports_are_trapdoors: bool,
-) -> Vec<i32> {
+) -> (Vec<i32>, Vec<i32>) {
     let length = base.len() as i32;
     // Tumblehome grows a touch with height (~1 per 3 blocks).
     let total_inset = ((height as f32) / 3.0).round().max(1.0) as i32;
@@ -127,9 +146,11 @@ async fn build_level(
                 || !in_ring(r, x, z + 1))
     };
 
-    // --- Plan the gun ports (cannon row, central band, both sides). ---
+    // --- Plan the gun ports (cannon row, both sides). The band reaches well toward the
+    // bow and stern; the `h >= 2` width guard below naturally stops the ports where the
+    // hull narrows at the ends. ---
     let gun_r = 2;
-    let band = (length / 5)..(length * 4 / 5);
+    let band = (length / 8)..(length * 7 / 8);
     let mut ports: Vec<(Point3D, ShipDir)> = Vec::new();
     let mut port_set: HashSet<Point3D> = HashSet::new();
     let mut x = band.start;
@@ -201,21 +222,34 @@ async fn build_level(
                     walls
                         .place_block(ctx.editor, place.to_world(cell), BlockForm::Stairs, Some(&inside), None)
                         .await;
-                    // Outside bevel: bottom stair on the ledge one block outboard.
-                    let (ox, oz) = match dir {
-                        ShipDir::Starboard => (0, 1),
-                        ShipDir::Port => (0, -1),
-                        ShipDir::Bow => (1, 0),
-                        ShipDir::Stern => (-1, 0),
-                    };
-                    let outside_cell = Point3D::new(sx + ox, y, z + oz);
-                    // Outside bevel faces inward (opposite the inside stair).
-                    let outside = HashMap::from([
-                        ("facing".to_string(), place.world_cardinal(dir.opposite()).to_string()),
-                        ("half".to_string(), "bottom".to_string()),
+                    // Outside bevel: a bottom stair on the ledge one block outboard — only
+                    // for the **side** (Port/Starboard) steps, where it lands on the real
+                    // outboard ledge (z ± 1). For Bow/Stern length-end steps it would jut
+                    // one block past the end into the air (a stray inward-facing stair), so
+                    // skip those.
+                    if matches!(dir, ShipDir::Starboard | ShipDir::Port) {
+                        let oz = if matches!(dir, ShipDir::Starboard) { 1 } else { -1 };
+                        let outside_cell = Point3D::new(sx, y, z + oz);
+                        // Outside bevel faces inward (opposite the inside stair).
+                        let outside = HashMap::from([
+                            ("facing".to_string(), place.world_cardinal(dir.opposite()).to_string()),
+                            ("half".to_string(), "bottom".to_string()),
+                        ]);
+                        walls
+                            .place_block(ctx.editor, place.to_world(outside_cell), BlockForm::Stairs, Some(&outside), None)
+                            .await;
+                    }
+                } else if let Some(dir) = plan_step_dir(&in_ring, r, sx, z) {
+                    // Smooth the fore/aft length taper (the same idea as the hull bilge
+                    // bevel, but along x): a length-end cell becomes an upside-down stair
+                    // facing the open bow/stern neighbour so the end rakes instead of
+                    // stepping blockily.
+                    let st = HashMap::from([
+                        ("facing".to_string(), place.world_cardinal(dir).to_string()),
+                        ("half".to_string(), "top".to_string()),
                     ]);
                     walls
-                        .place_block(ctx.editor, place.to_world(outside_cell), BlockForm::Stairs, Some(&outside), None)
+                        .place_block(ctx.editor, place.to_world(cell), BlockForm::Stairs, Some(&st), None)
                         .await;
                 } else {
                     walls.place_block(ctx.editor, place.to_world(cell), BlockForm::Block, None, None).await;
@@ -256,6 +290,23 @@ async fn build_level(
         }
     }
 
-    // Inset top outline → base for the next stacked level.
-    (0..length).map(|sx| half_at(height, sx)).collect()
+    // The inset top outline (→ base for the next stacked level) and the **outer rim**:
+    // the outermost solid half-beam at `top_y`. Where the top row bevels in (tumblehome),
+    // an outside bevel sits one block past the inset edge, so the rim is `half + 1`.
+    let inset: Vec<i32> = (0..length).map(|sx| half_at(height, sx)).collect();
+    let outer: Vec<i32> = (0..length)
+        .map(|sx| {
+            let h = half_at(height, sx);
+            if h < 1 {
+                return 0;
+            }
+            let stepped = height >= 2 && inset_at(height, sx) > inset_at(height - 1, sx);
+            if stepped {
+                h + 1
+            } else {
+                h
+            }
+        })
+        .collect();
+    (inset, outer)
 }

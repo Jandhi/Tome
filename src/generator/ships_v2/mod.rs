@@ -18,6 +18,7 @@ pub mod hull;
 pub mod rudder;
 pub mod deck;
 pub mod blueprint;
+pub mod tuning;
 
 #[cfg(test)]
 mod test;
@@ -41,9 +42,9 @@ use keel::KeelModel;
 use palette::ShipPalette;
 use rudder::RudderModel;
 
-/// Default length:beam ratio (max beam = length / ratio). ~2.7 ≈ the tutorial's
-/// stout hull; higher is sleeker.
-pub const DEFAULT_BEAM_RATIO: f32 = 2.7;
+/// Default length:beam ratio. Defined in [`tuning`]; re-exported here so the existing
+/// `ships_v2::DEFAULT_BEAM_RATIO` path keeps working.
+pub use tuning::DEFAULT_BEAM_RATIO;
 
 /// Cross-cutting context threaded through every v2 ship stage (mirrors v1 `ShipCtx`).
 pub struct ShipV2Ctx<'a> {
@@ -63,7 +64,7 @@ impl<'a> ShipV2Ctx<'a> {
 /// keel derives its depth / rake / post from it. The vertical footing is decided
 /// automatically from the terrain at the anchor (land vs water).
 #[derive(Debug, Clone, Copy)]
-pub struct ShipV2Context {
+pub struct ShipV2Spec {
     /// Bow direction (cardinal headings only, like v1).
     pub heading: Cardinal,
     /// Tip-to-tip keel length.
@@ -74,8 +75,8 @@ pub struct ShipV2Context {
     pub hull_shape: HullShape,
 }
 
-impl ShipV2Context {
-    /// Build a context with default beam ratio ([`DEFAULT_BEAM_RATIO`]) and a
+impl ShipV2Spec {
+    /// Build a spec with default beam ratio ([`DEFAULT_BEAM_RATIO`]) and a
     /// teardrop hull.
     pub fn new(heading: Cardinal, length: i32) -> Self {
         Self { heading, length, beam_ratio: DEFAULT_BEAM_RATIO, hull_shape: HullShape::Teardrop }
@@ -121,13 +122,13 @@ pub struct ShipV2Output {
 /// - **land:** the flat bottom rests on the ground, so everything is built above.
 pub async fn build_ship_v2(
     ctx: &mut ShipV2Ctx<'_>,
-    context: &ShipV2Context,
+    spec: &ShipV2Spec,
     anchor: Point2D,
 ) -> ShipV2Output {
     let ship_palette = ShipPalette::ship_oak_default();
 
     // 1. Keel model — pure geometry in the local frame.
-    let keel = keel::build_keel_model(context.length);
+    let keel = keel::build_keel_model(spec.length);
 
     // 2. Resolve the footing: world Y that the keel's flat bottom (local y=0) sits
     //    at. Heightmaps are local to the build origin, usable directly as origin.y.
@@ -140,7 +141,7 @@ pub async fn build_ship_v2(
     } else {
         world.get_height_at(anchor)
     };
-    let placement = Placement::new(Point3D::new(anchor.x, bottom_y, anchor.y), context.heading);
+    let placement = Placement::new(Point3D::new(anchor.x, bottom_y, anchor.y), spec.heading);
 
     // 3. Place the keel (waterlog stairs/slabs only when on water).
     keel::place_keel(ctx, &keel, &placement, &ship_palette, on_water).await;
@@ -148,10 +149,10 @@ pub async fn build_ship_v2(
     // 4. Build + place the hull shell upon the keel (blocks only for now). The hull
     //    sits on the keel's crest so the keel stays the outermost, water-touching part.
     let hull = hull::build_hull_model(
-        context.length,
+        spec.length,
         keel.depth,
-        context.beam_ratio,
-        context.hull_shape,
+        spec.beam_ratio,
+        spec.hull_shape,
         &keel.top_profile(),
     );
     hull::place_hull(ctx, &hull, &placement, &ship_palette, on_water).await;
@@ -168,7 +169,7 @@ pub async fn build_ship_v2(
     //    now respects size gating (Small ships, length ≤20, skip it → just a railed
     //    main deck); the other additions still build for all sizes until their gating
     //    is wired up.
-    let tier = SizeTier::from_length(context.length);
+    let tier = SizeTier::from_length(spec.length);
     let deck_ctx = additions::DeckContext {
         placement: &placement,
         keel: &keel,
@@ -181,14 +182,18 @@ pub async fn build_ship_v2(
     // Running top-weather-deck state: structural additions raise it, fittings read it.
     let mut deck_state = additions::DeckState::initial(&hull, &deck);
     for &addition in &additions::BUILD_ORDER {
+        if additions::DEBUG_SKIP.contains(&addition) {
+            continue; // debug toggle (additions.rs::DEBUG_SKIP)
+        }
         if addition == DeckAddition::AdditionalDeck && !tier.has(addition) {
             continue; // Small ships have no additional deck.
         }
         additions::build_addition(addition, ctx, &deck_ctx, &mut deck_state).await;
     }
     drop(deck_ctx);
-    let railing = deck_state.railing;
     let bowsprit = deck_state.bowsprit;
+    let railing = deck_state.railing;
+    
 
     ShipV2Output { placement, keel, hull, rudder, deck, railing, bowsprit, tier, on_water }
 }

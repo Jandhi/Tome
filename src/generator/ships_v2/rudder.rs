@@ -16,17 +16,8 @@ use crate::geometry::Point3D;
 use crate::minecraft::BlockForm;
 
 use super::palette::{ShipPalette, ShipPart};
+use super::tuning::{FIN_LEAD_X, RUDDER_RAKE, RUDDER_STAIR_FACE, RUDDER_STAIR_TOP};
 use super::{Placement, ShipDir, ShipV2Ctx};
-
-/// Leading edge of the fin (1-block fence gap aft of the post at `x = -1`).
-const FIN_LEAD_X: i32 = -2;
-/// Aft rake of the trailing edge per block of height below the waterline.
-const RUDDER_RAKE: f32 = 0.4;
-
-/// Stair orientation for the raked trailing edge. Classic MC stair flip point —
-/// swap the facing / `top_half` if a screenshot shows the bevel on the wrong face.
-const RUDDER_STAIR_FACE: ShipDir = ShipDir::Bow;
-const RUDDER_STAIR_TOP: bool = false;
 
 /// One fin cell (full block in the body, stair on a trailing-edge step).
 #[derive(Debug, Clone)]

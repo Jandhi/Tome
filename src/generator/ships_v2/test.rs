@@ -4,6 +4,59 @@
 
 use crate::generator::ships_v2::keel;
 
+/// Scan small hulls for watertightness leaks (the stern-hole bug). Pure geometry — no
+/// server. Flood-fills the below-waterline band from outside and reports any interior
+/// cell it reaches (a side/bottom hole). Run: `cargo test hull_watertight_scan -- --nocapture`
+#[test]
+fn hull_watertight_scan() {
+    use crate::generator::ships_v2::hull::{build_hull_model, HullShape};
+    use crate::generator::ships_v2::keel::build_keel_model;
+    use std::collections::HashSet;
+
+    for length in 14..=22 {
+        for shape in [HullShape::Teardrop, HullShape::Oval] {
+            let keel = build_keel_model(length);
+            let hull = build_hull_model(length, keel.depth, 2.7, shape, &keel.top_profile());
+            let mut solid: HashSet<(i32, i32, i32)> = HashSet::new();
+            for c in &hull.cells { solid.insert((c.x, c.y, c.z)); }
+            for b in &hull.bevel { solid.insert((b.local.x, b.local.y, b.local.z)); }
+            for c in &keel.cells { solid.insert((c.local.x, c.local.y, c.local.z)); }
+            let interior: HashSet<(i32, i32, i32)> = hull.interior.iter().map(|c| (c.x, c.y, c.z)).collect();
+
+            let (xlo, xhi) = (-2, length + 1);
+            let mb = hull.max_beam + 2;
+            let (ylo, yhi) = (1, keel.depth - 1); // strictly below the waterline rim
+            if yhi < ylo { continue; }
+            let air = |p: (i32, i32, i32)| !solid.contains(&p);
+            let mut seen: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut stack: Vec<(i32, i32, i32)> = Vec::new();
+            // Seed from the bounding-box shell (exterior), in the underwater band.
+            for y in ylo..=yhi {
+                for x in xlo..=xhi {
+                    for &z in &[-mb, mb] { if air((x, y, z)) { stack.push((x, y, z)); } }
+                }
+            }
+            let mut leaks: Vec<(i32, i32, i32)> = Vec::new();
+            while let Some(p) = stack.pop() {
+                if !seen.insert(p) { continue; }
+                if interior.contains(&p) { leaks.push(p); }
+                let (x, y, z) = p;
+                for d in [(-1,0,0),(1,0,0),(0,-1,0),(0,1,0),(0,0,-1),(0,0,1)] {
+                    let n = (x + d.0, y + d.1, z + d.2);
+                    if n.0 < xlo || n.0 > xhi || n.1 < ylo || n.1 > yhi || n.2 < -mb || n.2 > mb { continue; }
+                    if air(n) && !seen.contains(&n) { stack.push(n); }
+                }
+            }
+            leaks.sort();
+            assert!(
+                leaks.is_empty(),
+                "hull leak len={length} {shape:?} depth={}: {} interior cells reachable from outside below the waterline, e.g. {:?}",
+                keel.depth, leaks.len(), &leaks[..leaks.len().min(8)],
+            );
+        }
+    }
+}
+
 /// One-off analysis of the user's hand-fixed bowsprit/prow structure blocks, to
 /// reverse-engineer the pattern. Run with:
 /// `cargo test analyze_bowsprit_nbt -- --nocapture --ignored`
@@ -192,10 +245,12 @@ async fn build_ship_v2_offline() {
     use crate::editor::World;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::additions::bowsprit::{build_bowsprit_model, BowspritRake};
     use crate::generator::ships_v2::blueprint::{
-        render_hull_plan, render_hull_section, render_keel_ascii,
+        render_hull_plan, render_hull_section, render_keel_ascii, render_spar_profile,
     };
-    use crate::generator::ships_v2::{build_ship_v2, ShipV2Context, ShipV2Ctx};
+    use crate::generator::ships_v2::additions::{self, DeckAddition};
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Spec, ShipV2Ctx};
     use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
     use crate::minecraft::Block;
     use crate::noise::RNG;
@@ -216,11 +271,11 @@ async fn build_ship_v2_offline() {
         .clone();
 
     let mut rng = RNG::new(7);
-    let context = ShipV2Context::new(Cardinal::North, 30);
+    let spec = ShipV2Spec::new(Cardinal::North, 30);
     let anchor = Point2D::new(96, 96);
 
     let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
-    let ship = build_ship_v2(&mut ctx, &context, anchor).await;
+    let ship = build_ship_v2(&mut ctx, &spec, anchor).await;
     editor.flush_buffer().await;
 
     assert!(ship.on_water, "anchor over a water flatworld should be detected as water");
@@ -313,41 +368,47 @@ async fn build_ship_v2_offline() {
     assert!(above_deck, "additional deck should place blocks above the main deck");
 
     // Main railing: a fence rail caps the top weather deck (above the additional deck).
-    let railing = ship.railing.as_ref().expect("railing should be built");
-    assert!(!railing.cap.is_empty(), "railing should have a fence rail cap");
-    let cap_world = place.to_world(railing.cap[0]);
-    assert!(
-        editor.try_get_block(cap_world).map_or(false, |b| b.id.as_str().contains("fence")),
-        "expected a fence rail at {cap_world:?}, got {:?}",
-        editor.try_get_block(cap_world).map(|b| b.id),
-    );
+    // Skipped when DEBUG_SKIP excludes it.
+    if !additions::DEBUG_SKIP.contains(&DeckAddition::MainRailing) {
+        let railing = ship.railing.as_ref().expect("railing should be built");
+        assert!(!railing.cap.is_empty(), "railing should have a fence rail cap");
+        let cap_world = place.to_world(railing.cap[0]);
+        assert!(
+            editor.try_get_block(cap_world).map_or(false, |b| b.id.as_str().contains("fence")),
+            "expected a fence rail at {cap_world:?}, got {:?}",
+            editor.try_get_block(cap_world).map(|b| b.id),
+        );
+    }
 
     // Bowsprit: a solid tapered prow extends the bow, carrying a smoothed spar that
-    // projects forward past the bow tip.
-    let bowsprit = ship.bowsprit.as_ref().expect("bowsprit should be built");
-    assert!(!bowsprit.spar.is_empty(), "bowsprit should have a spar");
-    assert!(!bowsprit.prow.is_empty(), "bowsprit should have a solid prow");
-    let prow_world = place.to_world(bowsprit.prow[0]);
-    assert!(
-        editor.try_get_block(prow_world).as_ref().map_or(false, |b| !is_air(b)),
-        "expected a solid prow block at {prow_world:?}, got {:?}",
-        editor.try_get_block(prow_world).map(|b| b.id),
-    );
-    assert!(
-        bowsprit.tip.x > keel.length - 1,
-        "bowsprit tip ({}) should project past the bow tip ({})",
-        bowsprit.tip.x,
-        keel.length - 1,
-    );
-    let spar_world = place.to_world(bowsprit.spar[bowsprit.spar.len() / 2].local);
-    assert!(
-        editor.try_get_block(spar_world).map_or(false, |b| {
-            let id = b.id.as_str();
-            id.contains("slab") || id.contains("stairs")
-        }),
-        "expected a slab/stair spar at {spar_world:?}, got {:?}",
-        editor.try_get_block(spar_world).map(|b| b.id),
-    );
+    // projects forward past the bow tip. Skipped when DEBUG_SKIP excludes it.
+    if !additions::DEBUG_SKIP.contains(&DeckAddition::Bowsprit) {
+        let bowsprit = ship.bowsprit.as_ref().expect("bowsprit should be built");
+        assert!(!bowsprit.spar.is_empty(), "bowsprit should have a spar");
+        assert!(!bowsprit.prow.is_empty(), "bowsprit should have a solid prow");
+        let prow_world = place.to_world(bowsprit.prow[0]);
+        assert!(
+            editor.try_get_block(prow_world).as_ref().map_or(false, |b| !is_air(b)),
+            "expected a solid prow block at {prow_world:?}, got {:?}",
+            editor.try_get_block(prow_world).map(|b| b.id),
+        );
+        assert!(
+            bowsprit.tip.x > keel.length - 1,
+            "bowsprit tip ({}) should project past the bow tip ({})",
+            bowsprit.tip.x,
+            keel.length - 1,
+        );
+        // The spar is a block/slab beam (no stairs) — its mid cell is a solid plank or slab.
+        let spar_world = place.to_world(bowsprit.spar[bowsprit.spar.len() / 2].local);
+        assert!(
+            editor.try_get_block(spar_world).map_or(false, |b| {
+                let id = b.id.as_str();
+                id.contains("slab") || id.contains("plank") || id.contains("log")
+            }),
+            "expected a block/slab spar at {spar_world:?}, got {:?}",
+            editor.try_get_block(spar_world).map(|b| b.id),
+        );
+    }
 
     // Deck: a top slab caps the hull's open top.
     let deck = &ship.deck;
@@ -365,17 +426,39 @@ async fn build_ship_v2_offline() {
     let oval = crate::generator::ships_v2::hull::build_hull_model(
         keel.length,
         keel.depth,
-        context.beam_ratio,
+        spec.beam_ratio,
         crate::generator::ships_v2::HullShape::Oval,
         &keel.top_profile(),
     );
     let oval_plan = render_hull_plan(&oval);
     let section = render_hull_section(hull);
+    // Spar step-pattern (block/slab) profiles for each rake — the bow shape pre-check.
+    let keel_top = keel.top_profile();
+    let mut spar_dump = String::new();
+    for rake in [
+        BowspritRake::Straight,
+        BowspritRake::Gentle,
+        BowspritRake::Steep,
+        BowspritRake::Tiered,
+    ] {
+        let m = build_bowsprit_model(
+            keel.length,
+            ship.deck.deck_y,
+            ship.deck.deck_y,
+            &keel_top,
+            &hull.top_half,
+            true,
+            rake,
+        );
+        spar_dump.push_str(&render_spar_profile(&m));
+        spar_dump.push('\n');
+    }
     std::fs::create_dir_all("output/ships_v2").ok();
     std::fs::write("output/ships_v2/keel.txt", &ascii).expect("write ASCII");
     std::fs::write("output/ships_v2/hull.txt", &plan).expect("write hull plan");
     std::fs::write("output/ships_v2/hull_oval.txt", &oval_plan).expect("write oval plan");
     std::fs::write("output/ships_v2/hull_section.txt", &section).expect("write hull section");
+    std::fs::write("output/ships_v2/bowsprit_spar.txt", &spar_dump).expect("write spar profiles");
 
     println!(
         "Keel OK: length={}, depth={}, bow_rake={}, cells={}",
@@ -400,7 +483,7 @@ async fn build_ship_v2_offline_land() {
     use crate::editor::World;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::ships_v2::{build_ship_v2, ShipV2Context, ShipV2Ctx};
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Spec, ShipV2Ctx};
     use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
     use crate::minecraft::Block;
     use crate::noise::RNG;
@@ -422,11 +505,11 @@ async fn build_ship_v2_offline_land() {
         .clone();
 
     let mut rng = RNG::new(7);
-    let context = ShipV2Context::new(Cardinal::North, 30);
+    let spec = ShipV2Spec::new(Cardinal::North, 30);
     let anchor = Point2D::new(96, 96);
 
     let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
-    let ship = build_ship_v2(&mut ctx, &context, anchor).await;
+    let ship = build_ship_v2(&mut ctx, &spec, anchor).await;
     editor.flush_buffer().await;
 
     assert!(!ship.on_water, "anchor on a land flatworld should be detected as land");
@@ -463,7 +546,7 @@ async fn build_ship_v2_live() {
     use crate::editor::{Editor, World};
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::ships_v2::{ShipV2Context, ShipV2Ctx};
+    use crate::generator::ships_v2::{ShipV2Spec, ShipV2Ctx};
     use crate::geometry::{Cardinal, Point2D};
     use crate::http_mod::GDMCHTTPProvider;
     use crate::noise::RNG;
@@ -519,10 +602,10 @@ async fn build_ship_v2_live() {
         } else {
             crate::generator::ships_v2::HullShape::Oval
         };
-        let context = ShipV2Context::new(Cardinal::North, length).with_hull_shape(hull_shape);
+        let spec = ShipV2Spec::new(Cardinal::North, length).with_hull_shape(hull_shape);
 
         let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
-        let ship = crate::generator::ships_v2::build_ship_v2(&mut ctx, &context, anchor).await;
+        let ship = crate::generator::ships_v2::build_ship_v2(&mut ctx, &spec, anchor).await;
 
         println!(
             "length={} {:?} at {anchor:?} — {} footing, bottom_y={}, depth={}, max_beam={}",

@@ -13,11 +13,9 @@ use crate::geometry::Point3D;
 use crate::minecraft::BlockForm;
 
 use super::super::palette::ShipPart;
+use super::super::tuning::BULWARK_HEIGHT;
 use super::super::ShipV2Ctx;
 use super::{DeckContext, DeckState};
-
-/// Height of the solid bulwark course(s) below the fence rail cap.
-const BULWARK_HEIGHT: i32 = 1;
 
 /// Pure-geometry railing: the bulwark (solid) cells and the fence rail-cap cells, in
 /// the local frame, plus the deck floor it stands on.
@@ -32,7 +30,7 @@ pub struct RailingModel {
 }
 
 /// Perimeter `(x, z)` cells of the filled outline `{ |z| <= outline[x] }` — the deck
-/// edge.
+/// edge (sides + bow/stern caps).
 fn perimeter(outline: &[i32]) -> Vec<(i32, i32)> {
     let inside = |x: i32, z: i32| -> bool {
         x >= 0
@@ -57,8 +55,8 @@ fn perimeter(outline: &[i32]) -> Vec<(i32, i32)> {
     cells
 }
 
-/// Build the railing geometry around the `outline` (half-beam per station) standing
-/// on the deck floor at `deck_y`.
+/// Build the railing geometry around the `outline` (half-beam per station) standing on
+/// the deck floor at `deck_y`.
 pub fn build_railing_model(outline: &[i32], deck_y: i32) -> RailingModel {
     let mut bulwark = Vec::new();
     let mut cap = Vec::new();
@@ -71,8 +69,11 @@ pub fn build_railing_model(outline: &[i32], deck_y: i32) -> RailingModel {
     RailingModel { deck_y, bulwark, cap }
 }
 
-/// Place the railing around the current top weather deck and record it in `state`.
+/// Place the railing around the current top weather deck and record it in `state`. Uses
+/// the deck's **outer rim** outline (`DeckState::rail_outline`) — pure geometry, no block
+/// look-ups (those don't survive the offline→live coordinate shift).
 pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+    let place = dc.placement;
     let model = build_railing_model(&state.top_outline, state.top_y);
 
     let material = ctx
@@ -82,7 +83,6 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
         .clone();
     let mut placer_rng = ctx.rng.derive();
     let mut placer = MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut placer_rng), material);
-    let place = dc.placement;
 
     // Solid bulwark course(s).
     for &cell in &model.bulwark {
