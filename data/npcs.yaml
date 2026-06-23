@@ -285,6 +285,20 @@ dialogue:
     - "It's so tall! Did giants make it?"
     - "Why do we have to be quiet here?"
     - "I can see the whole square from the steps!"
+  # Folk out in a park or garden — strolling, resting on the grass, taking the air.
+  in_the_park:
+    - "A fine day for a walk in the green."
+    - "I could sit out here the whole afternoon."
+    - "The gardeners have done lovely work this year."
+    - "Nothing like a bit of shade and birdsong."
+    - "Quiet out here, away from the square."
+    - "Met my husband under a tree much like that one."
+  in_the_park_child:
+    - "Race you to the big tree!"
+    - "Look how many flowers! Can I pick one?"
+    - "I saw a frog! Over by the water!"
+    - "Push me higher — I want to touch the leaves!"
+    - "Let's play hide-and-seek in the bushes!"
   # Guards posted at a gate or on a wall tower, watching the approaches.
   guarding:
     - "State your business at the gate."

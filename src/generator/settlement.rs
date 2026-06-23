@@ -37,10 +37,17 @@ pub async fn generate_town(
     let mut rng2 = RNG::new(seed);
 
     // Infrastructure materials follow the culture: a desert town gets sandstone
-    // roads and walls, everyone else the default stone/cobble.
+    // roads and walls, a Japanese town a blackstone wall (matching its palette-
+    // skinned towers), everyone else the default stone/cobble.
     let desert = matches!(culture, crate::generator::buildings_v2::Culture::Desert);
+    let japanese = matches!(culture, crate::generator::buildings_v2::Culture::Japanese);
     let (wall_mat, arterial_mat, collector_mat): (&str, &str, &str) = if desert {
         ("smooth_sandstone", "smooth_sandstone", "sandstone")
+    } else if japanese {
+        // Blackstone wall to match the towers (which take the culture palette's
+        // `polished_blackstone_bricks` stone); deepslate roads — refined brick
+        // arterials, cobbled-deepslate collectors — to sit under the dark town.
+        ("polished_blackstone_bricks", "deepslate_bricks", "cobbled_deepslate")
     } else {
         ("stone_bricks", "stone_bricks", "cobblestone")
     };
@@ -199,6 +206,13 @@ pub async fn generate_town(
         }
     }
     println!("Rural roads: {} segments", rural_paths.len());
+
+    // A torii gate straddling each rural road, set a little way out from the
+    // gate — the threshold into the countryside. Japanese-only; no-op otherwise.
+    let torii = crate::generator::paths::place_rural_torii(&*editor, &rural_paths, culture).await;
+    if torii > 0 {
+        println!("Placed {torii} rural torii gates");
+    }
 
     // ── R3: paint rural production areas (after the roads) ────────────────
     for p in &placed_rural {
@@ -536,7 +550,6 @@ pub async fn generate_town(
     let roof_ids: Vec<PaletteId> = vec![
         "acacia_wood_roof".into(), "brick_roof".into(), "oak_wood_roof".into(), "red_wood_roof".into(),
     ];
-    let roof_styles = culture.roof_styles();
 
     fn roll_palette(rng: &mut RNG, base: &Palette, data: &LoadedData, woods: &[PaletteId], stones: &[PaletteId], roofs: &[PaletteId]) -> Palette {
         let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
@@ -699,6 +712,9 @@ pub async fn generate_town(
                         Culture::Desert => base_palette.clone(),
                         _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
                     };
+                    // Roof style weighted by culture + size (irimoya skews to the
+                    // grander buildings; see `roof_styles_for`).
+                    let roof_styles = culture.roof_styles_for(size_class);
                     let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
                     let footprint = crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
                         &mut rng, &plot, rect, frontage.outward, &size_class, culture.square_bias(),
@@ -735,6 +751,12 @@ pub async fn generate_town(
                     };
                     let mut bctx = BuildingContext::new(culture, size_class, roof_style);
                     bctx.base_y_override = base_lvl;
+                    // Roll the engawa veranda per the culture/size taste (every
+                    // Japanese Manor, a third of Halls; see `engawa_chance`).
+                    // `build_house` / `plan_engawa` still gate on the core rect
+                    // staying large enough and fall back to plain walls otherwise.
+                    let (en, ed) = culture.engawa_chance(size_class);
+                    bctx.engawa = ed > 0 && rng.rand_i32_range(0, ed as i32) < en as i32;
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
@@ -901,15 +923,19 @@ pub async fn generate_town(
     // (paved civic squares), nooks (small ringed gardens), parks (large green
     // commons), and yards (perimeter kitchen gardens).
     let mut place_labels: Vec<(Point2D, String)> = Vec::new();
-    // NPC standing-spot scenes harvested from plazas (stage performers, market
-    // vendors, onlookers in the crowd). Staffed as fixtures after furnishing,
-    // independent of the resident bed budget — a market is busy regardless of
-    // how many beds the town has.
+    // NPC standing-spot scenes harvested from the open spaces — plazas (stage
+    // performers, market vendors, onlookers in the crowd) and parks (idle folk
+    // strolling the green). Staffed as fixtures after furnishing, independent of
+    // the resident bed budget — a market or park is busy regardless of how many
+    // beds the town has.
     let mut plaza_scenes: Vec<crate::generator::population::AnchorScene> = Vec::new();
+    // Open-space landmark keys (plaza/park `.key()`) gathered for the settlement
+    // namer — a town with a market or graveyard can be named for it.
+    let mut civic_features: Vec<String> = Vec::new();
     {
         use crate::generator::open_space::{
             detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, OpenSpaceNames,
-            Theme, RegionType,
+            ParkType, Theme, RegionType,
         };
         let regions = detect_regions(editor.world(), &urban);
         let theme = Theme::for_culture(culture);
@@ -919,11 +945,17 @@ pub async fn generate_town(
         let names = OpenSpaceNames::load();
         let mut used: HashSet<String> = HashSet::new();
         let mut counts = [0usize; 4]; // plaza, nook, park, yard
+        // Stone lanterns (tōrō) scattered through the green spaces — Japanese
+        // only; the call is a no-op for other cultures, so we ring nooks and parks
+        // (but not yards, nor paved plazas, nor cemeteries) after furnishing. They
+        // are stoned to match each garden's own masonry (`theme.stone`).
+        let mut garden_lanterns = 0usize;
         for region in &regions {
             match region.region_type() {
                 RegionType::Plaza => {
                     let (plaza_type, scenes) = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
                     plaza_scenes.extend(scenes);
+                    civic_features.push(plaza_type.key().to_string());
                     if let Some(name) = names.as_ref().and_then(|n| n.name_plaza(plaza_type, culture, &mut os_rng, &mut used)) {
                         place_labels.push((region.centroid(), name));
                     }
@@ -931,12 +963,23 @@ pub async fn generate_town(
                 }
                 RegionType::Nook => {
                     furnish_nook(&*editor, region, &mut os_rng, &theme).await;
+                    garden_lanterns += crate::generator::paths::scatter_garden_lanterns(
+                        &*editor, region, &data, culture, theme.stone, &mut os_rng,
+                    ).await;
                     counts[1] += 1;
                 }
                 RegionType::Park => {
-                    let park_type = furnish_park(editor, region, &mut os_rng, &theme).await;
+                    let (park_type, scenes) = furnish_park(editor, region, &mut os_rng, &theme).await;
+                    plaza_scenes.extend(scenes);
+                    civic_features.push(park_type.key().to_string());
                     if let Some(name) = names.as_ref().and_then(|n| n.name_park(park_type, culture, &mut os_rng, &mut used)) {
                         place_labels.push((region.centroid(), name));
+                    }
+                    // Skip cemeteries — a glowing lantern doesn't suit a graveyard.
+                    if park_type != ParkType::Cemetery {
+                        garden_lanterns += crate::generator::paths::scatter_garden_lanterns(
+                            &*editor, region, &data, culture, theme.stone, &mut os_rng,
+                        ).await;
                     }
                     counts[2] += 1;
                 }
@@ -947,8 +990,8 @@ pub async fn generate_town(
             }
         }
         println!(
-            "Furnished open spaces — plaza {} nook {} park {} yard {}",
-            counts[0], counts[1], counts[2], counts[3],
+            "Furnished open spaces — plaza {} nook {} park {} yard {} | {} garden lanterns",
+            counts[0], counts[1], counts[2], counts[3], garden_lanterns,
         );
 
         // Skin the plaza fixtures from data: a stage's performers and a stall's
@@ -1270,6 +1313,22 @@ pub async fn generate_town(
             Ok(()) => println!("Wrote town map to output/town.png"),
             Err(e) => log::warn!("failed to render town.png: {e}"),
         }
+    }
+
+    // Welcome banner: bury a command-block proximity sensor at the town centre
+    // that flashes the settlement name when a player crosses into the urban
+    // area. The name is derived procedurally from the place's features (iconic
+    // building, land shape, biome), seeded off the town seed so it's stable.
+    // Requires `enable-command-block=true` on the server.
+    {
+        let mut name_rng = RNG::new(seed).derive();
+        let name = crate::generator::naming::generate_settlement_name(
+            editor.world(), &urban, &civic_features, culture, &mut name_rng,
+        );
+        crate::generator::welcome::place_welcome_title(
+            editor, &urban, &name, "Welcome, traveller",
+        ).await;
+        println!("Placed welcome-title sensor for \"{}\"", name);
     }
 
     editor.flush_buffer().await;

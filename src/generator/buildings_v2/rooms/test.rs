@@ -612,6 +612,151 @@ async fn build_manors_with_signs() {
 /// Builds exactly one Manor for debugging. Change `SEED` and re-run to inspect
 /// different layouts in-game: `cargo test build_single_manor -- --nocapture`.
 /// Asserts the manor got a cellar so a dud seed fails loudly.
+/// Places a single Japanese house with the irimoya (hip-and-gable) roof on the
+/// LIVE server at the build-area centre. Run against a running GDMC server:
+/// `cargo test build_irimoya_house_live -- --nocapture`.
+#[tokio::test]
+async fn build_irimoya_house_live() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::{BuildCtx, build_house, BuildingContext, Culture};
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("palette").clone();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+
+    // A clearly rectangular footprint (15×11) so the gable ridge runs along its
+    // long axis; bounds give the foundation room to level terrain around it.
+    let rect = Rect2D::from_points(
+        Point2D::new(center.x - 7, center.y - 5),
+        Point2D::new(center.x + 7, center.y + 5),
+    );
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 20, center.y - 20),
+        Point2D::new(center.x + 20, center.y + 20),
+    );
+
+    let mut rng = RNG::new(7);
+    let footprint = Footprint::from_rect(rect);
+    let bctx = BuildingContext::new(Culture::Japanese, SizeClass::House, RoofStyle::Irimoya);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds).await.expect("build_house failed");
+
+    editor.flush_buffer().await;
+
+    println!(
+        "Irimoya house placed live at rect {:?}..{:?}, roof_y={}",
+        rect.min(), rect.max(), house.frame.roof_y(0),
+    );
+}
+
+/// Japanese floors are bamboo mosaic, not the frame wood. Guards both silent
+/// failure modes: the `bamboo_mosaic` material file must actually load (a bad
+/// JSON would be skipped at debug level), and the palette's `ground_floor` role
+/// must resolve to it (an unknown id would leave the floor unplaced). `UpperFloor`
+/// falls back to `GroundFloor`, so this covers every interior floor.
+#[test]
+fn japanese_floor_is_bamboo_mosaic() {
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::MaterialRole;
+    use crate::generator::buildings_v2::Culture;
+    use crate::minecraft::BlockForm;
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data
+        .palettes
+        .get(&Culture::Japanese.palette_id())
+        .expect("japanese palette");
+
+    let floor_mat = palette
+        .get_material(MaterialRole::GroundFloor)
+        .expect("ground floor material");
+    assert_eq!(floor_mat.as_str(), "bamboo_mosaic", "ground floor should be bamboo");
+    assert_eq!(
+        palette.get_material(MaterialRole::UpperFloor).unwrap().as_str(),
+        "bamboo_mosaic",
+        "upper floor should fall back to bamboo",
+    );
+    // The frame wood is untouched — bamboo is the floor, not the timber.
+    assert_ne!(
+        palette.get_material(MaterialRole::PrimaryWood).unwrap().as_str(),
+        "bamboo_mosaic",
+        "primary wood must stay the frame timber",
+    );
+
+    // The material loaded and its block form resolves to the real MC block.
+    let material = data.materials.get(floor_mat).expect("bamboo_mosaic material loaded");
+    let mut rng = RNG::new(0);
+    let block = material.get_block(&BlockForm::Block, &mut rng).expect("block form");
+    assert_eq!(block.as_str().trim_start_matches("minecraft:"), "bamboo_mosaic");
+}
+
+/// Live: fill the build area with Japanese irimoya houses of varied sizes
+/// (Cottage / House / Hall / Manor). Run against a running GDMC server:
+/// `cargo test build_japanese_houses_live -- --nocapture`.
+#[tokio::test]
+async fn build_japanese_houses_live() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::{BuildCtx, build_house, BuildingContext, Culture};
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let culture = Culture::Japanese;
+    let palette = data.palettes.get(&culture.palette_id()).expect("palette").clone();
+
+    // Inset the build area a little so foundations have room to level.
+    let wr = editor.world().world_rect_2d();
+    let bounds = Rect2D::from_points(
+        Point2D::new(wr.min().x + 4, wr.min().y + 4),
+        Point2D::new(wr.max().x - 4, wr.max().y - 4),
+    );
+
+    let mut rng = RNG::new(21);
+    let mut plot = Plot::fully_usable(bounds);
+    let sizes = [SizeClass::Cottage, SizeClass::House, SizeClass::Hall, SizeClass::Manor];
+    let footprints = fill_plot_multi(&mut rng, &mut plot, &sizes, 24, culture.square_bias());
+    let n = footprints.len();
+
+    let mut placed = 0;
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+        let bctx = BuildingContext::new(culture, size_class, RoofStyle::Irimoya);
+        match build_house(&mut ctx, footprint, &bctx, bounds).await {
+            Ok(house) => {
+                placed += 1;
+                println!(
+                    "  {i}: {size_class:?} rects={} floors={}",
+                    house.footprint.rects().len(), house.frame.max_floors(),
+                );
+            }
+            Err(e) => println!("  {i}: {size_class:?} FAILED: {e}"),
+        }
+    }
+    editor.flush_buffer().await;
+    println!("Placed {placed}/{n} Japanese irimoya houses (live)");
+}
+
 #[tokio::test]
 async fn build_single_manor() {
     use crate::editor::World;
@@ -958,6 +1103,33 @@ async fn build_furnished_desert_houses() {
     println!("Done — {} furnished desert buildings placed", count);
 }
 
+/// Online Japanese variant: places the new hipped-roof houses in a live
+/// Minecraft world so the upturned eave corners can be inspected. Requires a
+/// live Minecraft server with the GDMC HTTP mod.
+#[tokio::test]
+async fn build_furnished_japanese_houses() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 64, center.y - 64),
+        Point2D::new(center.x + 63, center.y + 63),
+    );
+
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Japanese).await;
+    println!("Done — {} furnished japanese buildings placed", count);
+}
+
 /// Offline / dry-run variant: runs the same buildings_v2 pipeline against a
 /// synthetic flat world, without any HTTP traffic. Produces the same blueprint
 /// SVGs under `output/` as `build_furnished_houses` but does not require a
@@ -1048,6 +1220,368 @@ async fn build_furnished_desert_houses_offline() {
     use crate::generator::buildings_v2::Culture;
     let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Desert).await;
     println!("Done — {} furnished desert buildings placed (offline)", count);
+}
+
+/// Offline Japanese variant: blackstone palette and the new hipped roof with
+/// upturned eave corners. Use this to eyeball the new RoofStyle::Hipped output
+/// via the ASCII/SVG blueprints written under `output/`.
+#[tokio::test]
+async fn build_furnished_japanese_houses_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(
+        Point3D::new(0, 0, 0),
+        Point3D::new(255, 127, 255),
+    );
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let bounds = Rect2D::from_points(
+        Point2D::new(64, 64),
+        Point2D::new(191, 191),
+    );
+
+    use crate::generator::buildings_v2::Culture;
+    let count = run_furnished_houses_pipeline(&mut editor, bounds, 42, true, Culture::Japanese).await;
+    println!("Done — {} furnished japanese buildings placed (offline)", count);
+}
+
+/// Irimoya heightmap geometry: a hipped skirt opened into a long-axis gable.
+/// Pure geometry, no editor — asserts the three defining features:
+/// (1) a long horizontal ridge across the central gable span, (2) hip-style
+/// taper down to the eave in the short-end caps, and (3) the upturned corner curl.
+#[test]
+fn irimoya_heightmap_long_ridge_hip_caps_and_curl() {
+    use crate::generator::buildings_v2::roof::irimoya::{
+        IRIMOYA_RISE, LongAxis, gable_inset, irimoya_heightmap, pick_long_axis,
+    };
+
+    // 13×9 footprint (X long), so the ridge runs along X.
+    let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 8));
+    assert_eq!(pick_long_axis(&rect), LongAxis::X);
+
+    let inset = gable_inset(&rect, LongAxis::X);
+    assert_eq!(inset, 3, "central half gabled: along_extent 12 / 4");
+
+    let hm = irimoya_heightmap(&rect, &[], IRIMOYA_RISE, LongAxis::X, inset);
+
+    // across_extent = 8 → cap_h = floor(8/2 * 1.0) = 4. The ridge sits at z=4.
+    let ridge_z = 4;
+    let cap_h = 4.0;
+    for x in [3, 6, 9] {
+        assert_eq!(
+            hm.get(x, ridge_z), cap_h,
+            "central span should be a flat ridge at cap_h, x={x}",
+        );
+    }
+
+    // Short-end caps taper the ridge line down toward the eave (hip behaviour):
+    // at x=1 (d_along=1 < inset) the surface is well below the ridge.
+    assert!(
+        hm.get(1, ridge_z) < cap_h,
+        "end cap at x=1 should taper below the ridge, got {}", hm.get(1, ridge_z),
+    );
+
+    // Sorihafu curl: the diagonal corner overhang cell is lifted above its
+    // cardinal eave neighbour.
+    assert!(
+        hm.get(-1, -1) > hm.get(0, -1),
+        "corner overhang should be curled up above the cardinal eave: corner={}, cardinal={}",
+        hm.get(-1, -1), hm.get(0, -1),
+    );
+}
+
+/// Places a single Japanese house with the new `RoofStyle::Irimoya` through the
+/// full offline pipeline, writes ASCII + SVG blueprints under `output/`, and
+/// asserts the roof is present and a gable pediment wall closes the ridge end.
+#[tokio::test]
+async fn build_irimoya_house_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::irimoya::{LongAxis, gable_inset};
+    use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii, render_svg};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("palette").clone();
+
+    // A clearly rectangular rect: 15 (X) × 11 (Z), so the gable ridge runs along X.
+    let rect = Rect2D::from_points(Point2D::new(70, 70), Point2D::new(84, 80));
+    let bounds = Rect2D::from_points(Point2D::new(56, 56), Point2D::new(98, 98));
+
+    let mut rng = RNG::new(7);
+    let footprint = Footprint::from_rect(rect);
+    let bctx = BuildingContext::new(Culture::Japanese, SizeClass::House, RoofStyle::Irimoya);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds).await.expect("build_house failed");
+
+    // Dump blueprints for eyeballing.
+    let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
+    std::fs::write("output/irimoya_house.txt", render_ascii(&blueprint)).expect("write ascii");
+    std::fs::write("output/irimoya_house.svg", render_svg(&blueprint)).expect("write svg");
+
+    let wall_top = house.frame.roof_y(0);
+    let center = rect.midpoint();
+    let at = |p: Point2D, y: i32| editor.try_get_block(Point3D::new(p.x, y, p.y));
+    let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
+    // Topmost solid block in a column, scanning the roof band.
+    let top_solid = |p: Point2D| -> Option<i32> {
+        (wall_top - 1..wall_top + 12)
+            .filter(|&y| at(p, y).as_ref().map_or(false, |b| !is_air(b)))
+            .max()
+    };
+
+    // The ridge perches well above the wall top at the centre (a tall gable,
+    // not a shallow hip apex).
+    let ridge_top = top_solid(center).expect("no roof over the centre");
+    assert!(
+        ridge_top >= wall_top + 3,
+        "expected a tall central ridge, got top y={} (wall top {})", ridge_top, wall_top,
+    );
+
+    // The gable pediment: the inset plane that closes the ridge is a vertical
+    // wall — a stack of solid blocks rising from the wall top at the
+    // across-centre. A plain hip would be open air there.
+    let inset = gable_inset(&rect, LongAxis::X);
+    let pediment = Point2D::new(rect.min().x + inset, center.y);
+    let pediment_count = (wall_top..wall_top + 12)
+        .filter(|&y| at(pediment, y).as_ref().map_or(false, |b| !is_air(b)))
+        .count();
+    assert!(
+        pediment_count >= 2,
+        "expected a stacked gable pediment wall at {:?}, found {} solid blocks", pediment, pediment_count,
+    );
+
+    println!(
+        "Irimoya house OK: wall_top={wall_top}, ridge_top={ridge_top}, inset={inset}, \
+         pediment_blocks={pediment_count}, blueprints=output/irimoya_house.{{txt,svg}}",
+    );
+}
+
+/// Engawa regression: a large Japanese building with `bctx.engawa = true` insets
+/// its cellar/ground floor by 2 and its upper floors by 1 (so the upper storeys
+/// overhang the ground floor), raises onto a platform, and lays a 2-deep wooden
+/// deck with a pent-roof skirt over the outer ring. Builds a single-rect Manor
+/// (always ≥2 floors → guaranteed overhang), dumps blueprints, and asserts the
+/// differential inset, the 2-deep deck, and that the skirt only rings the outer
+/// deck (the cells not tucked under the overhang).
+#[tokio::test]
+async fn build_engawa_house_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::hipped::HippedPitch;
+    use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii, render_svg};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let world = World::synthetic(build_area, 64);
+    let mut editor = world.get_offline_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("palette").clone();
+
+    // 19 (X) × 15 (Z): ground insets to 15×11, upper to 17×13 — both well above
+    // MIN_INSET_SIDE, and large enough that a Manor stays a single rect.
+    let rect = Rect2D::from_points(Point2D::new(70, 70), Point2D::new(88, 84));
+    let bounds = Rect2D::from_points(Point2D::new(52, 52), Point2D::new(106, 106));
+
+    let mut rng = RNG::new(7);
+    let footprint = Footprint::from_rect(rect);
+    let mut bctx = BuildingContext::new(Culture::Japanese, SizeClass::Manor, RoofStyle::Hipped(HippedPitch::Stairs));
+    bctx.engawa = true;
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    let house = build_house(&mut ctx, footprint, &bctx, bounds).await.expect("build_house failed");
+
+    let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
+    std::fs::write("output/engawa_house.txt", render_ascii(&blueprint)).expect("write ascii");
+    std::fs::write("output/engawa_house.svg", render_svg(&blueprint)).expect("write svg");
+
+    // Ground floor inset by exactly 2 on every side.
+    let ground = house.frame.rect_at(0, 0).expect("ground floor extent");
+    assert_eq!(
+        (ground.min().x, ground.min().y, ground.max().x, ground.max().y),
+        (rect.min().x + 2, rect.min().y + 2, rect.max().x - 2, rect.max().y - 2),
+        "ground floor should inset by 2 from {:?}, got {:?}", rect, ground,
+    );
+
+    // Tapered profile: the TOP floor also insets by 2 (roof pulled back in).
+    let floors = house.frame.floor_counts()[0];
+    assert!(floors > 1, "Manor must be multi-floor; got {} floors", floors);
+    let top = house.frame.rect_at(0, floors - 1).expect("top floor extent");
+    assert_eq!(
+        (top.min().x, top.min().y, top.max().x, top.max().y),
+        (rect.min().x + 2, rect.min().y + 2, rect.max().x - 2, rect.max().y - 2),
+        "top floor should inset by 2 (matching the ground), got {:?}", top,
+    );
+    // Any MIDDLE floor insets by only 1 → it bulges out over the ground floor.
+    if floors >= 3 {
+        let mid = house.frame.rect_at(0, 1).expect("middle floor extent");
+        assert_eq!(
+            (mid.min().x, mid.min().y, mid.max().x, mid.max().y),
+            (rect.min().x + 1, rect.min().y + 1, rect.max().x - 1, rect.max().y - 1),
+            "middle floor should inset by 1 (bulging over the ground floor), got {:?}", mid,
+        );
+    }
+
+    let at = |p: Point2D, y: i32| editor.try_get_block(Point3D::new(p.x, y, p.y));
+    let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
+    let is_stair = |b: &Block| b.id.as_str().contains("stairs");
+    let is_slab = |b: &Block| b.id.as_str().contains("slab");
+    let deck_y = house.frame.floor_y(0) - 1;
+    let roof_y = house.frame.ceiling_y(0);
+    let mid_x = (rect.min().x + rect.max().x) / 2;
+
+    // The deck is 2 deep: both the nominal edge cell and the cell one in carry
+    // wooden planks.
+    let outer_deck = Point2D::new(mid_x, rect.min().y);       // nominal edge, outer ring
+    let inner_deck = Point2D::new(mid_x, rect.min().y + 1);   // against the wall, inner ring
+    for cell in [outer_deck, inner_deck] {
+        assert!(
+            at(cell, deck_y).as_ref().map_or(false, |b| !is_air(b)),
+            "expected a 2-deep wooden deck plank at {:?} y={}, got {:?}", cell, deck_y, at(cell, deck_y),
+        );
+    }
+
+    // Engawa roof: slabs on the inner ring (against the wall), stairs on the
+    // outer ring (the dripping eave edge).
+    assert!(
+        at(inner_deck, roof_y).as_ref().map_or(false, is_slab),
+        "expected an inner-ring roof slab at {:?} y={}, got {:?}", inner_deck, roof_y, at(inner_deck, roof_y),
+    );
+    assert!(
+        at(outer_deck, roof_y).as_ref().map_or(false, is_stair),
+        "expected an outer-ring roof stair at {:?} y={}, got {:?}", outer_deck, roof_y, at(outer_deck, roof_y),
+    );
+
+    // Diagonal corner: the outer corner cell (off the nominal corner) must be
+    // roofed too — the eave wraps all the way around, not just the flat sides.
+    let corner = Point2D::new(rect.min().x, rect.min().y);
+    let corner_block = at(corner, roof_y);
+    assert!(
+        corner_block.as_ref().map_or(false, |b| is_stair(b) || is_slab(b)),
+        "expected the diagonal corner to be roofed at {:?} y={}, got {:?}", corner, roof_y, corner_block,
+    );
+
+    // A fence-post support holds up the roof at the veranda corner: a wooden
+    // fence column between the deck surface and the eave.
+    let is_fence = |b: &Block| b.id.as_str().contains("fence") && !b.id.as_str().contains("gate");
+    assert!(
+        at(corner, deck_y + 1).as_ref().map_or(false, is_fence),
+        "expected a fence-post support at the corner {:?} y={}, got {:?}", corner, deck_y + 1, at(corner, deck_y + 1),
+    );
+
+    println!(
+        "Engawa house OK: nominal={:?}, ground={:?}, top={:?}, floors={floors}, \
+         deck_y={deck_y}, roof_y={roof_y}, blueprints=output/engawa_house.{{txt,svg}}",
+        rect, ground, top,
+    );
+}
+
+/// Engawa cellar regression: a cellar under an engawa house must shrink to the
+/// inset walls, not the nominal footprint — otherwise it carves a void out under
+/// the veranda deck. Searches seeds for a single-rect Japanese House that both
+/// insets *and* rolls a cellar, then asserts the cellar void reaches the inset
+/// interior but the ground under a deck-ring cell stays solid.
+#[tokio::test]
+async fn engawa_cellar_shrinks_to_inset_offline() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::hipped::HippedPitch;
+    use crate::generator::buildings_v2::engawa::plan_engawa;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("palette").clone();
+
+    // A single-rect 13×11 footprint: insets to 11×9 (cellar-worthy) and is large
+    // enough that the House class keeps it one rect across seeds.
+    let rect = Rect2D::from_points(Point2D::new(70, 70), Point2D::new(82, 80));
+    let bounds = Rect2D::from_points(Point2D::new(56, 56), Point2D::new(98, 98));
+    assert!(plan_engawa(&Footprint::from_rect(rect)).is_some(), "test setup: rect must be engawa-eligible");
+
+    // Search seeds for one that rolls a cellar (House = 2/5 chance).
+    let mut built = None;
+    for seed in 0..80i64 {
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(seed);
+        let footprint = Footprint::from_rect(rect);
+        let mut bctx = BuildingContext::new(Culture::Japanese, SizeClass::House, RoofStyle::Hipped(HippedPitch::Stairs));
+        bctx.engawa = true;
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        let house = build_house(&mut ctx, footprint, &bctx, bounds).await.expect("build_house failed");
+        if house.has_cellar {
+            built = Some((editor, house));
+            break;
+        }
+    }
+    let (editor, house) = built.expect("no engawa House rolled a cellar in 80 seeds");
+
+    let inset = house.frame.rect_at(0, 0).expect("ground extent");
+    let cellar_floor_y = house.frame.floor_y(CELLAR_FLOOR);
+    let at = |p: Point2D, y: i32| editor.try_get_block(Point3D::new(p.x, y, p.y));
+    let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
+    let air_at = |p: Point2D| at(p, cellar_floor_y).as_ref().map_or(false, is_air);
+
+    // Count void (air) cells at cellar-floor level, region by region. (We count
+    // over regions rather than probing one cell because cellar furniture lands on
+    // arbitrary interior cells — `HashMap` iteration order makes which ones
+    // non-deterministic across runs — so a single-cell air probe is flaky.)
+
+    // Inside the inset core → the cellar void. Several cells must be air (the
+    // cellar was excavated here), even if furniture occupies some.
+    let interior_air = inset.iter().filter(|&p| air_at(p)).count();
+    assert!(
+        interior_air >= 4,
+        "cellar should be excavated under the inset core (got {} air cells at y={})",
+        interior_air, cellar_floor_y,
+    );
+
+    // Inside the nominal footprint but OUTSIDE the inset core — the ring the
+    // engawa pulled the walls in from. A cellar tracking the nominal footprint
+    // would excavate void here; shrunk to the inset walls, there must be none.
+    let overreach_air = rect.iter()
+        .filter(|p| !inset.contains(*p))
+        .filter(|&p| air_at(p))
+        .count();
+    assert_eq!(
+        overreach_air, 0,
+        "cellar over-reached: {} void cells outside the inset core at y={} (should track the inset, not nominal, footprint)",
+        overreach_air, cellar_floor_y,
+    );
+
+    println!(
+        "Engawa cellar OK: inset={:?}, cellar_floor_y={}, interior_air={interior_air}, overreach_air=0",
+        inset, cellar_floor_y,
+    );
 }
 
 /// Dome regression: a desert (flat-roof) house on a square footprint must grow
@@ -1356,6 +1890,78 @@ async fn pipeline_invariants_property_test_jetty_multirect() {
     println!(
         "Multi-rect jetty property test: {} buildings ({} multi-rect, {} jettied) across {} seeds, all invariants hold",
         total, multi_rect, jettied, seeds.len(),
+    );
+}
+
+/// Engawa property test: run Japanese Cottages/Houses through the offline
+/// pipeline with `bctx.engawa = true` across many seeds. `build_house` applies
+/// the inset/raise/deck/skirt and runs `check_building_invariants` internally,
+/// so any veranda that breaks a wall/reachability invariant panics here. Asserts
+/// the engawa actually triggered on some building (ground extent inset below the
+/// nominal footprint), so a regression that silently stopped insetting can't let
+/// this pass vacuously.
+#[tokio::test]
+async fn pipeline_invariants_property_test_engawa() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::hipped::HippedPitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let bounds = Rect2D::from_points(Point2D::new(64, 64), Point2D::new(191, 191));
+    let styles = [
+        RoofStyle::Hipped(HippedPitch::Slab),
+        RoofStyle::Hipped(HippedPitch::Stairs),
+        RoofStyle::Irimoya,
+    ];
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("palette").clone();
+
+    let seeds: [i64; 10] = [1, 7, 13, 42, 99, 123, 256, 777, 1000, 2000];
+    let mut total = 0usize;
+    let mut engawad = 0usize;
+
+    for &seed in &seeds {
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(seed);
+        let mut plot = Plot::fully_usable(bounds);
+        // Large classes only — the deep ground inset (2 per side) needs sizeable
+        // footprints, matching how engawa is actually gated in the settlement.
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Hall, SizeClass::Manor], 8, 0);
+
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+            let mut bctx = BuildingContext::new(Culture::Japanese, size_class, styles[i % styles.len()]);
+            bctx.engawa = true;
+            let house = build_house(&mut ctx, footprint, &bctx, bounds)
+                .await
+                .unwrap_or_else(|msg| panic!("seed {} building {} ({:?}) invariant: {}", seed, i, size_class, msg));
+
+            total += 1;
+            // Engawa triggered if the frame's ground extent is inset below the
+            // nominal footprint rect it was built from.
+            let inset = (0..house.footprint.rects().len()).any(|r| {
+                match house.frame.rect_at(r, 0) {
+                    Some(g) => g.area() < house.footprint.rects()[r].area(),
+                    None => false,
+                }
+            });
+            if inset { engawad += 1; }
+        }
+        ctx.editor.flush_buffer().await;
+    }
+
+    assert!(engawad > 0, "engawa never triggered — the inset transform may be broken");
+    println!(
+        "Engawa property test: {} buildings ({} engawa'd) across {} seeds, all invariants hold",
+        total, engawad, seeds.len(),
     );
 }
 
@@ -1688,6 +2294,116 @@ async fn build_jetty_manors_halls_live() {
 
     ctx.editor.flush_buffer().await;
     println!("Done — manor/hall jetty grid placed live");
+}
+
+/// Live: places a grid of Japanese houses with `bctx.engawa = true`, so each one
+/// insets its walls, raises onto a wooden platform, decks the perimeter ring, and
+/// gets a pent-roof skirt. A label sign marks the seed/class and whether the
+/// engawa actually applied. Requires the GDMC HTTP mod running.
+/// Run with: `cargo test build_engawa_houses_live -- --nocapture`
+#[tokio::test]
+async fn build_engawa_houses_live() {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::hipped::HippedPitch;
+    use crate::generator::buildings_v2::engawa::plan_engawa;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data.palettes.get(&Culture::Japanese.palette_id()).expect("Japanese palette not found").clone();
+
+    let center = editor.world().world_rect_2d().midpoint();
+
+    // 3x2 grid, one large building per cell. Each cell searches seeds for an
+    // engawa-eligible footprint (one that survives the deep ground inset of 2 per
+    // side) so every building shows a veranda — engawa is only for large
+    // buildings, so we use Halls and Manors.
+    // With the relaxed gate (only the core must afford the deep inset; wings
+    // clamp to what they can fit), Halls qualify too — so the demo mixes both.
+    let cells: [(SizeClass, RoofStyle); 6] = [
+        (SizeClass::Manor, RoofStyle::Hipped(HippedPitch::Stairs)),
+        (SizeClass::Hall,  RoofStyle::Irimoya),
+        (SizeClass::Manor, RoofStyle::Hipped(HippedPitch::Slab)),
+        (SizeClass::Hall,  RoofStyle::Hipped(HippedPitch::Stairs)),
+        (SizeClass::Manor, RoofStyle::Irimoya),
+        (SizeClass::Hall,  RoofStyle::Hipped(HippedPitch::Slab)),
+    ];
+    let col_off = [-90i32, 0, 90];
+    let row_off = [-45i32, 45];
+    const HALF: i32 = 38; // 76x76 usable cell
+
+    let mut rng = RNG::new(0);
+    let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+    for (i, (size_class, roof_style)) in cells.iter().enumerate() {
+        let cx = center.x + col_off[i % 3];
+        let cz = center.y + row_off[i / 3];
+        let bounds = Rect2D::from_points(
+            Point2D::new(cx - HALF, cz - HALF),
+            Point2D::new(cx + HALF, cz + HALF),
+        );
+
+        // Each cell searches its own seed range so the buildings differ; the
+        // window is generous since even Manors don't always clear the inset.
+        let mut found: Option<(i64, Footprint)> = None;
+        for seed in (i as i64 * 3000 + 1)..(i as i64 * 3000 + 3000) {
+            let mut probe = RNG::new(seed);
+            let plot = Plot::fully_usable(bounds);
+            if let Some(fp) = generate_footprint(&mut probe, &plot, size_class) {
+                if plan_engawa(&fp).is_some() {
+                    found = Some((seed, fp));
+                    break;
+                }
+            }
+        }
+        let Some((seed, footprint)) = found else {
+            println!("{:?} cell {}: no engawa-eligible footprint, skipped", size_class, i);
+            continue;
+        };
+
+        // Re-roll on a fresh rng seeded identically so the build matches the probe.
+        *ctx.rng = RNG::new(seed);
+        let plot = Plot::fully_usable(bounds);
+        let _ = generate_footprint(ctx.rng, &plot, size_class);
+
+        let mut bctx = BuildingContext::new(Culture::Japanese, *size_class, *roof_style);
+        bctx.engawa = true;
+
+        let house = build_house(&mut ctx, footprint, &bctx, bounds)
+            .await
+            .expect("build_house failed");
+
+        // Engawa applied if the ground extent is inset below the nominal footprint.
+        let engawad = (0..house.footprint.rects().len()).any(|r| {
+            match house.frame.rect_at(r, 0) {
+                Some(g) => g.area() < house.footprint.rects()[r].area(),
+                None => false,
+            }
+        });
+        let tag = if engawad { "ENGAWA" } else { "flush" };
+
+        let sx = (house.footprint.bounds().min().x + house.footprint.bounds().max().x) / 2;
+        let sz = (house.footprint.bounds().min().y + house.footprint.bounds().max().y) / 2;
+        let sy = house.frame.floor_y(0) + 1;
+        let sign = sign_block(&format!("{:?} s{}", size_class, seed), tag);
+        ctx.editor.place_block_forced(&sign, Point3D::new(sx, sy, sz)).await;
+
+        println!(
+            "seed {:>2} {:?}: rects={}, floors={}, {}",
+            seed, size_class, house.footprint.rects().len(), house.frame.max_floors(), tag,
+        );
+    }
+
+    ctx.editor.flush_buffer().await;
+    println!("Done — Japanese engawa house grid placed live");
 }
 
 /// Generates parcels, partitions urban area into city blocks, then fills each block

@@ -1,0 +1,9 @@
+{
+    "id" : "bamboo_mosaic",
+    "blocks" : {
+        "block"   : "minecraft:bamboo_mosaic",
+        "stairs"  : "minecraft:bamboo_mosaic_stairs",
+        "slab"    : "minecraft:bamboo_mosaic_slab",
+        "fence"   : "minecraft:bamboo_fence"
+    }
+}

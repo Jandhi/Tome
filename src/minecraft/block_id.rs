@@ -51,6 +51,10 @@ impl BlockID {
             // below them, not perched on the root tangle.
             || name.contains("roots")
             || name.ends_with("_propagule")
+            // Huge-mushroom caps (red/brown_mushroom_block) match none of the
+            // above, so the tree logger left them floating after stripping the
+            // stem. Fold the mushroom blocks in so they're cleared like any tree.
+            || self.is_mushroom()
     }
 
     pub fn is_leaves(&self) -> bool {
@@ -59,7 +63,8 @@ impl BlockID {
 
     /// The blocks that make up huge mushrooms (e.g. dark oak forests): the red /
     /// brown caps plus the stem. The stem also matches `is_tree` via `_stem`, but
-    /// the cap blocks do not, so the logger needs this to clear them too.
+    /// the cap blocks do not on their own — `is_tree` folds this in so the logger
+    /// clears whole mushrooms instead of leaving the caps floating.
     pub fn is_mushroom(&self) -> bool {
         matches!(
             self.name(),

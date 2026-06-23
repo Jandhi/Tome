@@ -1,7 +1,7 @@
 //! Door and window placement. First the planning passes that cut openings into
 //! wall segments (`place_doors`, `place_terrace_doors`, `place_windows`), then
 //! `place_openings`, which renders the planned openings as actual door, glass,
-//! trapdoor, and arch blocks.
+//! trapdoor, fence, and arch blocks.
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,6 +33,9 @@ const CURTAIN_COLORS: [&str; 6] = [
 pub enum WindowFill {
     Glass,
     Trapdoor,
+    /// A fence column standing in the opening — reads as a wooden lattice / shoji
+    /// muntin. Uses the palette's primary wood. Japanese windows use this.
+    Fence,
     Open,
 }
 
@@ -459,6 +462,14 @@ pub async fn place_openings(
                                     placer.place_block_forced(
                                         editor, pos, BlockForm::Trapdoor,
                                         Some(&state), None,
+                                    ).await;
+                                }
+                                WindowFill::Fence => {
+                                    // A wooden fence post filling the opening,
+                                    // reading as a shoji-style lattice muntin.
+                                    placer.place_block_forced(
+                                        editor, pos, BlockForm::Fence,
+                                        None, None,
                                     ).await;
                                 }
                                 WindowFill::Open => {

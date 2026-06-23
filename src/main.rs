@@ -86,7 +86,7 @@ async fn run_generation_once() {
     crate::generator::settlement::generate_town(
         &mut editor,
         crate::noise::Seed(12345),
-        crate::generator::buildings_v2::Culture::Desert,
+        crate::generator::buildings_v2::Culture::Japanese,
     ).await;
 }
 

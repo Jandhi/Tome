@@ -154,11 +154,7 @@ pub async fn build_road_network(
 
     // Distance-to-wall field: routes pay a ramping penalty near the wall so they
     // keep clear of it and only meet it at gates.
-    let wall_cells: HashSet<Point2D> = urban.iter()
-        .filter(|&&c| CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
-        .copied()
-        .collect();
-    let wall_dist = wall_distance(&wall_cells, arterial_params.wall_clearance);
+    let wall_dist = wall_distance_field(&urban, arterial_params.wall_clearance);
 
     let mut paths: Vec<Path> = Vec::new();
     // The abstract edge each successfully-routed path came from, parallel to
@@ -563,13 +559,20 @@ pub fn find_blocks(
     blocks
 }
 
-/// Multi-source BFS distance (in cardinal steps) from the wall cells, out to
-/// `max_dist`. Wall cells are distance 0; cells farther than `max_dist` are
-/// omitted (callers treat "absent" as "far, no penalty").
-fn wall_distance(wall_cells: &HashSet<Point2D>, max_dist: i32) -> HashMap<Point2D, i32> {
+/// Distance-to-wall field for the urban perimeter: derives the wall cells (urban
+/// cells with at least one non-urban cardinal neighbour) and runs a multi-source
+/// BFS out to `max_dist`. Wall cells are distance 0; cells farther than `max_dist`
+/// are omitted (callers treat "absent" as "far, no penalty"). Shared by the urban
+/// and rural routers so both push their roads off the town wall.
+pub(super) fn wall_distance_field(urban: &HashSet<Point2D>, max_dist: i32) -> HashMap<Point2D, i32> {
+    let wall_cells: HashSet<Point2D> = urban.iter()
+        .filter(|&&c| CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
+        .copied()
+        .collect();
+
     let mut dist: HashMap<Point2D, i32> = HashMap::new();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
-    for &c in wall_cells {
+    for &c in &wall_cells {
         dist.insert(c, 0);
         queue.push_back(c);
     }
