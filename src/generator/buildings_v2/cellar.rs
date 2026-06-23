@@ -26,8 +26,9 @@ use super::footprint::{Footprint, SizeClass};
 use super::frame::{Frame, CELLAR_FLOOR};
 use super::pipeline::BuildCtx;
 use super::rooms::{compute_room_interior, CellState, ConstraintMap, RoomPlan};
-use super::furnish::furnish_interior;
+use super::furnish::{furnish_interior, harvest_anchors};
 use super::walls::{segment_cells, WallSegments};
+use crate::generator::population::AnchorScene;
 
 /// Roll cellar eligibility by size class. Larger, grander buildings are far
 /// more likely to have a cellar; a cottage only rarely gets a root cellar.
@@ -256,7 +257,7 @@ pub async fn maybe_build_cellar(
     floor_plan: &FloorPlan,
     room_plan: &RoomPlan,
     size_class: SizeClass,
-) -> Option<Vec<Point2D>> {
+) -> Option<(Vec<Point2D>, Vec<AnchorScene>)> {
     let mut rng = ctx.rng.derive();
     if !rolls_cellar(size_class, &mut rng) {
         return None;
@@ -299,8 +300,8 @@ pub async fn maybe_build_cellar(
     let (positions, dir) = stair;
     place_descending_stair(ctx, &positions, dir, floor_y, &main_stair_cells, &mut rng).await;
 
-    furnish_cellar(ctx, frame, interior, &positions).await;
-    Some(positions)
+    let anchors = furnish_cellar(ctx, frame, interior, &positions).await;
+    Some((positions, anchors))
 }
 
 /// Carve the cellar void and enclose it: stone floor slab under the whole core
@@ -430,7 +431,7 @@ async fn furnish_cellar(
     frame: &Frame,
     interior: Rect2D,
     positions: &[Point2D],
-) {
+) -> Vec<AnchorScene> {
     let mut constraints = ConstraintMap::new(&interior);
     for (i, pos) in positions.iter().enumerate() {
         let cell = (pos.x, pos.y);
@@ -455,7 +456,7 @@ async fn furnish_cellar(
         .or_else(|| ctx.data.furniture.rooms.get("storage"))
     {
         Some(list) => list,
-        None => return,
+        None => return Vec::new(),
     };
 
     // The cellar's deck sits at the CELLAR_FLOOR surface; its ceiling is the
@@ -470,7 +471,7 @@ async fn furnish_cellar(
     let palette = ctx.palette;
     let mut furn_rng = ctx.rng.derive();
 
-    furnish_interior(
+    let placed = furnish_interior(
         editor,
         &interior,
         &mut constraints,
@@ -486,6 +487,12 @@ async fn furnish_cellar(
         &mut furn_rng,
     )
     .await;
+
+    // Anchors for whoever works the cellar (a vintner at the racks, …).
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut scenes: Vec<AnchorScene> = Vec::new();
+    harvest_anchors(&placed, &constraints, floor_y, &mut claimed, &mut scenes);
+    scenes
 }
 
 #[cfg(test)]

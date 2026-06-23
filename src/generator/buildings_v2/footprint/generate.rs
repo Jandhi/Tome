@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::geometry::{Point2D, Rect2D};
+use crate::geometry::{Cardinal, Point2D, Rect2D};
 use crate::noise::RNG;
 use super::{SizeClass, maximal_rect::find_largest_rect, Plot};
 
@@ -506,6 +506,174 @@ pub fn generate_cores(
     }
 
     cores
+}
+
+/// Generate a footprint whose **core is fixed** (the road-facing rect chosen
+/// by frontage placement) and which may sprout wings extending into the lot
+/// away from the road. Wings never attach to the road-facing side of the core
+/// — the front door stays unobstructed.
+///
+/// `road_outward` is the cardinal direction from the core to the road (same
+/// `frontage.outward` the placement loop already has). The candidate area
+/// passed to wing generation is grown from the core outward in the three
+/// non-road directions, expanding while the trial rect stays inside the
+/// plot's usable region — so wings can occupy unused lot cells behind/beside
+/// the building without leaking onto a road or another house's footprint.
+///
+/// Falls back to a single-rect footprint (just the core) if the size class
+/// allows no wings, the score-based wing search finds nothing better, or the
+/// candidate has no room to grow.
+pub fn generate_footprint_from_core(
+    rng: &mut RNG,
+    plot: &Plot,
+    core: Rect2D,
+    road_outward: Cardinal,
+    size_class: &SizeClass,
+    square_bias: i32,
+) -> super::Footprint {
+    if size_class.max_wings() == 0 {
+        return super::Footprint::from_rect(core);
+    }
+    let road_side = match road_outward {
+        Cardinal::North => Side::North,
+        Cardinal::South => Side::South,
+        Cardinal::West => Side::West,
+        Cardinal::East => Side::East,
+    };
+
+    let candidate = expand_candidate_around_core(&core, plot, road_side);
+
+    // Skip wing search if expansion got nothing — the lot's edge is flush
+    // with the core, so wings have nowhere to go.
+    if candidate.min() == core.min() && candidate.max() == core.max() {
+        return super::Footprint::from_rect(core);
+    }
+
+    // Target a generous area for this size class, capped by the candidate
+    // and floored at the core (wings on top of an already-decent core).
+    let target_area = rng
+        .rand_i32_range(size_class.target_area_min(), size_class.target_area_max() + 1)
+        .min(candidate.area())
+        .max(core.area());
+
+    // Generate several wing configurations; the existing score_layout +
+    // select_layout machinery picks the best by area-match / proportion /
+    // balance / complexity.
+    const WING_CONFIGS: i32 = 6;
+    let mut layouts = Vec::with_capacity(WING_CONFIGS as usize);
+    for _ in 0..WING_CONFIGS {
+        let wings = generate_wings_skipping_side(
+            rng, &core, &candidate, size_class, target_area, square_bias, road_side,
+        );
+        layouts.push(Layout { core, wings });
+    }
+
+    let mut select_rng = rng.derive();
+    let min_area = size_class.min_side() * size_class.min_side();
+    let Some(winner) =
+        select_layout(&mut select_rng, &layouts, target_area, &candidate, min_area)
+    else {
+        return super::Footprint::from_rect(core);
+    };
+    super::merge::merge_layout(&winner)
+}
+
+/// Greedily grow the core into the surrounding usable lot, one cell per
+/// direction per pass, skipping the road side. Caps growth per side at
+/// `MAX_EXTEND` so a giant lot doesn't produce an absurd candidate rect.
+fn expand_candidate_around_core(core: &Rect2D, plot: &Plot, road_side: Side) -> Rect2D {
+    const MAX_EXTEND: i32 = 16;
+    let mut min = core.min();
+    let mut max = core.max();
+    loop {
+        let mut changed = false;
+        // North: grow upward (-z). Skip if road is north.
+        if road_side != Side::North && (core.min().y - min.y) < MAX_EXTEND {
+            let new_min = Point2D::new(min.x, min.y - 1);
+            let trial = Rect2D::from_points(new_min, max);
+            if plot.is_rect_usable(&trial) {
+                min = new_min;
+                changed = true;
+            }
+        }
+        // South: grow downward (+z). Skip if road is south.
+        if road_side != Side::South && (max.y - core.max().y) < MAX_EXTEND {
+            let new_max = Point2D::new(max.x, max.y + 1);
+            let trial = Rect2D::from_points(min, new_max);
+            if plot.is_rect_usable(&trial) {
+                max = new_max;
+                changed = true;
+            }
+        }
+        // West: grow leftward (-x). Skip if road is west.
+        if road_side != Side::West && (core.min().x - min.x) < MAX_EXTEND {
+            let new_min = Point2D::new(min.x - 1, min.y);
+            let trial = Rect2D::from_points(new_min, max);
+            if plot.is_rect_usable(&trial) {
+                min = new_min;
+                changed = true;
+            }
+        }
+        // East: grow rightward (+x). Skip if road is east.
+        if road_side != Side::East && (max.x - core.max().x) < MAX_EXTEND {
+            let new_max = Point2D::new(max.x + 1, max.y);
+            let trial = Rect2D::from_points(min, new_max);
+            if plot.is_rect_usable(&trial) {
+                max = new_max;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Rect2D::from_points(min, max)
+}
+
+/// Same shape as [`generate_wings`] but skips a single forbidden side — used
+/// to keep wings off the road-facing edge of the core.
+fn generate_wings_skipping_side(
+    rng: &mut RNG,
+    core: &Rect2D,
+    candidate: &Rect2D,
+    size_class: &SizeClass,
+    target_area: i32,
+    square_bias: i32,
+    forbidden_side: Side,
+) -> Vec<Rect2D> {
+    if size_class.max_wings() == 0 {
+        return vec![];
+    }
+    let allowed_sides: Vec<Side> = ALL_SIDES.iter().copied().filter(|&s| s != forbidden_side).collect();
+    if allowed_sides.is_empty() {
+        return vec![];
+    }
+    let mut wings = Vec::new();
+    let mut occupied: HashMap<Side, Vec<Span>> = HashMap::new();
+    let mut current_area = core.area();
+    let num_wings =
+        rng.rand_i32_range(size_class.min_wings().max(1), size_class.max_wings() + 1);
+
+    for attempt in 0..num_wings {
+        let remaining = target_area - current_area;
+        if remaining < MIN_WING_SIDE * MIN_WING_SIDE
+            && wings.len() as i32 >= size_class.min_wings()
+        {
+            break;
+        }
+        let &side = rng.choose(&allowed_sides);
+        let spans = occupied.get(&side).map(|v| v.as_slice()).unwrap_or(&[]);
+        let wings_left = num_wings - attempt;
+        if let Some((wing, span)) = attach_wing(
+            rng, core, side, candidate, remaining, MIN_WING_SIDE, core.area(),
+            wings_left, spans, square_bias,
+        ) {
+            current_area += wing.area();
+            occupied.entry(side).or_default().push(span);
+            wings.push(wing);
+        }
+    }
+    wings
 }
 
 #[cfg(test)]

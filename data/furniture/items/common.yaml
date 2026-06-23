@@ -12,6 +12,10 @@ chest:
     - offset: [0, 0]
       constraint: blocked_reachable
       facing: away_from_wall
+  # Someone crouched at the open chest, facing into it.
+  anchors:
+    - dialogue: sorting
+      slots: [ { offset: [0, 1] } ]
 
 lantern:
   unique: true
@@ -459,6 +463,10 @@ crafting_table:
   constraints:
     - offset: [0, 0]
       constraint: blocked_reachable
+  # A crafter working at the bench.
+  anchors:
+    - dialogue: crafting
+      slots: [ { offset: [0, 1] } ]
 
 # Single block against a wall. Fletching_table reads as a small writing
 # surface — palette-neutral and period-appropriate.
@@ -471,6 +479,10 @@ desk:
     - offset: [0, 0]
       constraint: wall
       facing: away_from_wall
+  # Someone seated at the desk, facing the writing surface.
+  anchors:
+    - dialogue: reading
+      slots: [ { offset: [0, 1], occupant: any_age } ]
 
 # Wooden stairs as a chair, facing into the room.
 chair:
@@ -528,6 +540,14 @@ table:
   constraints:
     - offset: [0, 0]
       constraint: blocked_reachable
+  # Two diners on opposite sides facing each other across the table. The far
+  # seat is optional, so a table boxed in on one side still seats one.
+  anchors:
+    - kind: conversation
+      dialogue: conversation
+      slots:
+        - { offset: [0, 1] }
+        - { offset: [0, -1], required: false }
 
 vase:
   blocks:

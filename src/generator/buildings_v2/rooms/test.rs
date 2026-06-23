@@ -1176,9 +1176,16 @@ async fn cellar_built_under_manor_offline() {
     let floor_y = house.frame.floor_y(CELLAR_FLOOR);
     let slab_y = floor_y - 1;
     let core = house.footprint.rects()[0];
-    let center = core.midpoint();
 
-    let at = |y: i32| editor.try_get_block(Point3D::new(center.x, y, center.y));
+    // Probe the stair landing, not the core centroid: the centroid can host
+    // cellar furniture (a barrel, a hay pile), which would sit at floor_y and
+    // fail the "floor surface is air" check even though the void was carved
+    // correctly. The landing (cellar_stair position 0) is reserved walkable and
+    // carries no stair block, so it's reliably the carved void — air at floor_y,
+    // stone slab below.
+    let probe = house.cellar_stair.as_ref().expect("cellar must have a stair")[0];
+
+    let at = |y: i32| editor.try_get_block(Point3D::new(probe.x, y, probe.y));
     let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
     let floor_block = at(floor_y);
     let slab_block = at(slab_y);
@@ -1192,7 +1199,7 @@ async fn cellar_built_under_manor_offline() {
         "cellar floor slab at y={} should be solid stone, got {:?}", slab_y, slab_block,
     );
 
-    println!("Manor cellar carved: floor_y={}, slab_y={}, core={:?}", floor_y, slab_y, core);
+    println!("Manor cellar carved: floor_y={}, slab_y={}, probe={:?}, core={:?}", floor_y, slab_y, probe, core);
 }
 
 /// Property test: run the offline pipeline across many seeds and assert that

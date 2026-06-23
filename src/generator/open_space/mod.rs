@@ -279,30 +279,6 @@ fn cull_thin(green: &HashSet<Point2D>) -> HashSet<Point2D> {
 /// become the watershed cuts that split sprawling regions apart.
 const CORE_MIN_DIST: i32 = 2;
 
-/// Multi-source BFS distance of every green cell from the nearest non-green
-/// boundary (boundary-adjacent cells are 0).
-fn boundary_distance(green: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
-    let mut dist: HashMap<Point2D, i32> = HashMap::new();
-    let mut queue: VecDeque<Point2D> = VecDeque::new();
-    for &c in green {
-        if CARDINALS_2D.iter().any(|d| !green.contains(&(c + *d))) {
-            dist.insert(c, 0);
-            queue.push_back(c);
-        }
-    }
-    while let Some(c) = queue.pop_front() {
-        let dc = dist[&c];
-        for d in CARDINALS_2D {
-            let n = c + d;
-            if green.contains(&n) && !dist.contains_key(&n) {
-                dist.insert(n, dc + 1);
-                queue.push_back(n);
-            }
-        }
-    }
-    dist
-}
-
 /// Flood the cells reachable from `start` within `allowed` that aren't already
 /// labelled, tagging them `id` in `label`.
 fn flood_label(
@@ -330,7 +306,9 @@ fn flood_label(
 /// nearest core. Sprawling shapes split at their necks; coreless components
 /// (uniformly thin blobs) stay whole.
 fn partition_cells(green: &HashSet<Point2D>) -> Vec<Vec<Point2D>> {
-    let dist = boundary_distance(green);
+    // Multi-source BFS distance of every green cell from the nearest non-green
+    // boundary (boundary-adjacent cells are 0) — the canonical impl in `props`.
+    let dist = props::edge_depth(green);
 
     // Cores: cells deep enough to be a lobe centre.
     let core: HashSet<Point2D> = green

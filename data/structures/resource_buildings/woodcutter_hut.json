@@ -11,5 +11,13 @@
     9
   ],
   "y_offset": -1,
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "woodcutter",
+    "looks": [
+      "Fletcher",
+      "Mason"
+    ],
+    "workers": 2
+  }
 }

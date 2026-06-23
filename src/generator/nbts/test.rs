@@ -10,6 +10,86 @@ mod tests {
     use fastnbt::to_writer;
 
 
+    /// Authoring aid: for each industrial NBT, propose standable cells next to
+    /// ground-floor workstations so anchor coords can be hand-curated into the
+    /// JSON sidecars. A "stand" cell is non-solid with a solid floor below and
+    /// headroom above. Run: `cargo test propose_industrial_anchors -- --nocapture`.
+    #[test]
+    fn propose_industrial_anchors() {
+        use std::collections::HashSet;
+        use std::io::Read;
+        use flate2::read::GzDecoder;
+
+        fn load(path: &str) -> NBTStructure {
+            let raw = std::fs::read(path).expect("read nbt");
+            match fastnbt::from_bytes::<NBTStructure>(&raw) {
+                Ok(s) => s,
+                Err(_) => {
+                    let mut d = GzDecoder::new(raw.as_slice());
+                    let mut buf = vec![];
+                    d.read_to_end(&mut buf).expect("gunzip");
+                    fastnbt::from_bytes(&buf).expect("parse nbt")
+                }
+            }
+        }
+
+        // Per building, the "primary" job-site blocks worth standing at (the
+        // outfit follows the building, not the block).
+        let primary: &[(&str, &[&str])] = &[
+            ("smithy", &["smithing_table", "anvil", "furnace", "grindstone"]),
+            ("mill", &["stonecutter", "grindstone"]),
+            ("bakery", &["furnace", "smoker", "barrel"]),
+            ("carpenter", &["stonecutter", "fletching_table"]),
+            ("tannery", &["cauldron", "smithing_table", "anvil", "fletching_table"]),
+            ("weaver", &["loom"]),
+        ];
+
+        for (name, stations) in primary {
+            let s = load(&format!("data/structures/resource_buildings/{name}.nbt"));
+            let short = |b: &crate::generator::nbts::nbt::BlockData| {
+                let id = s.palette[b.state].name.as_str().to_string();
+                id.strip_prefix("minecraft:").unwrap_or(&id).to_string()
+            };
+            let solid: HashSet<(i32, i32, i32)> = s.blocks.iter()
+                .filter(|b| { let n = short(b); n != "air" && n != "cave_air" && n != "void_air" })
+                .map(|b| (b.pos[0], b.pos[1], b.pos[2]))
+                .collect();
+            let standable = |p: (i32, i32, i32)| {
+                solid.contains(&(p.0, p.1 - 1, p.2)) // floor below
+                    && !solid.contains(&p)            // feet clear
+                    && !solid.contains(&(p.0, p.1 + 1, p.2)) // headroom
+            };
+            println!("\n===== {name} =====");
+            let mut used: HashSet<(i32, i32, i32)> = HashSet::new();
+            for b in &s.blocks {
+                if b.pos[1] != 1 { continue; } // ground floor only
+                let n = short(b);
+                if !stations.iter().any(|st| n == *st) { continue; }
+                let st = (b.pos[0], b.pos[1], b.pos[2]);
+                // First cardinally-adjacent standable cell, preferring an unused one.
+                let cands = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                if let Some((dx, dz)) = cands.iter().copied()
+                    .find(|(dx, dz)| { let c = (st.0 + dx, st.1, st.2 + dz); standable(c) && !used.contains(&c) })
+                    .or_else(|| cands.iter().copied().find(|(dx, dz)| standable((st.0 + dx, st.1, st.2 + dz))))
+                {
+                    let stand = (st.0 + dx, st.1, st.2 + dz);
+                    used.insert(stand);
+                    println!("  {n}@{:?}  -> stand [{},{},{}] look [{},{},{}]",
+                        st, stand.0, stand.1, stand.2, st.0, st.1, st.2);
+                }
+            }
+            if used.is_empty() {
+                println!("  (no station-adjacent stand cells; standable ground-floor cells:)");
+                for b in &s.blocks {
+                    let p = (b.pos[0], b.pos[1], b.pos[2]);
+                    if p.1 == 1 && standable(p) {
+                        println!("    stand [{},{},{}]", p.0, p.1, p.2);
+                    }
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_place_nbt() {
         init_logger();
@@ -94,14 +174,17 @@ mod tests {
         }, Point3D{
             x: match b.x {
                 Coordinate::Absolute(x) => x,
+                Coordinate::AbsoluteF(x) => x.round() as i32,
                 Coordinate::Relative(x) => build_area.origin.x + x,
             },
             y: match b.y {
                 Coordinate::Absolute(y) => y,
+                Coordinate::AbsoluteF(y) => y.round() as i32,
                 Coordinate::Relative(y) => build_area.origin.y + y,
             },
             z: match b.z {
                 Coordinate::Absolute(z) => z,
+                Coordinate::AbsoluteF(z) => z.round() as i32,
                 Coordinate::Relative(z) => build_area.origin.z + z,
             },
         } - build_area.origin)).collect::<Vec<_>>();
@@ -131,6 +214,7 @@ mod tests {
                 size_xz: (0, 0),
                 y_offset: 0,
                 allow_steep: false,
+                staffing: None,
             },
             wall_type: Some(WallType::Support),
             vertical_position: Some(VerticalWallPosition::Bottom),
@@ -164,14 +248,17 @@ mod tests {
         }, Point3D{
             x: match b.x {
                 Coordinate::Absolute(x) => x,
+                Coordinate::AbsoluteF(x) => x.round() as i32,
                 Coordinate::Relative(x) => build_area.origin.x + x,
             },
             y: match b.y {
                 Coordinate::Absolute(y) => y,
+                Coordinate::AbsoluteF(y) => y.round() as i32,
                 Coordinate::Relative(y) => build_area.origin.y + y,
             },
             z: match b.z {
                 Coordinate::Absolute(z) => z,
+                Coordinate::AbsoluteF(z) => z.round() as i32,
                 Coordinate::Relative(z) => build_area.origin.z + z,
             },
         } - build_area.origin)).collect::<Vec<_>>();
@@ -201,6 +288,7 @@ mod tests {
                 size_xz: (0, 0),
                 y_offset: 0,
                 allow_steep: false,
+                staffing: None,
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),
         };

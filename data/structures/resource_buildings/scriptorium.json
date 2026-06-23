@@ -11,5 +11,12 @@
     33,
     15
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "scribe",
+    "looks": [
+      "Librarian"
+    ],
+    "workers": 3
+  }
 }

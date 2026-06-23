@@ -159,7 +159,7 @@ pub(super) async fn place_tree(
         return false;
     };
     lay_soil_patch(editor, c, h).await;
-    let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y)).await;
+    let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y), rng).await;
     true
 }
 
@@ -180,11 +180,22 @@ pub(super) async fn lay_soil_patch(editor: &Editor, c: Point2D, h: i32) {
     }
 }
 
-/// A bench (`wood` stairs) backed against a wall, seat facing `inward`.
+/// A two-wide bench (`wood` stairs) backed against a wall, seat facing `inward`.
+///
+/// A stair's solid riser sits on the side *opposite* its `facing`, so the bench
+/// faces away from the seated occupant: we face it outward (toward the wall) so
+/// the riser lands on the open side as a backrest. (Facing it `inward` puts the
+/// backrest against the wall and the seat the wrong way round.) A second stair is
+/// laid alongside, perpendicular to `inward`, so the bench is two blocks wide.
 pub(super) async fn place_bench(editor: &Editor, c: Point2D, h: i32, inward: Point2D, wood: &str) {
-    let block = string_to_block(&format!("minecraft:{}_stairs[facing={}]", wood, cardinal_facing(inward)))
+    let outward = Point2D::new(-inward.x, -inward.y);
+    let block = string_to_block(&format!("minecraft:{}_stairs[facing={}]", wood, cardinal_facing(outward)))
         .expect("bench stair block");
-    editor.place_block(&block, Point3D::new(c.x, h, c.y)).await;
+    // Extend one cell along the wall (perpendicular to inward) for a two-wide seat.
+    let along = Point2D::new(-inward.y, inward.x);
+    for cell in [c, c + along] {
+        editor.place_block(&block, Point3D::new(cell.x, h, cell.y)).await;
+    }
 }
 
 /// A planter: a `wood` base with a leafy azalea on top.

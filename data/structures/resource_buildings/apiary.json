@@ -11,5 +11,12 @@
     16,
     15
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "beekeeper",
+    "looks": [
+      "Farmer"
+    ],
+    "workers": 2
+  }
 }

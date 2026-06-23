@@ -350,12 +350,15 @@ pub async fn build_rooms(
                 if stair_bottoms.contains(&key) || stair_tops.contains(&key) {
                     constraints.set(xz, CellState::UnblockedReachable);
                     constraints.set_ceiling(xz);
+                    constraints.mark_stair(xz);
                 } else if this_floor_stair_cells.contains(&xz) {
                     constraints.set(xz, CellState::Blocked);
                     constraints.set_ceiling(xz);
+                    constraints.mark_stair(xz);
                 } else if floor_plan.stair_air_above.contains(&key) {
                     constraints.set(xz, CellState::UnblockedReachable);
                     constraints.set_ceiling(xz);
+                    constraints.mark_stair(xz);
                 }
             }
 

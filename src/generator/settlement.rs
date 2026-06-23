@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::data::Loadable;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
-use crate::generator::districts::{build_wall, generate_parcels, ParcelType, WallType};
+use crate::generator::districts::{build_wall, generate_parcels, ParcelType, TowerSkin, WallType};
 use crate::generator::materials::{Material, MaterialId, Placer};
 use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
@@ -23,6 +23,11 @@ use crate::noise::{Seed, RNG};
 /// The caller is responsible for constructing the `Editor` (and the `World`
 /// behind it) and for flushing/finalising afterwards beyond the final
 /// `flush_buffer` performed here.
+/// Residents per bed of sleeping capacity. A house's population budget is
+/// `max(1, round(beds * POPULATION_PER_BED))`, so a single-bed house houses ~2
+/// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
+const POPULATION_PER_BED: f32 = 1.5;
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
@@ -89,9 +94,10 @@ pub async fn generate_town(
             p
         }
     });
+    let tower_skin = tower_palette.as_ref().map(|p| TowerSkin { data: &data, palette: p });
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
-        &mut placer, &wall_material, &structures, WallType::Standard, tower_palette.as_ref(),
+        &mut placer, &wall_material, &structures, WallType::Standard, tower_skin.as_ref(),
     ).await;
     drop(placer);
 
@@ -232,6 +238,22 @@ pub async fn generate_town(
     println!(
         "Placed {} / {} industrial buildings",
         editor.world().structures.len() - n_before, ind_counts.values().sum::<u32>(),
+    );
+    let urban_industrial_count = editor.world().structures.len() - n_before;
+
+    // ---- Rural buildings ----
+    // The rural resource-chain pass above already placed each gathering/
+    // processing building (farm, mine, sawmill, ranch, ...) in its own parcel and
+    // painted its production area. Their `Structure` claim ids follow the urban
+    // ones, so the worker-staffing pass below picks them up alongside the urban
+    // shops.
+    let rural_building_count = placed_rural.len();
+    let rural_parcel_count = editor.world().districts.values()
+        .filter(|sd| sd.data.parcel_type == ParcelType::Rural)
+        .count();
+    println!(
+        "Placed {} rural buildings across {} rural parcels",
+        rural_building_count, rural_parcel_count,
     );
 
     // Footprints → a `blocked` barrier (footprint + margin) and one node per
@@ -527,15 +549,71 @@ pub async fn generate_town(
     }
     // Densest tier first; size pool per tier (houses on the main roads,
     // cottages on the back lanes).
-    // House + Hall on every tier for now (district wealth will refine this
-    // later). Slots that can't fit a Hall's wider frontage just skip.
-    let tiers: [(&HashSet<Point2D>, &[SizeClass]); 3] = [
-        (&arterial_band, &[SizeClass::House, SizeClass::Hall]),
-        (&collector_band, &[SizeClass::House, SizeClass::Hall]),
-        (&alley_band, &[SizeClass::House, SizeClass::Hall]),
-    ];
+    // House + Hall on every tier. Manor is no longer opportunistic — it's
+    // seeded in a deliberate pre-pass: pick MANOR_CAP arterial-eligible lots
+    // up front and process them first with their arterial tier forced to
+    // Manor-only. Lots without an arterial frontage long enough for a Manor
+    // are ineligible. If a chosen Manor build fails we just continue (no
+    // fallback to House/Hall on that slice); the lot still gets its other
+    // tiers placed normally below.
+    const MANOR_CAP: usize = 2;
+    let mut manors_placed = 0usize;
+    let manor_min_front = *SizeClass::Manor.front_width_range().start();
+    // Manors prefer arterial frontage, but fall back to collector if no lot
+    // touches an arterial with enough cells (common — arterials run through
+    // the urban core but lots are bounded by collectors). `manor_tier_idx`
+    // names which tier hosts the Manor pool inside the main loop (0 = arterial,
+    // 1 = collector). Alley never hosts Manors.
+    let eligible_for_band = |band: &HashSet<Point2D>| -> Vec<usize> {
+        sub_blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, lot)| !lot.is_empty())
+            .filter(|(_, lot)| {
+                frontage_from_roads(lot, band)
+                    .iter()
+                    .any(|f| (f.cells.len() as i32) >= manor_min_front)
+            })
+            .map(|(i, _)| i)
+            .collect()
+    };
+    let arterial_eligible = eligible_for_band(&arterial_band);
+    let (eligible, manor_tier_idx, manor_tier_label): (Vec<usize>, usize, &str) =
+        if !arterial_eligible.is_empty() {
+            (arterial_eligible, 0, "arterial")
+        } else {
+            (eligible_for_band(&collector_band), 1, "collector (arterial empty)")
+        };
+    let manor_lots: HashSet<usize> = {
+        let mut pool = eligible.clone();
+        rng.derive().shuffle(&mut pool);
+        pool.into_iter().take(MANOR_CAP).collect()
+    };
+    println!(
+        "Manor pre-pass: {} {}-eligible lots, chose {} to host Manors",
+        eligible.len(),
+        manor_tier_label,
+        manor_lots.len(),
+    );
+    // Iterate manor-lots first (in shuffled order), then everything else in
+    // natural sub_block order. "Before the rest of the houses" is enforced
+    // by the iteration order alone — no separate code path.
+    let lot_order: Vec<usize> = manor_lots
+        .iter()
+        .copied()
+        .chain((0..sub_blocks.len()).filter(|i| !manor_lots.contains(i)))
+        .collect();
 
     let mut total_buildings = 0usize;
+    // Per-house NPC anchors + bed-derived population budget, gathered from every
+    // house and fed to the town-wide population pass once the town is built.
+    let mut town_anchors: Vec<crate::generator::population::HouseAnchors> = Vec::new();
+    // Houses placed per SizeClass — used to size the wealth distribution
+    // (Cottage/House = common, Hall = wealthy craftsman, Manor = elite).
+    let mut size_counts: HashMap<String, usize> = HashMap::new();
+    // Footprint rect-count distribution (1 = single-rect / no wings, 2 = one
+    // wing, 3+ = multi-wing L/T/U shapes). Reads how often wings actually land.
+    let mut rect_count_dist: HashMap<usize, usize> = HashMap::new();
     let mut tier_cells = [0usize; 3];   // frontage cells found per tier
     let mut tier_placed = [0usize; 3];  // houses placed per tier
     let mut tier_fail = [0usize; 3];    // build_house failures per tier
@@ -548,11 +626,33 @@ pub async fn generate_town(
     // the road and each house front, which we pave into a forecourt so the
     // unavoidable set-back on a diagonal reads as a shoulder, not bare grass.
     let mut tier_verge: [HashSet<Point2D>; 2] = Default::default();
-    for lot in &sub_blocks {
+    for lot_idx in lot_order {
+        let lot = &sub_blocks[lot_idx];
         if lot.is_empty() { continue; }
         let Some(mut plot) = plot_from_block(lot) else { continue; };
 
-        for (ti, (band, pool)) in tiers.iter().enumerate() {
+        // On a chosen manor-lot, the manor's tier (arterial when arterials
+        // had eligible frontages; otherwise collector) gets a Manor-only
+        // pool until the cap is reached. Other tiers — and other lots —
+        // stay House+Hall. Alley never hosts Manors.
+        let is_manor_lot = manor_lots.contains(&lot_idx) && manors_placed < MANOR_CAP;
+        let arterial_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 0 {
+            &[SizeClass::Manor]
+        } else {
+            &[SizeClass::House, SizeClass::Hall]
+        };
+        let collector_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 1 {
+            &[SizeClass::Manor]
+        } else {
+            &[SizeClass::House, SizeClass::Hall]
+        };
+        let tiers_local: [(&HashSet<Point2D>, &[SizeClass]); 3] = [
+            (&arterial_band, arterial_pool),
+            (&collector_band, collector_pool),
+            (&alley_band, &[SizeClass::House, SizeClass::Hall]),
+        ];
+
+        'tier_loop: for (ti, (band, pool)) in tiers_local.iter().enumerate() {
             let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
             for frontage in frontage_from_roads(lot, band) {
                 tier_cells[ti] += frontage.cells.len();
@@ -588,6 +688,10 @@ pub async fn generate_town(
                         tier_unfit[ti] += 1; cursor += 1; continue;
                     };
                     let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
+                    // The frontage rect becomes the core; try to grow wings
+                    // into the lot's remaining usable cells (away from the
+                    // road). Square_bias = 0 here matches the live town gen —
+                    // domes on wings haven't been wired through yet.
 
                     // Desert keeps a uniform sandstone palette; other cultures
                     // roll wood/stone/roof variants per house for variety.
@@ -596,8 +700,13 @@ pub async fn generate_town(
                         _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
                     };
                     let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
-                    let plot_bounds = synthetic_plot_bounds(&rect, frontage.outward);
-                    let footprint = Footprint::from_rect(rect);
+                    let footprint = crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
+                        &mut rng, &plot, rect, frontage.outward, &size_class, culture.square_bias(),
+                    );
+                    // Door scoring needs the full footprint bounds, not just
+                    // the core rect, so a wing extending rearward doesn't
+                    // misreport the back wall's distance to the plot edge.
+                    let plot_bounds = synthetic_plot_bounds(&footprint.bounds(), frontage.outward);
                     // Align the main door with the road it faces: pin the floor
                     // (= door sill) to the height of the *nearest* road cell to
                     // this frontage. Probe outward from every frontage cell and
@@ -628,10 +737,48 @@ pub async fn generate_town(
                     bctx.base_y_override = base_lvl;
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                        Ok(_) => {
-                            plot.mark_rect_used(&rect, SIDE_BUFFER_CELLS);
+                        Ok(output) => {
+                            // Population budget tracks sleeping capacity, not bed
+                            // furniture: a double/canopy bed sleeps two. Each
+                            // bed-tagged item's capacity is its number of
+                            // `part=foot` blocks (the head auto-spawns), min 1.
+                            let beds: usize = output
+                                .room_plan
+                                .rooms
+                                .iter()
+                                .flat_map(|r| &r.furniture)
+                                .filter_map(|f| data.furniture.items.get(&f.name))
+                                .filter(|it| it.tags.iter().any(|t| t == "bed"))
+                                .map(|it| {
+                                    it.blocks
+                                        .iter()
+                                        .filter(|b| b.block.contains("part=foot"))
+                                        .count()
+                                        .max(1)
+                                })
+                                .sum();
+                            // Scale capacity so houses feel lived-in, floored at 1.
+                            let population =
+                                ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
+                            town_anchors.push(crate::generator::population::HouseAnchors {
+                                scenes: output.npc_anchors,
+                                population,
+                                wealth: crate::generator::population::Wealth::from_size_class(size_class),
+                                pos: output.footprint.bounds().midpoint(),
+                            });
+                            // Mark every rect in the footprint (core + wings)
+                            // as used so subsequent placements on this lot
+                            // can't overlap the wing cells.
+                            for r in output.footprint.rects() {
+                                plot.mark_rect_used(r, SIDE_BUFFER_CELLS);
+                            }
+                            *rect_count_dist.entry(output.footprint.rects().len()).or_insert(0) += 1;
                             total_buildings += 1;
                             tier_placed[ti] += 1;
+                            *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
+                            if size_class == SizeClass::Manor {
+                                manors_placed += 1;
+                            }
                             // Record the verge: from each frontage cell, walk
                             // into the block (−outward) until we reach the
                             // house. On a straight slice this is just the
@@ -650,6 +797,14 @@ pub async fn generate_town(
                                     }
                                 }
                             }
+                            // A Manor closes out its lot's manor-tier: skip any
+                            // remaining frontages/cursors here so we don't tile
+                            // additional Manors along the same chain. Other
+                            // tiers (collector/alley) of the lot still process
+                            // normally below.
+                            if size_class == SizeClass::Manor {
+                                continue 'tier_loop;
+                            }
                             cursor += fw + SIDE_BUFFER_CELLS;
                         }
                         Err(msg) => {
@@ -663,6 +818,20 @@ pub async fn generate_town(
         }
     }
     println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
+    {
+        let order = ["Cottage", "House", "Hall", "Manor"];
+        let parts: Vec<String> = order
+            .iter()
+            .map(|k| format!("{}: {}", k, size_counts.get(*k).copied().unwrap_or(0)))
+            .collect();
+        println!("Size class breakdown — {}", parts.join("  "));
+    }
+    {
+        let mut rcounts: Vec<(usize, usize)> = rect_count_dist.iter().map(|(&k, &v)| (k, v)).collect();
+        rcounts.sort_unstable_by_key(|&(k, _)| k);
+        let parts: Vec<String> = rcounts.iter().map(|(k, v)| format!("{} rect: {}", k, v)).collect();
+        println!("Footprint shape — {}", parts.join("  "));
+    }
     println!(
         "Per-tier [frontage cells / placed / failed] — arterial: {}/{}/{}  collector: {}/{}/{}  subdivider: {}/{}/{}",
         tier_cells[0], tier_placed[0], tier_fail[0],
@@ -732,6 +901,11 @@ pub async fn generate_town(
     // (paved civic squares), nooks (small ringed gardens), parks (large green
     // commons), and yards (perimeter kitchen gardens).
     let mut place_labels: Vec<(Point2D, String)> = Vec::new();
+    // NPC standing-spot scenes harvested from plazas (stage performers, market
+    // vendors, onlookers in the crowd). Staffed as fixtures after furnishing,
+    // independent of the resident bed budget — a market is busy regardless of
+    // how many beds the town has.
+    let mut plaza_scenes: Vec<crate::generator::population::AnchorScene> = Vec::new();
     {
         use crate::generator::open_space::{
             detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, OpenSpaceNames,
@@ -748,7 +922,8 @@ pub async fn generate_town(
         for region in &regions {
             match region.region_type() {
                 RegionType::Plaza => {
-                    let plaza_type = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
+                    let (plaza_type, scenes) = furnish_plaza(&*editor, region, &mut os_rng, &theme).await;
+                    plaza_scenes.extend(scenes);
                     if let Some(name) = names.as_ref().and_then(|n| n.name_plaza(plaza_type, culture, &mut os_rng, &mut used)) {
                         place_labels.push((region.centroid(), name));
                     }
@@ -775,6 +950,308 @@ pub async fn generate_town(
             "Furnished open spaces — plaza {} nook {} park {} yard {}",
             counts[0], counts[1], counts[2], counts[3],
         );
+
+        // Skin the plaza fixtures from data: a stage's performers and a stall's
+        // vendor each roll a look from their fixture pool. Onlookers/browsers in
+        // the crowd keep the roster's own look (their slots are left untouched).
+        use crate::generator::population::{SceneKind, SlotRole};
+        let mut plaza_look_rng = rng.derive();
+        for scene in plaza_scenes.iter_mut() {
+            let performance = scene.kind == SceneKind::Performance;
+            for slot in scene.slots.iter_mut() {
+                let fixture = if performance {
+                    &data.npc_data.performers
+                } else if slot.role == SlotRole::Worker {
+                    &data.npc_data.vendors
+                } else {
+                    continue;
+                };
+                slot.look = Some(*plaza_look_rng.choose(&fixture.looks));
+            }
+        }
+    }
+
+    // Count plaza employment for the jobs summary: a stall is any scene with a
+    // `Worker` slot (market vendors), a stage is a `Performance` scene, and its
+    // performer slots are the per-stage cast. Onlookers/browsers aren't jobs.
+    let (market_stall_count, stage_count, performer_slot_count) = {
+        use crate::generator::population::{SceneKind, SlotRole};
+        let stalls = plaza_scenes.iter()
+            .filter(|s| s.slots.iter().any(|sl| sl.role == SlotRole::Worker))
+            .count();
+        let stages = plaza_scenes.iter()
+            .filter(|s| s.kind == SceneKind::Performance)
+            .count();
+        let performers: usize = plaza_scenes.iter()
+            .filter(|s| s.kind == SceneKind::Performance)
+            .map(|s| s.slots.len())
+            .sum();
+        (stalls, stages, performers)
+    };
+
+    // Town-wide NPC id allocator. Shared across every staffing call below
+    // (plaza fixtures, residents, workplace workers, guards) so every NPC has
+    // a unique id and kin relationships can reference any of them.
+    let mut id_alloc = crate::generator::population::IdAllocator::new();
+
+    // ---- Plaza fixtures: staff every harvested plaza scene ----
+    // Stage performers, market vendors, and onlookers are fixtures like the
+    // industrial workers below — always placed, independent of the resident bed
+    // budget. Each scene already carries its own position, facing, dialogue key,
+    // and bubble volume (criers/performers yell), so we just hand them a roster
+    // and staff them all. Live-only: no-op offline.
+    if !plaza_scenes.is_empty() {
+        use crate::generator::population::{build_roster, populate_npcs, Occupant};
+        let npc_data = &data.npc_data;
+        let budget = plaza_scenes.len();
+        // Some market/stage onlookers are kid slots; mint exactly that many
+        // children in the roster so those scenes can be staffed (rest adults).
+        let kids = plaza_scenes
+            .iter()
+            .flat_map(|s| &s.slots)
+            .filter(|sl| sl.occupant == Occupant::ChildOnly)
+            .count();
+        let roster = build_roster(budget, kids, culture, npc_data, &mut id_alloc, &mut rng.derive());
+        match populate_npcs(editor, plaza_scenes, roster, budget, npc_data, &mut rng).await {
+            Ok(staffed) => println!("Staffed {} plaza NPCs", staffed),
+            Err(e) => log::warn!("plaza staffing failed: {e}"),
+        }
+    }
+
+    // Worker binding runs inside the population pass below (before residential
+    // placement). These outlive that scope so the worker-fixture block can
+    // backfill the posts binding couldn't fill from residents, and the jobs
+    // summary can report the full per-trade tally.
+    let mut workplace_backfill: Vec<crate::generator::population::WorkerSlot> = Vec::new();
+    let mut bound_worker_count = 0usize;
+    let mut workplace_count = 0usize;
+    let mut worker_by_job: HashMap<String, usize> = HashMap::new();
+
+    // ---- Population: size the resident crowd to beds, scatter it town-wide ----
+    // Each house's budget is max(1, beds); the town total is their sum.
+    // Residents come from generated households (kin reciprocally wired, then
+    // cross-household links, then employment), and the town-wide draw seeds
+    // one resident per house, then fills the rest weighted by anchor weight,
+    // halving a house's weights each time it gains a resident so the crowd
+    // spreads instead of clustering. Live-only: no-op offline.
+    {
+        use crate::generator::population::{
+            assign_employment, build_households, link_cross_household,
+            log_population_stats, log_sample_households, populate_town,
+        };
+        let budget: usize = town_anchors.iter().map(|h| h.population).sum();
+        let candidate_anchors: usize = town_anchors.iter().map(|h| h.scenes.len()).sum();
+        println!(
+            "Population target: {} residents across {} houses ({} candidate anchors)",
+            budget,
+            town_anchors.len(),
+            candidate_anchors,
+        );
+        let npc_data = &data.npc_data;
+        // Four passes: shape households per house, link kin across town,
+        // assign professions, place at anchors. Each pass derives its own
+        // RNG so reordering or inserting a future pass doesn't shift
+        // downstream rolls.
+        let mut population = build_households(
+            &town_anchors, culture, npc_data, &mut id_alloc, &mut rng.derive(),
+        );
+        link_cross_household(&mut population, &mut rng.derive());
+        assign_employment(&mut population, &mut rng.derive());
+
+        // Diagnostics: stats + a handful of sampled households so the kin graph
+        // is legible in the console without needing a debugger.
+        log_population_stats(&population);
+        log_sample_households(&population, 8);
+
+        // Bind residents to workplaces before seating anyone at home. The draft
+        // weights each unplaced adult by qualification (proximity-led) and spawns
+        // the winner at the post; posts with no taker left fall through to
+        // anonymous fixtures (`workplace_backfill`). Bound workers are marked
+        // `placed`, so `populate_town` skips them — each resident appears once.
+        // Every post (resident-filled or not) is tallied by trade for the summary.
+        use crate::generator::population::bind_workers;
+        let (work_slots, n_workplaces) = discover_worker_slots(editor, &data);
+        workplace_count = n_workplaces;
+        for s in &work_slots {
+            *worker_by_job.entry(s.employment.clone()).or_insert(0) += 1;
+        }
+        match bind_workers(editor, &mut population, work_slots, npc_data, &mut rng.derive()).await {
+            Ok((bound, unfilled)) => {
+                println!(
+                    "Bound {} residents to workplaces; {} posts need fixtures",
+                    bound,
+                    unfilled.len(),
+                );
+                bound_worker_count = bound;
+                workplace_backfill = unfilled;
+            }
+            Err(e) => log::warn!("worker binding failed: {e}"),
+        }
+
+        match populate_town(editor, town_anchors, population, npc_data, &mut rng).await {
+            Ok(placed) => println!("Populated {} NPCs", placed),
+            Err(e) => log::warn!("NPC population failed: {e}"),
+        }
+    }
+
+    // ---- Worker fixtures: staff every workplace ----
+    // Stand a small crew of worker NPCs just outside each placed building (urban
+    // processing shop or rural gather building), facing it, wearing the trade
+    // outfit that matches its type. These are fixtures: always placed, independent
+    // of the resident budget above. The NBT interiors are opaque, so workers stand
+    // on clear ground cells at the footprint edge — never inside, never on a road
+    // or another building. A workplace can employ several hands (see the per-kind
+    // `workers` count in `data/npcs.yaml`).
+    {
+        use crate::generator::population::{
+            build_roster, populate_npcs, AnchorScene, AnchorSlot, SceneKind, SlotRole,
+        };
+
+        // Workplace posts that binding couldn't fill from residents get an
+        // anonymous fixture: a fresh skin rolled from the post's pool, standing
+        // where binding would have seated the resident. (Residents bound to
+        // workplaces were already spawned in the population pass above; the claim
+        // scan + stand-cell geometry now lives in `discover_worker_slots`.)
+        let npc_data = &data.npc_data;
+        let mut worker_rng = rng.derive();
+
+        let mut worker_scenes: Vec<AnchorScene> = Vec::new();
+        for slot in &workplace_backfill {
+            let look = *worker_rng.choose(&slot.looks);
+            worker_scenes.push(AnchorScene::worker(slot.stand, slot.facing, look));
+        }
+
+        // Total worker posts = residents bound in the population pass + the
+        // anonymous backfill scenes just built; guards are appended below.
+        let backfill_slots = worker_scenes.len();
+        let industrial_job_slots = bound_worker_count + backfill_slots;
+
+        // ---- Guard posts: gates + wall towers ----
+        // Gates get 1–2 guards each; each tower has a 10% chance of 2 guards and a
+        // 20% chance of 1 (else none). Guards carry their own `guarding` dialogue,
+        // watching the approaches. Each guard's appearance is rolled from the
+        // guards fixture's `looks` pool (villager professions and/or mobs like
+        // pillagers), so a post can mix both.
+        use crate::generator::npc::NpcLook;
+        let guard_looks = &npc_data.guards.looks;
+        let guard_scene = |feet: Point3D, facing: f32, look: NpcLook| -> AnchorScene {
+            let mut slot = AnchorSlot::new(feet, facing, SlotRole::Worker);
+            slot.look = Some(look);
+            slot.dialogue = Some("guarding".to_string());
+            AnchorScene::group(SceneKind::Solo, vec![slot])
+        };
+        let town_centre = {
+            let n = urban.len().max(1) as i32;
+            urban.iter().fold(Point2D::ZERO, |a, &p| a + p) / n
+        };
+        // Gates: one guard a couple cells inside the opening; when a gate gets a
+        // second, it stands the same distance outside — a guard on each side of
+        // the gate. Both face the opening.
+        for (gate_point, dir) in editor.world().gate_locations.clone() {
+            let base = gate_point.drop_y();
+            let fwd: Point2D = dir.into();
+            // One cell to each side of the gate centre — in the opening, not the
+            // wall a couple cells away.
+            let inside = Point2D::new(base.x - fwd.x, base.y - fwd.y);
+            let outside = Point2D::new(base.x + fwd.x, base.y + fwd.y);
+            let stands: Vec<Point2D> = if worker_rng.percent(50) {
+                vec![inside, outside]
+            } else {
+                vec![inside]
+            };
+            for s in stands {
+                // Stand on the gate's own cleared floor (`gate_point.y`), which is
+                // where the gateway punched its air column upward. Re-deriving the
+                // height from the ocean-floor heightmap dropped feet below the
+                // threshold, burying — and suffocating — the guard in gate blocks.
+                let y = gate_point.y;
+                let feet = Point3D::new(s.x, y, s.y);
+                let facing =
+                    crate::generator::population::yaw_toward(feet, Point3D::new(base.x, y, base.y));
+                let look = *worker_rng.choose(guard_looks);
+                let mut scene = guard_scene(feet, facing, look);
+                // Gates often sit on a slabbed threshold (sandstone slabs on a
+                // desert gateway, stair-and-slab approach on a stone one). When
+                // the block beneath the guard's feet is a slab, lift them half
+                // a block so they stand on the slab top rather than sunk in it.
+                let underfoot = editor.try_get_block(Point3D::new(s.x, y - 1, s.y));
+                if matches!(
+                    underfoot.map(|b| crate::minecraft::BlockForm::infer_from_block(&b.id)),
+                    Some(crate::minecraft::BlockForm::Slab),
+                ) {
+                    scene.slots[0].y_offset = 0.5;
+                }
+                worker_scenes.push(scene);
+            }
+        }
+        // Towers: weighted small chance of 1–2 guards on the walkway beside each.
+        for posts in editor.world().tower_guard_posts.clone() {
+            let roll = worker_rng.rand_i32(100);
+            let n: usize = if roll < 10 { 2 } else if roll < 30 { 1 } else { 0 };
+            for feet in posts.into_iter().take(n) {
+                let facing = crate::generator::population::yaw_toward(
+                    Point3D::new(town_centre.x, feet.y, town_centre.y),
+                    feet,
+                );
+                let look = *worker_rng.choose(guard_looks);
+                let mut scene = guard_scene(feet, facing, look);
+                scene.slots[0].y_offset = 0.5; // stand on the battlement slab, not sunk in it
+                worker_scenes.push(scene);
+            }
+        }
+        let guard_count = worker_scenes.len() - backfill_slots;
+
+        if !worker_scenes.is_empty() {
+            // Roster supplies names/dialogue/biome; each scene's slot
+            // overrides the profession, so the roll here is incidental.
+            let worker_roster = build_roster(
+                worker_scenes.len(), 0, culture, npc_data, &mut id_alloc, &mut rng.derive(),
+            );
+            let budget = worker_scenes.len();
+            match populate_npcs(editor, worker_scenes, worker_roster, budget, npc_data, &mut rng).await {
+                Ok(staffed) => println!(
+                    "Staffed {} fixture NPCs ({} backfill workers + {} guards); {} of {} posts across {} workplaces filled by residents",
+                    staffed, backfill_slots, guard_count, bound_worker_count, industrial_job_slots, workplace_count,
+                ),
+                Err(e) => log::warn!("worker/guard staffing failed: {}", e),
+            }
+        }
+
+        // ---- Jobs summary ----
+        let total_industrial = urban_industrial_count + rural_building_count;
+        let approx_jobs =
+            industrial_job_slots + guard_count + market_stall_count + performer_slot_count;
+        println!("=== JOBS SUMMARY ===");
+        println!(
+            "Industrial/resource buildings: {} ({} urban + {} rural)",
+            total_industrial, urban_industrial_count, rural_building_count,
+        );
+        println!("Workers: {}", industrial_job_slots);
+        println!("Guards: {} (gates + towers)", guard_count);
+        println!("Market stalls: {}", market_stall_count);
+        println!("Stages: {} ({} performer slots)", stage_count, performer_slot_count);
+        println!(
+            "Approx jobs available: {} (workers {} + guards {} + vendors {} + performers {})",
+            approx_jobs, industrial_job_slots, guard_count, market_stall_count, performer_slot_count,
+        );
+
+        // Employment by job: building trades (sorted by count), then the
+        // non-building roles (guards, vendors, performers).
+        println!("--- Employment by job ---");
+        let mut by_job: Vec<(String, usize)> = worker_by_job.into_iter().collect();
+        if guard_count > 0 {
+            by_job.push((npc_data.guards.employment.clone(), guard_count));
+        }
+        if market_stall_count > 0 {
+            by_job.push((npc_data.vendors.employment.clone(), market_stall_count));
+        }
+        if performer_slot_count > 0 {
+            by_job.push((npc_data.performers.employment.clone(), performer_slot_count));
+        }
+        by_job.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        for (job, count) in &by_job {
+            println!("  {:<14} {}", job, count);
+        }
     }
 
     // Top-down town map (SVG) for inspection: footprints + named roads coloured
@@ -796,4 +1273,109 @@ pub async fn generate_town(
     }
 
     editor.flush_buffer().await;
+}
+
+/// Scan the claim map for every placed workplace (urban shop or rural gather
+/// building) and produce one [`WorkerSlot`](crate::generator::population::WorkerSlot)
+/// per crew position: a clear stand cell at the footprint edge facing the
+/// building, the building centre for proximity scoring, and the post's skin pool
+/// + job label from `staffing_for`. Returns the slots plus the number of distinct
+/// workplaces that yielded any. This is the geometry half of worker staffing;
+/// who fills each post is decided by
+/// [`bind_workers`](crate::generator::population::bind_workers).
+fn discover_worker_slots(
+    editor: &Editor,
+    data: &LoadedData,
+) -> (Vec<crate::generator::population::WorkerSlot>, usize) {
+    use crate::generator::population::{yaw_toward, WorkerSlot};
+    use crate::generator::BuildClaim;
+    let npc_data = &data.npc_data;
+
+    // Placed buildings are the only `Structure` claims (wall towers claim
+    // `Wall`), and claims persist, so this recovers each building's footprint +
+    // type without threading placement state out. Scan the urban area *and*
+    // every rural parcel so rural gather buildings get staffed too.
+    let mut scan_cells: Vec<Point2D> = editor.world().get_urban_points().into_iter().collect();
+    for sd in editor.world().districts.values() {
+        if sd.data.parcel_type == ParcelType::Rural {
+            scan_cells.extend(sd.data.points_2d.iter().copied());
+        }
+    }
+    let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
+    for &p in &scan_cells {
+        if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
+            footprints
+                .entry(id.id)
+                .or_insert_with(|| (id.structure_type.0.clone(), Vec::new()))
+                .1
+                .push(p);
+        }
+    }
+
+    // A usable stand spot is an in-bounds open cell — not a road, wall, or
+    // building. Road-bordering cells sort first so workers read as street-side.
+    let is_clear = |c: Point2D| {
+        matches!(
+            editor.world().get_claim(c),
+            Some(BuildClaim::None) | Some(BuildClaim::Nature)
+        )
+    };
+    let road_side = |c: Point2D| {
+        crate::geometry::CARDINALS_2D
+            .iter()
+            .any(|&d| matches!(editor.world().get_claim(c + d), Some(BuildClaim::Path(_))))
+    };
+
+    // Deterministic order over buildings (HashMap iteration isn't stable).
+    let mut ids: Vec<u32> = footprints.keys().copied().collect();
+    ids.sort_unstable();
+
+    let mut slots: Vec<WorkerSlot> = Vec::new();
+    let mut workplaces = 0usize;
+    for id in ids {
+        let (kind, cells) = &footprints[&id];
+        let cell_set: HashSet<Point2D> = cells.iter().copied().collect();
+        let centroid =
+            cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
+
+        let mut candidates: Vec<Point2D> = Vec::new();
+        let mut seen: HashSet<Point2D> = HashSet::new();
+        for &fc in cells {
+            for d in crate::geometry::CARDINALS_2D {
+                let c = fc + d;
+                if cell_set.contains(&c) || !editor.world().is_in_bounds_2d(c) || !is_clear(c) {
+                    continue;
+                }
+                if seen.insert(c) {
+                    candidates.push(c);
+                }
+            }
+        }
+        candidates.sort_unstable_by_key(|c| (!road_side(*c), c.x, c.y));
+
+        // Staffing comes from the building's own structure JSON (its `staffing`
+        // block), falling back to the town-wide default.
+        let staffing = npc_data.staffing_for(kind, &data.structures);
+        let want = staffing.workers.min(candidates.len());
+        if want == 0 {
+            log::warn!("no clear stand cell for building '{}' (id {})", kind, id);
+            continue;
+        }
+        workplaces += 1;
+        for &stand in candidates.iter().take(want) {
+            // Stand on the ground at the cell; face the footprint centroid.
+            let y = editor.world().get_ocean_floor_height_at(stand);
+            let stand3 = Point3D::new(stand.x, y, stand.y);
+            let centre3 = Point3D::new(centroid.x, y, centroid.y);
+            let facing = yaw_toward(stand3, centre3);
+            slots.push(WorkerSlot {
+                stand: stand3,
+                facing,
+                workplace: centroid,
+                looks: staffing.looks.clone(),
+                employment: staffing.employment.clone(),
+            });
+        }
+    }
+    (slots, workplaces)
 }

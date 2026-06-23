@@ -1,0 +1,367 @@
+# Placeholder NPC name + dialogue pools for the population pass.
+# (Per-culture / per-profession pools and richer lines can come later.)
+
+# First names are generated on demand by concatenating a `first_name_prefix`
+# (consonant-ending stem) with a `first_name_suffix` (ending). All prefixes
+# are consonant-terminal so suffixes starting with a vowel don't produce
+# awkward double-vowels ("Edra"/"Mira" land naturally; we don't get "Edraa").
+# ~22 × ~12 ≈ 260 effective first names — collisions across a town of ~120
+# residents should be uncommon. See `roll_first_name` in
+# `src/generator/population.rs`.
+first_name_prefixes:
+  - Ael
+  - Bran
+  - Cael
+  - Cor
+  - Dor
+  - Edr
+  - Eldr
+  - Faer
+  - Garr
+  - Hild
+  - Iol
+  - Kael
+  - Lor
+  - Mir
+  - Nael
+  - Orin
+  - Per
+  - Rael
+  - Sel
+  - Theod
+  - Vael
+  - Wen
+  - Yor
+
+first_name_suffixes:
+  - a
+  - ad
+  - an
+  - ar
+  - ed
+  - el
+  - en
+  - er
+  - ic
+  - in
+  - ric
+  - wyn
+
+# Surnames are generated on demand by concatenating a `surname_prefix` (capitalized,
+# noun-like root) with a `surname_suffix` (lowercase place-name ending). All
+# combinations are designed to read as plausible English family names —
+# Ashwood, Underhill, Hawkridge, Brightford, etc. With ~35 prefixes and ~25
+# suffixes the effective name space is ~875 surnames, so collisions across a
+# town of ~120 residents are rare. See `Npc.surname` and `roll_surname` in
+# `src/generator/population.rs`.
+surname_prefixes:
+  # — trees & growth —
+  - Ash
+  - Oak
+  - Elm
+  - Birch
+  - Yew
+  - Holly
+  - Thorn
+  - Willow
+  - Briar
+  - Hazel
+  # — ground, stone, element —
+  - Moss
+  - Fern
+  - Heath
+  - Marsh
+  - Fen
+  - Reed
+  - Stone
+  - Flint
+  - Marble
+  - Chalk
+  # — colour / quality —
+  - Bright
+  - White
+  - Black
+  - Grey
+  - Gold
+  - Silver
+  - Fair
+  - Dark
+  # — beast —
+  - Hawk
+  - Fox
+  - Wolf
+  - Raven
+  - Hart
+  - Dove
+  # — position —
+  - Under
+  - Over
+  - North
+  - High
+  - Long
+  - Old
+
+surname_suffixes:
+  # — land form —
+  - wood
+  - field
+  - hollow
+  - hill
+  - ridge
+  - dale
+  - vale
+  - glen
+  - shaw
+  - dell
+  - moor
+  - heath
+  - grove
+  - fell
+  # — water —
+  - brook
+  - ford
+  - burn
+  - bank
+  - mere
+  # — built —
+  - ton
+  - ham
+  - wick
+  - worth
+  - bury
+  - stead
+  - bridge
+  # — stone —
+  - stone
+  - crag
+
+# Epithets are flavour add-ons. When an NPC has an epithet, the display
+# replaces the surname with it ("Doral the Quiet") — but the surname is still
+# stored on the NPC for kin/family lookups. Most epithets are biased toward
+# elders (see `Npc::display_name` and household generation).
+epithets:
+  - the Elder
+  - the Younger
+  - of the Hill
+  - Stonefoot
+  - Quickhand
+  - the Quiet
+  - Fairwind
+  - the Bold
+
+small_talk:
+  - "Fine weather for it, eh?"
+  - "Mind how you go."
+  - "Haven't seen you round here before."
+  - "Long day ahead."
+  - "The well's been low all season."
+  - "Heard there's trouble on the east road."
+  - "Spare a moment, traveller?"
+  - "Market's busy today."
+  - "Watch yourself after dark."
+  - "Good to see a new face."
+
+# Context dialogue pools, keyed by activity. A furniture anchor names one of
+# these keys (in its `anchors:` block); the same key can be shared by several
+# items — `cooking` covers the furnace, smoker, and cauldron, etc. A slot with
+# no key (or a key missing here) falls back to `small_talk` above.
+dialogue:
+  cooking:
+    - "Mind the fire — these coals run hot."
+    - "Almost ready. Won't be long now."
+    - "A good stew needs a slow flame."
+    - "Smells done, doesn't it?"
+    - "Bread's in. Come back at dusk."
+  # A child at the hearth (an `any_age` cooking slot — house/rooftop only).
+  cooking_child:
+    - "Is it ready yet? I'm starving!"
+    - "Can I stir it? Pleeease?"
+    - "It smells so good. Just one taste?"
+    - "Ow — the fire's too hot to sit near."
+  crafting:
+    - "Steady hands, that's the trick."
+    - "One more and it's finished."
+    - "Measure twice, they always say."
+    - "This'll fetch a fair price."
+    - "Honest work, this."
+  reading:
+    - "Shh — I've nearly found the passage."
+    - "So much here I'll never read it all."
+    - "A quiet corner and a good book. Bliss."
+    - "Now where did I leave off..."
+  # A child with a book at an `any_age` reading slot (shelf, lectern, desk).
+  reading_child:
+    - "Look at the pictures in this one!"
+    - "What's this big word mean?"
+    - "I read a whole page all by myself!"
+    - "Is this the one with the sea monster?"
+  sorting:
+    - "Swear I had more of these yesterday."
+    - "Everything in its place, that's my way."
+    - "Plenty stocked for the winter."
+    - "Now where did that get to?"
+  conversation:
+    - "You won't believe what I heard at the market."
+    - "It's been too long, friend."
+    - "Between you and me..."
+  resting:
+    - "Long day. I've earned a sit-down."
+    - "Just turning in. Quiet night, I hope."
+    - "These old bones need their rest."
+    - "Wake me at first light, would you?"
+  # Spoken by a child filling a `resting` slot (an `any_age` bed). When a
+  # `<key>_child` pool exists, children draw from it instead of the adult lines.
+  resting_child:
+    - "I'm not even sleepy yet!"
+    - "Can I stay up just a little longer?"
+    - "Five more minutes, pleeease?"
+    - "Tell me the one about the dragon again!"
+  # Market vendors hawking their wares from behind the stall counter. Rendered as
+  # a "yelled" bubble — bigger and visible from across the square.
+  market_cry:
+    - "Fresh today! Get it while it lasts!"
+    - "Finest wares in the whole town — come see!"
+    - "Two for the price of one, today only!"
+    - "Step up, step up! Best prices on the square!"
+    - "You'll not find better, I promise you that!"
+    - "Hot from the oven — come and get it!"
+    - "Half price before noon! Don't miss out!"
+    - "Come buy, come buy! Won't be here long!"
+  # A performer up on the stage, calling out over the crowd. Also yelled.
+  performing:
+    - "Gather round, good folk, gather round!"
+    - "A tale to chill your blood — come closer!"
+    - "Lend me your ears and I'll lend you a song!"
+    - "One night only — you'll tell your grandchildren!"
+    - "Strike up the tune! Let's have a dance!"
+    - "Hear ye! Hear ye! A story worth the telling!"
+  # Idle onlookers browsing the stalls or watching the show.
+  browsing:
+    - "Now that's a fair price, I'll give them that."
+    - "Did you hear the crier? Quite the show."
+    - "I only came for bread and look at me now."
+    - "Busy on the square today, isn't it?"
+    - "Wonder if they've any of those left..."
+    - "My coin's near spent already."
+  # A child loose in the market crowd (a `ChildOnly` onlooker slot).
+  browsing_child:
+    - "Can we get the honey cakes? Pleeease?"
+    - "Look at all the shiny things!"
+    - "I want to see the puppets!"
+    - "Mama said stay close, but look over there!"
+    - "Are those sweets? Can I have one?"
+  # Folk loitering at the village well — fetching water, trading gossip.
+  at_the_well:
+    - "Cold and clear today — good water this year."
+    - "Heard the miller's daughter is to be wed."
+    - "Mind the bucket, the rope's frayed near the top."
+    - "Always someone to talk to at the well."
+    - "Three trips already and the trough's still low."
+  at_the_well_child:
+    - "Can I drop the bucket down? I'll be careful!"
+    - "Hellooo! Hear it echo?"
+    - "How deep does it go all the way down?"
+    - "I carried the little pail all by myself!"
+  # Folk idling around the fountain — resting, chatting, enjoying the spray.
+  by_the_fountain:
+    - "Nothing finer than the sound of water on a hot day."
+    - "I come here to sit and think a while."
+    - "They say a coin in the basin brings luck."
+    - "Cooler by the water, isn't it?"
+    - "A fine spot to meet a friend."
+  by_the_fountain_child:
+    - "Watch me splash! Look, look!"
+    - "I threw a coin in — now I get a wish!"
+    - "The water's so cold! Feel it!"
+    - "Can we stay just a bit longer?"
+  # Folk pausing at the monument — paying respects, gazing up at the pillar.
+  at_the_monument:
+    - "They built it before my grandfather's time, they say."
+    - "We owe the old names more than a glance."
+    - "Stand a moment. It's only right."
+    - "Quiet here. I like to stop and remember."
+  at_the_monument_child:
+    - "Who's it for? Were they very brave?"
+    - "It's so tall! Did giants make it?"
+    - "Why do we have to be quiet here?"
+    - "I can see the whole square from the steps!"
+  # Guards posted at a gate or on a wall tower, watching the approaches.
+  guarding:
+    - "State your business at the gate."
+    - "Move along — nothing amiss here."
+    - "Keep the peace and we'll have no trouble."
+    - "Eyes on the road. You never know these days."
+    - "Halt. ...Right, on you go."
+    - "Quiet watch tonight, thank the gods."
+    - "No weapons drawn inside the walls."
+
+# Multi-person exchanges: each entry is one back-and-forth, its lines handed to
+# a scene's slots in order (line 0 = the opener, line 1 = the reply). Keyed like
+# `dialogue` — a `conversation` anchor (two diners at a table) draws one of
+# these so the pair actually talks to each other. Keep line 0 standalone, in
+# case the scene is ever reduced to a single person.
+exchanges:
+  conversation:
+    - - "You won't believe what I heard at the market."
+      - "Go on then — don't keep me waiting!"
+    - - "Did you finish the harvest before the rain?"
+      - "Just barely. Last cart came in soaked."
+    - - "They say the smith's taking on an apprentice."
+      - "Is that so? My nephew could use the work."
+    - - "Have you tried the new baker on the square?"
+      - "Twice this week. Don't tell my wife."
+    - - "Quiet day, for once."
+      - "Don't say that too loud — you'll jinx it."
+    - - "I heard wolves on the ridge last night."
+      - "Best keep the gate barred, then."
+  # Stage performances, bucketed by cast size. The stage rolls 1–3 performers and
+  # staff_scene draws a `performing` entry with exactly that many lines (one per
+  # performer). Solos, duets, and trios live side by side here; every line is
+  # yelled out over the square, so each should stand on its own as a shout.
+  performing:
+    # — solo acts (1) —
+    - - "Gather round, good folk — a tale to chill your very blood!"
+    - - "Lend me your ears, and I'll lend you a song you'll never forget!"
+    - - "One night only! You'll be telling your grandchildren of this!"
+    # — duets (2) —
+    - - "Strike up the tune, my friend — let's give them a show!"
+      - "Aye! And I'll sing it sweet enough to still the birds!"
+    - - "I'll play the gallant knight, bold and true!"
+      - "And I the wicked dragon — flee, good people, flee!"
+    - - "Step closer for the ballad of the drowned sailor!"
+      - "And mind you weep, for it's a sorry end he met!"
+    # — trios (3) —
+    - - "A play in three parts, good people — settle in!"
+      - "I am the king, and I have lost my crown!"
+      - "And we the thieves who took it — catch us if you can!"
+    - - "Step up for the song of the three winds!"
+      - "I am the north wind, cold and cruel!"
+      - "And I the south — I'll thaw his frozen heart yet!"
+
+# Gate and tower guard fixture. `employment` is the job label baked onto each
+# guard and shown in the jobs summary; `looks` is the skin pool, rolled per guard
+# (mix villager and mob skins; repeat an entry to weight it, e.g.
+# [Armorer, Armorer, pillager] ≈ 2:1 villagers to pillagers). Each look is either
+# a villager Profession (PascalCase, e.g. Armorer) or a Mob (snake_case, e.g.
+# pillager, vindicator) spawned through the mob path. `looks` must be non-empty.
+guards:
+  employment: guard
+  looks: [Armorer, pillager]
+
+# Plaza fixtures: the vendor hawking wares behind a market stall, and a troupe
+# member up on a stage. Same shape as `guards` — an `employment` job label plus a
+# `looks` skin pool rolled per fixture (villager Professions and/or Mobs; a
+# wandering_trader vendor or a witch performer reads nicely). `looks` non-empty.
+vendors:
+  employment: vendor
+  looks: [Farmer, Butcher, Fletcher, wandering_trader]
+
+performers:
+  employment: performer
+  looks: [Cartographer, Cleric, witch]
+
+# Fallback worker staffing for buildings whose structure JSON declares no
+# `staffing` block of its own. Per-building staffing now lives on each building's
+# sidecar (e.g. data/structures/resource_buildings/woodcutter_hut.json); this
+# only covers the unstated ones. Same shape as a structure's `staffing`.
+default_staffing: { employment: laborer, looks: [Farmer], workers: 3 }

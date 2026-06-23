@@ -69,6 +69,13 @@ pub struct Structure {
     /// buildings meant to cut into a hillside, e.g. mines. Default false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub allow_steep : bool,
+
+    /// Worker staffing for this building, when it's a staffed workplace — the
+    /// crew's job label, skin pool, and size. Absent for non-workplace
+    /// structures (walls, towers, decoration). Read by the settlement worker
+    /// pass; a building without it falls back to `NpcData::default_staffing`.
+    #[serde(default, skip_serializing)]
+    pub staffing : Option<crate::generator::npc::Staffing>,
 }
 
 fn default_weight() -> f32 {

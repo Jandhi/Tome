@@ -7,7 +7,7 @@ mod meta;
 mod structure;
 
 
-pub use place::{place_nbt, place_structure};
+pub use place::{load_nbt_structure, place_nbt, place_structure};
 pub use structure::{Structure, StructureID, StructureType};
 pub use nbt::{NBTStructure};
 pub use transform::Transform;

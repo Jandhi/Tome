@@ -11,5 +11,12 @@
     17,
     11
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "tailor",
+    "looks": [
+      "Shepherd"
+    ],
+    "workers": 3
+  }
 }

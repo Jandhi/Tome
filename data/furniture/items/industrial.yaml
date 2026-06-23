@@ -8,6 +8,10 @@ anvil:
     - offset: [0, 0]
       constraint: blocked_reachable
       facing: perpendicular
+  # A smith working the anvil.
+  anchors:
+    - dialogue: crafting
+      slots: [ { offset: [0, 1] } ]
 
 cauldron:
   unique: true
@@ -18,6 +22,10 @@ cauldron:
   constraints:
     - offset: [0, 0]
       constraint: blocked_reachable
+  # Someone stirring the cauldron.
+  anchors:
+    - dialogue: cooking
+      slots: [ { offset: [0, 1] } ]
 
 furnace:
   unique: true
@@ -32,6 +40,10 @@ furnace:
       facing: away_from_wall
     - offset: [0, 1]
       constraint: blocked_reachable
+  # A worker tending the furnace, standing on its reserved approach cell.
+  anchors:
+    - dialogue: cooking
+      slots: [ { offset: [0, 1] } ]
 
 loom:
   unique: true
@@ -43,6 +55,10 @@ loom:
     - offset: [0, 0]
       constraint: blocked_reachable
       facing: away_from_wall
+  # Someone working the loom.
+  anchors:
+    - dialogue: crafting
+      slots: [ { offset: [0, 1] } ]
 
 smoker:
   unique: true
@@ -55,3 +71,7 @@ smoker:
     - offset: [0, 0]
       constraint: blocked_reachable
       facing: away_from_wall
+  # Someone tending the smoker.
+  anchors:
+    - dialogue: cooking
+      slots: [ { offset: [0, 1] } ]

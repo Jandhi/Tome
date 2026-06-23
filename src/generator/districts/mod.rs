@@ -23,7 +23,7 @@ pub use district::District;
 pub use district::DistrictID;
 pub use data::{ParcelData, HasParcelData};
 pub use parcel_painter::*;
-pub use wall::{build_wall, get_wall_points, WallType};
+pub use wall::{build_wall, get_wall_points, TowerSkin, WallType};
 pub use footprint::{regularize_urban_footprint, reconcile_districts_to_footprint};
 pub use gate::build_wall_gate;
 pub use paint_palette::{PaintPaletteId, PaintPalette, PaintPalettesFile};

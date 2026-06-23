@@ -12,5 +12,12 @@
     9
   ],
   "allow_steep": true,
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "miner",
+    "looks": [
+      "Mason"
+    ],
+    "workers": 2
+  }
 }
