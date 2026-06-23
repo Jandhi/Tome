@@ -909,7 +909,7 @@ pub async fn generate_town(
     {
         use crate::generator::open_space::{
             detect_regions, furnish_nook, furnish_park, furnish_plaza, furnish_yard, OpenSpaceNames,
-            Theme, RegionType,
+            ParkType, Theme, RegionType,
         };
         let regions = detect_regions(editor.world(), &urban);
         let theme = Theme::for_culture(culture);
@@ -919,6 +919,11 @@ pub async fn generate_town(
         let names = OpenSpaceNames::load();
         let mut used: HashSet<String> = HashSet::new();
         let mut counts = [0usize; 4]; // plaza, nook, park, yard
+        // Stone lanterns (tōrō) scattered through the green spaces — Japanese
+        // only; the call is a no-op for other cultures, so we ring nooks, parks,
+        // and yards (but not paved plazas, nor cemeteries) after furnishing. They
+        // are stoned to match each garden's own masonry (`theme.stone`).
+        let mut garden_lanterns = 0usize;
         for region in &regions {
             match region.region_type() {
                 RegionType::Plaza => {
@@ -931,6 +936,9 @@ pub async fn generate_town(
                 }
                 RegionType::Nook => {
                     furnish_nook(&*editor, region, &mut os_rng, &theme).await;
+                    garden_lanterns += crate::generator::paths::scatter_garden_lanterns(
+                        &*editor, region, &data, culture, theme.stone, &mut os_rng,
+                    ).await;
                     counts[1] += 1;
                 }
                 RegionType::Park => {
@@ -938,17 +946,26 @@ pub async fn generate_town(
                     if let Some(name) = names.as_ref().and_then(|n| n.name_park(park_type, culture, &mut os_rng, &mut used)) {
                         place_labels.push((region.centroid(), name));
                     }
+                    // Skip cemeteries — a glowing lantern doesn't suit a graveyard.
+                    if park_type != ParkType::Cemetery {
+                        garden_lanterns += crate::generator::paths::scatter_garden_lanterns(
+                            &*editor, region, &data, culture, theme.stone, &mut os_rng,
+                        ).await;
+                    }
                     counts[2] += 1;
                 }
                 RegionType::Yard => {
                     furnish_yard(&*editor, region, &mut os_rng, &theme).await;
+                    garden_lanterns += crate::generator::paths::scatter_garden_lanterns(
+                        &*editor, region, &data, culture, theme.stone, &mut os_rng,
+                    ).await;
                     counts[3] += 1;
                 }
             }
         }
         println!(
-            "Furnished open spaces — plaza {} nook {} park {} yard {}",
-            counts[0], counts[1], counts[2], counts[3],
+            "Furnished open spaces — plaza {} nook {} park {} yard {} | {} garden lanterns",
+            counts[0], counts[1], counts[2], counts[3], garden_lanterns,
         );
 
         // Skin the plaza fixtures from data: a stage's performers and a stall's

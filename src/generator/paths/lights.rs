@@ -45,6 +45,30 @@ const POST_FENCES: i32 = 5;
 /// caller can claim them; placement here mirrors [`build_paths_merged`](super::build_paths_merged),
 /// which also leaves claiming to the caller.
 pub async fn place_street_lights(editor: &Editor, paths: &[Path], lantern: &Block) -> Vec<Point2D> {
+    let anchors = verge_anchors(editor, paths, SPACING, MIN_GAP_SQ);
+    let mut placed: Vec<Point2D> = Vec::with_capacity(anchors.len());
+    for (cell, toward_road) in anchors {
+        place_lamp(editor, cell, toward_road, lantern).await;
+        placed.push(cell);
+    }
+    placed
+}
+
+/// Walk every road centreline by arc length and return a verge anchor every
+/// `spacing` blocks: the verge cell, paired with a unit step from it back
+/// toward the road. Anchors alternate sides each interval and fall back to the
+/// other side; candidates on pavement, water, out of bounds, on a claimed cell,
+/// or within `sqrt(min_gap_sq)` of an earlier anchor are skipped.
+///
+/// Shared by [`place_street_lights`] and the stone-lantern placer — both want
+/// "evenly spaced spots just off the kerb", differing only in spacing and what
+/// they stand there. Returns spots in walk order.
+pub(super) fn verge_anchors(
+    editor: &Editor,
+    paths: &[Path],
+    spacing: f64,
+    min_gap_sq: i32,
+) -> Vec<(Point2D, Point2D)> {
     // Light every road tier — arterials, collectors, and alleys.
     let lit: Vec<&Path> = paths.iter().collect();
     if lit.is_empty() {
@@ -56,6 +80,7 @@ pub async fn place_street_lights(editor: &Editor, paths: &[Path], lantern: &Bloc
     let paved = paved_cells(&lit);
 
     let mut placed: Vec<Point2D> = Vec::new();
+    let mut anchors: Vec<(Point2D, Point2D)> = Vec::new();
     let mut anchor_index: u32 = 0;
 
     for path in &lit {
@@ -73,11 +98,11 @@ pub async fn place_street_lights(editor: &Editor, paths: &[Path], lantern: &Bloc
             let curr = pts[i].drop_y();
             dist_acc += prev.distance(&curr);
 
-            while dist_acc >= SPACING {
-                dist_acc -= SPACING;
+            while dist_acc >= spacing {
+                dist_acc -= spacing;
 
                 // Perpendicular to travel, reduced to a clean cardinal so the
-                // lamp offsets squarely off the road rather than diagonally.
+                // spot offsets squarely off the road rather than diagonally.
                 let delta = curr - prev;
                 let perp = if delta.x.abs() >= delta.y.abs() {
                     Point2D::new(0, 1)
@@ -91,11 +116,10 @@ pub async fn place_street_lights(editor: &Editor, paths: &[Path], lantern: &Bloc
 
                 for side in [primary, -primary] {
                     let cell = curr + perp * (offset * side);
-                    if is_valid_spot(editor, cell, &paved, &placed) {
-                        // Step from the verge back toward the road; the arm and
-                        // lantern lean out over the street along this direction.
+                    if is_valid_spot(editor, cell, &paved, &placed, min_gap_sq) {
+                        // Step from the verge back toward the road.
                         let toward_road = perp * (-side);
-                        place_lamp(editor, cell, toward_road, lantern).await;
+                        anchors.push((cell, toward_road));
                         placed.push(cell);
                         break;
                     }
@@ -104,7 +128,7 @@ pub async fn place_street_lights(editor: &Editor, paths: &[Path], lantern: &Bloc
         }
     }
 
-    placed
+    anchors
 }
 
 /// The widened paved footprint of `paths`, mirroring the shoulder pass in
@@ -126,6 +150,7 @@ fn is_valid_spot(
     cell: Point2D,
     paved: &HashSet<Point2D>,
     placed: &[Point2D],
+    min_gap_sq: i32,
 ) -> bool {
     let world = editor.world();
     if !world.is_in_bounds_2d(cell) || paved.contains(&cell) {
@@ -142,7 +167,7 @@ fn is_valid_spot(
     if world.is_water(cell) {
         return false;
     }
-    placed.iter().all(|p| p.distance_squared(&cell) >= MIN_GAP_SQ)
+    placed.iter().all(|p| p.distance_squared(&cell) >= min_gap_sq)
 }
 
 /// Stand a lamp on the verge: a fence post, an arm fence reaching one block
