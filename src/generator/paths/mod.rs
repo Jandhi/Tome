@@ -11,6 +11,7 @@ mod road_map;
 mod labelling;
 mod naming;
 mod rural;
+mod torii;
 pub mod network;
 
 pub use a_star::a_star;
@@ -24,5 +25,6 @@ pub use labelling::label_roads_geometric;
 pub use naming::name_roads_layered;
 pub use network::{build_road_network, find_blocks};
 pub use rural::{build_rural_road_network, RuralBuilding};
+pub use torii::place_rural_torii;
 pub use path::{Path, PathPriority, PathType};
 pub use routing::{get_path, get_path_with, route_path, route_path_with, RouteContext, RouteParams};

@@ -385,6 +385,12 @@ impl World {
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
+        // Out of bounds is dry land, not a panic: callers that sample around a
+        // road band / search frontier routinely probe a cell or two past the
+        // build edge, and `ground_block_map` is indexed unchecked.
+        if !self.is_in_bounds_2d(point) {
+            return false;
+        }
         self.ground_block_map[point.x as usize][point.y as usize].id.is_water()
     }
 
