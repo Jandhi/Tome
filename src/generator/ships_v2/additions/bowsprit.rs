@@ -276,7 +276,12 @@ pub fn build_bowsprit_model(
     let mut deck_outline = Vec::new();
     for x in x0..=x_stem {
         let hw = hw_w(x);
-        for y in kb(x)..=plat_y {
+        // Don't overwrite the keel: where it exists (`x <= bow_x`) start one above its
+        // crest so its bottom course (a top slab) stays intact — like the hull, which
+        // sits strictly above the keel. The stem extension (`x > bow_x`, no keel) fills
+        // from its own swept bottom.
+        let y_start = if x <= bow_x { kb(x) + 1 } else { kb(x) };
+        for y in y_start..=plat_y {
             let h = half_at(x, y);
             if h < 0 {
                 continue;

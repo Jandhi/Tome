@@ -11,14 +11,22 @@
 //! one is: new file + `pub mod x;` + a match arm in [`build_addition`]. The pipeline
 //! just iterates [`BUILD_ORDER`].
 
+use std::collections::HashMap;
+
+use crate::generator::materials::{MaterialPlacer, Placer};
+use crate::geometry::Point3D;
+use crate::minecraft::BlockForm;
+
 use super::deck::DeckModel;
 use super::hull::HullModel;
 use super::keel::KeelModel;
-use super::palette::ShipPalette;
-use super::{Placement, ShipV2Ctx};
+use super::palette::{ShipPalette, ShipPart};
+use super::tuning::GUN_PORT_STEP;
+use super::{Placement, ShipDir, ShipV2Ctx};
 
 pub mod additional_deck;
 pub mod bowsprit;
+pub mod masts;
 pub mod railing;
 
 /// Mutable state threaded through the addition pipeline: the current **topmost open
@@ -40,6 +48,13 @@ pub struct DeckState {
     pub railing: Option<railing::RailingModel>,
     /// The bowsprit off the bow (`None` until `Bowsprit`).
     pub bowsprit: Option<bowsprit::BowspritModel>,
+    /// The masts (`None` until `Masts`).
+    pub masts: Option<masts::MastModel>,
+    /// Gun-port cells `(cell, outward dir)` planned by the additional deck, kept so they
+    /// can be **re-stamped after the bowsprit** (whose solid prow buries the bow ones).
+    pub gun_ports: Vec<(Point3D, ShipDir)>,
+    /// Whether the gun ports are trapdoor lids (`true`) or open holes (`false`).
+    pub gun_ports_trapdoors: bool,
 }
 
 impl DeckState {
@@ -51,6 +66,9 @@ impl DeckState {
             top_y: deck.deck_y,
             railing: None,
             bowsprit: None,
+            masts: None,
+            gun_ports: Vec::new(),
+            gun_ports_trapdoors: false,
         }
     }
 }
@@ -135,6 +153,14 @@ pub enum DeckAddition {
     CargoHatch,
 }
 
+/// How the sails are rendered. `None` is bare yards; `Furled` is rolled-up canvas
+/// (alternating quartz stairs along each yard). `Full` (set sails) is a later step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SailState {
+    None,
+    Furled,
+}
+
 /// Read-only context every deck addition builds against: the ship-so-far (placement
 /// + hull/deck geometry), the ship palette, the size tier, and the footing. Mutable
 /// access (editor/rng/data/base palette) comes via the [`ShipV2Ctx`] passed
@@ -147,6 +173,10 @@ pub struct DeckContext<'a> {
     pub ship_palette: &'a ShipPalette,
     pub tier: SizeTier,
     pub on_water: bool,
+    /// Forward mast rake (blocks of `+x` per block of height; `0.0` = vertical).
+    pub mast_lean: f32,
+    /// How sails are rendered (none / furled / …).
+    pub sail_state: SailState,
 }
 
 /// **Debug toggle** — additions to skip building, for isolating issues. Normally empty;
@@ -186,6 +216,84 @@ pub async fn build_addition(
         DeckAddition::AdditionalDeck => additional_deck::build(ctx, dc, state).await,
         DeckAddition::MainRailing => railing::build(ctx, dc, state).await,
         DeckAddition::Bowsprit => bowsprit::build(ctx, dc, state).await,
+        DeckAddition::Masts => masts::build(ctx, dc, state).await,
         _ => {}
+    }
+}
+
+/// Gun ports cut into the **prow's side surface** at the gun-deck row — the outermost
+/// prow cell per station, spaced by [`GUN_PORT_STEP`]. The prow flares a block or two
+/// past the deck wall, so these add windows in the bow (often forming a through-window
+/// with the re-stamped inner deck port).
+fn prow_side_ports(prow: &[Point3D], gun_row: i32) -> Vec<(Point3D, ShipDir)> {
+    // Outermost |z| of the solid prow per station, at the gun-deck row.
+    let mut outer: HashMap<i32, i32> = HashMap::new();
+    for c in prow {
+        if c.y == gun_row && c.z != 0 {
+            let e = outer.entry(c.x).or_insert(0);
+            *e = (*e).max(c.z.abs());
+        }
+    }
+    let mut xs: Vec<i32> = outer.keys().copied().collect();
+    xs.sort_unstable();
+    let mut ports = Vec::new();
+    if let (Some(&minx), Some(&maxx)) = (xs.first(), xs.last()) {
+        let mut x = minx;
+        while x <= maxx {
+            if let Some(&oz) = outer.get(&x) {
+                if oz >= 2 {
+                    ports.push((Point3D::new(x, gun_row, oz), ShipDir::Starboard));
+                    ports.push((Point3D::new(x, gun_row, -oz), ShipDir::Port));
+                }
+            }
+            x += GUN_PORT_STEP;
+        }
+    }
+    ports
+}
+
+/// Finish the gun ports **after** the bowsprit: re-stamp the additional deck's ports (the
+/// solid prow buried the bow ones) **and** cut new ports into the prow's side surface.
+/// Trapdoor lids are re-placed; open holes are forced back to air. Forced placement is
+/// needed to punch through the prow's solid blocks.
+pub async fn restamp_gun_ports(
+    ctx: &mut ShipV2Ctx<'_>,
+    place: &Placement,
+    ship_palette: &ShipPalette,
+    state: &DeckState,
+) {
+    if state.gun_ports.is_empty() {
+        return;
+    }
+    // The deck's planned ports + new ports on the prow sides at the same gun-deck row.
+    let mut ports = state.gun_ports.clone();
+    let gun_row = state.gun_ports[0].0.y;
+    if let Some(bowsprit) = &state.bowsprit {
+        ports.extend(prow_side_ports(&bowsprit.prow, gun_row));
+    }
+
+    if state.gun_ports_trapdoors {
+        let material = ctx
+            .palette
+            .get_material(ship_palette.role(ShipPart::Topside))
+            .expect("Topside role missing from base palette")
+            .clone();
+        let mut placer_rng = ctx.rng.derive();
+        let mut placer = MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut placer_rng), material);
+        for (cell, dir) in &ports {
+            let st = HashMap::from([
+                ("facing".to_string(), place.world_cardinal(*dir).to_string()),
+                ("half".to_string(), "bottom".to_string()),
+                ("open".to_string(), "true".to_string()),
+            ]);
+            placer
+                .place_block_forced(ctx.editor, place.to_world(*cell), BlockForm::Trapdoor, Some(&st), None)
+                .await;
+        }
+    } else {
+        let air = crate::minecraft::Block::from("minecraft:air");
+        for (cell, _) in &ports {
+            ctx.editor.place_block_forced(&air, place.to_world(*cell)).await;
+        }
     }
 }

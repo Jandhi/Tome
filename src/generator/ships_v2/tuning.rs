@@ -106,6 +106,94 @@ pub const RUDDER_STAIR_TOP: bool = false;
 pub const GUN_PORT_STEP: i32 = 3;
 
 // ===========================================================================
+// Masts (`additions/masts.rs`)
+// ===========================================================================
+
+/// Main-mast height as a fraction of hull length — the tallest mast stands ~this · length
+/// above the keel ("as tall as the hull length"). Secondary masts scale down from it.
+pub const MAST_HEIGHT_FACTOR: f32 = 1.0;
+
+/// Default forward lean of the masts: blocks of `+x` (toward the bow) per block of
+/// height. `0.0` = straight (vertical) masts — the current default; leaning is a future
+/// feature, available per-ship via `ShipV2Spec::with_mast_lean`.
+pub const MAST_LEAN: f32 = 0.0;
+
+// --- Spars (yards / top fences / aft stays) --------------------------------
+
+/// Lowest (widest) yard's half-width as a fraction of hull length — the biggest sail
+/// span. Upper yards narrow gently (see [`MAST_YARD_NARROW_MAX`]). Larger = longer yards.
+pub const MAST_YARD_HALF_FRACTION: f32 = 0.18;
+/// Minimum sail height (the smallest a sail can be — used for the lowest yard's sail
+/// down to the deck and as a floor on any gap).
+pub const MAST_SAIL_TOP_HEIGHT: i32 = 4;
+/// Spacing (blocks) between the U-shaped droops along a wide furled sail.
+pub const MAST_SAIL_FURL_U_STEP: i32 = 4;
+/// Mast-height thresholds at which the **top yard** drops an extra block below the
+/// masthead: above the first it sits 1 lower, above the second 2 lower (leaving more bare
+/// mast / room for a topgallant above it on taller masts).
+pub const MAST_TOP_YARD_DROP_H1: i32 = 20;
+pub const MAST_TOP_YARD_DROP_H2: i32 = 35;
+/// Roughly one yard per this many blocks of usable mast span (masthead → min clearance) —
+/// drives how many yards a mast gets (then clamped by [`MAST_MAX_YARDS`]).
+pub const MAST_YARD_SPAN_PER_SAIL: i32 = 8;
+/// Hard cap on yards per mast.
+pub const MAST_MAX_YARDS: i32 = 4;
+/// Gap growth going down: each lower sail's gap is weighted `1 + i·growth`, so sails get
+/// bigger toward the deck while the yards stay spread across the span ("semi-even,
+/// respecting sizes").
+pub const MAST_SAIL_GROWTH: f32 = 0.4;
+/// Most an upper yard narrows relative to the bottom yard (so they shrink with their
+/// sails, "but not by too much").
+pub const MAST_YARD_NARROW_MAX: i32 = 3;
+/// Forward (`+x`, toward the bow) offset of the yards from the mast centreline, in blocks
+/// — so the yard (and its sail) sits just ahead of the mast rather than through it.
+pub const MAST_YARD_FORWARD: i32 = 1;
+/// Minimum height (blocks above the weather deck) for a yard — no yard is placed lower
+/// than this, so the lowest sail keeps clear of the deck. (The guaranteed top yard is
+/// exempt — it always sits at the masthead.)
+pub const MAST_YARD_MIN_CLEARANCE: i32 = 8;
+/// Fence blocks stacked on top of each mast (the straight finial spar).
+pub const MAST_TOP_FENCE: i32 = 2;
+
+// --- Spanker (gaff + boom on the aftmost mast) -----------------------------
+
+/// Chance (percent, 0–100) that the aftmost mast carries a spanker (gaff + boom), rolled
+/// once per ship. `100` = always, `0` = never.
+pub const MAST_SPANKER_CHANCE: i32 = 50;
+/// Boom (lower, near-horizontal spar) length aft of the mast, as a fraction of hull
+/// length. The spanker is a fore-and-aft sail in the centreline (z=0) plane.
+pub const MAST_SPANKER_BOOM_FRACTION: f32 = 0.40;
+/// Boom height above the weather deck (kept at least a block up off the deck).
+pub const MAST_SPANKER_BOOM_CLEARANCE: i32 = 3;
+/// Gaff throat height up the mast (above the boom), as a fraction of the mast's height
+/// above the boom — where the rising gaff attaches.
+pub const MAST_SPANKER_LUFF_FRACTION: f32 = 0.45;
+/// Gaff run aft as a fraction of the boom length. The gaff rises at a fixed **45°**
+/// (1 up per block aft), built with double-stairs (stairs on both sides) for a smooth
+/// diagonal; this sets how far aft (= how high) it goes.
+pub const MAST_SPANKER_GAFF_RUN_FRACTION: f32 = 0.8;
+/// Gaff double-stair facing (the gaff rises aft). **Flip candidate.**
+pub const MAST_GAFF_STAIR_FACE: ShipDir = ShipDir::Stern;
+
+// --- Crow's nests (mast platforms) -----------------------------------------
+
+/// Minimum mast height to carry any platform/nest — shorter (the smallest) masts get none.
+pub const MAST_NEST_MIN_HEIGHT: i32 = 22;
+/// Chance (percent) that the tallest mast gets the fenced top crow's nest, rolled once per
+/// ship. `100` = always. (Intermediate platforms are unaffected.)
+pub const MAST_NEST_CHANCE: i32 = 60;
+/// Fenced **top** crow's-nest half-width (`2` → 5×5) — only at the tallest mast's top.
+pub const MAST_NEST_HALF: i32 = 2;
+/// **Intermediate** (mid-mast) platform half-width (`1` → 3×3), unfenced.
+pub const MAST_NEST_PLATFORM_HALF: i32 = 1;
+/// Height of the intermediate platform up the mast, as a fraction of the mast's height.
+pub const MAST_NEST_HEIGHT_FRACTION: f32 = 0.70;
+/// A nest must sit **more than** this many blocks from the nearest yard (so it doesn't
+/// crowd a stay). The intermediate platform drops to satisfy it; the top nest pushes the
+/// top yard down.
+pub const MAST_NEST_YARD_GAP: i32 = 2;
+
+// ===========================================================================
 // Railing (`additions/railing.rs`)
 // ===========================================================================
 

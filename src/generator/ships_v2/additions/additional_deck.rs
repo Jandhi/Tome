@@ -61,10 +61,12 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
     let mut rim = state.rail_outline.clone();
     for _ in 0..levels {
         let height = random_height(ctx.rng);
-        let (inset, outer) = build_level(ctx, dc, &base, base_y, height, ports_are_trapdoors).await;
+        let (inset, outer, ports) =
+            build_level(ctx, dc, &base, base_y, height, ports_are_trapdoors).await;
         base = inset;
         rim = outer;
         base_y += height;
+        state.gun_ports.extend(ports); // re-stamped after the bowsprit
     }
 
     // Hand the raised top deck to subsequent additions: the inset outline for stacking,
@@ -72,12 +74,13 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
     state.top_outline = base;
     state.rail_outline = rim;
     state.top_y = base_y;
+    state.gun_ports_trapdoors = ports_are_trapdoors;
 }
 
 /// Build a single topside level on top of `base` (half-beam per station) at
-/// `base_y`, `height` tall. Returns `(inset top outline, outer rim outline)` — the inset
-/// for stacking the next level, the rim (outermost solid half-beam at the top) for the
-/// railing.
+/// `base_y`, `height` tall. Returns `(inset top outline, outer rim outline, gun ports)` —
+/// the inset for stacking the next level, the rim for the railing, and the planned gun-port
+/// cells (re-stamped after the bowsprit).
 async fn build_level(
     ctx: &mut ShipV2Ctx<'_>,
     dc: &DeckContext<'_>,
@@ -85,7 +88,7 @@ async fn build_level(
     base_y: i32,
     height: i32,
     ports_are_trapdoors: bool,
-) -> (Vec<i32>, Vec<i32>) {
+) -> (Vec<i32>, Vec<i32>, Vec<(Point3D, ShipDir)>) {
     let length = base.len() as i32;
     // Tumblehome grows a touch with height (~1 per 3 blocks).
     let total_inset = ((height as f32) / 3.0).round().max(1.0) as i32;
@@ -308,5 +311,5 @@ async fn build_level(
             }
         })
         .collect();
-    (inset, outer)
+    (inset, outer, ports)
 }

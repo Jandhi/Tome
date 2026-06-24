@@ -32,9 +32,10 @@ use crate::noise::RNG;
 // Reused harness from v1: the local→world transform and ship-relative facings.
 pub use super::ships::{Placement, ShipDir};
 
-pub use additions::{DeckAddition, SizeTier};
+pub use additions::{DeckAddition, SailState, SizeTier};
 pub use hull::HullShape;
 use additions::bowsprit::BowspritModel;
+use additions::masts::MastModel;
 use additions::railing::RailingModel;
 use deck::DeckModel;
 use hull::HullModel;
@@ -73,13 +74,31 @@ pub struct ShipV2Spec {
     pub beam_ratio: f32,
     /// Plan-view hull shape.
     pub hull_shape: HullShape,
+    /// Forward mast rake — blocks of `+x` (toward the bow) per block of mast height.
+    /// `0.0` = perfectly vertical masts.
+    pub mast_lean: f32,
+    /// How the sails are rendered (none / furled / …).
+    pub sail_state: SailState,
 }
 
 impl ShipV2Spec {
     /// Build a spec with default beam ratio ([`DEFAULT_BEAM_RATIO`]) and a
     /// teardrop hull.
     pub fn new(heading: Cardinal, length: i32) -> Self {
-        Self { heading, length, beam_ratio: DEFAULT_BEAM_RATIO, hull_shape: HullShape::Teardrop }
+        Self {
+            heading,
+            length,
+            beam_ratio: DEFAULT_BEAM_RATIO,
+            hull_shape: HullShape::Teardrop,
+            mast_lean: tuning::MAST_LEAN,
+            sail_state: SailState::Furled,
+        }
+    }
+
+    /// Set how the sails are rendered (none / furled / …).
+    pub fn with_sail_state(mut self, sail_state: SailState) -> Self {
+        self.sail_state = sail_state;
+        self
     }
 
     /// Set the length:beam ratio (lower = beamier, higher = sleeker).
@@ -91,6 +110,12 @@ impl ShipV2Spec {
     /// Set the plan-view hull shape.
     pub fn with_hull_shape(mut self, hull_shape: HullShape) -> Self {
         self.hull_shape = hull_shape;
+        self
+    }
+
+    /// Set the forward mast rake (`0.0` = vertical masts).
+    pub fn with_mast_lean(mut self, mast_lean: f32) -> Self {
+        self.mast_lean = mast_lean;
         self
     }
 }
@@ -106,6 +131,8 @@ pub struct ShipV2Output {
     pub railing: Option<RailingModel>,
     /// The bowsprit off the bow (built by the additions pipeline).
     pub bowsprit: Option<BowspritModel>,
+    /// The masts (built by the additions pipeline).
+    pub masts: Option<MastModel>,
     /// Size tier derived from length — gates which deck additions are built.
     pub tier: SizeTier,
     /// `true` if the anchor was over water (built below the surface), `false` if on
@@ -178,6 +205,8 @@ pub async fn build_ship_v2(
         ship_palette: &ship_palette,
         tier,
         on_water,
+        mast_lean: spec.mast_lean,
+        sail_state: spec.sail_state,
     };
     // Running top-weather-deck state: structural additions raise it, fittings read it.
     let mut deck_state = additions::DeckState::initial(&hull, &deck);
@@ -191,9 +220,13 @@ pub async fn build_ship_v2(
         additions::build_addition(addition, ctx, &deck_ctx, &mut deck_state).await;
     }
     drop(deck_ctx);
+
+    // The bowsprit's solid prow buries the bow gun ports — re-stamp them so they re-open.
+    additions::restamp_gun_ports(ctx, &placement, &ship_palette, &deck_state).await;
+
     let bowsprit = deck_state.bowsprit;
     let railing = deck_state.railing;
-    
+    let masts = deck_state.masts;
 
-    ShipV2Output { placement, keel, hull, rudder, deck, railing, bowsprit, tier, on_water }
+    ShipV2Output { placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, on_water }
 }

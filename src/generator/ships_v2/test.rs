@@ -420,6 +420,23 @@ async fn build_ship_v2_offline() {
         editor.try_get_block(deck_world).map(|b| b.id),
     );
 
+    // Masts: keel-stepped log poles rising above the deck.
+    if !additions::DEBUG_SKIP.contains(&DeckAddition::Masts) {
+        let masts = ship.masts.as_ref().expect("masts should be built");
+        assert_eq!(
+            masts.masts.len() as i32,
+            ship.tier.mast_count(),
+            "mast count should match the size tier",
+        );
+        let main = &masts.masts[0];
+        let log_world = place.to_world(main.cells[main.cells.len() / 2]);
+        assert!(
+            editor.try_get_block(log_world).map_or(false, |b| b.id.as_str().contains("log")),
+            "expected a mast log at {log_world:?}, got {:?}",
+            editor.try_get_block(log_world).map(|b| b.id),
+        );
+    }
+
     let ascii = render_keel_ascii(keel);
     let plan = render_hull_plan(hull);
     // Oval variant plan for comparison.
