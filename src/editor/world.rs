@@ -10,6 +10,38 @@ use super::Editor;
 
 const CHUNK_SIZE : i32 = 16;
 
+/// Checked access into a `map[x][z]` 2D grid by a `Point2D`.
+///
+/// Returns `None` for any out-of-bounds coordinate — crucially including
+/// *negative* ones, which a bare `point.x as usize` cast would otherwise wrap
+/// into a huge index and panic on. This is the single choke point that makes
+/// the World maps impossible to panic-index. Callers that sample a cell or two
+/// past the build edge (road bands, search frontiers) get `None` and decide
+/// what to do, rather than crashing the generator.
+fn cell_2d<T>(map: &[Vec<T>], point: Point2D) -> Option<&T> {
+    if point.x < 0 || point.y < 0 {
+        log_oob(point);
+        return None;
+    }
+    match map.get(point.x as usize).and_then(|col| col.get(point.y as usize)) {
+        Some(cell) => Some(cell),
+        None => {
+            log_oob(point);
+            None
+        }
+    }
+}
+
+/// Trace (not warn) on out-of-bounds map access. OOB is *expected* here —
+/// `is_water` / road-band / search-frontier probes routinely sample a cell or
+/// two past the build edge, so a louder level would flood every normal run and
+/// bury the signal. At `RUST_LOG=trace` this leaves a coordinate trail so a
+/// genuine bug (a wrong point that silently gets skipped instead of panicking)
+/// can still be tracked down.
+fn log_oob(point: Point2D) {
+    log::trace!("World map access out of bounds at {:?}; returning None", point);
+}
+
 #[derive(Debug)]
 pub struct World {
     pub build_area : Rect3D,
@@ -130,8 +162,14 @@ impl World {
                 // `is_water` / `get_ground_block` — actually holds the surface block rather
                 // than the air above it. Without the `-1`, `is_water` reported false over
                 // open water, letting buildings be placed on water and backfilled.
-                world.ground_block_map[x][z] = world.get_block(Point3D::new(x as i32, world.ground_height_map[x][z] - 1, z as i32)).expect("Failed to get block at point");
-                world.ground_biome_map[x][z] = world.get_biome(Point3D::new(x as i32, world.ocean_floor_height_map[x][z], z as i32)).expect("Failed to get biome at point");
+                // Fall back to a sane default if the chunk/section isn't loaded
+                // for this cell rather than aborting the whole world load.
+                world.ground_block_map[x][z] = world
+                    .get_block(Point3D::new(x as i32, world.ground_height_map[x][z] - 1, z as i32))
+                    .unwrap_or_else(|| Block::new(Default::default(), None, None));
+                world.ground_biome_map[x][z] = world
+                    .get_biome(Point3D::new(x as i32, world.ocean_floor_height_map[x][z], z as i32))
+                    .unwrap_or_else(Biome::unknown);
             }
         }
 
@@ -215,18 +253,22 @@ impl World {
         }.iter()
     }
 
-    pub fn get_height_at(&self, point : Point2D) -> i32 {
-        self.ground_height_map[point.x as usize][point.y as usize]
+    pub fn get_height_at(&self, point : Point2D) -> Option<i32> {
+        cell_2d(&self.ground_height_map, point).copied()
     }
 
-    pub fn get_non_tree_height(&self, point : Point2D) -> i32 {
-        let mut height = self.get_height_at(point);
-        let mut block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
-        while block.id.is_tree() {
+    pub fn get_non_tree_height(&self, point : Point2D) -> Option<i32> {
+        let mut height = self.get_height_at(point)?;
+        // Walk down through tree blocks to the real surface. If a block read
+        // fails (unloaded chunk / out of section range), stop where we are
+        // rather than panicking — the height so far is the best estimate.
+        while let Some(block) = self.get_block(Point3D::new(point.x, height - 1, point.y)) {
+            if !block.id.is_tree() {
+                break;
+            }
             height -= 1;
-            block = self.get_block(Point3D::new(point.x, height - 1, point.y)).expect("Failed to get block at point");
         }
-        height
+        Some(height)
     }
 
     pub fn get_height_map(&self) -> &Vec<Vec<i32>> {
@@ -250,7 +292,16 @@ impl World {
     }
 
     pub fn set_heights(&mut self, points : &HashSet<Point3D>) {
+        let xlen = self.ground_height_map.len() as i32;
+        let zlen = self.ground_height_map.first().map_or(0, |col| col.len()) as i32;
         for point in points {
+            // Defensive: terrain ops can hand us a cell one past the build-area
+            // edge, and these maps have no bounds check (see the is-water OOB
+            // gotcha). Those cells aren't ours to flatten, so skip rather than
+            // panic.
+            if point.x < 0 || point.z < 0 || point.x >= xlen || point.z >= zlen {
+                continue;
+            }
             self.ground_height_map[point.x as usize][point.z as usize] = point.y;
             self.ocean_floor_height_map[point.x as usize][point.z as usize] = point.y;
         }
@@ -265,44 +316,42 @@ impl World {
     }
 
     // Get height without counting water
-    pub fn get_ocean_floor_height_at(&self, point : Point2D) -> i32 {
-        let x = (point.x as usize).min(self.ocean_floor_height_map.len() - 1);
-        let z = (point.y as usize).min(self.ocean_floor_height_map[0].len() - 1);
-        self.ocean_floor_height_map[x][z]
+    pub fn get_ocean_floor_height_at(&self, point : Point2D) -> Option<i32> {
+        cell_2d(&self.ocean_floor_height_map, point).copied()
     }
 
-    pub fn get_motion_blocking_height_at(&self, point : Point2D) -> i32 {
-        let x = (point.x as usize).min(self.motion_blocking_height_map.len() - 1);
-        let z = (point.y as usize).min(self.motion_blocking_height_map[0].len() - 1);
-        self.motion_blocking_height_map[x][z]
+    pub fn get_motion_blocking_height_at(&self, point : Point2D) -> Option<i32> {
+        cell_2d(&self.motion_blocking_height_map, point).copied()
     }
 
-    pub fn get_surface_biome_at(&self, point : Point2D) -> Biome {
-        let height = self.get_ocean_floor_height_at(point);
+    pub fn get_surface_biome_at(&self, point : Point2D) -> Option<Biome> {
+        let height = self.get_ocean_floor_height_at(point)?;
         let point_3d = Point3D::new(point.x, height, point.y);
-        self.get_biome(point_3d).expect("Failed to get biome at point")
+        self.get_biome(point_3d)
     }
 
     pub fn get_parcel_at(&self, point : Point2D) -> Option<ParcelID> {
-        self.parcel_map[point.x as usize][point.y as usize]
+        cell_2d(&self.parcel_map, point).copied().flatten()
     }
 
     pub fn get_district_at(&self, point : Point2D) -> Option<DistrictID> {
-        self.district_map[point.x as usize][point.y as usize]
-    }   
-
-    pub fn add_height(&self, point : Point2D) -> Point3D {
-        Point3D::new(point.x, self.get_height_at(point), point.y)
+        cell_2d(&self.district_map, point).copied().flatten()
     }
 
-    pub fn add_non_tree_height(&self, point : Point2D) -> Point3D {
-        let mut new_point = Point3D::new(point.x, self.get_height_at(point), point.y);
-        let mut block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
-        while block.id.is_tree() {
+    pub fn add_height(&self, point : Point2D) -> Option<Point3D> {
+        Some(Point3D::new(point.x, self.get_height_at(point)?, point.y))
+    }
+
+    pub fn add_non_tree_height(&self, point : Point2D) -> Option<Point3D> {
+        let mut new_point = Point3D::new(point.x, self.get_height_at(point)?, point.y);
+        // Walk down through tree blocks; stop on a failed read rather than panic.
+        while let Some(block) = self.get_block(new_point + DOWN) {
+            if !block.id.is_tree() {
+                break;
+            }
             new_point += DOWN;
-            block = self.get_block(new_point + DOWN).expect("Failed to get block at point");
         }
-        new_point
+        Some(new_point)
     }
 
     pub fn is_in_bounds_2d(&self, point : Point2D) -> bool {
@@ -380,26 +429,25 @@ impl World {
         Some(block_index as usize)
     }
 
-    pub fn get_ground_block(&self, point: Point2D) -> &Block {
-        &self.ground_block_map[point.x as usize][point.y as usize]
+    pub fn get_ground_block(&self, point: Point2D) -> Option<&Block> {
+        cell_2d(&self.ground_block_map, point)
     }
 
     pub fn is_water(&self, point : Point2D) -> bool {
         // Out of bounds is dry land, not a panic: callers that sample around a
         // road band / search frontier routinely probe a cell or two past the
-        // build edge, and `ground_block_map` is indexed unchecked.
-        if !self.is_in_bounds_2d(point) {
-            return false;
-        }
-        self.ground_block_map[point.x as usize][point.y as usize].id.is_water()
+        // build edge.
+        cell_2d(&self.ground_block_map, point).map_or(false, |b| b.id.is_water())
     }
 
     pub fn is_water_3d(&self, point : Point3D) -> bool {
-        self.get_block(point).expect("failed to get block").id.is_water()
+        // Missing block (unloaded chunk / out of range) is treated as not water.
+        self.get_block(point).map_or(false, |b| b.id.is_water())
     }
 
     pub fn is_claimed(&self, point : Point2D) -> bool {
-        self.build_claim_map[point.x as usize][point.y as usize] != BuildClaim::None
+        // Out of bounds cells are unclaimable, so treat them as unclaimed.
+        cell_2d(&self.build_claim_map, point).map_or(false, |c| *c != BuildClaim::None)
     }
 
     pub fn claim(&mut self, point: Point2D, claim: BuildClaim) {

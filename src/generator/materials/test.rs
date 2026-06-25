@@ -60,7 +60,7 @@ mod tests {
         });
 
         for point in editor.world_mut().world_rect_2d().clone().iter() {
-            let point = editor.world_mut().add_height(point);
+            let point = editor.world_mut().add_height(point).expect("test cell in bounds");
             placer.place_block(&mut editor, point, &material, BlockForm::Block, None, None).await;
         }
     }
@@ -89,10 +89,10 @@ mod tests {
             .world_rect_2d()
             .clone()
             .iter()
-            .map(|point| editor.world_mut().add_height(point))
+            .map(|point| editor.world_mut().add_height(point).expect("test cell in bounds"))
             .collect();
         placer.place_blocks(
-            &mut editor, 
+            &mut editor,
             points.into_iter(),
             &material,
             BlockForm::Block, 
@@ -126,10 +126,10 @@ mod tests {
             .world_rect_2d()
             .clone()
             .iter()
-            .map(|point| editor.world_mut().add_height(point))
+            .map(|point| editor.world_mut().add_height(point).expect("test cell in bounds"))
             .collect();
         placer.place_blocks(
-            &mut editor, 
+            &mut editor,
             points.into_iter(),
             &material,
             BlockForm::Block,

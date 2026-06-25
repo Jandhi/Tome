@@ -638,7 +638,7 @@ async fn debug_single_manor_segments() {
     let footprint = generate_footprint(&mut rng, &mut plot, &SizeClass::Manor)
         .expect("Failed to generate manor footprint");
 
-    let base_y = editor.world().get_ocean_floor_height_at(center);
+    let base_y = editor.world().get_ocean_floor_height_at(center).expect("test cell in bounds");
     let frame_footprint = Footprint::new(
         outline_from_rects(footprint.rects()),
         footprint.rects().to_vec(),

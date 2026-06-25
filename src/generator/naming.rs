@@ -213,7 +213,7 @@ pub fn generate_settlement_name(
     // Land shape: relief across the footprint + whether the edge touches water.
     let (lo, hi) = urban
         .iter()
-        .map(|&c| world.get_height_at(c))
+        .filter_map(|&c| world.get_height_at(c))
         .fold((i32::MAX, i32::MIN), |(lo, hi), h| (lo.min(h), hi.max(h)));
     let relief = (hi - lo).max(0);
     let landform_concept: Option<&str> = if touches_water(world, urban, cfg.water_share) {
@@ -226,8 +226,11 @@ pub fn generate_settlement_name(
         None
     };
 
-    // Biome: always available.
-    let biome = world.get_surface_biome_at(centre);
+    // Biome: always available for in-bounds centres; fall back to the default
+    // name if the centre is somehow off the map.
+    let Some(biome) = world.get_surface_biome_at(centre) else {
+        return default_name(culture);
+    };
     let biome_concept = biome_concept(&cfg, biome.name());
 
     // ── Render concepts in the culture's vocabulary into weighted themes ──

@@ -15,6 +15,7 @@ pub mod chronicle;
 pub mod settlement;
 pub mod open_space;
 pub mod naming;
+pub mod heraldry;
 pub mod npc;
 pub mod population;
 pub mod welcome;

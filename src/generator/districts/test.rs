@@ -702,7 +702,7 @@ mod tests {
             if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
                 continue;
             }
-            let h = editor.world().get_ocean_floor_height_at(*p);
+            let Some(h) = editor.world().get_ocean_floor_height_at(*p) else { continue; };
             editor.place_block(&alley_block, Point3D::new(p.x, h - 1, p.y)).await;
             editor.world_mut().claim(*p, BuildClaim::Path(PathType::Pavement));
         }

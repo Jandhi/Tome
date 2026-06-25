@@ -129,7 +129,7 @@ fn road_floor_level(chain_slice: &[Point2D], outward: Cardinal, editor: &Editor)
 /// the debug road markers that float high above the surface. `None` if the
 /// window holds only air (no road here).
 fn road_surface_top(editor: &Editor, cell: Point2D) -> Option<i32> {
-    let ref_y = editor.world().get_ocean_floor_height_at(cell);
+    let ref_y = editor.world().get_ocean_floor_height_at(cell)?;
     for y in (ref_y - 5..=ref_y + 5).rev() {
         if let Some(block) = editor.try_get_block(cell.add_y(y)) {
             if !block.id.is_air() {

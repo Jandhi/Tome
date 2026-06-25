@@ -249,8 +249,10 @@ fn assemble_nodes(
 
     if include_town_center {
         if let Some(c) = centroid_snapped(urban) {
-            nodes.push(editor.world().add_height(c));
-            kinds.push(NodeKind::TownCentre);
+            if let Some(p) = editor.world().add_height(c) {
+                nodes.push(p);
+                kinds.push(NodeKind::TownCentre);
+            }
         }
     }
     nodes.extend_from_slice(anchor_nodes);
@@ -260,14 +262,17 @@ fn assemble_nodes(
             continue;
         }
         if let Some(c) = centroid_snapped(&sd.data.points_2d) {
-            nodes.push(editor.world().add_height(c));
-            kinds.push(NodeKind::District);
+            if let Some(p) = editor.world().add_height(c) {
+                nodes.push(p);
+                kinds.push(NodeKind::District);
+            }
         }
     }
     // Gates use their exact centre so the road meets the threshold; paving lays
     // road surface across the gate/wall tiles without cutting into the wall.
     for (gate_point, _dir) in editor.world().gate_locations.clone() {
-        nodes.push(editor.world().add_height(gate_point.drop_y()));
+        let Some(p) = editor.world().add_height(gate_point.drop_y()) else { continue; };
+        nodes.push(p);
         kinds.push(NodeKind::Gate);
     }
 
@@ -276,7 +281,9 @@ fn assemble_nodes(
     for node in nodes.iter_mut() {
         if blocked.contains(&node.drop_y()) {
             if let Some(c) = nearest_unblocked(node.drop_y(), urban, blocked) {
-                *node = editor.world().add_height(c);
+                if let Some(p) = editor.world().add_height(c) {
+                    *node = p;
+                }
             }
         }
     }

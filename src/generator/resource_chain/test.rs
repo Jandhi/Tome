@@ -645,7 +645,7 @@ mod tests {
 
                 let block = district_color.get(&district_id).expect("district color");
                 // Post-terraform surface height (local, matching block-write coords).
-                let height = editor.world().get_height_at(Point2D::new(x, z));
+                let height = editor.world().get_height_at(Point2D::new(x, z)).expect("test cell in bounds");
 
                 let on_edge = edge_cells.contains(&Point2D::new(x, z));
 
@@ -839,7 +839,7 @@ mod tests {
                     continue;
                 }
                 let on_edge = edge_cells.contains(&p);
-                let height = editor.world().get_height_at(p);
+                let height = editor.world().get_height_at(p).expect("test cell in bounds");
                 match ptype {
                     ParcelType::Urban | ParcelType::OffLimits => {
                         let block = if matches!(ptype, ParcelType::Urban) { &blue } else { &red };

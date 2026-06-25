@@ -435,6 +435,10 @@ pub struct Household {
     /// Wealth tier derived from the building's size class at placement time.
     /// Biases [`assign_employment`] and [`pick_household_shape`].
     pub wealth: Wealth,
+    /// English blazon of the family's banner, copied from its [`HouseAnchors`]
+    /// for the chronicle — e.g. "a red cross on a black background". `Some` only
+    /// for manor families that fly a heraldic design.
+    pub banner_blazon: Option<String>,
     pub members: Vec<Npc>,
 }
 
@@ -1227,6 +1231,7 @@ pub fn build_households(
             home: h_idx,
             pos: house.pos,
             wealth,
+            banner_blazon: house.banner_blazon.clone(),
             members,
         });
     }
@@ -1758,6 +1763,10 @@ pub struct HouseAnchors {
     /// Blackwell), matching the colour it flies on its exterior banners. `None`
     /// for ordinary houses, which keep a plain random surname.
     pub family_color: Option<Color>,
+    /// English blazon of the family's banner design for the chronicle, e.g.
+    /// "a red cross on a black background". `Some` only for manors that fly a
+    /// heraldic design; `None` for ordinary houses.
+    pub banner_blazon: Option<String>,
 }
 
 /// One candidate scene in the town-wide draw, tagged with the house it belongs
@@ -2342,6 +2351,7 @@ mod tests {
             home: id as usize,
             pos,
             wealth: Wealth::Modest,
+            banner_blazon: None,
             members: vec![Npc {
                 id,
                 first_name: "A".into(),
@@ -2398,6 +2408,7 @@ mod tests {
                 wealth: Wealth::Modest,
                 pos: Point2D::new(pop as i32 * 16, 0),
                 family_color: None,
+                banner_blazon: None,
             })
             .collect();
         let pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
@@ -2456,6 +2467,7 @@ mod tests {
                 wealth: Wealth::Modest,
                 pos: Point2D::new(pop as i32 * 16, 0),
                 family_color: None,
+                banner_blazon: None,
             })
             .collect();
         let mut pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
@@ -2507,7 +2519,7 @@ mod tests {
         let scenes: Vec<AnchorScene> = (0..count)
             .map(|i| {
                 let c = Point2D::new(start_x + i * 3, cz);
-                let y = editor.world().get_ocean_floor_height_at(c);
+                let y = editor.world().get_ocean_floor_height_at(c).expect("test cell in bounds");
                 AnchorScene::solo(Point3D::new(c.x, y, c.y), 0.0, SlotRole::Resident)
             })
             .collect();

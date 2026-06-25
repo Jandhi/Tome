@@ -45,7 +45,7 @@ pub async fn feathered_flatten(
     // Natural surface height at each region cell (skipping tree canopy).
     let natural: HashSet<Point3D> = region
         .iter()
-        .map(|p| editor.world().add_non_tree_height(*p))
+        .filter_map(|p| editor.world().add_non_tree_height(*p))
         .collect();
 
     // Smoothed target surface: repeated wide averaging flattens local relief
@@ -149,7 +149,9 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         }
         // Heightmap convention (see World::new / blend_terrain): the surface
         // value is the first air block; the top solid sits at `value - 1`.
-        let terrain_y = editor.world().get_ocean_floor_height_at(xz);
+        let Some(terrain_y) = editor.world().get_ocean_floor_height_at(xz) else {
+            continue;
+        };
         let target_y = point.y;
 
         // Keep the terraformed cap in the natural surface material: grass stays
@@ -250,9 +252,9 @@ pub async fn smooth_terrain(points: &HashSet<Point2D>, strength: f32, editor: &m
     let points_3d: HashSet<Point3D> = points
         .iter()
         .filter(|&&p| !editor.world().is_water(p))
-        .map(|&p| {
-            let y = editor.world().get_non_tree_height(p);
-            Point3D::new(p.x, y, p.y)
+        .filter_map(|&p| {
+            let y = editor.world().get_non_tree_height(p)?;
+            Some(Point3D::new(p.x, y, p.y))
         })
         .collect();
 

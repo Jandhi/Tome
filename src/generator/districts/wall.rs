@@ -226,17 +226,17 @@ pub async fn build_wall(urban_points: &HashSet<Point2D>, editor: &mut Editor, rn
 
 pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor, rng: &mut RNG, material_placer: &mut Placer<'_>, material_id: &MaterialId, structures: & HashMap<StructureType, Structure>) {
     let wall_points_with_height = wall_points.iter()
-        .map(|&point| {
+        .filter_map(|&point| {
             let height = rng.rand_i32_range(4, 7);
-            let new_point = editor.world().add_height(point);
-            (new_point, height)
+            let new_point = editor.world().add_height(point)?;
+            Some((new_point, height))
         })
         .collect::<HashMap<_, _>>();
 
     let mut main_points = Vec::new();
     let mut top_points = Vec::new();
     let wall_points_with_world_height = wall_points.iter()
-        .map(|&point| editor.world().add_height(point))
+        .filter_map(|&point| editor.world().add_height(point))
         .collect::<Vec<_>>();
 
     for (point, height) in wall_points_with_height {
@@ -292,7 +292,8 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
             // sit flush with the walkway behind them instead of jutting up as a block.
             let is_outer = parapet_is_outer(point.drop_y(), urban_points, &wall_set);
             let column_top = if is_outer { point.y } else { point.y - 1 };
-            for y in editor.world().get_height_at(point.drop_y())..=column_top {
+            let Some(column_base) = editor.world().get_height_at(point.drop_y()) else { continue; };
+            for y in column_base..=column_top {
                 let new_point = Point3D { x: point.x, y, z: point.z };
                 material_placer.place_block(editor, new_point, material_id, BlockForm::Block, None, None).await;
             }
@@ -397,7 +398,8 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
             // sit flush with the walkway behind them instead of jutting up as a block.
             let is_outer = parapet_is_outer(point.drop_y(), urban_points, &wall_set);
             let column_top = if is_outer { point.y } else { point.y - 1 };
-            for y in editor.world().get_height_at(point.drop_y())..=column_top {
+            let Some(column_base) = editor.world().get_height_at(point.drop_y()) else { continue; };
+            for y in column_base..=column_top {
                 let new_point = Point3D { x: point.x, y, z: point.z };
                 material_placer.place_block(editor, new_point, material_id, BlockForm::Block, None, None).await;
             }
@@ -440,8 +442,10 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
                             
                         }
                         if fill_in {
-                            for y in editor.world().get_height_at(new_pt)..point.y {
-                                material_placer.place_block(editor, new_pt.add_y(y), material_id, BlockForm::Block, None, None).await;
+                            if let Some(base_y) = editor.world().get_height_at(new_pt) {
+                                for y in base_y..point.y {
+                                    material_placer.place_block(editor, new_pt.add_y(y), material_id, BlockForm::Block, None, None).await;
+                                }
                             }
                             if editor.world().is_water(new_pt) {
                                 fill_water(new_pt, editor, material_placer, material_id).await;
@@ -475,8 +479,10 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
                         }
                     }
                     if fill_in {
-                        for y in editor.world().get_height_at(new_pt)..point.y {
-                            material_placer.place_block(editor, new_pt.add_y(y), material_id, BlockForm::Block, None, None).await;
+                        if let Some(base_y) = editor.world().get_height_at(new_pt) {
+                            for y in base_y..point.y {
+                                material_placer.place_block(editor, new_pt.add_y(y), material_id, BlockForm::Block, None, None).await;
+                            }
                         }
                         if editor.world().is_water(new_pt) {
                             fill_water(new_pt, editor, material_placer, material_id).await;
@@ -489,7 +495,8 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
 
     for (_i, point) in inner_wall_points.clone().iter().enumerate() {
         if !walkway_points.contains(&point.drop_y()) {
-            for y in editor.world().get_height_at(point.drop_y())..=point.y {
+            let Some(base_y) = editor.world().get_height_at(point.drop_y()) else { continue; };
+            for y in base_y..=point.y {
                 material_placer.place_block(editor, point.drop_y().add_y(y), material_id, BlockForm::Block, None, None).await;
             }
             if editor.world().is_water(point.drop_y()) {
@@ -599,11 +606,18 @@ pub fn add_wall_points_height(
     wall_points: &[Point2D],
     editor: &mut Editor,
 ) -> Vec<Point3D> {
-    let n = wall_points.len();
-
-    let desired: Vec<i32> = wall_points
+    // Drop any out-of-bounds ring points up front so the per-index vectors below
+    // (`desired`, `above`, `below`, `tops`) stay aligned with `in_bounds_points`.
+    let in_bounds_points: Vec<Point2D> = wall_points
         .iter()
-        .map(|p| editor.world().get_height_at(*p) + WALL_HEIGHT)
+        .filter(|p| editor.world().get_height_at(**p).is_some())
+        .cloned()
+        .collect();
+    let n = in_bounds_points.len();
+
+    let desired: Vec<i32> = in_bounds_points
+        .iter()
+        .filter_map(|p| editor.world().get_height_at(*p).map(|h| h + WALL_HEIGHT))
         .collect();
 
     let mut above = desired.clone();
@@ -621,7 +635,7 @@ pub fn add_wall_points_height(
         })
         .collect();
 
-    wall_points
+    in_bounds_points
         .iter()
         .zip(tops)
         .map(|(point, y)| Point3D { x: point.x, y, z: point.y })
@@ -678,7 +692,8 @@ pub async fn fill_water(
     material_id: &MaterialId,
 ) {
     let mut water_points = Vec::new();
-    let mut height = editor.world().get_height_at(point) - 1;
+    let Some(surface_height) = editor.world().get_height_at(point) else { return; };
+    let mut height = surface_height - 1;
     while editor.world().is_water_3d(point.add_y(height)) && height > 0 {
         water_points.push(Point3D { x: point.x, y: height, z: point.y });
         height -= 1;

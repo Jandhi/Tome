@@ -128,7 +128,7 @@ pub async fn build_rural_road_network(
     let mut road_height: HashMap<Point2D, i32> = HashMap::new();
 
     for (anchor, gate) in jobs {
-        let start = editor.world().add_height(anchor);
+        let Some(start) = editor.world().add_height(anchor) else { continue; };
 
         // Discount field = laid roads ∪ predicted rings, so routes prefer running
         // along an existing road or a ring rather than carving a parallel one.
@@ -180,7 +180,10 @@ pub async fn build_rural_road_network(
             log::warn!("rural road: gate {:?} found no dry edge to spur to", gnode);
             continue;
         };
-        let target = editor.world().add_height(*land_path.last().expect("path has an edge cell"));
+        let Some(target) = editor.world().add_height(*land_path.last().expect("path has an edge cell")) else {
+            log::warn!("rural road: gate {:?} edge target had no height", gnode);
+            continue;
+        };
 
         let mut discount = network_cells.clone();
         discount.extend(&ring_cells);
@@ -200,7 +203,7 @@ pub async fn build_rural_road_network(
         // long/steep for its search), fall back to the BFS dry-land path so the
         // gate still gets a road. Width 2 matches the Medium collector tier.
         let path = routed.unwrap_or_else(|| {
-            let pts: Vec<Point3D> = land_path.iter().map(|&c| editor.world().add_height(c)).collect();
+            let pts: Vec<Point3D> = land_path.iter().filter_map(|&c| editor.world().add_height(c)).collect();
             Path::new(pts, 2, material.clone(), PathPriority::Medium)
         });
         for p in path.points() {
@@ -226,7 +229,7 @@ fn gate_nodes(editor: &Editor) -> Vec<Point3D> {
     world
         .gate_locations
         .iter()
-        .map(|(gate, dir)| {
+        .filter_map(|(gate, dir)| {
             let cell = gate.drop_y();
             let d = Point2D::from(*dir);
             // Step toward whichever side is not urban (the countryside).
@@ -329,7 +332,7 @@ fn building_anchor(editor: &Editor, footprint: &HashSet<Point2D>, target: Point2
 fn door_approach(editor: &Editor, footprint: &HashSet<Point2D>, target: Point2D) -> Option<Point2D> {
     let mut approaches: Vec<Point2D> = Vec::new();
     for &cell in footprint {
-        let ground = editor.world().get_non_tree_height(cell);
+        let Some(ground) = editor.world().get_non_tree_height(cell) else { continue; };
         for dy in 0..DOOR_SCAN_HEIGHT {
             // Read from the placement cache by local coord: the door was placed
             // this run, and `try_get_block` would subtract the build-area origin

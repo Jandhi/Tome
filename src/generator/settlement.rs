@@ -67,6 +67,15 @@ impl ColorScheme {
             _ => *rng.choose(&self.pool),
         }
     }
+
+    /// A pool colour guaranteed different from `avoid` — the secondary (charge)
+    /// colour for a manor's banner design, so the charge always contrasts with
+    /// its family (field) colour. The pool always has ≥ 4 entries, so excluding
+    /// one never empties it.
+    fn distinct_from(&self, avoid: Color, rng: &mut RNG) -> Color {
+        let opts: Vec<Color> = self.pool.iter().copied().filter(|&c| c != avoid).collect();
+        if opts.is_empty() { avoid } else { *rng.choose(&opts) }
+    }
 }
 
 pub async fn generate_town(
@@ -329,7 +338,7 @@ pub async fn generate_town(
         })
         .collect();
     let ind_nodes: Vec<Point3D> = ind_footprints.values()
-        .map(|cells| {
+        .filter_map(|cells| {
             let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
             editor.world().add_height(c)
         })
@@ -365,11 +374,17 @@ pub async fn generate_town(
         println!("--- path[0] sample: road_y vs ground_h vs ocean_h ---");
         for p in path.points().iter().take(25) {
             let xz = p.drop_y();
+            let (Some(ground_h), Some(ocean_h)) = (
+                editor.world().get_height_at(xz),
+                editor.world().get_ocean_floor_height_at(xz),
+            ) else {
+                continue;
+            };
             println!(
                 "  ({:>4},{:>4})  road_y={:>3}  ground_h={:>3}  ocean_h={:>3}",
                 xz.x, xz.y, p.y,
-                editor.world().get_height_at(xz),
-                editor.world().get_ocean_floor_height_at(xz),
+                ground_h,
+                ocean_h,
             );
         }
     }
@@ -432,7 +447,7 @@ pub async fn generate_town(
                 for dz in -WIN..=WIN {
                     let n = Point2D::new(c.x + dx, c.y + dz);
                     if !urban.contains(&n) { continue; }
-                    let h = editor.world().get_ocean_floor_height_at(n);
+                    let Some(h) = editor.world().get_ocean_floor_height_at(n) else { continue; };
                     lo = lo.min(h);
                     hi = hi.max(h);
                 }
@@ -503,7 +518,7 @@ pub async fn generate_town(
     // alley path), but DON'T build them yet — we build after the houses so
     // house-foundation earth can't bury the road. Houses are placed first and
     // sit their floor at the level of the road they front (see `road_h`).
-    let alley_pts: Vec<Point3D> = alley_band.iter().map(|c| editor.world().add_height(*c)).collect();
+    let alley_pts: Vec<Point3D> = alley_band.iter().filter_map(|c| editor.world().add_height(*c)).collect();
     let alley_path = Path::new(alley_pts, 1, MaterialId::new(collector_mat.to_string()), PathPriority::Low);
     let mut all_paths = paths.clone();
     all_paths.push(alley_path);
@@ -725,6 +740,14 @@ pub async fn generate_town(
         "Town colours: dominant={:?}, second={:?}; manor family colours={:?}",
         color_scheme.town[0], color_scheme.town[1], color_scheme.manor,
     );
+    // Per-manor name signs are planned during the building loop (geometry known
+    // once the door is cut) and lettered after the population pass rolls each
+    // family's surname. `sign_rng` keeps the designation draw off the placement
+    // streams. Designation varies per manor for flavour.
+    const MANOR_DESIGNATIONS: [&str; 4] = ["Manor", "Estate", "Hall", "House"];
+    let mut sign_rng = rng.derive();
+    let mut manor_sign_sites: Vec<crate::generator::buildings_v2::exterior::ManorSignSite> =
+        Vec::new();
 
     let mut total_buildings = 0usize;
     // Per-house NPC anchors + bed-derived population budget, gathered from every
@@ -868,6 +891,23 @@ pub async fn generate_town(
                     palette.primary_color = Some(
                         family_color.unwrap_or_else(|| color_scheme.next_color(&mut color_rng)),
                     );
+                    // A manor family also flies one heraldic banner design on
+                    // every banner it owns (door + interior): the family colour
+                    // is the field, a distinct second colour the charge. Stamped
+                    // via `palette.banner_data` wherever a banner is recoloured.
+                    // The blazon rides along to the household for the chronicle.
+                    palette.banner_data = None;
+                    let mut banner_blazon: Option<String> = None;
+                    if let Some(primary) = family_color {
+                        let secondary = color_scheme.distinct_from(primary, &mut color_rng);
+                        if let Some(b) = crate::generator::heraldry::pick_family_banner(
+                            primary, secondary, &mut color_rng,
+                        ) {
+                            println!("Manor banner: {}", b.blazon);
+                            palette.banner_data = Some(b.data);
+                            banner_blazon = Some(b.blazon);
+                        }
+                    }
                     // Roof style weighted by culture + size (irimoya skews to the
                     // grander buildings; see `roof_styles_for`).
                     let roof_styles = culture.roof_styles_for(size_class);
@@ -913,6 +953,14 @@ pub async fn generate_town(
                     // staying large enough and fall back to plain walls otherwise.
                     let (en, ed) = culture.engawa_chance(size_class);
                     bctx.engawa = ed > 0 && rng.rand_i32_range(0, ed as i32) < en as i32;
+                    // Roll the jetty per culture taste (medieval timber-frame
+                    // upper-floor overhang; see `jetty_chance`). Frame generation
+                    // gates on shape/floor-count/plot fit and silently no-ops when
+                    // ineligible, so an un-jettiable building just stays flush.
+                    // Engawa wins in the pipeline, but the cultures don't overlap
+                    // (jetty is medieval-only, engawa Japanese-only).
+                    let (jn, jd) = culture.jetty_chance();
+                    bctx.jetty = jd > 0 && rng.rand_i32_range(0, jd as i32) < jn as i32;
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
@@ -924,6 +972,17 @@ pub async fn generate_town(
                                 crate::generator::buildings_v2::exterior::place_family_banner(
                                     &mut bctx_editor, &output.wall_segs, color,
                                 ).await;
+                                // Plan its name sign now the door is known; it gets
+                                // lettered after the population pass names the family.
+                                let designation = MANOR_DESIGNATIONS[
+                                    sign_rng.rand_i32_range(0, MANOR_DESIGNATIONS.len() as i32) as usize
+                                ].to_string();
+                                if let Some(site) = crate::generator::buildings_v2::exterior::plan_manor_sign(
+                                    &output.wall_segs, &palette, &data.materials,
+                                    &mut sign_rng, town_anchors.len(), designation,
+                                ) {
+                                    manor_sign_sites.push(site);
+                                }
                             }
                             // Population budget tracks sleeping capacity, not bed
                             // furniture: a double/canopy bed sleeps two. Each
@@ -953,6 +1012,7 @@ pub async fn generate_town(
                                 wealth: crate::generator::population::Wealth::from_size_class(size_class),
                                 pos: output.footprint.bounds().midpoint(),
                                 family_color,
+                                banner_blazon,
                             });
                             // Mark every rect in the footprint (core + wings)
                             // as used so subsequent placements on this lot
@@ -1048,7 +1108,7 @@ pub async fn generate_town(
     let mut verge_total = 0usize;
     for (ti, cells) in tier_verge.iter().enumerate() {
         for c in cells {
-            let h = editor.world().get_ocean_floor_height_at(*c);
+            let Some(h) = editor.world().get_ocean_floor_height_at(*c) else { continue; };
             editor.place_block(&verge_blocks[ti], Point3D::new(c.x, h - 1, c.y)).await;
             verge_total += 1;
         }
@@ -1060,10 +1120,12 @@ pub async fn generate_town(
     // generator picks the lantern type city-wide.
     let city_rect = editor.world().world_rect_2d();
     let city_centre = (city_rect.origin + city_rect.max()) / 2;
-    let cold = {
-        let n = editor.world().get_surface_biome_at(city_centre);
-        let n = n.name();
-        n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+    let cold = match editor.world().get_surface_biome_at(city_centre) {
+        Some(biome) => {
+            let n = biome.name();
+            n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
+        }
+        None => false,
     };
     let street_lantern: crate::minecraft::Block = if cold {
         "minecraft:soul_lantern".into()
@@ -1274,6 +1336,16 @@ pub async fn generate_town(
         // is legible in the console without needing a debugger.
         log_population_stats(&population);
         log_sample_households(&population, 8);
+
+        // Letter each manor's name sign now its household surname is known.
+        for site in &manor_sign_sites {
+            if let Some(hh) = population.households.iter().find(|h| h.home == site.anchor_idx) {
+                println!("Manor sign: {} {}", hh.surname, site.designation());
+                crate::generator::buildings_v2::exterior::place_manor_sign(
+                    editor, site, &hh.surname,
+                ).await;
+            }
+        }
 
         // Bind residents to workplaces before seating anyone at home. The draft
         // weights each unplaced adult by qualification (proximity-led) and spawns
@@ -1592,7 +1664,7 @@ fn discover_worker_slots(
         workplaces += 1;
         for &stand in candidates.iter().take(want) {
             // Stand on the ground at the cell; face the footprint centroid.
-            let y = editor.world().get_ocean_floor_height_at(stand);
+            let Some(y) = editor.world().get_ocean_floor_height_at(stand) else { continue; };
             let stand3 = Point3D::new(stand.x, y, stand.y);
             let centre3 = Point3D::new(centroid.x, y, centroid.y);
             let facing = yaw_toward(stand3, centre3);

@@ -175,7 +175,7 @@ pub(super) async fn lay_soil_patch(editor: &Editor, c: Point2D, h: i32) {
     lay_soil(editor, c, h).await;
     for d in CARDINALS_2D {
         let n = c + d;
-        let hn = editor.world().get_ocean_floor_height_at(n);
+        let Some(hn) = editor.world().get_ocean_floor_height_at(n) else { continue; };
         lay_soil(editor, n, hn).await;
     }
 }

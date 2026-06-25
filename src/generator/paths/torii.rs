@@ -117,7 +117,8 @@ async fn build_torii(editor: &Editor, center: Point3D, road_dir: Cardinal) {
     let post_top = base_y + POST_HEIGHT - 1;
     for side in [-POST_OFFSET, POST_OFFSET] {
         let foot = c + p * side;
-        let ground_y = editor.world().add_height(foot).y;
+        let Some(ground) = editor.world().add_height(foot) else { continue; };
+        let ground_y = ground.y;
         for y in ground_y.min(post_top)..=post_top {
             editor.place_block_forced(&red, at(side, y)).await;
         }

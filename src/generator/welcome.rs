@@ -131,7 +131,9 @@ pub async fn place_welcome_title(
 
     // Bury at the town centre, still inside a chunk that loads when players are
     // in town.
-    let surface_y = editor.world().get_height_at(centre);
+    let Some(surface_y) = editor.world().get_height_at(centre) else {
+        return;
+    };
     let base = Point3D::new(centre.x, surface_y - BURY_DEPTH, centre.y);
 
     // Chain (west→east): subtitle → title → tag. Each fires the next on the same

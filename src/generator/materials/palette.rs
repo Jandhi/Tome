@@ -37,6 +37,14 @@ pub struct Palette {
     pub primary_color : Option<Color>,
     pub secondary_color : Option<Color>,
 
+    /// Block-entity pattern SNBT (`{patterns:[...]}`) stamped on every banner
+    /// this palette recolours, giving a manor family one heraldic design across
+    /// all its banners. Set per-building at placement time (see `settlement.rs`
+    /// / `generator::heraldry`); `None` for ordinary buildings, whose banners
+    /// stay solid-colour. Not loaded from data files.
+    #[serde(default)]
+    pub banner_data : Option<String>,
+
     pub tags : Option<Vec<String>>,
 }
 

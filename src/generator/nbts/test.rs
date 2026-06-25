@@ -104,7 +104,7 @@ mod tests {
             .join("data").join("structures").join("test_save.nbt");
         
         let midpoint = editor.world_mut().world_rect_2d().size / 2;
-        let point = editor.world_mut().add_height(midpoint);
+        let point = editor.world_mut().add_height(midpoint).expect("test cell in bounds");
 
         let data = RefCell::new(data);
         let materials = &data.borrow().materials;
@@ -140,7 +140,7 @@ mod tests {
         let mut editor = world.get_editor();
 
         let midpoint = editor.world().world_rect_2d().size / 2;
-        let point = editor.world().add_height(midpoint);
+        let point = editor.world().add_height(midpoint).expect("test cell in bounds");
         //point.y = point.y - 1; // Adjust height if necessary
 
         let structures = Structure::load().expect("Failed to load structures");

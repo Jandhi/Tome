@@ -248,7 +248,10 @@ pub fn name_roads_layered(
             (dedup(&mut used, "High", suf), Layer::Centre)
         } else {
             let biome = world.get_surface_biome_at(cells[cells.len() / 2]);
-            let pool = cfg.generic_pool(biome.name(), culture);
+            // OOB centre cell -> no biome hint; generic_pool handles an unknown
+            // biome name by falling back to its culture-only word list.
+            let biome_name = biome.as_ref().map(|b| b.name()).unwrap_or("");
+            let pool = cfg.generic_pool(biome_name, culture);
             (generic_name(&pool, rid, suf, flav, &mut used), Layer::Generic)
         };
 

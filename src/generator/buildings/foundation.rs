@@ -28,8 +28,10 @@ pub async fn build_foundation(
     );
 
     for point in area.union(&edge).into_iter() {
-        let height = editor.world().get_ocean_floor_height_at(*point);
-        let grid_height = grid.origin.y; 
+        let Some(height) = editor.world().get_ocean_floor_height_at(*point) else {
+            continue;
+        };
+        let grid_height = grid.origin.y;
         if height >= grid_height - 1 {
             let block = editor.world().get_block(point.add_y(height - 1)).expect("Block not found at point");
             editor.place_block(&block, point.add_y(grid_height - 1)).await;

@@ -204,7 +204,7 @@ async fn flatten_region(editor: &mut Editor, region: &Region, theme: &Theme) {
         region
             .cells
             .iter()
-            .map(|&c| (c, world.get_ocean_floor_height_at(c)))
+            .filter_map(|&c| world.get_ocean_floor_height_at(c).map(|h| (c, h)))
             .collect()
     };
     let mut sorted: Vec<i32> = nat.values().copied().collect();
@@ -221,7 +221,7 @@ async fn flatten_region(editor: &mut Editor, region: &Region, theme: &Theme) {
         if is_building(editor.world().get_claim(c).as_ref()) {
             continue;
         }
-        let nat_h = nat[&c];
+        let Some(&nat_h) = nat.get(&c) else { continue; };
         let t = flatten_blend(depth.get(&c).copied().unwrap_or(2));
         let tgt = (nat_h as f32 * (1.0 - t) + target_h as f32 * t).round() as i32;
         let surface = tgt - 1; // the grass surface y
@@ -305,7 +305,15 @@ pub async fn furnish_park(
     // One type per region, chosen from the centroid biome.
     let sum = region.cells.iter().fold(Point2D::ZERO, |a, p| a + *p);
     let centroid = sum / region.cells.len().max(1) as i32;
-    let biome = world.get_surface_biome_at(centroid);
+    // Sample the centroid's biome; if that cell is out of bounds, fall back to the
+    // first region cell that has one. A region with no in-bounds cell at all can't
+    // be furnished, so bail with no scenes.
+    let Some(biome) = world
+        .get_surface_biome_at(centroid)
+        .or_else(|| region.cells.iter().find_map(|&c| world.get_surface_biome_at(c)))
+    else {
+        return (ParkType::Wooded, Vec::new());
+    };
     let park_type = choose_park_type(&biome, theme.arid, rng);
 
     // In a sand-floored (desert) biome, green the whole park so flowers, trees,
@@ -317,7 +325,7 @@ pub async fn furnish_park(
         && !matches!(park_type, ParkType::Cemetery | ParkType::Cactus);
     if green_floor {
         for &c in &region.cells {
-            let h = world.get_ocean_floor_height_at(c);
+            let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
             lay_soil(editor, c, h).await;
         }
     }
@@ -404,7 +412,8 @@ fn scatter_park_visitors(
         if !CARDINALS_2D.iter().all(|d| region_cells.contains(&(c + *d))) {
             continue;
         }
-        let feet = Point3D::new(c.x, world.get_ocean_floor_height_at(c), c.y);
+        let Some(feet_y) = world.get_ocean_floor_height_at(c) else { continue; };
+        let feet = Point3D::new(c.x, feet_y, c.y);
         let facing = yaw_toward(feet, Point3D::new(centroid.x, feet.y, centroid.y));
         let mut scene = AnchorScene::solo_with(
             feet,
@@ -444,14 +453,14 @@ async fn furnish_cemetery(
         if used.contains(&c) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         put(editor, c.x, h, c.y, theme.wall).await;
         used.insert(c);
     }
     // A lantern on every eighth wall post so the plot reads at night.
     for (i, &c) in perimeter.iter().enumerate() {
         if i % 8 == 0 {
-            let h = world.get_ocean_floor_height_at(c);
+            let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
             put(editor, c.x, h + 1, c.y, "minecraft:lantern").await;
         }
     }
@@ -467,8 +476,9 @@ async fn furnish_cemetery(
         while gz <= max_z {
             let c = Point2D::new(gx, gz);
             if cells.contains(&c) && !used.contains(&c) {
-                let h = world.get_ocean_floor_height_at(c);
-                place_grave(editor, c, h, used, rng, theme).await;
+                if let Some(h) = world.get_ocean_floor_height_at(c) {
+                    place_grave(editor, c, h, used, rng, theme).await;
+                }
             }
             gz += 3;
         }
@@ -516,21 +526,25 @@ async fn furnish_lawn(
     let centroid = sum / region.cells.len().max(1) as i32;
 
     if let Some(centre) = interior.iter().copied().min_by_key(|c| c.distance_squared(&centroid)) {
-        let h = world.get_ocean_floor_height_at(centre);
-        let grand_tree = rng.percent(50);
-        if grand_tree {
-            if let Some(tree) = park_tree(theme, &world.get_surface_biome_at(centre), rng) {
+        if let Some(h) = world.get_ocean_floor_height_at(centre) {
+            let grand_tree = rng.percent(50);
+            let tree = if grand_tree {
+                world
+                    .get_surface_biome_at(centre)
+                    .and_then(|b| park_tree(theme, &b, rng))
+            } else {
+                None
+            };
+            if let Some(tree) = tree {
                 lay_soil_patch(editor, centre, h).await;
                 let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y), rng).await;
             } else {
                 place_monument(editor, centre, h, theme).await;
             }
-        } else {
-            place_monument(editor, centre, h, theme).await;
-        }
-        used.insert(centre);
-        for d in CARDINALS_2D {
-            used.insert(centre + d);
+            used.insert(centre);
+            for d in CARDINALS_2D {
+                used.insert(centre + d);
+            }
         }
     }
 
@@ -555,7 +569,7 @@ async fn furnish_zen(
         if used.contains(&c) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         put_forced(editor, c.x, h - 1, c.y, theme.rake).await;
     }
 
@@ -569,7 +583,7 @@ async fn furnish_zen(
         if used.contains(&c) || rocks.iter().any(|r| chebyshev(*r, c) < 3) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         place_rock(editor, c, h, cells, used, rng, theme).await;
         rocks.push(c);
     }
@@ -584,7 +598,7 @@ async fn furnish_zen(
         if used.contains(&c) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         put(editor, c.x, h, c.y, theme.stone).await;
         put(editor, c.x, h + 1, c.y, "minecraft:lantern").await;
         used.insert(c);
@@ -600,13 +614,17 @@ async fn furnish_zen(
         .filter(|c| !used.contains(c))
         .min_by_key(|c| c.distance_squared(&centroid))
     {
-        if let Some(tree) = park_tree(theme, &world.get_surface_biome_at(centre), rng) {
-            let h = world.get_ocean_floor_height_at(centre);
-            lay_soil_patch(editor, centre, h).await;
-            let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y), rng).await;
-            used.insert(centre);
-            for d in CARDINALS_2D {
-                used.insert(centre + d);
+        if let (Some(biome), Some(h)) = (
+            world.get_surface_biome_at(centre),
+            world.get_ocean_floor_height_at(centre),
+        ) {
+            if let Some(tree) = park_tree(theme, &biome, rng) {
+                lay_soil_patch(editor, centre, h).await;
+                let _ = generate_tree_feature(tree, editor, Point3D::new(centre.x, h, centre.y), rng).await;
+                used.insert(centre);
+                for d in CARDINALS_2D {
+                    used.insert(centre + d);
+                }
             }
         }
     }
@@ -633,7 +651,9 @@ async fn furnish_fountain(
     let Some(centre) = interior.iter().copied().min_by_key(|c| c.distance_squared(&centroid)) else {
         return;
     };
-    let h = world.get_ocean_floor_height_at(centre);
+    let Some(h) = world.get_ocean_floor_height_at(centre) else {
+        return;
+    };
 
     // Build the largest fountain that fits (5×5), else a plain monument.
     if square_fits(cells, used, centre, 2) {
@@ -652,7 +672,7 @@ async fn furnish_fountain(
                 if !cells.contains(&p) || used.contains(&p) {
                     break;
                 }
-                let hp = world.get_ocean_floor_height_at(p);
+                let Some(hp) = world.get_ocean_floor_height_at(p) else { break; };
                 put_forced(editor, p.x, hp - 1, p.y, theme.path).await;
                 used.insert(p);
                 step += 1;
@@ -690,7 +710,7 @@ async fn furnish_hedge(
         if used.contains(&c) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         place_hedge(editor, c, h, theme.hedge).await;
         used.insert(c);
     }
@@ -704,10 +724,11 @@ async fn furnish_hedge(
             continue;
         }
         if rng.percent(40) {
-            let h = world.get_ocean_floor_height_at(c);
-            let flower = *rng.choose(&FORMAL_FLOWERS);
-            lay_soil(editor, c, h).await;
-            put_forced(editor, c.x, h, c.y, flower).await;
+            if let Some(h) = world.get_ocean_floor_height_at(c) {
+                let flower = *rng.choose(&FORMAL_FLOWERS);
+                lay_soil(editor, c, h).await;
+                put_forced(editor, c.x, h, c.y, flower).await;
+            }
         }
         used.insert(c);
     }
@@ -722,8 +743,9 @@ async fn furnish_hedge(
     let passages = carve_maze(&maze_area, rng);
     for &c in &maze_area {
         if !passages.contains(&c) {
-            let h = world.get_ocean_floor_height_at(c);
-            place_hedge(editor, c, h, theme.hedge).await;
+            if let Some(h) = world.get_ocean_floor_height_at(c) {
+                place_hedge(editor, c, h, theme.hedge).await;
+            }
         }
         used.insert(c); // keep passages clear of later props too
     }
@@ -757,7 +779,7 @@ async fn furnish_cactus(
         if used.contains(&c) || placed.iter().any(|t| chebyshev(*t, c) < 2) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         // Grow the cactus through the Tree system; it lays its own sand footing.
         let _ = generate_tree_feature(Tree::Cactus, editor, Point3D::new(c.x, h, c.y), rng).await;
         used.insert(c);
@@ -778,7 +800,7 @@ async fn furnish_cactus(
         if used.contains(&c) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         place_rock(editor, c, h, cells, used, rng, theme).await;
         rocks += 1;
     }
@@ -788,7 +810,7 @@ async fn furnish_cactus(
         if used.contains(&c) || !rng.percent(15) {
             continue;
         }
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         put_forced(editor, c.x, h - 1, c.y, pad).await;
         put_forced(editor, c.x, h, c.y, "minecraft:dead_bush").await;
         used.insert(c);
@@ -872,7 +894,7 @@ async fn place_rock(
     for d in CARDINALS_2D {
         let n = c + d;
         if rng.percent(35) && cells.contains(&n) && !used.contains(&n) {
-            let hn = editor.world().get_ocean_floor_height_at(n);
+            let Some(hn) = editor.world().get_ocean_floor_height_at(n) else { continue; };
             put(editor, n.x, hn, n.y, rock).await;
             used.insert(n);
         }
@@ -931,10 +953,15 @@ async fn scatter_trees(
         if used.contains(&c) || placed.iter().any(|t| chebyshev(*t, c) < min_gap) {
             continue;
         }
-        let Some(tree) = park_tree(theme, &world.get_surface_biome_at(c), rng) else {
+        let Some(biome) = world.get_surface_biome_at(c) else {
             continue;
         };
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(tree) = park_tree(theme, &biome, rng) else {
+            continue;
+        };
+        let Some(h) = world.get_ocean_floor_height_at(c) else {
+            continue;
+        };
         lay_soil_patch(editor, c, h).await;
         let _ = generate_tree_feature(tree, editor, Point3D::new(c.x, h, c.y), rng).await;
         used.insert(c);
@@ -960,7 +987,7 @@ async fn dapple_plants(
             continue;
         }
         let plant = *rng.choose(plants);
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         lay_soil(editor, c, h).await;
         put_forced(editor, c.x, h, c.y, plant).await;
         used.insert(c);
@@ -985,7 +1012,7 @@ async fn scatter_tall_flowers(
             continue;
         }
         let kind = *rng.choose(&["rose_bush", "lilac", "peony", "sunflower"]);
-        let h = world.get_ocean_floor_height_at(c);
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         lay_soil(editor, c, h).await;
         put_forced(editor, c.x, h, c.y, &format!("minecraft:{kind}[half=lower]")).await;
         put_forced(editor, c.x, h + 1, c.y, &format!("minecraft:{kind}[half=upper]")).await;
@@ -1006,11 +1033,13 @@ async fn small_pond(
         if used.contains(&c) {
             continue;
         }
-        let h0 = world.get_ocean_floor_height_at(c);
+        let Some(h0) = world.get_ocean_floor_height_at(c) else { continue; };
         let flat = (-1..=1).all(|dx| {
             (-1..=1).all(|dz| {
                 let p = Point2D::new(c.x + dx, c.y + dz);
-                cells.contains(&p) && !used.contains(&p) && world.get_ocean_floor_height_at(p) == h0
+                cells.contains(&p)
+                    && !used.contains(&p)
+                    && world.get_ocean_floor_height_at(p) == Some(h0)
             })
         });
         if !flat {
@@ -1024,7 +1053,7 @@ async fn small_pond(
                 CARDINALS_2D.iter().all(|d| {
                     let n = p + *d;
                     let inside = (n.x - c.x).abs() <= 1 && (n.y - c.y).abs() <= 1;
-                    inside || world.get_ocean_floor_height_at(n) >= h0
+                    inside || world.get_ocean_floor_height_at(n).is_some_and(|hn| hn >= h0)
                 })
             })
         });
@@ -1058,18 +1087,24 @@ async fn carve_pond(
         if used.contains(&c) {
             return false;
         }
-        let h0 = world.get_ocean_floor_height_at(c);
+        let Some(h0) = world.get_ocean_floor_height_at(c) else {
+            return false;
+        };
         (-1..=1).all(|dx| {
             (-1..=1).all(|dz| {
                 let p = Point2D::new(c.x + dx, c.y + dz);
-                cells.contains(&p) && !used.contains(&p) && world.get_ocean_floor_height_at(p) == h0
+                cells.contains(&p)
+                    && !used.contains(&p)
+                    && world.get_ocean_floor_height_at(p) == Some(h0)
             })
         })
     }) else {
         return Vec::new();
     };
 
-    let h0 = world.get_ocean_floor_height_at(seed);
+    let Some(h0) = world.get_ocean_floor_height_at(seed) else {
+        return Vec::new();
+    };
     let mut pond: Vec<(Point2D, i32)> = Vec::new();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
     let mut seen: HashSet<Point2D> = HashSet::new();
@@ -1079,7 +1114,7 @@ async fn carve_pond(
         if pond.len() >= max_cells {
             break;
         }
-        if !cells.contains(&c) || used.contains(&c) || world.get_ocean_floor_height_at(c) != h0 {
+        if !cells.contains(&c) || used.contains(&c) || world.get_ocean_floor_height_at(c) != Some(h0) {
             continue;
         }
         // Only fill where every side is walled by solid terrain (>= h0) or more
@@ -1087,7 +1122,7 @@ async fn carve_pond(
         // fringe cells stay dry and become the shore.
         let contained = CARDINALS_2D
             .iter()
-            .all(|d| world.get_ocean_floor_height_at(c + *d) >= h0);
+            .all(|d| world.get_ocean_floor_height_at(c + *d).is_some_and(|hn| hn >= h0));
         if !contained {
             continue;
         }
@@ -1168,8 +1203,9 @@ async fn place_benches(
         if used.contains(&c) || placed.iter().any(|b| chebyshev(*b, c) < 4) {
             continue;
         }
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
         if let Some(inward) = inward_dir(world, c, cells) {
-            place_bench(editor, c, world.get_ocean_floor_height_at(c), inward, wood).await;
+            place_bench(editor, c, h, inward, wood).await;
             used.insert(c);
             placed.push(c);
         }
@@ -1194,7 +1230,8 @@ async fn place_lamps(
         if used.contains(&c) || placed.iter().any(|l| chebyshev(*l, c) < 6) {
             continue;
         }
-        place_lantern_post(editor, c, world.get_ocean_floor_height_at(c), wood).await;
+        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
+        place_lantern_post(editor, c, h, wood).await;
         used.insert(c);
         placed.push(c);
     }

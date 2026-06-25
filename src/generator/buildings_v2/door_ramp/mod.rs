@@ -306,7 +306,24 @@ pub fn plan_door_ramps_from_world(
     footprint: &Footprint,
     world: &World,
 ) -> Vec<DoorRamp> {
-    plan_door_ramps(wall_segs, footprint, |p| world.get_ocean_floor_height_at(p))
+    // The planner's terrain closure must yield an `i32` per cell. World height
+    // lookups now return `Option` (None only for out-of-bounds cells). For a
+    // building being placed the footprint and its door-adjacent cells are
+    // in-bounds, so every sample is `Some` and behavior is identical to before.
+    // For the degenerate edge case of a sample falling outside the build area,
+    // fall back to a representative in-bounds footprint height rather than
+    // panicking — never a fabricated constant.
+    let fallback_y = footprint
+        .filled_points()
+        .iter()
+        .find_map(|&p| world.get_ocean_floor_height_at(p));
+    let Some(fallback_y) = fallback_y else {
+        // Whole footprint is out of bounds — nothing sensible to plan.
+        return Vec::new();
+    };
+    plan_door_ramps(wall_segs, footprint, |p| {
+        world.get_ocean_floor_height_at(p).unwrap_or(fallback_y)
+    })
 }
 
 /// Place the planned ramps into the editor. Ascending ramps fill stone under

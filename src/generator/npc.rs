@@ -434,7 +434,7 @@ mod tests {
         // Build-area-local coordinates: the editor adds the origin back on spawn.
         let size = editor.world().world_rect_2d().size;
         let centre = Point2D::new(size.x / 2, size.y / 2);
-        let ground = editor.world().get_ocean_floor_height_at(centre);
+        let ground = editor.world().get_ocean_floor_height_at(centre).expect("centre in bounds");
         let feet = Point3D::new(centre.x, ground, centre.y);
 
         spawn_villager_npc(
