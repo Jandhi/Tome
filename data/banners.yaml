@@ -1,0 +1,48 @@
+# Heraldic banner designs for manor families. Each manor flies ONE design on
+# every banner it owns — the pair flanking its front door and every banner
+# inside the house. The banner block's own colour is the family's primary colour
+# (the heraldic "field"); each pattern layer below is stamped in a distinct
+# secondary colour (the "charge"). One design is picked per family in
+# `settlement.rs` (see `generator::heraldry::pick_family_banner`).
+#
+# `layers` are minecraft `banner_pattern` registry ids, stacked bottom-to-top.
+# `blazon` is the charge as an English noun phrase for the chronicle, slotted
+# into "a {secondary} {blazon} on a {primary} background" — keep it reading
+# naturally there (e.g. "cross", "saltire", "cross within a border").
+designs:
+  - name: pale
+    layers: [stripe_center]
+    blazon: pale
+  - name: fess
+    layers: [stripe_middle]
+    blazon: fess
+  - name: bend
+    layers: [diagonal_up_right]
+    blazon: bend
+  - name: saltire
+    layers: [cross]
+    blazon: saltire
+  - name: cross
+    layers: [straight_cross]
+    blazon: cross
+  - name: chief
+    layers: [stripe_top]
+    blazon: chief
+  - name: bordure
+    layers: [border]
+    blazon: border
+  - name: lozenge
+    layers: [rhombus]
+    blazon: lozenge
+  - name: pile
+    layers: [triangle_bottom]
+    blazon: pile
+  - name: roundel
+    layers: [circle]
+    blazon: roundel
+  - name: cross_bordure
+    layers: [straight_cross, border]
+    blazon: cross within a border
+  - name: saltire_chief
+    layers: [cross, stripe_top]
+    blazon: saltire beneath a chief

@@ -85,7 +85,7 @@ pub async fn scatter_garden_lanterns(
         if placed.iter().any(|p| chebyshev(*p, c) < GARDEN_GAP) {
             continue;
         }
-        let foot = editor.world().add_height(c);
+        let Some(foot) = editor.world().add_height(c) else { continue; };
         build_stone_lantern(editor, &mut placer, foot).await;
         placed.push(c);
     }

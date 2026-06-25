@@ -57,7 +57,9 @@ pub async fn blend_terrain(ctx: &mut BuildCtx<'_>, footprint: &Footprint, base_y
                 continue;
             }
 
-            let terrain_y = ctx.editor.world().get_ocean_floor_height_at(point);
+            let Some(terrain_y) = ctx.editor.world().get_ocean_floor_height_at(point) else {
+                continue;
+            };
 
             // Only raise terrain, never lower it. If terrain is already at or
             // above the lerped target there's nothing to do.

@@ -139,7 +139,7 @@ async fn furnish_plaza_inner(
     // level square. The flatten *eases out* at the border: the two outermost
     // rings only partly level, lerping from natural ground toward the flat
     // interior, so the plaza doesn't drop off a cliff at its edge.
-    let mut heights: Vec<i32> = region.cells.iter().map(|&c| height_at(c)).collect();
+    let mut heights: Vec<i32> = region.cells.iter().filter_map(|&c| height_at(c)).collect();
     heights.sort_unstable();
     let target_top = heights[heights.len() / 2] - 1; // the flat paved surface y
 
@@ -147,10 +147,10 @@ async fn furnish_plaza_inner(
     let surf: HashMap<Point2D, i32> = region
         .cells
         .iter()
-        .map(|&c| {
-            let nat = height_at(c) - 1; // natural surface y
+        .filter_map(|&c| {
+            let nat = height_at(c)? - 1; // natural surface y
             let t = flatten_blend(depth.get(&c).copied().unwrap_or(2));
-            (c, (nat as f32 * (1.0 - t) + target_top as f32 * t).round() as i32)
+            Some((c, (nat as f32 * (1.0 - t) + target_top as f32 * t).round() as i32))
         })
         .collect();
 
@@ -161,7 +161,7 @@ async fn furnish_plaza_inner(
         .cells
         .iter()
         .copied()
-        .filter(|c| surf[c] == target_top)
+        .filter(|c| surf.get(c).copied() == Some(target_top))
         .collect();
 
     // Placement lists drawn from the plateau (never the stepped border):
@@ -190,8 +190,9 @@ async fn furnish_plaza_inner(
         if is_building(world.get_claim(c).as_ref()) {
             continue;
         }
-        let s = surf[&c]; // tapered surface y for this cell
-        let base = height_at(c) - 1; // current surface y
+        let Some(&s) = surf.get(&c) else { continue; }; // tapered surface y for this cell
+        let Some(base_h) = height_at(c) else { continue; };
+        let base = base_h - 1; // current surface y
         // Cut anything above the new surface.
         for y in (s + 1)..=base {
             put_forced(editor, c.x, y, c.y, "minecraft:air").await;
@@ -440,7 +441,7 @@ async fn furnish_plaza_inner(
             continue;
         }
         if trees < 3 {
-            let biome = world.get_surface_biome_at(c);
+            let Some(biome) = world.get_surface_biome_at(c) else { continue; };
             if place_tree(editor, theme, &biome, c, surf[&c] + 1, rng).await {
                 used.insert(c);
                 trees += 1;

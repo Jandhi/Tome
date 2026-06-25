@@ -209,7 +209,9 @@ async fn logging_production_painter(
     let mut to_log: HashSet<Point2D> = HashSet::new();
     let mut stumps: Vec<(Point3D, Block)> = Vec::with_capacity(selected.len());
     for tree in &selected {
-        let stump_y = editor.world().get_non_tree_height(tree.trunk);
+        let Some(stump_y) = editor.world().get_non_tree_height(tree.trunk) else {
+            continue;
+        };
         let stump_pos = tree.trunk.add_y(stump_y);
         stumps.push((stump_pos, editor.get_block(stump_pos)));
         to_log.extend(tree.cells.iter().copied());
@@ -491,7 +493,10 @@ async fn sugarcane_production_painter(
     // 1. Soil bed — every cell gets a cane-supportable solid surface, keeping the
     //    existing block where it already qualifies.
     for &c in &ordered {
-        let y = editor.world().get_non_tree_height(c) - 1;
+        let Some(ch) = editor.world().get_non_tree_height(c) else {
+            continue;
+        };
+        let y = ch - 1;
         let pos = Point3D::new(c.x, y, c.y);
         let current = editor.get_block(pos);
         if !can_support_sugar_cane(&current.id) {
@@ -514,7 +519,11 @@ async fn sugarcane_production_painter(
     loop {
         let mut demote: Vec<Point2D> = Vec::new();
         for &w in &water_set {
-            let wy = editor.world().get_non_tree_height(w) - 1;
+            let Some(wh) = editor.world().get_non_tree_height(w) else {
+                demote.push(w);
+                continue;
+            };
+            let wy = wh - 1;
             // Floor must be solid.
             if !is_solid_support(&editor.get_block(Point3D::new(w.x, wy - 1, w.y))) {
                 demote.push(w);
@@ -526,7 +535,8 @@ async fn sugarcane_production_painter(
                 if is_solid_support(&editor.get_block(Point3D::new(n.x, wy, n.y))) {
                     return true;
                 }
-                water_set.contains(&n) && editor.world().get_non_tree_height(n) - 1 == wy
+                water_set.contains(&n)
+                    && editor.world().get_non_tree_height(n).is_some_and(|nh| nh - 1 == wy)
             });
             if !boxed {
                 demote.push(w);
@@ -543,7 +553,10 @@ async fn sugarcane_production_painter(
     // 3. Place the validated (boxed) water.
     let water_block: Block = "water".into();
     for &w in &water_set {
-        let wy = editor.world().get_non_tree_height(w) - 1;
+        let Some(wh) = editor.world().get_non_tree_height(w) else {
+            continue;
+        };
+        let wy = wh - 1;
         editor.place_block_forced(&water_block, Point3D::new(w.x, wy, w.y)).await;
     }
     editor.flush_buffer().await;
@@ -559,11 +572,14 @@ async fn sugarcane_production_painter(
         if water_set.contains(&c) {
             continue;
         }
-        let cy = editor.world().get_non_tree_height(c); // base air cell of the column
+        let Some(cy) = editor.world().get_non_tree_height(c) else {
+            continue;
+        }; // base air cell of the column
         let support_y = cy - 1;
         let has_water = CARDINALS_2D.iter().any(|&d| {
             let n = c + d;
-            water_set.contains(&n) && editor.world().get_non_tree_height(n) - 1 == support_y
+            water_set.contains(&n)
+                && editor.world().get_non_tree_height(n).is_some_and(|nh| nh - 1 == support_y)
         });
         if !has_water {
             continue;
@@ -636,7 +652,7 @@ fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], r
 /// directly above (the canopy roof) — hanging beneath a leaf is fine even without
 /// neighbouring leaves.
 fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)> {
-    let base_y = editor.world().get_non_tree_height(trunk);
+    let base_y = editor.world().get_non_tree_height(trunk)?;
 
     // Walk up the trunk's logs to find the top of the stem.
     let mut top_y = base_y;
@@ -769,7 +785,10 @@ fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
     let step = (ordered.len() / MINE_GEOLOGY_SAMPLES).max(1);
     for c in ordered.iter().step_by(step) {
-        let top = editor.world().get_non_tree_height(*c) - 1;
+        let Some(ch) = editor.world().get_non_tree_height(*c) else {
+            continue;
+        };
+        let top = ch - 1;
         for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
             // `try_get_block` (not `get_block`) so scanning below the world floor —
             // common for a mine near bedrock — returns None instead of panicking.
@@ -804,7 +823,10 @@ fn detect_outcrop_rock(center: Point2D, editor: &Editor) -> (String, bool) {
             if !editor.world().is_in_bounds_2d(cell) {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(cell) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(cell) else {
+                continue;
+            };
+            let top = ch - 1;
             for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
                 let Some(block) = editor.try_get_block(Point3D::new(cell.x, top - dy, cell.y)) else {
                     break;
@@ -884,7 +906,10 @@ async fn place_outcrop(
             if !editor.world().is_in_bounds_2d(cell) {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(cell) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(cell) else {
+                continue;
+            };
+            let top = ch - 1;
             // Height tapers from the centre outward, plus a 0–1 block of jitter.
             let falloff = 1.0 - (dist2 as f32 / (r2 as f32 + 1.0)).sqrt();
             let taper = (falloff * MINE_BOULDER_MAX_HEIGHT as f32).round() as i32;
@@ -970,7 +995,10 @@ async fn mine_production_painter(
             if rng.rand_i32_range(0, 1000) >= MINE_TERRAIN_ORE_PERMILLE {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(c) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(c) else {
+                continue;
+            };
+            let top = ch - 1;
             editor.place_block_forced(&seam_ore, Point3D::new(c.x, top, c.y)).await;
         }
     }
@@ -1200,7 +1228,9 @@ async fn pasture_production_painter(
     let (fence_block, gate_id) = resolve_fence_blocks(&p.palette, data, rng);
 
     for &cell in &fence_cells {
-        let y = editor.world().get_non_tree_height(cell);
+        let Some(y) = editor.world().get_non_tree_height(cell) else {
+            continue;
+        };
         let pos = Point3D::new(cell.x, y, cell.y);
         if gate_cells.contains(&cell) {
             // Face the gate toward an outward (non-pasture) neighbour.
@@ -1234,7 +1264,9 @@ async fn pasture_production_painter(
         let spots = rng.choose_many(&interior, count);
         let mut entities: Vec<(Point3D, String, Option<String>)> = Vec::with_capacity(spots.len());
         for &spot in spots {
-            let y = editor.world().get_non_tree_height(spot);
+            let Some(y) = editor.world().get_non_tree_height(spot) else {
+                continue;
+            };
             let pos = Point3D::new(spot.x, y, spot.y);
             let nbt = animal_name_nbt(&reg.animal_names, &reg.animal_name_prefixes, &reg.animal_name_suffixes, rng);
             entities.push((pos, p.animal.clone(), nbt));

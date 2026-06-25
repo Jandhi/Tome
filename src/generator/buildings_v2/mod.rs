@@ -17,6 +17,7 @@ pub use pipeline::{BuildCtx, HouseOutput, build_house};
 pub use self::walls::{TimberPattern, WindowFill};
 
 use crate::generator::materials::PaletteId;
+use crate::minecraft::Color;
 use footprint::SizeClass;
 use roof::RoofStyle;
 use roof::gable::GablePitch;
@@ -42,6 +43,32 @@ impl Culture {
             Culture::Medieval => "medieval_spruce".into(),
             Culture::Desert => "desert_sandstone".into(),
             Culture::Japanese => "japanese_dark_blackstone".into(),
+        }
+    }
+
+    /// Curated, harmonious dye palette this culture's buildings draw their
+    /// accent colour from. The settlement's `ColorScheme` picks its two town
+    /// colours and the manor family colours out of this pool, so the whole town
+    /// reads as one coherent colour family. Every colour here must have a
+    /// matching `colors:` word entry for this culture in `settlement_names.yaml`
+    /// so a town named after its dominant colour can render it.
+    pub fn color_pool(&self) -> Vec<Color> {
+        match self {
+            // Heraldic + earthy: the classic medieval banner colours.
+            Culture::Medieval => vec![
+                Color::Red, Color::Blue, Color::Green,
+                Color::Yellow, Color::White, Color::Black, Color::Brown,
+            ],
+            // Vermilion / indigo / ink — the traditional Japanese register.
+            Culture::Japanese => vec![
+                Color::Red, Color::Blue, Color::White,
+                Color::Black, Color::Purple, Color::Yellow, Color::Green,
+            ],
+            // Sun-bleached earth tones for the desert.
+            Culture::Desert => vec![
+                Color::White, Color::Red, Color::Green,
+                Color::Yellow, Color::LightBlue, Color::Black,
+            ],
         }
     }
 

@@ -175,7 +175,7 @@ fn is_valid_spot(
 /// light leans out over the street. `toward_road` is a unit step from the verge
 /// cell back toward the centreline.
 async fn place_lamp(editor: &Editor, cell: Point2D, toward_road: Point2D, lantern: &Block) {
-    let ground = editor.world().add_height(cell);
+    let Some(ground) = editor.world().add_height(cell) else { return; };
     let fence: Block = "minecraft:oak_fence".into();
 
     // Vertical post.

@@ -410,7 +410,7 @@ mod minecraft_tests {
             for x in 0..64i32 {
                 for z in 0..64i32 {
                     let world_point = Point2D::new(area_min.x + x, area_min.y + z);
-                    let y = editor.world().get_height_at(world_point);
+                    let y = editor.world().get_height_at(world_point).expect("test cell in bounds");
 
                     let block: Block = if edge_set.contains(&world_point) {
                         "stone_bricks".into()
@@ -428,7 +428,7 @@ mod minecraft_tests {
             let sign_x = if ox < 0 { area_max.x } else { area_min.x };
             let sign_z = if oz < 0 { area_max.y } else { area_min.y };
             let sign_point = Point2D::new(sign_x, sign_z);
-            let sign_y = editor.world().get_height_at(sign_point);
+            let sign_y = editor.world().get_height_at(sign_point).expect("test cell in bounds");
             editor.place_block(&sign_block(name), sign_point.add_y(sign_y + 1)).await;
         }
 
@@ -445,7 +445,7 @@ mod minecraft_tests {
 
         let world_rect = editor.world().world_rect_2d();
         let center = world_rect.midpoint();
-        let y = editor.world().get_height_at(center);
+        let y = editor.world().get_height_at(center).expect("test cell in bounds");
 
         // Create a 30x30 plot with some obstacles
         let plot_min = Point2D::new(center.x - 15, center.y - 15);

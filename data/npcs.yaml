@@ -47,6 +47,230 @@ first_name_suffixes:
   - ric
   - wyn
 
+# ── Per-culture first names ───────────────────────────────────────────────────
+# Localized first-name pools, picked directly by `roll_first_name` based on the
+# town's `Culture` (see `src/generator/population.rs`). When a culture has a
+# non-empty `first_names` list it is used verbatim; otherwise generation falls
+# back to the legacy `first_name_prefixes` × `first_name_suffixes` composition
+# above. Lists mix masculine and feminine given names — a name is assigned to an
+# NPC at random regardless of villager skin. Surnames are NOT localized here
+# (still composed from `surname_*`); only first names are culture-specific.
+cultures:
+  medieval:
+    # Anglo-Saxon / early-medieval English given names, to match the Old-English
+    # settlement names.
+    first_names:
+      - Aldwin
+      - Aldric
+      - Alfred
+      - Ansel
+      - Baldric
+      - Bardolf
+      - Cedric
+      - Cuthbert
+      - Drogo
+      - Dunstan
+      - Eadric
+      - Edgar
+      - Edmund
+      - Edwin
+      - Egbert
+      - Elric
+      - Ewart
+      - Frewin
+      - Garrick
+      - Godric
+      - Godwin
+      - Hamond
+      - Harold
+      - Herewald
+      - Leofric
+      - Leofwin
+      - Maerwin
+      - Odo
+      - Osbert
+      - Osric
+      - Oswin
+      - Oswald
+      - Raedwald
+      - Roderic
+      - Selwyn
+      - Sigeric
+      - Theobald
+      - Theodric
+      - Wilfred
+      - Wulfric
+      - Wulfstan
+      - Wymer
+      - Aelfgifu
+      - Aethelflaed
+      - Aldith
+      - Alwynn
+      - Audrey
+      - Bertha
+      - Cwen
+      - Cyneburh
+      - Eadgyth
+      - Edith
+      - Elfreda
+      - Ermina
+      - Frideswide
+      - Godiva
+      - Goldwyn
+      - Hereswith
+      - Hilda
+      - Leofgyth
+      - Mathilda
+      - Merewyn
+      - Mildred
+      - Osgith
+      - Rowena
+      - Sunngifu
+      - Wilburh
+      - Winfled
+      - Wynflaed
+      - Wynne
+  japanese:
+    # Traditional Japanese given names suited to a feudal village.
+    first_names:
+      - Akio
+      - Akira
+      - Daisuke
+      - Goro
+      - Hideo
+      - Hiroshi
+      - Ichiro
+      - Isamu
+      - Jiro
+      - Jun
+      - Kaname
+      - Katsuo
+      - Kazuo
+      - Kenji
+      - Kenta
+      - Kiyoshi
+      - Kuro
+      - Mamoru
+      - Masaru
+      - Minoru
+      - Nobuo
+      - Noboru
+      - Osamu
+      - Ryo
+      - Saburo
+      - Satoshi
+      - Shin
+      - Shiro
+      - Sora
+      - Susumu
+      - Tadao
+      - Takeshi
+      - Taro
+      - Tetsuo
+      - Toru
+      - Yoshio
+      - Yutaka
+      - Aiko
+      - Akiko
+      - Asa
+      - Chiyo
+      - Emiko
+      - Hana
+      - Hanako
+      - Haru
+      - Hiroko
+      - Kaede
+      - Keiko
+      - Kiku
+      - Kimiko
+      - Mai
+      - Maki
+      - Michiko
+      - Midori
+      - Nori
+      - Rei
+      - Ren
+      - Sachiko
+      - Sakura
+      - Setsuko
+      - Sumire
+      - Tomoko
+      - Yoko
+      - Yuki
+      - Yumi
+      - Yuriko
+  desert:
+    # Arabic given names for the desert culture.
+    first_names:
+      - Abbas
+      - Amir
+      - Anwar
+      - Aziz
+      - Bilal
+      - Faisal
+      - Farid
+      - Hamza
+      - Harun
+      - Hassan
+      - Husain
+      - Ibrahim
+      - Idris
+      - Imran
+      - Ismail
+      - Jamal
+      - Kamal
+      - Karim
+      - Khalid
+      - Mahmud
+      - Malik
+      - Mansur
+      - Marwan
+      - Musa
+      - Nadir
+      - Nasir
+      - Omar
+      - Qasim
+      - Rashid
+      - Sahl
+      - Salim
+      - Samir
+      - Suhayl
+      - Tahir
+      - Tariq
+      - Walid
+      - Yahya
+      - Yusuf
+      - Zahir
+      - Zayd
+      - Ziyad
+      - Aisha
+      - Amira
+      - Asma
+      - Basma
+      - Dunya
+      - Farida
+      - Fatima
+      - Halima
+      - Iman
+      - Jamila
+      - Karima
+      - Khadija
+      - Layla
+      - Lina
+      - Maryam
+      - Nadia
+      - Najwa
+      - Noor
+      - Rania
+      - Rasha
+      - Safiya
+      - Salma
+      - Samira
+      - Yasmin
+      - Zahra
+      - Zaynab
+      - Zubaida
+
 # Surnames are generated on demand by concatenating a `surname_prefix` (capitalized,
 # noun-like root) with a `surname_suffix` (lowercase place-name ending). All
 # combinations are designed to read as plausible English family names —

@@ -77,12 +77,15 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme
             .iter()
             .min_by_key(|c| c.distance_squared(&centroid))
         {
-            let biome = world.get_surface_biome_at(center);
-            place_tree(editor, theme, &biome, center, height_at(center), rng).await;
-            // Keep the centrepiece cell and its neighbours clear of furniture.
-            used.insert(center);
-            for d in CARDINALS_2D {
-                used.insert(center + d);
+            if let (Some(biome), Some(h)) =
+                (world.get_surface_biome_at(center), height_at(center))
+            {
+                place_tree(editor, theme, &biome, center, h, rng).await;
+                // Keep the centrepiece cell and its neighbours clear of furniture.
+                used.insert(center);
+                for d in CARDINALS_2D {
+                    used.insert(center + d);
+                }
             }
         }
     }
@@ -96,8 +99,9 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme
         if used.contains(&c) {
             continue;
         }
+        let Some(h) = height_at(c) else { continue; };
         if let Some(inward) = inward_dir(world, c, &cells) {
-            place_bench(editor, c, height_at(c), inward, theme.wood).await;
+            place_bench(editor, c, h, inward, theme.wood).await;
             used.insert(c);
             placed += 1;
         }
@@ -112,7 +116,8 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme
         if used.contains(&c) {
             continue;
         }
-        place_planter(editor, c, height_at(c), theme.wood).await;
+        let Some(h) = height_at(c) else { continue; };
+        place_planter(editor, c, h, theme.wood).await;
         used.insert(c);
         placed += 1;
     }
@@ -122,7 +127,8 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme
         if used.contains(&c) {
             continue;
         }
-        place_lantern_post(editor, c, height_at(c), theme.wood).await;
+        let Some(h) = height_at(c) else { continue; };
+        place_lantern_post(editor, c, h, theme.wood).await;
         break;
     }
 }

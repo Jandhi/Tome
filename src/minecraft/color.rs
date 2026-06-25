@@ -63,6 +63,26 @@ impl Into<String> for Color {
     }
 }
 
+impl Color {
+    /// An English surname root for this colour, or `None` for colours that don't
+    /// read as a family name. Combined with a place-name suffix (`-well`,
+    /// `-wood`, …) to mint a colour-derived house name — `Black` + `well` =
+    /// `Blackwell`. Used to tie a manor's family name to its family colour.
+    pub fn surname_root(self) -> Option<&'static str> {
+        match self {
+            Color::Black => Some("Black"),
+            Color::White => Some("White"),
+            Color::Gray | Color::LightGray => Some("Grey"),
+            Color::Green => Some("Green"),
+            Color::Brown => Some("Brown"),
+            Color::Red => Some("Red"),
+            Color::Yellow => Some("Gold"),
+            Color::Blue => Some("Blue"),
+            _ => None,
+        }
+    }
+}
+
 const SWAPPABLE_STRINGS: &[&str] = &[
     "wool",
     "carpet",

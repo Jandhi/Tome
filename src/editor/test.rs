@@ -28,7 +28,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let point = editor.world_mut().add_height(Point2D { x, y: z });
+                let point = editor.world_mut().add_height(Point2D { x, y: z }).expect("test cell in bounds");
                 info!("Placing block at: {:?}", point);
                 editor.place_block( &block, point).await;
             }
@@ -45,7 +45,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let biome = world.get_surface_biome_at(Point2D::new(x, z));
+                let biome = world.get_surface_biome_at(Point2D::new(x, z)).expect("test cell in bounds");
                 assert!(!biome.is_unknown(), "Biome should not be unknown");
             }
         }
@@ -74,7 +74,7 @@ mod tests {
 
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let height = world.get_height_at(Point2D::new(x, z)) - 1;
+                let height = world.get_height_at(Point2D::new(x, z)).expect("test cell in bounds") - 1;
                 let block = world.get_block(Point3D::new(x, height, z));
                 let point = Point3D::new(x, height, z) + world.build_area.origin;
                 println!("Block at ({:?}) height:{} {:?}", point, height, block);
@@ -96,7 +96,7 @@ mod tests {
         println!("Build area: {:?}", build_area);
         for x in 0..build_area.length() {
             for z in 0..build_area.width() {
-                let height = editor.world().get_height_at(Point2D::new(x, z)) - 1;
+                let height = editor.world().get_height_at(Point2D::new(x, z)).expect("test cell in bounds") - 1;
                 let block = editor.world().get_block(Point3D::new(x, height, z));
                 let point = Point3D::new(x, height, z) + editor.world().build_area.origin;
                 let new_point = Point3D::new(x, 200, z);

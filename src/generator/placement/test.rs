@@ -273,7 +273,7 @@ mod tests {
         let anchor_nodes: Vec<Point3D> = footprint_by_id.values()
             .map(|cells| {
                 let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
-                editor.world().add_height(c)
+                editor.world().add_height(c).expect("test cell in bounds")
             })
             .collect();
         println!("Placed {} / {} industrial buildings; {} building nodes for the network", placed, want, anchor_nodes.len());
@@ -491,7 +491,7 @@ mod tests {
         let ind_nodes: Vec<Point3D> = ind_footprints.values()
             .map(|cells| {
                 let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
-                editor.world().add_height(c)
+                editor.world().add_height(c).expect("test cell in bounds")
             })
             .collect();
 
@@ -527,8 +527,8 @@ mod tests {
                 println!(
                     "  ({:>4},{:>4})  road_y={:>3}  ground_h={:>3}  ocean_h={:>3}",
                     xz.x, xz.y, p.y,
-                    editor.world().get_height_at(xz),
-                    editor.world().get_ocean_floor_height_at(xz),
+                    editor.world().get_height_at(xz).expect("test cell in bounds"),
+                    editor.world().get_ocean_floor_height_at(xz).expect("test cell in bounds"),
                 );
             }
         }
@@ -573,7 +573,7 @@ mod tests {
                     for dz in -WIN..=WIN {
                         let n = Point2D::new(c.x + dx, c.y + dz);
                         if !urban.contains(&n) { continue; }
-                        let h = editor.world().get_ocean_floor_height_at(n);
+                        let h = editor.world().get_ocean_floor_height_at(n).expect("test cell in bounds");
                         lo = lo.min(h);
                         hi = hi.max(h);
                     }
@@ -655,7 +655,7 @@ mod tests {
             }
         }
         for &c in &alley_band {
-            road_h.entry(c).or_insert_with(|| editor.world().add_height(c).y);
+            road_h.entry(c).or_insert_with(|| editor.world().add_height(c).expect("test cell in bounds").y);
         }
 
         // Frontage bands per tier (paved cells, matching the roads we'll build).
@@ -1016,7 +1016,7 @@ mod tests {
         let mut verge_total = 0usize;
         for (ti, cells) in tier_verge.iter().enumerate() {
             for c in cells {
-                let h = editor.world().get_ocean_floor_height_at(*c);
+                let h = editor.world().get_ocean_floor_height_at(*c).expect("test cell in bounds");
                 editor.place_block(&verge_blocks[ti], Point3D::new(c.x, h - 1, c.y)).await;
                 verge_total += 1;
             }
@@ -1047,7 +1047,7 @@ mod tests {
             "Alleys: {} corridor + {} connector cells -> {} total",
             alley_band.len(), connectors.len(), full_alleys.len(),
         );
-        let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c)).collect();
+        let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c).expect("test cell in bounds")).collect();
         let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
         build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
         for c in &full_alleys {
@@ -1114,7 +1114,7 @@ mod tests {
         let city_rect = editor.world().world_rect_2d();
         let city_centre = (city_rect.origin + city_rect.max()) / 2;
         let cold = {
-            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = editor.world().get_surface_biome_at(city_centre).expect("test cell in bounds");
             let n = n.name();
             n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
         };

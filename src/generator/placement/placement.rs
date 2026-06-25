@@ -314,7 +314,7 @@ fn flattest_candidate_centres(
     // re-walk tree columns for every overlapping window.
     let height_at: HashMap<Point2D, i32> = interior
         .iter()
-        .map(|&p| (p, editor.world().get_non_tree_height(p)))
+        .filter_map(|&p| editor.world().get_non_tree_height(p).map(|h| (p, h)))
         .collect();
 
     let mut ranked: Vec<Point2D> = interior.to_vec();
@@ -393,7 +393,7 @@ pub fn district_seatable_footprints(
     // Precompute non-tree surface heights once, reused for every footprint's window.
     let height_at: HashMap<Point2D, i32> = interior
         .iter()
-        .map(|&p| (p, editor.world().get_non_tree_height(p)))
+        .filter_map(|&p| editor.world().get_non_tree_height(p).map(|h| (p, h)))
         .collect();
 
     footprints
@@ -836,7 +836,7 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
         if world.is_water(p) {
             return None;
         }
-        heights.push(world.get_non_tree_height(p));
+        heights.push(world.get_non_tree_height(p)?);
     }
 
     let mean = heights.iter().sum::<i32>() as f32 / heights.len() as f32;
@@ -969,7 +969,7 @@ fn expanded_rect_cells(rect: &Rect2D, radius: i32) -> Vec<Point2D> {
 fn footprint_target_height(cells: &[Point2D], editor: &Editor, allow_steep: bool) -> i32 {
     let mut heights: Vec<i32> = cells
         .iter()
-        .map(|p| editor.world().get_non_tree_height(*p))
+        .filter_map(|p| editor.world().get_non_tree_height(*p))
         .collect();
     heights.sort_unstable();
     let percentile = if allow_steep { STEEP_TARGET_PERCENTILE } else { 0.5 };
@@ -991,7 +991,9 @@ fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Po
         if dist == 0 || dist > BLEND_RADIUS {
             continue;
         }
-        let natural_y = world.get_non_tree_height(p);
+        let Some(natural_y) = world.get_non_tree_height(p) else {
+            continue;
+        };
         // Always grade toward natural terrain — no early bail on steep deltas, so
         // the pad edge ramps down instead of leaving a cliff. The footprint slope
         // is already bounded by MAX_PLACEMENT_SLOPE (except allow_steep buildings,
@@ -1014,7 +1016,10 @@ fn sample_foundation_material(rect: &Rect2D, editor: &Editor) -> Block {
         if !world.is_in_bounds_2d(p) {
             continue;
         }
-        *counts.entry(world.get_ground_block(p).id.as_str().to_string()).or_insert(0) += 1;
+        let Some(ground) = world.get_ground_block(p) else {
+            continue;
+        };
+        *counts.entry(ground.id.as_str().to_string()).or_insert(0) += 1;
     }
     counts
         .into_iter()
@@ -1048,7 +1053,9 @@ async fn build_foundation_skirt(editor: &mut Editor, rect: &Rect2D, target_y: i3
             if dist == 0 || dist > FOUNDATION_SKIRT_RADIUS {
                 continue;
             }
-            let natural_y = world.get_non_tree_height(p);
+            let Some(natural_y) = world.get_non_tree_height(p) else {
+                continue;
+            };
             // Taper from the pad height (just outside the wall) to natural grade at
             // the skirt's outer edge.
             let t = dist as f32 / (FOUNDATION_SKIRT_RADIUS as f32 + 1.0);

@@ -156,9 +156,14 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
                 //     continue;
                 // }
 
-                let y = editor.world().get_height_at(height_point);
+                let Some(y) = editor.world().get_height_at(height_point) else {
+                    continue;
+                };
+                let Some(point_height) = editor.world().get_height_at(point) else {
+                    continue;
+                };
 
-                if y.abs_diff(editor.world().get_height_at(point)) > 3 {
+                if y.abs_diff(point_height) > 3 {
                     continue; // Skip if the height difference is too large, this is probably indicative of a bad spot to place
                 }
 
@@ -225,7 +230,7 @@ impl PavingType {
 }
 
 pub async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>, paving_type : PavingType) {
-    let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
+    let mut points = outers.iter().filter_map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
     points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
     force_height(editor, &points, true).await;
 

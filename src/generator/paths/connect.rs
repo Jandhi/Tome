@@ -58,8 +58,8 @@ pub async fn connect_doors_to_roads(
             continue;
         }
 
-        let start = editor.world().add_height(door);
-        let end = editor.world().add_height(goal);
+        let Some(start) = editor.world().add_height(door) else { continue; };
+        let Some(end) = editor.world().add_height(goal) else { continue; };
 
         // Route a Low-priority (width-1) path that stays in the urban area,
         // dodges building/wall footprints, and ends the moment it touches a road.

@@ -79,14 +79,29 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
     server.update_phase(visualizer::GenerationPhase::Done);
 }
 
+/// A fresh seed for an interactive run, taken from the wall clock. Generation is
+/// fully deterministic in the seed, so the value printed by [`run_generation_once`]
+/// reproduces the exact town (pass it to `generate_town` to rebuild it).
+fn random_seed() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(12345)
+}
+
 async fn run_generation_once() {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     let mut editor = world.get_editor();
+    // Random per-run seed so each interactive run is a different town; printed so
+    // a good one can be reproduced. `generate_town` takes the seed as a parameter,
+    // so tests can still pin it to a fixed value for determinism.
+    let seed = crate::noise::Seed(random_seed());
+    println!("Generating town with seed {}", seed.0);
     crate::generator::settlement::generate_town(
         &mut editor,
-        crate::noise::Seed(12345),
-        crate::generator::buildings_v2::Culture::Japanese,
+        seed,
+        crate::generator::buildings_v2::Culture::Medieval,
     ).await;
 }
 

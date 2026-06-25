@@ -232,7 +232,7 @@ async fn place_fingerpost(
     if signs.is_empty() {
         return;
     }
-    let ground = editor.world().add_height(cell);
+    let Some(ground) = editor.world().add_height(cell) else { return; };
 
     // Signs stacked from the ground up, one block apart.
     for (i, &(rid, rotation, arrow)) in signs.iter().enumerate() {

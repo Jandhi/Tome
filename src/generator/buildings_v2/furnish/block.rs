@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette};
 use crate::geometry::{Cardinal, Point2D};
-use crate::minecraft::{Block, BlockForm, color_block, string_to_block};
+use crate::minecraft::{Block, BlockForm, BlockID, color_block, string_to_block};
 use crate::noise::RNG;
 
 use super::data::PaletteSwap;
@@ -59,6 +59,19 @@ pub(super) fn parse_block(block_str: &str) -> Block {
         .unwrap_or_else(|| Block::from_id(block_str.into()))
 }
 
+/// If `id` is a banner and the palette carries a family banner design, return
+/// that design's pattern SNBT; otherwise keep the block's existing data. Lets a
+/// manor stamp its one heraldic design onto every banner the furnish pass
+/// recolours, while leaving all other recoloured blocks (beds, carpets, …)
+/// untouched.
+fn banner_data_or(id: &BlockID, palette: &Palette, existing: Option<String>) -> Option<String> {
+    if palette.banner_data.is_some() && id.as_str().contains("banner") {
+        palette.banner_data.clone()
+    } else {
+        existing
+    }
+}
+
 /// Apply palette substitution to a block.
 pub(super) fn swap_block_for_palette(
     block: Block,
@@ -83,7 +96,9 @@ pub(super) fn swap_block_for_palette(
         }
         PaletteSwap::Color => {
             if let Some(color) = palette.primary_color {
-                Block::new(color_block(block.id, color), block.state, block.data)
+                let id = color_block(block.id, color);
+                let data = banner_data_or(&id, palette, block.data);
+                Block::new(id, block.state, data)
             } else {
                 block
             }
@@ -93,7 +108,9 @@ pub(super) fn swap_block_for_palette(
             // primary-color when no secondary is defined.
             let color = palette.secondary_color.or(palette.primary_color);
             if let Some(color) = color {
-                Block::new(color_block(block.id, color), block.state, block.data)
+                let id = color_block(block.id, color);
+                let data = banner_data_or(&id, palette, block.data);
+                Block::new(id, block.state, data)
             } else {
                 block
             }

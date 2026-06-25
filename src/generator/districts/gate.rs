@@ -215,7 +215,7 @@ fn score_candidate(wall_points: &Vec<Point3D>, editor: &Editor, i: usize) -> f64
         let y = wall_points[j].y;
         min_y = min_y.min(y);
         max_y = max_y.max(y);
-        let t = editor.world().get_height_at(wall_points[j].drop_y());
+        let Some(t) = editor.world().get_height_at(wall_points[j].drop_y()) else { continue; };
         min_t = min_t.min(t);
         max_t = max_t.max(t);
     }
@@ -337,9 +337,10 @@ async fn place_palisade_gate(
 ) {
     let air = "air".into();
     let point = wall_points[i];
+    let Some(middle_height) = editor.world().get_height_at(wall_points[i + 2].drop_y()) else { return; };
     let middle_point = Point3D::new(
         wall_points[i + 2].x,
-        editor.world().get_height_at(wall_points[i + 2].drop_y()),
+        middle_height,
         wall_points[i + 2].z,
     );
     let direction = if point.x == wall_points[i + 6].x {
@@ -379,9 +380,10 @@ async fn place_thin_gate(
 ) {
     let air = "air".into();
     let point = wall_points[i];
+    let Some(middle_height) = editor.world().get_height_at(wall_points[i + 3].drop_y()) else { return; };
     let middle_point = Point3D::new(
         wall_points[i + 3].x,
-        editor.world().get_height_at(wall_points[i + 3].drop_y()),
+        middle_height,
         wall_points[i + 3].z,
     );
     let direction = if point.x == wall_points[i + 6].x {
@@ -428,7 +430,7 @@ async fn place_wide_gate(
     let neighbours: Vec<Point2D> = ((middle_point.x - 3)..=(middle_point.x + 3))
         .flat_map(|x| ((middle_point.y - 3)..=(middle_point.y + 3)).map(move |y| Point2D { x, y }))
         .collect();
-    let height = editor.world().get_height_at(middle_point);
+    let Some(height) = editor.world().get_height_at(middle_point) else { return; };
     for neighbour in neighbours.iter() {
         editor.world_mut().claim(*neighbour, BuildClaim::Gate);
         for h in height..height + gate_height {

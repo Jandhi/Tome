@@ -71,7 +71,7 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG, theme
                 .all(|d| cells.contains(&(c + *d)) && height_at(c + *d) == h)
         });
         for &c in &interior {
-            let h = height_at(c);
+            let Some(h) = height_at(c) else { continue; };
             if Some(c) == water_cell {
                 put_forced(editor, c.x, h - 1, c.y, "minecraft:water").await;
             } else {
@@ -90,7 +90,7 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG, theme
         if used.contains(&c) {
             continue;
         }
-        let h = height_at(c);
+        let Some(h) = height_at(c) else { continue; };
         let open_side = CARDINALS_2D.iter().any(|d| {
             let n = c + *d;
             !cells.contains(&n)
@@ -117,7 +117,8 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG, theme
         if used.contains(&c) {
             continue;
         }
-        place_lantern_post(editor, c, height_at(c), theme.wood).await;
+        let Some(h) = height_at(c) else { continue; };
+        place_lantern_post(editor, c, h, theme.wood).await;
         break;
     }
 }

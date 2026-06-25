@@ -1,22 +1,19 @@
-//! Engawa: a raised Japanese veranda for large buildings. Built on the same
-//! per-floor-extent machinery as [`super::frame::apply_jetty`], but inset rather
-//! than grown, and by different amounts per floor so the building tapers:
+//! Engawa: a raised Japanese veranda for large buildings. The building mass is
+//! inset from its nominal footprint and the freed perimeter becomes the veranda:
 //!
-//! - the cellar and ground floor inset by **2** on every open-air side,
-//! - the **top** floor also insets by **2**, so the roof is pulled back in,
-//! - the **middle** floors inset by **1**, so they bulge out over the veranda
-//!   (the tapered, overhanging engawa silhouette),
+//! - every floor (cellar through top) insets by **2** on every open-air side, so
+//!   the building is a clean inset box sitting back from the veranda edge,
 //! - the whole building is raised one block onto a wooden platform,
 //! - a **2-deep wooden deck** wraps the entire building perimeter — computed as a
 //!   dilation band around the merged ground-living shape, so it runs continuously
 //!   around corners and bumps around junctions where two rects meet, and
 //! - an **engawa roof** caps the veranda all the way around at the ground-floor
-//!   ceiling: slabs on the inner ring (against the wall), stairs on the outer
+//!   ceiling: full blocks on the inner ring (against the wall), stairs on the outer
 //!   ring (the dripping eave edge), with the diagonal corners filled.
 //!
-//! Planning ([`plan_engawa`]) is pure geometry and gates on the deeply-inset
-//! ground rects staying usable; [`apply_overhang`] rebuilds the frame with the
-//! per-floor extents; [`place_engawa`] lays the deck and roof after the roof.
+//! Planning ([`plan_engawa`]) is pure geometry and gates on the inset ground
+//! rects staying usable; the frame is built straight from the inset footprint;
+//! [`place_engawa`] lays the deck and roof after the roof.
 
 use std::collections::{HashMap, HashSet};
 
@@ -30,17 +27,15 @@ use super::footprint::merge::outline_from_rects;
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
 
-/// Inset (cells) for the cellar, ground floor, and top floor — the deep inset.
-const DEEP_INSET: i32 = 2;
-/// Inset (cells) for the middle floors — one less, so they overhang the ground.
-const MID_INSET: i32 = 1;
-/// Depth of the veranda deck, in cells. Matches `DEEP_INSET` so the deck fills
+/// Inset (cells) applied to every floor on every open-air side.
+const INSET: i32 = 2;
+/// Depth of the veranda deck, in cells. Matches `INSET` so the deck fills
 /// out to the nominal footprint edge on cleanly-inset sides.
-const DECK_DEPTH: i32 = DEEP_INSET;
+const DECK_DEPTH: i32 = INSET;
 
-/// Smallest side a ground rect may have *after* the deep inset. Below this the
+/// Smallest side a ground rect may have *after* the inset. Below this the
 /// room partitioner has nothing usable, so the building falls back to plain
-/// walls. With `DEEP_INSET = 2` this needs a nominal side of at least 8 — i.e.
+/// walls. With `INSET = 2` this needs a nominal side of at least 8 — i.e.
 /// engawa only takes on the larger footprints, as intended.
 const MIN_INSET_SIDE: i32 = 4;
 
@@ -55,16 +50,12 @@ const CARDINALS: [Cardinal; 4] = [
 /// The four diagonal offsets, for corner filling: (dx, dz).
 const DIAGONALS: [(i32, i32); 4] = [(-1, -1), (-1, 1), (1, -1), (1, 1)];
 
-/// Output of [`plan_engawa`]. `building_footprint` (the deep-inset rects) is what
-/// the frame, walls, rooms, and cellar are built from; `mid_rects` are the
-/// per-rect middle-floor extents grafted on by [`apply_overhang`]; and
-/// `deck_cells` is the continuous veranda ring.
+/// Output of [`plan_engawa`]. `building_footprint` (the inset rects) is what the
+/// frame, walls, rooms, and cellar are built from on every floor; `deck_cells`
+/// is the continuous veranda ring.
 pub struct EngawaPlan {
-    /// Deep-inset footprint — cellar, ground floor, and top floor use this.
+    /// Inset footprint — every floor uses this.
     pub building_footprint: Footprint,
-    /// Middle-floor extents (inset by [`MID_INSET`]), parallel to
-    /// `building_footprint.rects()`. Applied to floors `1..count-1`.
-    mid_rects: Vec<Rect2D>,
     /// Veranda deck cells: a [`DECK_DEPTH`]-wide band wrapping the whole ground
     /// living shape, continuous around corners and junctions.
     pub deck_cells: Vec<Point2D>,
@@ -134,7 +125,7 @@ fn affordable_inset(rect: &Rect2D, s: &OpenAir, cap: i32) -> i32 {
 }
 
 /// Try to plan an engawa for `footprint`. Returns `None` (build plain) only when
-/// the **core** rect can't afford the full deep inset — i.e. the main mass is too
+/// the **core** rect can't afford the full inset — i.e. the main mass is too
 /// small for a real veranda. Wings inset by as much as they can fit (down to 0),
 /// so a building with one big core and small wings still gets an engawa; the deck
 /// (a dilation band, below) wraps around the under-inset wings regardless.
@@ -143,21 +134,15 @@ pub fn plan_engawa(footprint: &Footprint) -> Option<EngawaPlan> {
     let sides = open_air_sides(rects);
 
     // Per-rect inset amounts, clamped to what each rect can afford.
-    let deep_amounts: Vec<i32> = rects.iter().zip(&sides)
-        .map(|(r, s)| affordable_inset(r, s, DEEP_INSET))
+    let inset_amounts: Vec<i32> = rects.iter().zip(&sides)
+        .map(|(r, s)| affordable_inset(r, s, INSET))
         .collect();
-    // The core (rect 0) must afford the full deep inset for a proper veranda.
-    if deep_amounts[0] < DEEP_INSET {
+    // The core (rect 0) must afford the full inset for a proper veranda.
+    if inset_amounts[0] < INSET {
         return None;
     }
-    // Middle floors inset one less than the ground (but never more), so they
-    // bulge out wherever the ground actually inset.
-    let mid_amounts: Vec<i32> = deep_amounts.iter().map(|&d| MID_INSET.min(d)).collect();
 
-    let deep: Vec<Rect2D> = rects.iter().zip(&sides).zip(&deep_amounts)
-        .map(|((r, s), &a)| inset_one(r, s, a))
-        .collect();
-    let mid: Vec<Rect2D> = rects.iter().zip(&sides).zip(&mid_amounts)
+    let inset_rects: Vec<Rect2D> = rects.iter().zip(&sides).zip(&inset_amounts)
         .map(|((r, s), &a)| inset_one(r, s, a))
         .collect();
 
@@ -165,7 +150,7 @@ pub fn plan_engawa(footprint: &Footprint) -> Option<EngawaPlan> {
     // Computed by dilation (Chebyshev) so it runs continuously around corners and
     // around junctions where a partial seam stopped a rect from insetting — the
     // band simply bumps outward there to keep the ring unbroken.
-    let ground_cells: HashSet<Point2D> = deep.iter().flat_map(|r| r.iter()).collect();
+    let ground_cells: HashSet<Point2D> = inset_rects.iter().flat_map(|r| r.iter()).collect();
     let mut deck: HashSet<Point2D> = HashSet::new();
     for cell in &ground_cells {
         for dx in -DECK_DEPTH..=DECK_DEPTH {
@@ -182,36 +167,12 @@ pub fn plan_engawa(footprint: &Footprint) -> Option<EngawaPlan> {
     }
     let deck_cells: Vec<Point2D> = deck.into_iter().collect();
 
-    let building_footprint = Footprint::new(outline_from_rects(&deep), deep);
-    Some(EngawaPlan { building_footprint, mid_rects: mid, deck_cells })
-}
-
-/// Rebuild `frame` with the engawa's per-floor extents: the ground floor (0) and
-/// the top floor keep the deep-inset rect; the middle floors use the mid-inset
-/// rect (bulging out over the ground floor). `frame` must already have been
-/// generated from `plan.building_footprint`.
-pub fn apply_overhang(frame: Frame, plan: &EngawaPlan) -> Frame {
-    let max_floors = frame.max_floors();
-    let extents: Vec<Vec<Option<Rect2D>>> = (0..frame.rect_count()).map(|i| {
-        let count = frame.floor_counts()[i];
-        let deep = frame.rect_at(i, 0).expect("ground extent at floor 0");
-        let mid = plan.mid_rects[i];
-        (0..max_floors).map(|f| {
-            if f >= count { None }
-            else if f == 0 || f == count - 1 { Some(deep) } // ground or top → deep
-            else { Some(mid) }                              // middle → bulge out
-        }).collect()
-    }).collect();
-    Frame::with_per_floor_extents(
-        frame.footprint().clone(),
-        frame.base_y(),
-        extents,
-        frame.wall_height(),
-    )
+    let building_footprint = Footprint::new(outline_from_rects(&inset_rects), inset_rects);
+    Some(EngawaPlan { building_footprint, deck_cells })
 }
 
 /// Place the veranda deck and its engawa roof. `frame` is the inset, raised frame
-/// with the overhang applied (so `floor_y(0)` is the raised interior surface).
+/// (so `floor_y(0)` is the raised interior surface).
 pub async fn place_engawa(ctx: &mut BuildCtx<'_>, frame: &Frame, plan: &EngawaPlan) {
     let editor: &Editor = &*ctx.editor;
 
@@ -237,7 +198,7 @@ pub async fn place_engawa(ctx: &mut BuildCtx<'_>, frame: &Frame, plan: &EngawaPl
         roof_material,
     );
 
-    // Ground living cells (the deep-inset footprint). The engawa roof's inner
+    // Ground living cells (the inset footprint). The engawa roof's inner
     // ring is the deck band one cell out from these (against the wall); the outer
     // ring is the band two cells out (the dripping eave edge).
     let ground: HashSet<Point2D> = plan
@@ -297,15 +258,15 @@ pub async fn place_engawa(ctx: &mut BuildCtx<'_>, frame: &Frame, plan: &EngawaPl
         }
     }
 
-    let top_slab = HashMap::from([("type".to_string(), "top".to_string())]);
-
-    // Inner ring → top slabs (the higher part of the pent eave, against the wall).
+    // Inner ring → full roof blocks (the higher part of the pent eave, against
+    // the wall). Full blocks rather than top slabs so the inner eave reads solid
+    // and leaves no half-height gap beneath it where it meets the wall.
     for &cell in &inner {
         roof_placer.place_block_forced(
             editor,
             Point3D::new(cell.x, roof_y, cell.y),
-            BlockForm::Slab,
-            Some(&top_slab),
+            BlockForm::Block,
+            None,
             None,
         ).await;
     }

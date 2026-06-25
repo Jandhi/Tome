@@ -126,11 +126,11 @@ pub async fn build_house(
 
     // Frame consumes a Footprint; keep `building_footprint` for later lookups
     // (find_boundaries, filled_points). The frame is generated from the
-    // ground-inset footprint; for an engawa, `apply_overhang` then grafts on the
-    // upper-floor extents (inset by one, overhanging the ground floor).
+    // deep-inset footprint, so every engawa floor already sits at that inset —
+    // no per-floor overhang. A non-engawa building may instead jetty its uppers.
     let frame = generate_frame(building_footprint.clone(), frame_base_y, &size_class, ctx.rng);
-    let frame = if let Some(plan) = &engawa_plan {
-        engawa::apply_overhang(frame, plan)
+    let frame = if engawa_plan.is_some() {
+        frame
     } else if bctx.jetty {
         apply_jetty(frame, &plot_bounds)
     } else {
