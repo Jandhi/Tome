@@ -20,16 +20,23 @@ use crate::minecraft::{string_to_block, BlockForm};
 
 use super::super::palette::ShipPart;
 use super::super::tuning::{
-    MAST_GAFF_STAIR_FACE, MAST_HEIGHT_FACTOR, MAST_MAX_YARDS, MAST_NEST_CHANCE, MAST_NEST_HALF,
-    MAST_NEST_HEIGHT_FRACTION, MAST_NEST_MIN_HEIGHT, MAST_NEST_PLATFORM_HALF, MAST_NEST_YARD_GAP,
-    MAST_SAIL_GROWTH, MAST_SAIL_TOP_HEIGHT,
-    MAST_SPANKER_BOOM_CLEARANCE, MAST_SPANKER_BOOM_FRACTION, MAST_SPANKER_CHANCE,
-    MAST_SPANKER_GAFF_RUN_FRACTION, MAST_SPANKER_LUFF_FRACTION, MAST_TOP_FENCE,
+    BULWARK_HEIGHT,
+    FLAG_COLORS, FLAG_HOIST_HEIGHT, FLAG_MAX_LEN, FLAG_MIN_LEN, FLAG_WAVE_AMP_Y, FLAG_WAVE_AMP_Z,
+    FLAG_WAVE_FREQ_Y, FLAG_WAVE_FREQ_Z, FLAG_WAVE_Z_PHASE, JIB_CHANCE_HUGE, JIB_CHANCE_LARGE,
+    JIB_CHANCE_MEDIUM, MAST_GAFF_STAIR_FACE, MAST_HEIGHT_FACTOR,
+    MAST_MAX_YARDS, MAST_NEST_CHANCE, MAST_NEST_HALF, MAST_NEST_HEIGHT_FRACTION,
+    MAST_NEST_MIN_HEIGHT, MAST_NEST_PLATFORM_HALF, MAST_NEST_YARD_GAP, MAST_SAIL_GROWTH,
+    MAST_SAIL_TOP_HEIGHT, MAST_SPANKER_BOOM_CLEARANCE, MAST_SPANKER_BOOM_FRACTION,
+    MAST_SPANKER_CHANCE, MAST_SPANKER_GAFF_RUN_FRACTION, MAST_SPANKER_LUFF_FRACTION, MAST_TOP_FENCE,
     MAST_TOP_YARD_DROP_H1, MAST_TOP_YARD_DROP_H2, MAST_YARD_FORWARD, MAST_YARD_HALF_FRACTION,
-    MAST_YARD_MIN_CLEARANCE, MAST_YARD_NARROW_MAX, MAST_YARD_SPAN_PER_SAIL,
+    MAST_YARD_NARROW_MAX, MAST_YARD_SPAN_PER_SAIL, SAIL_BELLY_POW, SAIL_BIG_HALF_WIDTH,
+    SAIL_BILLOW_DIR, SAIL_BLOCK, SAIL_COMBINED_EDGE, SAIL_CURTAIN_CURVE_POW,
+    SAIL_CURTAIN_SIZE_GAIN, SAIL_FOOT_CLEARANCE, SAIL_JIB_FOOT_RAISE, SAIL_JIB_WIND_FACTOR,
+    SAIL_SPANKER_FOOT_LIFT, SAIL_SPANKER_WIND_FACTOR,
 };
 use super::super::{ShipDir, ShipV2Ctx};
-use super::{DeckContext, DeckState, SailState};
+use super::SizeTier;
+use super::{DeckContext, DeckState, SailBillow, SailState};
 
 /// A horizontal main yard: centred on the mast at `(x, y)`, spanning `±half_width` in z.
 /// `sail_height` is how far its sail hangs below it (down toward the next yard / deck).
@@ -54,11 +61,14 @@ pub struct SparCell {
 
 /// The gaff-rigged spanker on the aftmost mast: a near-horizontal **boom** (slabs) along
 /// the foot and a **gaff** rising aft at 45° (double-stairs) along the head, in the
-/// centreline (`z = 0`) plane. The sail (a later step) fills between them.
+/// centreline (`z = 0`) plane. `sail` is the flat (`z = 0`) canvas region bounded by the
+/// boom (foot), the gaff + leech (head/aft) and the mast (luff) — billowed to leeward when
+/// deployed (`Full`).
 #[derive(Debug, Clone)]
 pub struct Spanker {
     pub boom: Vec<SparCell>,
     pub gaff: Vec<SparCell>,
+    pub sail: Vec<Point3D>,
 }
 
 /// A crow's nest / mast platform: a slab floor (mast through the centre) ringed by a
@@ -67,6 +77,14 @@ pub struct Spanker {
 pub struct Nest {
     pub floor: Vec<Point3D>,
     pub rail: Vec<Point3D>,
+}
+
+/// A masthead pennant: a short wool ribbon streaming **aft** off the mast's finial,
+/// staggered in `y` and `z` so it reads as cloth flapping in the wind rather than a flat
+/// plane. Placed as wool in [`build`].
+#[derive(Debug, Clone)]
+pub struct Flag {
+    pub cells: Vec<Point3D>,
 }
 
 /// One mast and its spars (local frame).
@@ -81,11 +99,17 @@ pub struct Mast {
     pub yards: Vec<Yard>,
     /// Fence finial straight on top.
     pub top_fence: Vec<Point3D>,
+    /// Masthead pennant streaming aft off the finial.
+    pub flag: Flag,
     /// Gaff-rigged spanker — only on the aftmost mast (and only by chance).
     pub spanker: Option<Spanker>,
     /// Platforms: an unfenced intermediate platform on tall masts + a fenced top crow's
     /// nest at the tallest mast's top.
     pub nests: Vec<Nest>,
+    /// Local Y the **lowest** sail's foot sits at — clear of the deck **and its railing**
+    /// (see `deck_clearance` in [`build_masts_model`]). The render hangs the lowest sail
+    /// down to here; the yard layout reserves the room.
+    pub sail_foot_base: i32,
 }
 
 /// Pure-geometry masts in the local frame.
@@ -140,7 +164,308 @@ fn build_spanker(base_x: i32, mast_h: i32, weather_y: i32, length: i32) -> Spank
         y += 1;
     }
 
-    Spanker { boom, gaff }
+    // Sail region (flat, z = 0): the quadrilateral bounded by the **boom** (foot), the
+    // **gaff** then the **leech** (head/aft) and the **mast** (luff). Each column spans from
+    // the foot up to the gaff (forward of the peak) or the leech (aft of the peak). The
+    // **foot arcs upward** in the centre (`SAIL_SPANKER_FOOT_LIFT`, 0 at the two corners) so
+    // the bottom edge lifts off the boom — the wind pushing the sail up. Billowed to leeward
+    // at placement; the boom/gaff cells themselves stay as the spars.
+    let peak_x = base_x - (gaff_run - 1);
+    let peak_y = throat_y + (gaff_run - 1);
+    let clew_x = base_x - boom_len; // boom's aft end
+    let foot_center = (clew_x + base_x - 1) as f32 / 2.0;
+    let foot_half = ((base_x - 1 - clew_x) as f32 / 2.0).max(1.0);
+    let mut sail = Vec::new();
+    for x in clew_x..=(base_x - 1) {
+        let leech_top = if x >= peak_x {
+            throat_y + (base_x - x) // under the gaff (rises 1 per block aft)
+        } else {
+            // leech: straight from the peak down to the clew (boom's aft end)
+            let span = (peak_x - clew_x).max(1);
+            boom_y + ((peak_y - boom_y) as f32 * (x - clew_x) as f32 / span as f32).round() as i32
+        };
+        // Keep at least one canvas row above the boom along its whole length, so the boom's
+        // aft end (clew) is under sail instead of a bare spar tip — the leech still rises to
+        // the gaff tip above it.
+        let top = leech_top.max(boom_y + 1);
+        // Foot lift: a parabola, 0 at the corners → max in the centre.
+        let t = (x as f32 - foot_center) / foot_half; // -1..1 across the boom
+        let lift = (SAIL_SPANKER_FOOT_LIFT as f32 * (1.0 - t * t)).round().max(0.0) as i32;
+        let bottom = (boom_y + lift).min(top);
+        for y in bottom..=top {
+            sail.push(Point3D::new(x, y, 0));
+        }
+    }
+
+    Spanker { boom, gaff, sail }
+}
+
+/// Build the masthead pennant: a `length`-block wool ribbon streaming **downwind** from
+/// the finial top at `(staff_x, staff_top)`. `stream_sign` is the local-x direction it
+/// flies — `-1` aft (at rest / furled), `+1` forward toward the bow (when set sails are
+/// drawing the wind from astern), so the flag and the sails read as the same wind. Each
+/// step drops a short column whose baseline ripples up/down (`y`) and side-to-side (`z`)
+/// on two out-of-phase sine waves whose amplitude **grows toward the free (fly) end** —
+/// the hoist is pinned to the staff, the fly whips. The `y`/`z` stagger keeps it a curved
+/// 3-D ribbon, never a flat plane.
+fn build_flag(staff_x: i32, staff_top: i32, length: i32, phase: f32, stream_sign: i32) -> Flag {
+    let mut cells = Vec::new();
+    // Each column always steps 1 block downwind (`x`). To keep the ribbon a single
+    // connected sheet (every block has a neighbour within a 3×3), the `y`/`z` ripple may
+    // only step **±1 per column** toward its target — cloth can't teleport — so consecutive
+    // columns are always Chebyshev-1 neighbours and never leave a floating block.
+    let (mut cur_y, mut cur_z) = (0, 0);
+    for i in 0..length {
+        let frac = if length > 1 { i as f32 / (length - 1) as f32 } else { 0.0 };
+        // Amplitude grows from the pinned hoist (0) to the whipping fly (frac = 1).
+        let target_y = (frac * FLAG_WAVE_AMP_Y * (phase + i as f32 * FLAG_WAVE_FREQ_Y).sin()).round() as i32;
+        let target_z = (frac * FLAG_WAVE_AMP_Z
+            * (phase + FLAG_WAVE_Z_PHASE + i as f32 * FLAG_WAVE_FREQ_Z).sin())
+        .round() as i32;
+        cur_y += (target_y - cur_y).clamp(-1, 1);
+        cur_z += (target_z - cur_z).clamp(-1, 1);
+        // Column height tapers from the hoist body down to a single block at the fly tip.
+        let col_h = ((FLAG_HOIST_HEIGHT as f32) * (1.0 - frac) + frac).round().max(1.0) as i32;
+        let x = staff_x + stream_sign * (1 + i); // one block off the staff, streaming on
+        for h in 0..col_h {
+            cells.push(Point3D::new(x, staff_top + cur_y - h, cur_z));
+        }
+    }
+    Flag { cells }
+}
+
+/// Billow-depth field for a deployed square sail spanning `z ∈ [-hw, hw]`, `y ∈ [bottom_y,
+/// top_y]`, in the chosen [`SailBillow`] shape. Returns `(bulge, ny)` where
+/// `bulge[zi * ny + yi]` is the forward depth (blocks) of the cell at `z = zi − hw`,
+/// `y = bottom_y + yi`.
+///
+/// Both shapes end **relaxed to a 1-block gradient** (each cell clamped to its lowest
+/// pinned-neighbour + 1) so neighbouring cells never differ by more than 1 in `x` — the
+/// sheet is a single hole-free surface (every block has a neighbour within its 3×3, no
+/// see-through gaps at an angle).
+///
+/// - [`SailBillow::Domed`]: target = parabola across the width × `sin` down the height,
+///   pinned to 0 at **every** edge; relaxed in 2-D. Curve across the width, straight sides.
+/// - [`SailBillow::Curtain`]: a 1-D profile down the height (deep flat middle, drastic
+///   ends — `sin^p` with `p < 1`, depth scaled up a touch for wide sails), pinned only at
+///   the head/foot and **broadcast across the width**, so every row is flat and the whole
+///   length (sides included) curves.
+pub fn billow_field(
+    hw: i32,
+    bottom_y: i32,
+    top_y: i32,
+    wind: f32,
+    shape: SailBillow,
+) -> (Vec<i32>, usize) {
+    let nz = (2 * hw + 1) as usize;
+    let drop = (top_y - bottom_y).max(1);
+    let ny = (top_y - bottom_y + 1) as usize;
+    let at = |zi: usize, yi: usize| zi * ny + yi;
+    let mut b = vec![0i32; nz * ny];
+
+    match shape {
+        SailBillow::Domed => {
+            for (zi, z) in (-hw..=hw).enumerate() {
+                let tz = z as f32 / hw.max(1) as f32; // -1..1 across the width
+                let shape_z = 1.0 - tz * tz; // 0 at the luff edges, 1 at the centre
+                for yi in 0..ny {
+                    let y = bottom_y + yi as i32;
+                    let t = (top_y - y) as f32 / drop as f32; // 0 head → 1 foot
+                    let shape_y = (std::f32::consts::PI * t).sin().powf(SAIL_BELLY_POW);
+                    b[at(zi, yi)] = (wind * shape_z * shape_y).round().max(0.0) as i32;
+                }
+            }
+            // 2-D relax: every edge pinned (exterior = 0).
+            for _ in 0..(nz + ny) {
+                let mut changed = false;
+                for zi in 0..nz {
+                    for yi in 0..ny {
+                        let left = if zi > 0 { b[at(zi - 1, yi)] } else { 0 };
+                        let right = if zi + 1 < nz { b[at(zi + 1, yi)] } else { 0 };
+                        let down = if yi > 0 { b[at(zi, yi - 1)] } else { 0 };
+                        let up = if yi + 1 < ny { b[at(zi, yi + 1)] } else { 0 };
+                        let ceil = left.min(right).min(down).min(up) + 1;
+                        if b[at(zi, yi)] > ceil {
+                            b[at(zi, yi)] = ceil;
+                            changed = true;
+                        }
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+        }
+        SailBillow::Curtain => {
+            // Larger sails curve a touch deeper.
+            let amp = wind + ((hw - SAIL_BIG_HALF_WIDTH).max(0) as f32) * SAIL_CURTAIN_SIZE_GAIN;
+            let mut prof = vec![0i32; ny];
+            for yi in 0..ny {
+                let t = yi as f32 / (ny - 1).max(1) as f32; // 0 foot .. 1 head (sin is symmetric)
+                prof[yi] = (amp * (std::f32::consts::PI * t).sin().powf(SAIL_CURTAIN_CURVE_POW))
+                    .round()
+                    .max(0.0) as i32;
+            }
+            // 1-D relax down the height: pinned only at the head/foot (exterior = 0); the
+            // sides are free, so the whole row carries the same depth and curves with it.
+            for _ in 0..ny {
+                let mut changed = false;
+                for yi in 0..ny {
+                    let down = if yi > 0 { prof[yi - 1] } else { 0 };
+                    let up = if yi + 1 < ny { prof[yi + 1] } else { 0 };
+                    let ceil = down.min(up) + 1;
+                    if prof[yi] > ceil {
+                        prof[yi] = ceil;
+                        changed = true;
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+            for zi in 0..nz {
+                for yi in 0..ny {
+                    b[at(zi, yi)] = prof[yi]; // flat rows — broadcast across the width
+                }
+            }
+        }
+        SailBillow::Combined => {
+            // Domed `sin`×parabola belly (deepest at the centre), but the across-width factor
+            // only falls to `SAIL_COMBINED_EDGE` at the luff edges (not 0), and those edges
+            // are left **free** in the relax (like the curtain) — so the sides billow partway
+            // instead of pinning flat. Head/foot stay pinned.
+            for (zi, z) in (-hw..=hw).enumerate() {
+                let tz = z as f32 / hw.max(1) as f32;
+                let parab = 1.0 - tz * tz; // 1 centre → 0 edges
+                let shape_z = SAIL_COMBINED_EDGE + (1.0 - SAIL_COMBINED_EDGE) * parab; // edge..1
+                for yi in 0..ny {
+                    let y = bottom_y + yi as i32;
+                    let t = (top_y - y) as f32 / drop as f32;
+                    let shape_y = (std::f32::consts::PI * t).sin().powf(SAIL_BELLY_POW);
+                    b[at(zi, yi)] = (wind * shape_z * shape_y).round().max(0.0) as i32;
+                }
+            }
+            // Relax: head/foot pinned (y exterior = 0), luff sides free (z exterior ignored).
+            const FREE: i32 = 1 << 20;
+            for _ in 0..(nz + ny) {
+                let mut changed = false;
+                for zi in 0..nz {
+                    for yi in 0..ny {
+                        let left = if zi > 0 { b[at(zi - 1, yi)] } else { FREE };
+                        let right = if zi + 1 < nz { b[at(zi + 1, yi)] } else { FREE };
+                        let down = if yi > 0 { b[at(zi, yi - 1)] } else { 0 };
+                        let up = if yi + 1 < ny { b[at(zi, yi + 1)] } else { 0 };
+                        let ceil = left.min(right).min(down).min(up) + 1;
+                        if b[at(zi, yi)] > ceil {
+                            b[at(zi, yi)] = ceil;
+                            changed = true;
+                        }
+                    }
+                }
+                if !changed {
+                    break;
+                }
+            }
+        }
+    }
+
+    (b, ny)
+}
+
+/// Billow a flat fore-and-aft sail region (cells in the `z = 0` plane) **sideways** to
+/// leeward. Returns the leeward `z` depth per cell `(x, y)`.
+///
+/// The **head (gaff), luff (mast) and leech (aft) edges are pinned to 0** so the canvas
+/// tapers onto the spars there (the row under the gaff lands at `z = 0`, a wool block bent
+/// onto it). The **foot (boom) is left free** except at its **two corners** (tack + clew,
+/// held by the luff/leech) — so the foot billows up off the boom, giving a less boxy belly.
+/// The interior starts at the target `wind` and is **relaxed to a 1-block gradient** (clamped
+/// to its lowest pinning/in-region neighbour + 1), staying hole-free (no neighbour steps >1).
+///
+/// `spars` = boom + gaff cells; the boom is the bottom row (`y == foot_y`), the gaff sits
+/// above it. A neighbour pins toward 0 if it is the gaff (a spar above the foot) or it is off
+/// the canvas to the **sides/top** (`y ≥ foot_y`); off-canvas **below the foot** and the boom
+/// itself do **not** pin. The caller offsets each cell to `z = depth · side` and skips spars.
+pub fn spanker_billow(
+    cells: &[Point3D],
+    wind: f32,
+    spars: &std::collections::HashSet<(i32, i32)>,
+) -> HashMap<(i32, i32), i32> {
+    let region: std::collections::HashSet<(i32, i32)> = cells.iter().map(|c| (c.x, c.y)).collect();
+    let foot_y = cells.iter().map(|c| c.y).min().unwrap_or(0); // lowest (corner) boom row
+    let target = wind.round().max(0.0) as i32;
+    let neighbours = |p: (i32, i32)| {
+        [(p.0 - 1, p.1), (p.0 + 1, p.1), (p.0, p.1 - 1), (p.0, p.1 + 1)]
+    };
+    // The foot edge: the lowest region cell of each column (the arced boom edge).
+    let mut foot_cells: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    {
+        let mut min_y: HashMap<i32, i32> = HashMap::new();
+        for c in cells {
+            let e = min_y.entry(c.x).or_insert(c.y);
+            *e = (*e).min(c.y);
+        }
+        for (x, y) in min_y {
+            foot_cells.insert((x, y));
+        }
+    }
+    // Pins toward 0: the gaff (a spar above the foot), or off-canvas to the **sides/top**.
+    // Off-canvas **directly below the foot edge** does not pin → the foot (its arc and the
+    // span between the two corners) is free to billow.
+    let pins = |q: (i32, i32)| {
+        if spars.contains(&q) && q.1 > foot_y {
+            return true; // gaff (head)
+        }
+        if region.contains(&q) {
+            return false;
+        }
+        // off-canvas: pins everywhere except just under the foot edge
+        !foot_cells.contains(&(q.0, q.1 + 1))
+    };
+
+    const FREE: i32 = 1 << 20; // an off-canvas, non-pinning neighbour imposes no ceiling
+    let mut anchors: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    let mut depth: HashMap<(i32, i32), i32> = HashMap::new();
+    for c in cells {
+        let p = (c.x, c.y);
+        // Pinned to 0 if it is the gaff, or it touches a pinning edge (this also pins the two
+        // foot corners, where the luff/leech meet the boom).
+        if (spars.contains(&p) && p.1 > foot_y) || neighbours(p).into_iter().any(pins) {
+            anchors.insert(p);
+            depth.insert(p, 0);
+        } else {
+            depth.insert(p, target);
+        }
+    }
+    // Relax the non-anchored interior to 1-Lipschitz (bounded by the cell count).
+    for _ in 0..cells.len() {
+        let mut changed = false;
+        for c in cells {
+            let p = (c.x, c.y);
+            if anchors.contains(&p) {
+                continue;
+            }
+            let nb = |q: (i32, i32)| {
+                if pins(q) {
+                    0
+                } else if region.contains(&q) {
+                    *depth.get(&q).unwrap_or(&0)
+                } else {
+                    FREE // off-canvas, non-pinning (below the foot) → no constraint
+                }
+            };
+            let ceil = neighbours(p).into_iter().map(nb).min().unwrap_or(0) + 1;
+            let d = depth.get_mut(&p).unwrap();
+            if *d > ceil {
+                *d = ceil;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    depth
 }
 
 /// A platform centred on the mast at `(cx, nest_y)`: a `half`-radius slab floor with the
@@ -185,6 +510,10 @@ pub fn build_masts_model(
     weather_y: i32,
     spanker: bool,
     top_nest: bool,
+    flag_phase: f32,
+    flag_len_seed: i32,
+    flag_stream_sign: i32,
+    deck_clearance: i32,
 ) -> MastModel {
     let main_h = ((length as f32) * MAST_HEIGHT_FACTOR).round().max(6.0) as i32;
     let specs = layout(count);
@@ -205,36 +534,51 @@ pub fn build_masts_model(
 
             let cells = (0..height).map(|y| Point3D::new(base_x + dx(y), y, 0)).collect();
 
-            // Main yards distributed **top-down** across the usable span (masthead → min
-            // clearance above the deck): a guaranteed top yard, then yards spread down with
-            // gaps (sail heights) growing toward the deck so the lowest sail is biggest.
-            // First collect `(yard_y, sail_height)`. The top yard drops an extra block
-            // below the masthead on taller masts (room for a topgallant above it).
+            // Main yards distributed so the **lowest sail is the largest**. Sails stack
+            // from a foot base a few blocks above the deck (the bottom 2–3 carry no canvas,
+            // so the planning must allow for them) up to the top yard near the masthead.
+            // Each sail's height is weighted — heaviest at the bottom course, shrinking
+            // going up — and yards are placed bottom→top atop each sail, then recorded
+            // top→bottom (the order the width/render code expects). The top yard drops an
+            // extra block below the masthead on taller masts (room for a topgallant above).
             let top_drop =
                 (height > MAST_TOP_YARD_DROP_H1) as i32 + (height > MAST_TOP_YARD_DROP_H2) as i32;
             let mut top = height - 1 - top_drop; // top yard, below the fence finial
             if has_top_nest {
                 top = top.min(top_nest_y - 1 - MAST_NEST_YARD_GAP); // keep clear below the nest
             }
-            let bottom = (weather_y + MAST_YARD_MIN_CLEARANCE).min(top); // lowest a yard sits
-            let span = top - bottom;
+            // Bottom of the lowest sail. `deck_clearance` already covers the deck **and
+            // its railing**; we add +1 for a wide (big) course so it clears the rail by 3.
+            // Excluding this from the budget keeps the lowest sail off the rail.
+            let foot_base = weather_y
+                + deck_clearance
+                + (yard_base_hw >= SAIL_BIG_HALF_WIDTH) as i32;
+            let span = (top - foot_base).max(MAST_SAIL_TOP_HEIGHT);
             let n = (span / MAST_YARD_SPAN_PER_SAIL + 1).clamp(1, MAST_MAX_YARDS);
-            let weights: Vec<f32> = (0..(n - 1).max(0)).map(|i| 1.0 + i as f32 * MAST_SAIL_GROWTH).collect();
+            // Sail-height budget = span minus the (n−1) yard rows between stacked sails.
+            let budget = (span - (n - 1)).max(n * MAST_SAIL_TOP_HEIGHT);
+            // Weights: bottom sail (k = 0) heaviest, shrinking upward.
+            let weights: Vec<f32> =
+                (0..n).map(|k| 1.0 + (n - 1 - k) as f32 * MAST_SAIL_GROWTH).collect();
             let wsum: f32 = weights.iter().sum::<f32>().max(1.0);
+            let heights: Vec<i32> = weights
+                .iter()
+                .map(|w| (((budget as f32) * w / wsum).round() as i32).max(MAST_SAIL_TOP_HEIGHT))
+                .collect();
+            // Place yards bottom→top: yard k caps sail k; a yard row separates stacked sails.
+            let mut yard_ys_btt: Vec<i32> = Vec::with_capacity(n as usize);
+            let mut y = foot_base;
+            for &h in &heights {
+                y += h;
+                yard_ys_btt.push(y.min(top));
+                y += 1;
+            }
+            // Record `(yard_y, sail_height)` top→bottom.
             let mut entries: Vec<(i32, i32)> = Vec::new();
-            let mut y = top;
-            for i in 0..n {
-                if i < n - 1 {
-                    // gap to the next yard down = this yard's sail height
-                    let gap = (((span as f32) * weights[i as usize] / wsum).round() as i32)
-                        .max(MAST_SAIL_TOP_HEIGHT);
-                    entries.push((y, gap));
-                    y -= gap;
-                } else {
-                    // lowest yard: sits at (≈) the clearance, sail hangs down toward the deck
-                    let yl = y.max(bottom);
-                    entries.push((yl, (yl - weather_y).max(MAST_SAIL_TOP_HEIGHT)));
-                }
+            for k in (0..n as usize).rev() {
+                let yk = yard_ys_btt[k];
+                let foot = if k == 0 { foot_base } else { yard_ys_btt[k - 1] + 1 };
+                entries.push((yk, (yk - foot).max(1)));
             }
             // Widths: bottom yard widest, narrowing gently going up (capped).
             let n = entries.len();
@@ -251,6 +595,18 @@ pub fn build_masts_model(
             // Fence finial straight on top.
             let xt = base_x + dx(height);
             let top_fence = (0..MAST_TOP_FENCE).map(|k| Point3D::new(xt, height + k, 0)).collect();
+
+            // Masthead pennant streaming aft off the top of the finial. Length + ripple
+            // phase vary per mast (seeded per ship) so no two flags match.
+            let flag_span = FLAG_MAX_LEN - FLAG_MIN_LEN + 1;
+            let flag_len = FLAG_MIN_LEN + (flag_len_seed + base_x).rem_euclid(flag_span);
+            let flag = build_flag(
+                xt,
+                height + MAST_TOP_FENCE - 1,
+                flag_len,
+                flag_phase + base_x as f32 * 0.6,
+                flag_stream_sign,
+            );
 
             // Spanker only on the aftmost (stern-most) mast, and only when rolled.
             let mast_spanker = if spanker && (xf - aft_xf).abs() < 1e-6 {
@@ -272,11 +628,102 @@ pub fn build_masts_model(
                 nests.push(build_nest(base_x + dx(top_nest_y), top_nest_y, MAST_NEST_HALF, true));
             }
 
-            Mast { base_x, height, cells, yards, top_fence, spanker: mast_spanker, nests }
+            Mast {
+                base_x,
+                height,
+                cells,
+                yards,
+                top_fence,
+                flag,
+                spanker: mast_spanker,
+                nests,
+                sail_foot_base: foot_base,
+            }
         })
         .collect();
 
     MastModel { masts }
+}
+
+/// Cells (`z = 0`) along the straight segment `a`→`b` in the x–y plane (integer DDA).
+pub fn line_xy(a: Point3D, b: Point3D) -> Vec<(i32, i32)> {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let steps = dx.abs().max(dy.abs()).max(1);
+    let mut out: Vec<(i32, i32)> = (0..=steps)
+        .map(|i| (a.x + dx * i / steps, a.y + dy * i / steps))
+        .collect();
+    out.dedup();
+    out
+}
+
+/// Filled triangle cells (`z = 0`) for corners `a, b, c` in the x–y plane (edges included).
+pub fn triangle_xy(a: Point3D, b: Point3D, c: Point3D) -> Vec<(i32, i32)> {
+    let sign = |p: (i32, i32), q: (i32, i32), r: (i32, i32)| {
+        (p.0 - r.0) * (q.1 - r.1) - (q.0 - r.0) * (p.1 - r.1)
+    };
+    let (ax, ay, bx, by, cx, cy) = (a.x, a.y, b.x, b.y, c.x, c.y);
+    let mut out = Vec::new();
+    for x in ax.min(bx).min(cx)..=ax.max(bx).max(cx) {
+        for y in ay.min(by).min(cy)..=ay.max(by).max(cy) {
+            let d1 = sign((x, y), (ax, ay), (bx, by));
+            let d2 = sign((x, y), (bx, by), (cx, cy));
+            let d3 = sign((x, y), (cx, cy), (ax, ay));
+            let neg = d1 < 0 || d2 < 0 || d3 < 0;
+            let pos = d1 > 0 || d2 > 0 || d3 > 0;
+            if !(neg && pos) {
+                out.push((x, y));
+            }
+        }
+    }
+    out
+}
+
+/// Billow a flat triangular sail (cells in the `z = 0` plane) **sideways** to leeward, with
+/// the `pinned` cells (the luff line, on the forestay) held flat at 0 and everything else
+/// free to billow — held only where it meets a pinned cell. The interior starts at the target
+/// `wind` and is **relaxed to a 1-block gradient** (each cell clamped to its lowest in-region
+/// neighbour + 1; off-region neighbours impose no ceiling), so it is hole-free.
+pub fn jib_billow(
+    cells: &[(i32, i32)],
+    wind: f32,
+    pinned: &std::collections::HashSet<(i32, i32)>,
+) -> HashMap<(i32, i32), i32> {
+    let region: std::collections::HashSet<(i32, i32)> = cells.iter().copied().collect();
+    let target = wind.round().max(0.0) as i32;
+    let mut depth: HashMap<(i32, i32), i32> = cells
+        .iter()
+        .map(|&p| (p, if pinned.contains(&p) { 0 } else { target }))
+        .collect();
+    const FREE: i32 = 1 << 20;
+    for _ in 0..cells.len() {
+        let mut changed = false;
+        for &p in cells {
+            if pinned.contains(&p) {
+                continue;
+            }
+            let nb = |q: (i32, i32)| {
+                if region.contains(&q) {
+                    *depth.get(&q).unwrap_or(&0)
+                } else {
+                    FREE
+                }
+            };
+            let ceil = nb((p.0 - 1, p.1))
+                .min(nb((p.0 + 1, p.1)))
+                .min(nb((p.0, p.1 - 1)))
+                .min(nb((p.0, p.1 + 1)))
+                + 1;
+            let d = depth.get_mut(&p).unwrap();
+            if *d > ceil {
+                *d = ceil;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    depth
 }
 
 /// Place the masts (logs) + spars (slabs/fences/stairs) and record them in `state`.
@@ -284,6 +731,43 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
     let deck_rise = (state.top_y - dc.deck.deck_y).max(0);
     let has_spanker = ctx.rng.rand_i32_range(0, 100) < MAST_SPANKER_CHANCE;
     let has_top_nest = ctx.rng.rand_i32_range(0, 100) < MAST_NEST_CHANCE;
+    // Jib (triangular headsail off the bowsprit): optional, with the chance **rising with
+    // ship size**. Needs a bowsprit (built earlier; Medium+), so Small effectively never.
+    let jib_chance = match dc.tier {
+        SizeTier::Small => 0,
+        SizeTier::Medium => JIB_CHANCE_MEDIUM,
+        SizeTier::Large => JIB_CHANCE_LARGE,
+        SizeTier::Huge => JIB_CHANCE_HUGE,
+    };
+    let has_jib = ctx.rng.rand_i32_range(0, 100) < jib_chance;
+    // Masthead flags: one wool colour for the whole ship (her colours); ripple phase +
+    // length seed rolled per ship, varied per mast inside the model.
+    let flag_color = (*ctx.rng.choose(FLAG_COLORS)).to_string();
+    let flag_phase = (ctx.rng.rand_i32_range(0, 360) as f32).to_radians();
+    let flag_len_seed = ctx.rng.rand_i32_range(0, 1000);
+    // With set sails the wind is from astern (it bellies the sails toward `SAIL_BILLOW_DIR`),
+    // so the pennants must stream the same way (downwind) to make sense. At rest (furled /
+    // no sails) they hang aft.
+    let flag_stream_sign = if dc.sail_state == SailState::Full {
+        match SAIL_BILLOW_DIR {
+            ShipDir::Bow => 1,
+            _ => -1,
+        }
+    } else {
+        -1
+    };
+    // Deployed-sail billow shape: weighted random per ship (Combined / Curtain / Domed).
+    let sail_billow = SailBillow::pick(ctx.rng);
+    // Spanker leeward side (which way it bellies in z): **random per ship** for now —
+    // `+1` starboard / `-1` port. When a real wind direction feeds the rig later, decide it
+    // from that here instead. Kept consistent for the whole ship (only the aftmost mast
+    // carries a spanker anyway).
+    let spanker_side = if ctx.rng.rand_i32_range(0, 2) == 0 { -1 } else { 1 };
+    // The lowest sail must clear the deck **and its railing**. The railing rises
+    // `BULWARK_HEIGHT` (solid) + 1 (fence cap) above the weather deck when present, so the
+    // foot sits that far up plus `SAIL_FOOT_CLEARANCE` of open air above the rail.
+    let rail_h = state.railing.as_ref().map_or(0, |_| BULWARK_HEIGHT + 1);
+    let deck_clearance = rail_h + SAIL_FOOT_CLEARANCE;
     let model = build_masts_model(
         dc.hull.length,
         dc.tier.mast_count(),
@@ -292,6 +776,10 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
         state.top_y,
         has_spanker,
         has_top_nest,
+        flag_phase,
+        flag_len_seed,
+        flag_stream_sign,
+        deck_clearance,
     );
 
     let mast_mat = ctx
@@ -393,11 +881,55 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
                 }
             }
         }
+        // Set (deployed) square sails: a billowing white-wool sheet hung from each yard —
+        // head pinned just under its own yard, foot just above the next yard down (or, for
+        // the lowest, `mast.sail_foot_base`, clear of the deck **and** its rail). The sheet
+        // bellies **forward** into the wind: one block per (z, y) at `x = yard.x + bulge`,
+        // the bulge peaking at the centre (parabola across the width × a sin profile down
+        // the height, both pinned at the edges) with `dc.wind` the depth. The bulge field is
+        // then **relaxed to a 1-block gradient** so it never steps >1 between neighbouring
+        // cells — the sheet stays a single hole-free surface (every block has a neighbour in
+        // its 3×3, no see-through gaps at an angle).
+        if dc.sail_state == SailState::Full {
+            let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))
+                .expect("SAIL_BLOCK should parse");
+            let sign = match SAIL_BILLOW_DIR {
+                ShipDir::Bow => 1,
+                _ => -1,
+            };
+            let yards = &mast.yards;
+            for (idx, yard) in yards.iter().enumerate() {
+                let top_y = yard.y - 1; // head: just under the yard
+                let bottom_y = if idx + 1 < yards.len() {
+                    yards[idx + 1].y + 1 // foot: just above the next yard down
+                } else {
+                    mast.sail_foot_base // lowest: clear of the deck + rail
+                };
+                if top_y < bottom_y {
+                    continue;
+                }
+                let hw = yard.half_width;
+                let (b, ny) = billow_field(hw, bottom_y, top_y, dc.wind, sail_billow);
+                for (zi, z) in (-hw..=hw).enumerate() {
+                    for yi in 0..ny {
+                        let y = bottom_y + yi as i32;
+                        let cell = Point3D::new(yard.x + b[zi * ny + yi] * sign, y, z);
+                        ctx.editor.place_block(&sail_block, place.to_world(cell)).await;
+                    }
+                }
+            }
+        }
         // Fence finial on top.
         for &cell in &mast.top_fence {
             spar_placer
                 .place_block(ctx.editor, place.to_world(cell), BlockForm::Fence, Some(&fence_state), None)
                 .await;
+        }
+        // Masthead pennant (rippling wool ribbon, the ship's colours).
+        if let Some(flag_block) = string_to_block(&format!("minecraft:{flag_color}_wool")) {
+            for &cell in &mast.flag.cells {
+                ctx.editor.place_block(&flag_block, place.to_world(cell)).await;
+            }
         }
         // Spanker (boom slabs + gaff double-stairs).
         if let Some(spanker) = &mast.spanker {
@@ -436,6 +968,34 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
                     }
                 }
             }
+            // Set (deployed) spanker: the canvas is **bent to the gaff (head)** and the
+            // **mast (luff)**, with the **leech** the free aft edge, but along the **boom
+            // (foot)** it's held only at the **two corners** (tack + clew) — the foot between
+            // them billows up off the boom for a more natural, less boxy belly. A fore-and-aft
+            // sail, so it bellies **sideways** to leeward in `z`: each cell offset to
+            // `z = depth · side`, the depth relaxed hole-free. Boom/gaff spar cells skipped.
+            if dc.sail_state == SailState::Full {
+                let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))
+                    .expect("SAIL_BLOCK should parse");
+                let side = spanker_side; // random per ship (see roll above)
+                let spars: std::collections::HashSet<(i32, i32)> = spanker
+                    .boom
+                    .iter()
+                    .chain(spanker.gaff.iter())
+                    .map(|sc| (sc.local.x, sc.local.y))
+                    .collect();
+                let depth =
+                    spanker_billow(&spanker.sail, dc.wind * SAIL_SPANKER_WIND_FACTOR, &spars);
+                for c in &spanker.sail {
+                    if spars.contains(&(c.x, c.y)) {
+                        continue; // leave the boom/gaff spars visible
+                    }
+                    let z = depth.get(&(c.x, c.y)).copied().unwrap_or(0) * side;
+                    ctx.editor
+                        .place_block(&sail_block, place.to_world(Point3D::new(c.x, c.y, z)))
+                        .await;
+                }
+            }
         }
         // Platforms / crow's nests (top-slab floor + optional fence basket).
         for nest in &mast.nests {
@@ -448,6 +1008,72 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
                 spar_placer
                     .place_block(ctx.editor, place.to_world(cell), BlockForm::Fence, Some(&fence_state), None)
                     .await;
+            }
+        }
+    }
+
+    // Jib: a triangular headsail set between the **bowsprit start (A)**, **bowsprit tip (B)**
+    // and **foremast top (C)**. Built only when rolled (size-gated) and a bowsprit exists. It
+    // bellies sideways to leeward (same side as the spanker). The **foot (A→B) drapes over the
+    // bowsprit as wool** (raised `SAIL_JIB_FOOT_RAISE` above the spar), the **luff/forestay
+    // (B→C) is a chain**, and the leech billows off them.
+    if has_jib {
+        if let (Some(bowsprit), Some(fore)) =
+            (&state.bowsprit, model.masts.iter().max_by_key(|m| m.base_x))
+        {
+            // Foot raised so the sail sits over the bowsprit, not on/through it.
+            let raise = Point3D::new(0, SAIL_JIB_FOOT_RAISE, 0);
+            let a = bowsprit
+                .spar
+                .iter()
+                .map(|sc| sc.local)
+                .min_by_key(|p| p.x)
+                .unwrap_or(bowsprit.tip)
+                + raise; // over the bowsprit start
+            let b = bowsprit.tip + raise; // over the bowsprit tip
+            let c = *fore.cells.iter().max_by_key(|p| p.y).unwrap(); // foremast top
+
+            let tri = triangle_xy(a, b, c);
+            if tri.len() >= 6 {
+                let foot: std::collections::HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
+                let luff: std::collections::HashSet<(i32, i32)> = line_xy(b, c).into_iter().collect();
+                // Pin the foot (laced over the bowsprit) and the luff (on the forestay).
+                let pinned: std::collections::HashSet<(i32, i32)> =
+                    foot.union(&luff).copied().collect();
+                let depth = jib_billow(&tri, dc.wind * SAIL_JIB_WIND_FACTOR, &pinned);
+                let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))
+                    .expect("SAIL_BLOCK should parse");
+                // Plain chain (default `axis=y`) — no explicit blockstate, so nothing for the
+                // live server to reject; visually identical for the near-vertical forestay.
+                let chain = string_to_block("minecraft:chain");
+                // The forestay runs up to the foremast head — don't carve the pole or its yards.
+                let mut rig: std::collections::HashSet<(i32, i32)> =
+                    fore.cells.iter().map(|p| (p.x, p.y)).collect();
+                for yd in &fore.yards {
+                    rig.insert((yd.x, yd.y));
+                }
+
+                for &(x, y) in &tri {
+                    let d = depth[&(x, y)];
+                    if d >= 1 {
+                        // Belly (interior + leech) offset to leeward.
+                        ctx.editor
+                            .place_block(&sail_block, place.to_world(Point3D::new(x, y, d * spanker_side)))
+                            .await;
+                    } else if foot.contains(&(x, y)) {
+                        // Foot: wool draped over the bowsprit (centreline, z = 0).
+                        ctx.editor.place_block(&sail_block, place.to_world(Point3D::new(x, y, 0))).await;
+                    } else if !rig.contains(&(x, y)) {
+                        // Luff: the forestay chain. **Force-placed** so the density check can't
+                        // silently drop it where it crosses other thin rig; skips the foremast
+                        // pole/yards so it never carves them.
+                        if let Some(ch) = &chain {
+                            ctx.editor
+                                .place_block_forced(ch, place.to_world(Point3D::new(x, y, 0)))
+                                .await;
+                        }
+                    }
+                }
             }
         }
     }

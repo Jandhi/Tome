@@ -197,6 +197,286 @@ fn analyze_bowsprit_nbt() {
     dump(&format!("{dir}/large_ship_bowsprit_after.nbt"));
 }
 
+/// Every masthead-flag block must be connected: it always has another flag block within
+/// a 3×3×3 neighbourhood (Chebyshev distance 1) — no floating wool. Swept across mast
+/// counts, lengths and ripple phases.
+#[test]
+fn masthead_flags_have_no_floating_blocks() {
+    use crate::generator::ships_v2::additions::masts::build_masts_model;
+    use std::collections::HashSet;
+
+    let mut rng = crate::noise::RNG::new(11);
+    for length in [14, 20, 26, 32, 40, 46] {
+        for count in [1, 2, 3] {
+            for _ in 0..12 {
+                let phase = (rng.rand_i32_range(0, 360) as f32).to_radians();
+                let seed = rng.rand_i32_range(0, 1000);
+                let sign = if rng.rand_i32_range(0, 2) == 0 { -1 } else { 1 }; // aft / forward
+                let model = build_masts_model(
+                    length, count, 0.0, 0, length / 4, false, false, phase, seed, sign, 4,
+                );
+                for mast in &model.masts {
+                    let occ: HashSet<(i32, i32, i32)> =
+                        mast.flag.cells.iter().map(|c| (c.x, c.y, c.z)).collect();
+                    assert!(!occ.is_empty(), "len={length} count={count}: empty flag");
+                    for &(x, y, z) in &occ {
+                        let connected = (-1..=1).any(|dx| {
+                            (-1..=1).any(|dy| {
+                                (-1..=1).any(|dz| {
+                                    (dx, dy, dz) != (0, 0, 0)
+                                        && occ.contains(&(x + dx, y + dy, z + dz))
+                                })
+                            })
+                        });
+                        assert!(
+                            connected,
+                            "floating flag block at ({x},{y},{z}) len={length} count={count} phase={phase} seed={seed}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Diagnostic: print, per ship length, the weather-deck Y, railing cap top, lowest-sail
+/// foot, and the resulting clearance — so the 2–3-block rule can be verified across sizes.
+/// Run: `cargo test sail_clearance_diagnostic -- --nocapture --ignored`
+#[tokio::test]
+#[ignore]
+async fn sail_clearance_diagnostic() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+
+    for length in [14, 20, 26, 32, 38, 44] {
+        let world = World::synthetic_water(build_area, 50, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(3);
+        let spec = ShipV2Spec::new(Cardinal::North, length);
+        let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+        let ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+        let wd = ship.weather_deck_y;
+        let rail_top = ship
+            .railing
+            .as_ref()
+            .and_then(|r| r.cap.iter().map(|c| c.y).max());
+        let masts = ship.masts.as_ref().unwrap();
+        let m = &masts.masts[0];
+        let bottom = m.yards.last().unwrap();
+        let foot = bottom.y - bottom.sail_height;
+        println!(
+            "len={length:2} tier={:?} deck_y={} weather_y={wd} rail_top={:?} | lowest yard_y={} sail_h={} foot={foot} clearance={} | yards={}",
+            ship.tier, ship.deck.deck_y, rail_top, bottom.y, bottom.sail_height,
+            foot - wd, m.yards.len(),
+        );
+    }
+}
+
+/// On every mast the **lowest sail is the largest** — its yard carries the tallest sail
+/// height (and widest yard) of the stack, shrinking going up. Swept across sizes.
+#[test]
+fn square_sails_largest_at_bottom() {
+    use crate::generator::ships_v2::additions::masts::build_masts_model;
+
+    for length in [20, 26, 32, 40, 46] {
+        for count in [1, 2, 3] {
+            let model = build_masts_model(length, count, 0.0, 0, 5, false, false, 0.0, 0, 1, 4);
+            for mast in &model.masts {
+                if mast.yards.len() < 2 {
+                    continue;
+                }
+                // Yards are ordered top→bottom, so the last is the bottom (course).
+                let bottom = mast.yards.last().unwrap();
+                for y in &mast.yards {
+                    assert!(
+                        bottom.sail_height >= y.sail_height,
+                        "len={length} count={count}: bottom sail ({}) shorter than an upper sail ({}) at y={}",
+                        bottom.sail_height, y.sail_height, y.y,
+                    );
+                    assert!(
+                        bottom.half_width >= y.half_width,
+                        "len={length} count={count}: bottom yard ({}) narrower than an upper yard ({})",
+                        bottom.half_width, y.half_width,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// A deployed square sail's billow surface has **no holes**: the bulge field never steps
+/// more than 1 between neighbouring cells, so every placed block has a grid neighbour within
+/// its 3×3 (no see-through gaps). Swept across width, drop and wind strength.
+#[test]
+fn square_sail_surface_has_no_holes() {
+    use crate::generator::ships_v2::additions::masts::billow_field;
+    use crate::generator::ships_v2::SailBillow;
+
+    for shape in [SailBillow::Domed, SailBillow::Curtain, SailBillow::Combined] {
+        for hw in 2..=9 {
+            for drop in 2..=16 {
+                for wind10 in [0, 15, 20, 30, 40, 60] {
+                    let wind = wind10 as f32 / 10.0;
+                    let (b, ny) = billow_field(hw, 0, drop, wind, shape);
+                    let nz = (2 * hw + 1) as usize;
+                    let at = |zi: usize, yi: usize| zi * ny + yi;
+                    for zi in 0..nz {
+                        for yi in 0..ny {
+                            if zi + 1 < nz {
+                                assert!(
+                                    (b[at(zi, yi)] - b[at(zi + 1, yi)]).abs() <= 1,
+                                    "z-step >1 at {shape:?} hw={hw} drop={drop} wind={wind}",
+                                );
+                            }
+                            if yi + 1 < ny {
+                                assert!(
+                                    (b[at(zi, yi)] - b[at(zi, yi + 1)]).abs() <= 1,
+                                    "y-step >1 at {shape:?} hw={hw} drop={drop} wind={wind}",
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The deployed spanker (aft fore-and-aft sail) is bent to the boom + gaff and bellies
+/// sideways with **no floating blocks** — every placed canvas block has a neighbour within
+/// its 3×3×3. Swept across sizes (spanker forced on).
+#[test]
+fn spanker_sail_has_no_holes() {
+    use crate::generator::ships_v2::additions::masts::{build_masts_model, spanker_billow};
+    use std::collections::HashSet;
+
+    for length in [26, 32, 38, 44] {
+        for count in [2, 3] {
+            // spanker = true, so the aftmost mast carries one.
+            let model = build_masts_model(length, count, 0.0, 0, 5, true, false, 0.0, 0, 1, 4);
+            for mast in &model.masts {
+                let Some(sp) = &mast.spanker else { continue };
+                assert!(!sp.sail.is_empty(), "len={length}: empty spanker sail");
+                let spars: HashSet<(i32, i32)> = sp
+                    .boom
+                    .iter()
+                    .chain(sp.gaff.iter())
+                    .map(|c| (c.local.x, c.local.y))
+                    .collect();
+                let depth = spanker_billow(&sp.sail, 3.0, &spars);
+                let placed: HashSet<(i32, i32, i32)> = sp
+                    .sail
+                    .iter()
+                    .filter(|c| !spars.contains(&(c.x, c.y)))
+                    .map(|c| (c.x, c.y, depth[&(c.x, c.y)]))
+                    .collect();
+                for &(x, y, z) in &placed {
+                    let connected = (-1..=1).any(|dx| {
+                        (-1..=1).any(|dy| {
+                            (-1..=1).any(|dz| {
+                                (dx, dy, dz) != (0, 0, 0) && placed.contains(&(x + dx, y + dy, z + dz))
+                            })
+                        })
+                    });
+                    assert!(
+                        connected,
+                        "floating spanker cell at ({x},{y},{z}) len={length} count={count}",
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// End-to-end: a Huge ship (jib chance 100%) actually **places the jib** — chain (forestay)
+/// blocks and white-wool (sail) blocks land in the world. Confirms the rigging is built.
+#[tokio::test]
+async fn jib_places_chains_and_wool() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+
+    let world = World::synthetic_water(build_area, 50, 64);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(3);
+    let spec = ShipV2Spec::new(Cardinal::North, 46); // Huge → jib always
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let _ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+    editor.flush_buffer().await;
+
+    // Scan the build volume for chain + white_wool blocks.
+    let (mut chains, mut wool) = (0, 0);
+    for x in 0..180 {
+        for y in 40..110 {
+            for z in 0..180 {
+                if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
+                    let id = b.id.as_str();
+                    if id.contains("chain") {
+                        chains += 1;
+                    } else if id.contains("white_wool") {
+                        wool += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("jib scan: chains={chains}, white_wool={wool}");
+    assert!(chains > 0, "expected forestay chain blocks to be placed");
+    assert!(wool > 0, "expected jib/sail wool blocks to be placed");
+}
+
+/// The jib's billowed triangle has **no holes**: the depth field never steps more than 1
+/// between neighbouring cells. Swept across a range of triangle shapes and winds.
+#[test]
+fn jib_sail_has_no_holes() {
+    use crate::generator::ships_v2::additions::masts::{jib_billow, line_xy, triangle_xy};
+    use crate::geometry::Point3D;
+    use std::collections::HashSet;
+
+    // A few representative jib triangles (bowsprit start A, tip B, foremast top C).
+    let cases = [
+        (Point3D::new(30, 6, 0), Point3D::new(42, 7, 0), Point3D::new(26, 30, 0)),
+        (Point3D::new(20, 5, 0), Point3D::new(28, 5, 0), Point3D::new(17, 20, 0)),
+        (Point3D::new(40, 8, 0), Point3D::new(58, 9, 0), Point3D::new(35, 40, 0)),
+    ];
+    for (a, b, c) in cases {
+        let tri = triangle_xy(a, b, c);
+        let cellset: HashSet<(i32, i32)> = tri.iter().copied().collect();
+        // Pin the foot (A→B) and luff (B→C), as the build does.
+        let mut pinned: HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
+        pinned.extend(line_xy(b, c));
+        for wind10 in [10, 20, 30, 40] {
+            let depth = jib_billow(&tri, wind10 as f32 / 10.0, &pinned);
+            for &(x, y) in &tri {
+                let d = depth[&(x, y)];
+                for (nx, ny) in [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)] {
+                    if cellset.contains(&(nx, ny)) {
+                        assert!(
+                            (d - depth[&(nx, ny)]).abs() <= 1,
+                            "jib step >1 at ({x},{y}) wind={wind10}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// The keel geometry is well-formed across a range of (no-rowboat) lengths,
 /// including several random sizes.
 #[test]
@@ -619,6 +899,7 @@ async fn build_ship_v2_live() {
         } else {
             crate::generator::ships_v2::HullShape::Oval
         };
+        // The deployed-sail billow shape is rolled per ship (weighted Combined/Curtain/Domed).
         let spec = ShipV2Spec::new(Cardinal::North, length).with_hull_shape(hull_shape);
 
         let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);

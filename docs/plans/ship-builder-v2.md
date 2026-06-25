@@ -267,6 +267,94 @@ each arrives only with the user's algorithm for it.
    slightly **wider at the bottom** than the top (secured to the yard below). (The
    copy-paste-with-water building trick is workflow-only — N/A for generation.)
 
+   **Square sails (deployed / `SailState::Full`) — implemented** (`additions/masts.rs`).
+   A billowing **white-wool** sheet hangs from each main yard: **head** pinned just under
+   its own yard ("bottom of the stays"), **foot** just above the next yard down — or, for
+   the lowest sail, on `mast.sail_foot_base`: **2–3 blocks of open air above the deck
+   *railing*** (`SAIL_FOOT_CLEARANCE`, +1 for a wide course). The clearance is measured above
+   the rail, not the bare deck — the rail (`BULWARK_HEIGHT` + fence) is added at build time —
+   so the course no longer lands on the bulwark. The sheet **bellies forward** (toward the
+   bow, into a following wind): one wool block per `(z, y)` at `x = yard.x + bulge`, from the
+   bulge field `billow_field`, which is **relaxed to a 1-block gradient** so neighbours never
+   step >1 → a single **hole-free** surface (asserted by `square_sail_surface_has_no_holes`).
+   Depth = **wind strength**, configurable via `ShipV2Spec::with_wind` (default `SAIL_WIND`);
+   `SAIL_BILLOW_DIR` the direction (flip candidate). `ShipV2Spec::new` defaults to `Full`.
+
+   Three **billow shapes** (`SailBillow`, `ShipV2Spec::with_sail_billow`; the live test
+   cycles them so all show in one shot):
+   - **`Domed`** (attempt 1) — curve runs **across the width**: a parabola in `z` (deepest at
+     centre, pinned at the luff edges) × a `sin` down the height; the vertical **sides stay
+     straight** at the yard. A pillow. `SAIL_BELLY_POW` tunes fullness.
+   - **`Curtain`** (attempt 2, current default) — each row is **flat** (all blocks at one
+     `x`), so the curve runs **down the whole length and the sides curve too**. A 1-D profile
+     (`sin^SAIL_CURTAIN_CURVE_POW`, `p<1`) bulges **more drastically at the head/foot and
+     flattens through the middle**, broadcast across the width; **larger sails curve deeper**
+     (`SAIL_CURTAIN_SIZE_GAIN`). The no-holes relaxation caps the end-sweep at ~45°.
+   - **`Combined`** (attempt 3) — a blend: the domed `sin`×parabola belly (centre-weighted),
+     but the across-width factor only drops to `SAIL_COMBINED_EDGE` at the luff edges (not 0)
+     **and those edges are left free** in the relax (curtain-style), so the **sides billow
+     partway** instead of pinning flat. Fuller/rounder than `Domed`, more centre-weighted than
+     `Curtain`. `SAIL_COMBINED_EDGE` = 0 → `Domed`, = 1 → `Curtain`.
+
+   (Course-foot draw-in is a later pass.)
+
+   **Spanker (deployed) — implemented** (`additions/masts.rs`, `spanker_billow`). The aft
+   fore-and-aft sail (**wool**) is **bent to the gaff (head) and mast (luff)** with the
+   **leech** the free aft edge — `build_spanker` records the flat (`z = 0`) `sail`
+   quadrilateral. Under `Full` it bellies **sideways to leeward**, the side (`±z`) **rolled
+   randomly per ship** for now (a real wind input would decide it later — that's the single
+   spot to change): each cell offset to `z = depth · side`. `spanker_billow` pins the **head,
+   luff and leech to 0** (so the canvas tapers onto the spars — the row under the gaff lands at
+   `z = 0`, a **wool block bent onto the upside-down gaff stair**), but leaves the **foot (boom)
+   free except at its two corners** (tack + clew, held by the luff/leech) so the foot **billows
+   off the boom** for a less boxy belly. To exaggerate the wind, the **foot also arcs upward**
+   in the centre (`SAIL_SPANKER_FOOT_LIFT`, 0 at the corners) — the bottom edge lifts off the
+   boom (which stays visible below). The **leech** runs straight from the gaff tip to the boom
+   tip, with at least one canvas row kept above the boom along its **full length**
+   (`leech_top.max(boom_y+1)`) so the boom's aft end (clew) is **under sail, not a bare spar
+   tip**. The interior starts at `dc.wind · SAIL_SPANKER_WIND_FACTOR`
+   (spankers get large, so they billow deeper) and is **relaxed hole-free** (1-block gradient,
+   foot underside excluded from pinning via the per-column `foot_cells`). Boom/gaff spar cells
+   skipped. `Furled` keeps the stowed roll on the boom. Asserted by `spanker_sail_has_no_holes`.
+   Rolled per ship by `MAST_SPANKER_CHANCE` (50%).
+
+   **Jib (triangular headsail) — implemented** (`additions/masts.rs`: `triangle_xy`, `line_xy`,
+   `jib_billow`). Set between three points: the **bowsprit start (A)**, **bowsprit tip (B)** and
+   **foremast top (C)** (foremost mast = max `base_x`; A = the spar's inboard cell; B =
+   `bowsprit.tip`). The filled triangle bellies **sideways to leeward** (same `spanker_side` as
+   the spanker), pinned along the **foot (A→B)** and **luff (B→C)** with the leech free, relaxed
+   hole-free (asserted by `jib_sail_has_no_holes`). The **foot drapes over the bowsprit as wool**
+   — raised `SAIL_JIB_FOOT_RAISE` (1) above the spar so it rests **over** it, not beside/through
+   it — and the **luff/forestay (B→C) is a chain** (skipping the masthead); the leech bellies off
+   them. **Size-gated, chance rising with size** (`JIB_CHANCE_MEDIUM`/`LARGE`/`HUGE` = 55/80/100;
+   Small has no bowsprit → none) and only when a bowsprit exists. Billow depth
+   `dc.wind · SAIL_JIB_WIND_FACTOR`. Placement verified by `jib_places_chains_and_wool`.
+
+   **Yard/sail stacking** is sized so the **lowest sail (course) is the largest** — yards
+   are laid out **bottom→top** from the foot base (rail clearance excluded from the budget),
+   each sail height weighted heaviest at the bottom and shrinking upward (`MAST_SAIL_GROWTH`);
+   bottom yard is also widest. `MAST_YARD_SPAN_PER_SAIL` (now 11) sets how many yards/stays a
+   mast gets — larger = fewer stays, taller sails. Asserted by `square_sails_largest_at_bottom`.
+
+   _Verify on the live screenshot:_ curve reads as wind-filled (tune `SAIL_WIND`); billow
+   faces forward (flip `SAIL_BILLOW_DIR` if not); sails span cleanly stay-to-stay with the
+   lowest ending 2–3 above deck; no clipping into the mast or yards.
+
+   **Masthead flags — implemented** (`additions/masts.rs`, `build_flag`). A small wool
+   **pennant** streams **aft** off each mast's fence finial: **4–7 blocks long** (rolled
+   per mast), **1 block tall** (`FLAG_HOIST_HEIGHT`; can taper from a taller hoist body).
+   To read as cloth flapping (not a rigid flat plane), each column aft is **staggered in
+   both `y` and `z`** on two out-of-phase sine ripples whose **amplitude grows toward the
+   free fly end** (the hoist is pinned to the staff) — a curved 3-D ribbon, the wind on a
+   slight angle. One heraldic **wool colour per ship** (`FLAG_COLORS`, hardcoded like the
+   quartz sails until a cloth palette role exists); ripple phase + length seed rolled per
+   ship and varied per mast. Flies regardless of `sail_state`. Tunables: `FLAG_*` in
+   `tuning.rs`.
+
+   _Verify on the live screenshot:_ flag reads as a flapping pennant (tune `FLAG_WAVE_AMP_Y`
+   / `FLAG_WAVE_AMP_Z` / the freqs); streams clear aft of the rigging; length range looks
+   right; colour variety across the fleet.
+
    **More detail above water (user principle):** above-water features need finer
    detail than the mostly-blocks/large-shapes underwater work — use stairs/slabs,
    trim, secondary colours, windows. Example idea: **side ladders as climbing ropes**

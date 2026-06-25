@@ -133,9 +133,10 @@ pub const MAST_SAIL_FURL_U_STEP: i32 = 4;
 /// mast / room for a topgallant above it on taller masts).
 pub const MAST_TOP_YARD_DROP_H1: i32 = 20;
 pub const MAST_TOP_YARD_DROP_H2: i32 = 35;
-/// Roughly one yard per this many blocks of usable mast span (masthead → min clearance) —
-/// drives how many yards a mast gets (then clamped by [`MAST_MAX_YARDS`]).
-pub const MAST_YARD_SPAN_PER_SAIL: i32 = 8;
+/// Roughly one yard per this many blocks of usable mast span (foot base → top yard) —
+/// drives how many yards a mast gets (then clamped by [`MAST_MAX_YARDS`]). Larger = fewer
+/// yards / stays, so each sail is taller.
+pub const MAST_YARD_SPAN_PER_SAIL: i32 = 11;
 /// Hard cap on yards per mast.
 pub const MAST_MAX_YARDS: i32 = 4;
 /// Gap growth going down: each lower sail's gap is weighted `1 + i·growth`, so sails get
@@ -148,12 +149,110 @@ pub const MAST_YARD_NARROW_MAX: i32 = 3;
 /// Forward (`+x`, toward the bow) offset of the yards from the mast centreline, in blocks
 /// — so the yard (and its sail) sits just ahead of the mast rather than through it.
 pub const MAST_YARD_FORWARD: i32 = 1;
-/// Minimum height (blocks above the weather deck) for a yard — no yard is placed lower
-/// than this, so the lowest sail keeps clear of the deck. (The guaranteed top yard is
-/// exempt — it always sits at the masthead.)
-pub const MAST_YARD_MIN_CLEARANCE: i32 = 8;
 /// Fence blocks stacked on top of each mast (the straight finial spar).
 pub const MAST_TOP_FENCE: i32 = 2;
+
+// --- Masthead flags (wool pennants) ----------------------------------------
+
+/// Shortest / longest masthead pennant, in wool blocks streaming aft. Each mast rolls
+/// a length in `[FLAG_MIN_LEN, FLAG_MAX_LEN]`.
+pub const FLAG_MIN_LEN: i32 = 4;
+pub const FLAG_MAX_LEN: i32 = 7;
+/// Vertical column height at the **hoist** (staff edge), tapering to 1 at the fly tip —
+/// a small pennant body. `1` = a flat 1-tall streamer (rippled in `y`/`z`); larger = a
+/// taller flag.
+pub const FLAG_HOIST_HEIGHT: i32 = 1;
+/// Peak vertical (`y`) ripple amplitude at the free (fly) end — the flag whips up/down.
+/// Amplitude grows from 0 at the pinned hoist to this at the fly. Larger = floppier.
+pub const FLAG_WAVE_AMP_Y: f32 = 1.6;
+/// Peak sideways (`z`) ripple amplitude at the fly end — so the flag is **not a flat
+/// plane** but a 3-D flapping ribbon (wind comes at a slight angle). Larger = more sway.
+pub const FLAG_WAVE_AMP_Z: f32 = 1.6;
+/// Radians of wave per block along the flag for the vertical (`y`) ripple. ~`1.2` gives
+/// roughly one S-curve over a 5-block pennant. Larger = tighter ripples.
+pub const FLAG_WAVE_FREQ_Y: f32 = 1.2;
+/// Radians of wave per block for the sideways (`z`) ripple — deliberately **different**
+/// from [`FLAG_WAVE_FREQ_Y`] so the two waves don't lock into a rigid helix.
+pub const FLAG_WAVE_FREQ_Z: f32 = 0.9;
+/// Phase offset (radians) of the `z` ripple relative to the `y` ripple (≈ a quarter
+/// wave) — staggers the two so the ribbon curves organically.
+pub const FLAG_WAVE_Z_PHASE: f32 = 1.6;
+/// Heraldic wool colours a ship's pennants are drawn from (one rolled per ship, so a
+/// vessel flies its own colours). Hardcoded like the quartz sails until a palette role
+/// exists for cloth.
+pub const FLAG_COLORS: &[&str] =
+    &["red", "white", "blue", "yellow", "black", "light_blue", "green", "orange"];
+
+// --- Square sails (deployed / billowing) -----------------------------------
+
+/// Default **wind strength** = the deepest billow (blocks the belly bulges past the yard)
+/// for a deployed square sail. `0.0` = a flat sheet; larger = a fuller, more curved sail.
+/// Overridable per ship via `ShipV2Spec::with_wind`.
+pub const SAIL_WIND: f32 = 2.0;
+/// Which way a filled sail bellies — `Bow` (driven by a following wind, the usual set) or
+/// `Stern`. Local fore/aft displacement, **flip candidate** if the curve faces the wrong way.
+pub const SAIL_BILLOW_DIR: ShipDir = ShipDir::Bow;
+/// Vertical belly fullness exponent. The bulge down the sail follows `sin(π·t)^p` (`t` =
+/// 0 at the head/yard, 1 at the foot) — pinned at **both** the head and the foot, deepest
+/// mid-height. `p < 1` fills the belly out over more of the height (a fuller sail); `p > 1`
+/// concentrates it in a tighter mid-band.
+pub const SAIL_BELLY_POW: f32 = 0.8;
+/// Open-air gap (blocks) the lowest sail's foot leaves **above the deck railing** — the
+/// user's "2–3 above deck". The railing height (`BULWARK_HEIGHT` + fence) is added on top
+/// of this at build time so the foot clears the rail, not just the deck floor. Bumped by 1
+/// for a wide (big) sail — see `SAIL_BIG_HALF_WIDTH`.
+pub const SAIL_FOOT_CLEARANCE: i32 = 2;
+/// Yard half-width at/above which the lowest sail counts as "big" and gets +1 foot clearance.
+pub const SAIL_BIG_HALF_WIDTH: i32 = 6;
+/// Block a deployed sail's canvas is built from (white cloth). Hardcoded like the furled
+/// quartz until a cloth palette role exists.
+pub const SAIL_BLOCK: &str = "white_wool";
+
+// Attempt 2 — `SailBillow::Curtain` (flat rows, the whole length curves, sides included).
+
+/// Curtain vertical-profile exponent: depth ∝ `sin(π·t)^p` down the height. `< 1` makes the
+/// belly fill out fast and flatten through the middle, with the curve concentrated near the
+/// **head/foot** (the "more drastic at top/bottom, tapers into the middle" look). The
+/// no-holes relaxation then caps any step at 1 (so the very ends read as a ~45° sweep).
+pub const SAIL_CURTAIN_CURVE_POW: f32 = 0.6;
+/// Extra billow depth (blocks) per block of yard half-width **beyond** `SAIL_BIG_HALF_WIDTH`,
+/// so larger sails curve slightly deeper. `0.0` = every curtain sail the same depth as `wind`.
+pub const SAIL_CURTAIN_SIZE_GAIN: f32 = 0.35;
+
+// Attempt 3 — `SailBillow::Combined` (domed centre-weighting + curtain's curving sides).
+
+/// Per-ship chance (percent) of each deployed-sail billow shape, rolled once per ship.
+/// `Combined` then `Curtain` then the remainder (`Domed`): 50 / 35 / 15.
+pub const SAIL_BILLOW_COMBINED_CHANCE: i32 = 50;
+pub const SAIL_BILLOW_CURTAIN_CHANCE: i32 = 35;
+
+/// How much the luff **sides** billow on the combined sail, `0`–`1`: the across-width factor
+/// runs from this at the edges to `1` at the centre. `0` = sides pinned flat (pure `Domed`);
+/// `1` = sides as deep as the centre (pure `Curtain`). The relaxation leaves the sides free,
+/// so they curve to this fraction of the centre depth.
+pub const SAIL_COMBINED_EDGE: f32 = 0.5;
+
+/// Wind multiplier for the spanker relative to the square sails (`SAIL_WIND`). Spankers get
+/// quite tall/large, so they billow a bit deeper to read as curved. `1.0` = same as the
+/// square sails.
+pub const SAIL_SPANKER_WIND_FACTOR: f32 = 1.6;
+/// How far (blocks) the spanker's **foot lifts up** in the centre — the bottom edge arcs
+/// upward off the boom (0 at the two corners), showing the wind pushing the sail up. `0` =
+/// a straight foot along the boom.
+pub const SAIL_SPANKER_FOOT_LIFT: i32 = 2;
+
+// --- Jib (triangular headsail, bowsprit → foremast) ------------------------
+
+/// Per-ship chance (percent) of a jib, by size tier — **rises with ship size**. A jib needs
+/// a bowsprit (Medium+), so `Small` is effectively 0.
+pub const JIB_CHANCE_MEDIUM: i32 = 55;
+pub const JIB_CHANCE_LARGE: i32 = 80;
+pub const JIB_CHANCE_HUGE: i32 = 100;
+/// Wind multiplier for the jib billow relative to the square sails (`SAIL_WIND`).
+pub const SAIL_JIB_WIND_FACTOR: f32 = 1.3;
+/// Blocks the jib's foot (the A→B edge) sits **above** the bowsprit, so the sail drapes
+/// **over** the spar rather than beside it. `1` rests it just on top.
+pub const SAIL_JIB_FOOT_RAISE: i32 = 1;
 
 // --- Spanker (gaff + boom on the aftmost mast) -----------------------------
 
@@ -162,7 +261,7 @@ pub const MAST_TOP_FENCE: i32 = 2;
 pub const MAST_SPANKER_CHANCE: i32 = 50;
 /// Boom (lower, near-horizontal spar) length aft of the mast, as a fraction of hull
 /// length. The spanker is a fore-and-aft sail in the centreline (z=0) plane.
-pub const MAST_SPANKER_BOOM_FRACTION: f32 = 0.40;
+pub const MAST_SPANKER_BOOM_FRACTION: f32 = 0.30;
 /// Boom height above the weather deck (kept at least a block up off the deck).
 pub const MAST_SPANKER_BOOM_CLEARANCE: i32 = 3;
 /// Gaff throat height up the mast (above the boom), as a fraction of the mast's height

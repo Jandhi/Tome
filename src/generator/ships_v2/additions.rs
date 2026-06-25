@@ -154,11 +154,48 @@ pub enum DeckAddition {
 }
 
 /// How the sails are rendered. `None` is bare yards; `Furled` is rolled-up canvas
-/// (alternating quartz stairs along each yard). `Full` (set sails) is a later step.
+/// (alternating quartz stairs along each yard); `Full` is set, billowing square sails
+/// (a curved white-wool sheet hung from each yard, depth driven by [`DeckContext::wind`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SailState {
     None,
     Furled,
+    Full,
+}
+
+/// The billow *shape* of a deployed (`Full`) square sail — two looks to choose between.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SailBillow {
+    /// Attempt 1 — a pillow/dome: the curve runs **across the width** (deepest at the
+    /// centre, pinned at the luff edges), so the vertical sides stay straight at the yard.
+    Domed,
+    /// Attempt 2 — a curtain/scoop: each horizontal row is flat (all blocks at one `x`), so
+    /// the curve runs **down the whole length** and the **sides curve too**. The vertical
+    /// profile bulges more drastically near the head/foot and flattens through the middle;
+    /// larger sails curve slightly deeper.
+    Curtain,
+    /// Attempt 3 — a blend of the two: a domed `sin`×parabola belly (deepest at the centre)
+    /// **but the luff sides are not pinned flat** — they billow partway (curtain-like) instead
+    /// of back to the yard. Fuller and rounder than `Domed`, more centre-weighted than
+    /// `Curtain`. The blend is set by `SAIL_COMBINED_EDGE`.
+    Combined,
+}
+
+impl SailBillow {
+    /// Roll a billow shape for a ship, weighted by [`SAIL_BILLOW_COMBINED_CHANCE`] /
+    /// [`SAIL_BILLOW_CURTAIN_CHANCE`] (the remainder is `Domed`).
+    pub fn pick(rng: &mut crate::noise::RNG) -> SailBillow {
+        let r = rng.rand_i32_range(0, 100);
+        if r < super::tuning::SAIL_BILLOW_COMBINED_CHANCE {
+            SailBillow::Combined
+        } else if r
+            < super::tuning::SAIL_BILLOW_COMBINED_CHANCE + super::tuning::SAIL_BILLOW_CURTAIN_CHANCE
+        {
+            SailBillow::Curtain
+        } else {
+            SailBillow::Domed
+        }
+    }
 }
 
 /// Read-only context every deck addition builds against: the ship-so-far (placement
@@ -175,8 +212,10 @@ pub struct DeckContext<'a> {
     pub on_water: bool,
     /// Forward mast rake (blocks of `+x` per block of height; `0.0` = vertical).
     pub mast_lean: f32,
-    /// How sails are rendered (none / furled / …).
+    /// How sails are rendered (none / furled / full).
     pub sail_state: SailState,
+    /// Wind strength — deepest billow (blocks) of a deployed [`SailState::Full`] sail.
+    pub wind: f32,
 }
 
 /// **Debug toggle** — additions to skip building, for isolating issues. Normally empty;

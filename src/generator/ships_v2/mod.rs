@@ -32,7 +32,7 @@ use crate::noise::RNG;
 // Reused harness from v1: the local→world transform and ship-relative facings.
 pub use super::ships::{Placement, ShipDir};
 
-pub use additions::{DeckAddition, SailState, SizeTier};
+pub use additions::{DeckAddition, SailBillow, SailState, SizeTier};
 pub use hull::HullShape;
 use additions::bowsprit::BowspritModel;
 use additions::masts::MastModel;
@@ -77,8 +77,10 @@ pub struct ShipV2Spec {
     /// Forward mast rake — blocks of `+x` (toward the bow) per block of mast height.
     /// `0.0` = perfectly vertical masts.
     pub mast_lean: f32,
-    /// How the sails are rendered (none / furled / …).
+    /// How the sails are rendered (none / furled / full).
     pub sail_state: SailState,
+    /// Wind strength — deepest billow (blocks) of a deployed `Full` sail. `0.0` = flat.
+    pub wind: f32,
 }
 
 impl ShipV2Spec {
@@ -91,13 +93,20 @@ impl ShipV2Spec {
             beam_ratio: DEFAULT_BEAM_RATIO,
             hull_shape: HullShape::Teardrop,
             mast_lean: tuning::MAST_LEAN,
-            sail_state: SailState::Furled,
+            sail_state: SailState::Full,
+            wind: tuning::SAIL_WIND,
         }
     }
 
-    /// Set how the sails are rendered (none / furled / …).
+    /// Set how the sails are rendered (none / furled / full).
     pub fn with_sail_state(mut self, sail_state: SailState) -> Self {
         self.sail_state = sail_state;
+        self
+    }
+
+    /// Set the wind strength — deepest billow (blocks) of a deployed `Full` sail.
+    pub fn with_wind(mut self, wind: f32) -> Self {
+        self.wind = wind;
         self
     }
 
@@ -135,6 +144,9 @@ pub struct ShipV2Output {
     pub masts: Option<MastModel>,
     /// Size tier derived from length — gates which deck additions are built.
     pub tier: SizeTier,
+    /// Local Y of the **topmost open weather deck** (what additions/masts build against —
+    /// the raised additional deck if any, else the main deck). Sails clear this.
+    pub weather_deck_y: i32,
     /// `true` if the anchor was over water (built below the surface), `false` if on
     /// land (built resting on the ground).
     pub on_water: bool,
@@ -207,6 +219,7 @@ pub async fn build_ship_v2(
         on_water,
         mast_lean: spec.mast_lean,
         sail_state: spec.sail_state,
+        wind: spec.wind,
     };
     // Running top-weather-deck state: structural additions raise it, fittings read it.
     let mut deck_state = additions::DeckState::initial(&hull, &deck);
@@ -227,6 +240,9 @@ pub async fn build_ship_v2(
     let bowsprit = deck_state.bowsprit;
     let railing = deck_state.railing;
     let masts = deck_state.masts;
+    let weather_deck_y = deck_state.top_y;
 
-    ShipV2Output { placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, on_water }
+    ShipV2Output {
+        placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, weather_deck_y, on_water,
+    }
 }
