@@ -604,6 +604,191 @@ async fn helm_places_wheel() {
 }
 
 /// The jib's billowed triangle has **no holes**: the depth field never steps more than 1
+/// Stage 3: companionways connect the levels — a Medium+ ship records hatch/stair cells and cuts
+/// at least one hole (air) in a deck layer.
+#[tokio::test]
+async fn companionways_connect_levels() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+    let world = World::synthetic_water(build_area, 50, 64);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(4);
+    let spec = ShipV2Spec::new(Cardinal::North, 36); // Large → hold + gun deck
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+    editor.flush_buffer().await;
+
+    assert!(!ship.hatch_cells.is_empty(), "companionways should record hatch/stair cells");
+    // A below-decks hatch is an open hole (air); the weather-deck hatch is an openable trapdoor lid.
+    // (Recorded cells are the x/z footprint at `floor_y`; the ceiling cells carry the hole/lid.)
+    let (mut holes, mut trapdoors) = (0, 0);
+    for cell in &ship.hatch_cells {
+        if let Some(b) = editor.try_get_block(ship.placement.to_world(*cell)) {
+            let id = b.id.as_str();
+            if id.contains("air") {
+                holes += 1;
+            } else if id.contains("trapdoor") {
+                trapdoors += 1;
+            }
+        }
+    }
+    assert!(holes > 0, "expected an open below-decks hatch (air)");
+    assert!(trapdoors > 0, "expected an openable trapdoor lid over the weather-deck hatch");
+}
+
+/// Stage 3: the interior levels get **furnished** — a Large ship places furniture (barrels/chests/
+/// etc.) below decks, reusing the buildings_v2 furnishing engine.
+#[tokio::test]
+async fn ship_interior_furnished() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+    let world = World::synthetic_water(build_area, 50, 64);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(8);
+    let spec = ShipV2Spec::new(Cardinal::North, 38); // Large → hold + gun deck
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let _ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+    editor.flush_buffer().await;
+
+    let (mut cargo, mut beds) = (0, 0);
+    for x in 0..180 {
+        for y in 40..90 {
+            for z in 0..180 {
+                if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
+                    let id = b.id.as_str();
+                    if id.contains("barrel") || id.ends_with("chest") || id.contains("hay") {
+                        cargo += 1;
+                    } else if id.contains("bed") {
+                        beds += 1;
+                    }
+                }
+            }
+        }
+    }
+    println!("ship interior: cargo={cargo}, beds={beds}");
+    assert!(cargo > 0, "expected cargo (barrels/chests) in the holds");
+    // The gun deck is bulkheaded into cabins — the captain/crew cabins place beds.
+    assert!(beds > 0, "expected a bed from the bulkheaded gun-deck cabins");
+}
+
+/// For fun: a **giant** ship — keel length 100 — builds end to end without panicking, and everything
+/// scales off the length (hull/masts/levels/etc. are all length-derived). Just a smoke test.
+#[tokio::test]
+async fn giant_ship_length_100() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(383, 255, 383));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+    let world = World::synthetic_water(build_area, 60, 120);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(100);
+    let spec = ShipV2Spec::new(Cardinal::North, 100);
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let ship = build_ship_v2(&mut ctx, &spec, Point2D::new(190, 190)).await;
+    editor.flush_buffer().await;
+
+    // Everything scaled off the length: a deep hull, tall masts, multiple levels.
+    assert!(ship.keel.depth >= 12, "len-100 keel should be deep, got {}", ship.keel.depth);
+    assert!(ship.hull.max_beam >= 25, "len-100 beam should be wide, got {}", ship.hull.max_beam);
+    let masts = ship.masts.as_ref().expect("masts");
+    let tallest = masts.masts.iter().map(|m| m.height).max().unwrap_or(0);
+    assert!(tallest >= 80, "len-100 mainmast should be tall, got {tallest}");
+    assert!(ship.levels.levels.iter().any(|l| l.name == "hold"), "len-100 should have a hold");
+    // Deep hull → stacked lower holds reached by mast ladders.
+    let lower = ship.levels.levels.iter().filter(|l| l.name == "lower_hold").count();
+    assert!(lower >= 1, "len-100 deep hull should stack lower holds, got {lower}");
+    let mut ladders = 0;
+    for x in 0..256 {
+        for y in 60..130 {
+            for z in 0..256 {
+                if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
+                    if b.id.as_str().contains("ladder") {
+                        ladders += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert!(ladders > 0, "len-100 should place mast ladders to the lower holds");
+    println!(
+        "giant ship: depth={}, beam={}, mast={}, levels={} (lower_holds={lower}), ladders={ladders}",
+        ship.keel.depth, ship.hull.max_beam, tallest, ship.levels.levels.len()
+    );
+}
+
+/// Stage 3: the interior **levels** model is well-formed across sizes — every level has positive
+/// headroom and a non-empty footprint; Medium+ ships (with a raised additional deck) get a gun deck
+/// on top of the hold. Writes a per-level ASCII dump to `output/ships_v2/levels.txt`.
+#[tokio::test]
+async fn ship_levels_offline() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::levels::render_levels_ascii;
+    use crate::generator::ships_v2::{build_ship_v2, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+
+    let mut dump = String::new();
+    for length in [16, 26, 36, 44] {
+        let world = World::synthetic_water(build_area, 50, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(7);
+        let spec = ShipV2Spec::new(Cardinal::North, length);
+        let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+        let ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+
+        // Every level: positive headroom, non-empty footprint, floor below ceiling.
+        for lvl in &ship.levels.levels {
+            assert!(lvl.headroom() >= 2, "len={length} {} headroom {}", lvl.name, lvl.headroom());
+            assert!(lvl.floor_y < lvl.ceiling_y, "len={length} {} floor>=ceiling", lvl.name);
+            assert!(lvl.outline.iter().any(|&h| h >= 1), "len={length} {} empty footprint", lvl.name);
+        }
+        // A hold appears once the hull is deep enough for headroom below the deck; Medium+ (raised
+        // additional deck) also gets a gun deck.
+        let has_hold = ship.levels.levels.iter().any(|l| l.name == "hold");
+        if ship.deck.deck_y - 2 >= 2 {
+            assert!(has_hold, "len={length} deep enough but no hold (deck_y={})", ship.deck.deck_y);
+        }
+        if ship.weather_deck_y > ship.deck.deck_y {
+            assert!(ship.levels.levels.iter().any(|l| l.name == "gun_deck"), "len={length} no gun deck");
+        }
+
+        dump.push_str(&format!("==== length {length} ====\n"));
+        dump.push_str(&render_levels_ascii(&ship.levels));
+    }
+
+    std::fs::create_dir_all("output/ships_v2").ok();
+    std::fs::write("output/ships_v2/levels.txt", &dump).ok();
+    println!("{dump}");
+}
+
 /// between neighbouring cells. Swept across a range of triangle shapes and winds.
 #[test]
 fn jib_sail_has_no_holes() {
@@ -787,12 +972,20 @@ async fn build_ship_v2_offline() {
         "expected hull shell block at {side:?}",
     );
 
-    // On water, the hollow interior is cleared to air (dry hull).
-    if !hull.interior.is_empty() {
-        let inside = place.to_world(hull.interior[0]);
+    // On water, the hollow interior is cleared to air (dry hull). Pick a cell near the **top** of
+    // the hull, hard against the **side** — above the laid hold floor, clear of the centreline masts
+    // and the off-centre companionway — so it stays air after the Stage-3 interior passes.
+    let air_probe = hull
+        .interior
+        .iter()
+        .filter(|c| c.y < hull.depth) // below the deck slabs (which fill the y == depth row)
+        .max_by_key(|c| (c.y, c.z.abs()))
+        .copied();
+    if let Some(cell) = air_probe {
+        let inside = place.to_world(cell);
         assert!(
             editor.try_get_block(inside).as_ref().map_or(false, |b| is_air(b)),
-            "hull interior should be cleared to air at {inside:?}, got {:?}",
+            "hull interior should be cleared to air at {inside:?} (local {cell:?}), got {:?}",
             editor.try_get_block(inside),
         );
     }
@@ -1008,6 +1201,62 @@ async fn build_ship_v2_offline_land() {
 }
 
 /// Live build: places a row of keels of increasing length into the running
+/// For fun: build a single **giant** ship (keel length 100) into the live server's build area, so
+/// the whole length-scaled rig can be screenshotted. Needs a **big** build area over water (~200×200,
+/// tall) set with `/setbuildarea`, then:
+///
+/// ```text
+/// cargo test build_giant_ship_v2_live -- --nocapture
+/// ```
+#[tokio::test]
+async fn build_giant_ship_v2_live() {
+    use crate::editor::{Editor, World};
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{ShipV2Spec, ShipV2Ctx};
+    use crate::geometry::{Cardinal, Point2D};
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::noise::RNG;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let build_area = provider.get_build_area().await.expect("Failed to get build area");
+    let world = World::new(&provider).await.expect("Failed to create world");
+    let mut editor = Editor::new(build_area, world);
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette = data
+        .palettes
+        .get(&PaletteId::from("ship_oak"))
+        .expect("ship_oak palette (data/palettes/ships/)")
+        .clone();
+
+    const LENGTH: i32 = 100;
+    let size = editor.world().world_rect_2d().size;
+    // Centre the ship: bows point -z, so anchor (the stern keel point) half a length south of the
+    // centre so the hull's midpoint lands on the build-area centre.
+    let anchor = Point2D::new(
+        (size.x / 2).clamp(0, size.x - 1),
+        (size.y / 2 + LENGTH / 2).clamp(0, size.y - 1),
+    );
+
+    let mut rng = RNG::new(100);
+    let spec = ShipV2Spec::new(Cardinal::North, LENGTH);
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let ship = crate::generator::ships_v2::build_ship_v2(&mut ctx, &spec, anchor).await;
+    println!(
+        "giant ship @ {anchor:?} — {} footing, depth={}, beam={}, weather_deck_y={}, levels={}",
+        if ship.on_water { "water" } else { "land" },
+        ship.keel.depth,
+        ship.hull.max_beam,
+        ship.weather_deck_y,
+        ship.levels.levels.len(),
+    );
+    editor.flush_buffer().await;
+}
+
 /// server's build area so the shape and proportional depth can be compared in one
 /// screenshot. Set a wide build area over water with `/setbuildarea`, then:
 ///

@@ -17,6 +17,8 @@ pub mod keel;
 pub mod hull;
 pub mod rudder;
 pub mod deck;
+pub mod levels;
+pub mod interior;
 pub mod blueprint;
 pub mod tuning;
 
@@ -157,6 +159,11 @@ pub struct ShipV2Output {
     /// Local Y of the **topmost open weather deck** (what additions/masts build against —
     /// the raised additional deck if any, else the main deck). Sails clear this.
     pub weather_deck_y: i32,
+    /// Stage-3 interior levels (hold / gun deck) — the spaces connections + furnishing build into.
+    pub levels: levels::ShipLevels,
+    /// Local `(x, floor_y, z)` cells of the companionway hatches + stairs/ladders — kept clear by
+    /// the later furnish pass.
+    pub hatch_cells: Vec<Point3D>,
     /// `true` if the anchor was over water (built below the surface), `false` if on
     /// land (built resting on the ground).
     pub on_water: bool,
@@ -255,7 +262,19 @@ pub async fn build_ship_v2(
     let masts = deck_state.masts;
     let weather_deck_y = deck_state.top_y;
 
+    // Stage 3: enumerate the interior levels (hold / gun deck) from the finished hull + decks.
+    let levels = levels::build_ship_levels(&hull, deck.deck_y, deck_state.top_y);
+    let hatch_cells = deck_state.hatch_cells;
+
+    // Stage 3: furnish the interior levels (reuses the buildings_v2 furnishing engine).
+    let mast_xs: Vec<i32> = masts
+        .as_ref()
+        .map(|m| m.masts.iter().map(|mm| mm.base_x).collect())
+        .unwrap_or_default();
+    interior::furnish(ctx, &placement, &ship_palette, &levels, &hatch_cells, &mast_xs).await;
+
     ShipV2Output {
-        placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, weather_deck_y, on_water,
+        placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, weather_deck_y, levels,
+        hatch_cells, on_water,
     }
 }

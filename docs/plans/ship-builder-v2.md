@@ -592,3 +592,114 @@ Sub-algorithms (to be detailed):
    the whole sternpost to the fin. Underwater cells waterlogged on water; the top
    not. Own `Rudder` palette component. Stair facing/half (`RUDDER_STAIR_FACE`/
    `RUDDER_STAIR_TOP`) are screenshot-flip candidates.
+
+### Stage 3 — Interior: levels, connections, furnishing
+
+Two goals: (1) **connect the deck levels and the hull interior** with stairs/ladders, and
+(2) **furnish** the below-deck spaces — reusing the buildings_v2 furnishing engine. **Decisions
+(user):** build **levels + connections first** (furnishing on top); divide the interior into
+**cabins via bulkheads** (not one open volume); use **stairs where they fit, ladders as the
+fallback**.
+
+**Reuse (confirmed):**
+- `buildings_v2::furnish::furnish_interior` (`pub(crate)`) — furnishes an arbitrary `Rect2D`
+  against a seeded `ConstraintMap` from a `RoomFurnitureList`; returns the placed items. The whole
+  engine is room-agnostic.
+- `rooms::ConstraintMap` (`Empty`/`Blocked`/`BlockedReachable`/`UnblockedReachable`).
+- `ctx.data.furniture` (`FurnitureData`: items + `rooms.yaml` lists + loot) — already on the ship's
+  `LoadedData`.
+- `footprint::maximal_rect::find_largest_rect` — largest interior rectangle from a boolean mask
+  (carve furnishable rects out of the curved hull / each cabin).
+- The furnish engine works in **absolute editor coords**; ships use **cardinal-only `Placement`**,
+  so a ship-local rect maps to an axis-aligned world `Rect2D` cleanly.
+
+**Shared prerequisite — `ShipLevels` model.** Enumerate the stacked enclosed spaces, each
+`{ floor_y, ceiling_y, outline }`:
+1. **Hold (orlop)** — inside the hull below the main deck; lay a flat plank floor ~2–3 above the
+   keel (the hull bottom is curved/narrow), ceiling = main-deck slabs.
+2. **Main deck** — `deck_y`.
+3. **'Tween / gun deck(s)** — between the main deck and each raised additional deck (walls =
+   tumblehome walls, ceiling = that deck's floor); already partly enclosed.
+Built from `HullModel.interior`, `DeckModel`, `DeckState` (additional decks track inset outline +
+`top_y`).
+
+**Task B (first) — connections (`additions/companionway.rs`; wire `CargoHatch`).** Cut a hatch
+(hole + coaming) through a deck/floor at a clear spot (centreline, clear of masts/helm); connect
+adjacent levels with a **short straight stair flight** where headroom/footprint allow (geometry
+mirrors `floors/stairs.rs`), else a **ladder column** (`ladder[facing]`). Links: main deck ↔ hold,
+raised deck ↔ main deck, stacked decks ↔ each other (Huge). Reserve hatch cells `Blocked` for the
+later furnish pass so furniture routes around them.
+
+**Bulkheads.** Divide the tween/hold volumes into cabins with dividing walls + a door before
+furnishing — e.g. a stern **great cabin**, **crew quarters**, **galley**; below, the **hold**.
+
+**Task A — furnishing (`additions/interior.rs`).** Add ship room keys to `data/rooms.yaml`
+(`hold`, `gun_deck`, `captain_cabin`, `crew_quarters`, `galley`) from mostly-existing items + a few
+ship items (hammock, cannon, sea-chest). Per cabin: rasterize its outline → `find_largest_rect` →
+world `Rect2D` → `ConstraintMap` (seed `Blocked` for masts/hatch coamings/posts) → `furnish_interior`
+with that level's `floor_y`/`ceiling_y`. Guard ≥2 headroom.
+
+**Pipeline order:** `…masts/helm` → levels model → connections → bulkheads/floors → furnish (added
+after `Masts` in `BUILD_ORDER`; levels threaded via `DeckState`).
+
+**Verification:** offline `furnish_ship_offline` (places furniture + loot, like
+`build_furnished_houses_offline`); a connectivity invariant (every level's hatch stays reachable
+after furnish); per-level ASCII dump. Live screenshot loop.
+
+**Companionways — implemented** (`additions/companionway.rs`, wired as `CargoHatch`, built **last** so
+the masts/helm exist to route around). Per interior level it lays the **hold floor** (planks; the gun
+deck's floor is the existing main deck), cuts a **hatch** through the level's ceiling, and drops a
+**stair flight** to the floor (a **ladder** with a backing post when there's no clear straight run).
+The connector sits **off the centreline** (`z = cz != 0`) so it never fouls the keel-stepped masts
+(at `z = 0`); the stair run is the most central window of `drop + 2` stations with deck.
+- **Lead-in stair:** a **right-side-up** stair at the deck level, one station back toward the
+  approach, so it steps down toward the hatch and you walk onto it smoothly instead of dropping in.
+- **Weather-deck hatch:** the ceiling opening spans the top **three** steps (headroom to walk down),
+  covered by **openable trapdoor lids** (oak, `half=top`, closed, flush with the top-slab deck) that
+  **open to the side** (a beam direction) so they swing clear of the fore-aft stairway; below-decks
+  hatches stay open holes.
+- **Bottom step skipped:** the lowest step (at `floor_y`) isn't placed — you step straight onto the
+  deck / laid floor it would land on.
+- **Underside thickness:** each step gets an **upside-down stair beneath it** (same facing) so the
+  gangway reads as a solid, sloped flight rather than thin floating steps.
+- **Mirrored on large ships:** `Large`+ ships get a **mirrored pair** of flights (port + starboard,
+  `±cz`) for a symmetric gangway; the whole flight is factored into `place_stair_flight`.
+Hatch + connector cells are recorded on `DeckState::hatch_cells` → `ShipV2Output.hatch_cells` for the
+later furnish pass. Asserted by `companionways_connect_levels`. _Stair **facing/half** and the exact
+landing are screenshot-flip candidates._
+
+**Giant ship.** `giant_ship_length_100` (offline smoke) + `build_giant_ship_v2_live` build a
+keel-length-**100** ship — everything (hull depth/beam, mast height, levels) scales off the length
+(len-100 → depth ~18, beam ~37, mainmast ~105, hold + gun deck). Live needs a big water build area:
+`cargo test build_giant_ship_v2_live -- --nocapture`.
+
+**Furnishing — implemented** (`interior.rs`, reusing the buildings_v2 engine). `build_ship_v2` calls
+`interior::furnish` after the additions: for each level with a matching `data/rooms.yaml` list
+(`hold` / `lower_hold` / `gun_deck`; `captain_cabin` / `crew_quarters` / `galley` await bulkheads), it
+carves the **largest interior rectangle** from the deck outline (`footprint::find_largest_rect`,
+re-exported), transforms it to a world `Rect2D` (cardinal heading → axis-aligned), seeds a
+`ConstraintMap` blocking the **masts** + **companionway hatches**, and calls
+`furnish_interior(...)`. Furniture stands one above the laid floor; ceiling items hang under the deck
+above. **Perf:** the rect is capped to `FURNISH_MAX_SPAN` (14) per side and the cargo rooms use a
+**single optional pass** (no `fill_threshold` → not the aggressive multi-pass packing) — without
+these a len-100 ship's huge holds took ~130 s; now the whole offline suite is ~3 s.
+
+**Bulkheads → cabins — implemented** (`interior.rs`). The **gun deck** is divided **fore→aft** into
+**cabins** by plank **bulkheads** (full-height across the rect's beam, with a 2-tall centreline
+**doorway**): a stern **great cabin** (`captain_cabin`), then **crew quarters**, then the **galley**
+(`CABIN_ROOMS`, stern→bow; count from the rect length / `CABIN_MIN_LEN`, capped at 3). Each cabin is
+furnished from its own `rooms.yaml` list via the same `furnish_local_rect` path (transform → seed
+masts/hatches → `furnish_interior`). Holds stay single-rect cargo. Verified by
+`ship_interior_furnished` (cargo in the holds + beds from the cabins). _Doorways are open gaps for
+now (a real door block is a follow-up); cabin room assignment is fixed stern→bow._
+
+**Stacked lower holds + mast ladders — implemented** (`levels.rs`, `companionway.rs`). A deep hull is
+divided into **multiple stacked hold levels** (the **hold** under the main deck, then **lower holds**
+below it for as long as the hull stays deep + wide enough — `build_ship_levels` walks down in
+`HOLD_MAX_HEIGHT` steps to `HOLD_KEEL_CLEARANCE`). The companionway lays every hold floor; the **stair
+companionway** serves the upper decks (gun deck + main hold), and the **lower holds are reached by
+ladders on the masts** — the keel-stepped masts run down the centreline through every level, so a
+ladder on a mast's **aft face** (`base_x - 1`, `z = 0`, facing the stern → its back is the mast)
+spans them, with a 1-cell hole cut through each hold floor at the ladder. Built only when there's
+more than one hold level. Verified by `giant_ship_length_100` (len-100 → 5 levels / 3 lower holds /
+mast ladders).

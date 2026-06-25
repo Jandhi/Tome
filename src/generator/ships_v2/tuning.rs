@@ -161,6 +161,17 @@ pub const MAST_STAY_THICK: i32 = 1;
 /// halfway between the aftmost mast and the stern, but never closer than this to the stern rail.
 pub const HELM_STERN_CLEARANCE: i32 = 2;
 
+// --- Interior levels (Stage 3: hold / gun deck) ----------------------------
+
+/// The **hold** floor is laid at least this many blocks **above the keel bottom** (`y = 0`), so it
+/// sits on the flat part of the hull rather than in the narrow keel.
+pub const HOLD_KEEL_CLEARANCE: i32 = 2;
+/// Maximum **hold height** (floor → main-deck ceiling). Deeper hulls keep the floor this far below
+/// the deck (the extra depth below is bilge, not a room) so the hold doesn't become a tall shaft.
+pub const HOLD_MAX_HEIGHT: i32 = 4;
+/// A level needs at least this much **headroom** (`ceiling_y - floor_y`) to count as a room.
+pub const LEVEL_MIN_HEADROOM: i32 = 2;
+
 // --- Masthead flags (wool pennants) ----------------------------------------
 
 /// Shortest / longest masthead pennant, in wool blocks streaming aft. Each mast rolls

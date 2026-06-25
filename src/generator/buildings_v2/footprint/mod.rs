@@ -1,6 +1,10 @@
 mod maximal_rect;
 pub mod generate;
 pub mod merge;
+
+/// Largest axis-aligned rectangle of `true` cells in a boolean grid (re-exported for reuse, e.g.
+/// carving furnishable rects out of a ship's curved deck outline).
+pub use maximal_rect::find_largest_rect;
 #[cfg(test)]
 mod test;
 

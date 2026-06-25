@@ -26,6 +26,7 @@ use super::{Placement, ShipDir, ShipV2Ctx};
 
 pub mod additional_deck;
 pub mod bowsprit;
+pub mod companionway;
 pub mod helm;
 pub mod masts;
 pub mod railing;
@@ -56,6 +57,9 @@ pub struct DeckState {
     pub gun_ports: Vec<(Point3D, ShipDir)>,
     /// Whether the gun ports are trapdoor lids (`true`) or open holes (`false`).
     pub gun_ports_trapdoors: bool,
+    /// `(x, z)` footprint of the companionway hatches + stair/ladder cells (local), so the later
+    /// furnish pass keeps them clear (reachable, no furniture).
+    pub hatch_cells: Vec<Point3D>,
 }
 
 impl DeckState {
@@ -70,6 +74,7 @@ impl DeckState {
             masts: None,
             gun_ports: Vec::new(),
             gun_ports_trapdoors: false,
+            hatch_cells: Vec::new(),
         }
     }
 }
@@ -259,9 +264,11 @@ pub const BUILD_ORDER: [DeckAddition; 9] = [
     // prow (`DeckState::top_outline`), and the shared main railing then wraps that too.
     DeckAddition::Bowsprit,
     DeckAddition::MainRailing,
-    DeckAddition::CargoHatch,
     DeckAddition::Masts,
     DeckAddition::HelmCapstan,
+    // Companionways last: the hatch/stair placement avoids the mast columns and the helm, so it
+    // needs those built first.
+    DeckAddition::CargoHatch,
 ];
 
 /// Dispatch a single addition to its submodule. Add a match arm here (and the
@@ -282,6 +289,7 @@ pub async fn build_addition(
         DeckAddition::Bowsprit => bowsprit::build(ctx, dc, state).await,
         DeckAddition::Masts => masts::build(ctx, dc, state).await,
         DeckAddition::HelmCapstan => helm::build(ctx, dc, state).await,
+        DeckAddition::CargoHatch => companionway::build(ctx, dc, state).await,
         _ => {}
     }
 }

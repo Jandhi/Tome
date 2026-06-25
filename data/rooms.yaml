@@ -251,3 +251,84 @@ cellar_workshop:
     - table
     - cauldron
     - furnace
+
+# --- Ship interiors (ships_v2 Stage 3) -------------------------------------
+# The hull hold + lower holds — packed cargo. (No fill_threshold → a single optional pass, not the
+# aggressive multi-pass packing; the repeated entries give density without the cost.)
+hold:
+  required: [crate]
+  optional:
+    - barrel
+    - crate
+    - sack_pile
+    - barrel_stack
+    - hay_pile
+    - chest
+    - elevated_chest
+    - barrel
+    - crate
+    - lantern
+
+lower_hold:
+  required: [barrel]
+  optional:
+    - crate
+    - barrel
+    - sack_pile
+    - barrel_stack
+    - hay_pile
+    - chest
+    - barrel
+    - crate
+
+# The 'tween / gun deck — working space, stores + a little crew kit.
+gun_deck:
+  required: [lantern]
+  optional:
+    - barrel
+    - chest
+    - crate
+    - table
+    - bench
+    - sack_pile
+    - lantern
+    - carpet
+
+# Stern great cabin — the captain's quarters.
+captain_cabin:
+  required: [bed, lantern, desk]
+  optional:
+    - chair
+    - table
+    - chest
+    - bookshelf
+    - shelf
+    - vase
+    - carpet
+    - carpet
+    - wall_banner
+    - lectern
+    - potted_plant
+
+# Crew quarters — bunks + sea chests.
+crew_quarters:
+  required: [bed, lantern]
+  optional:
+    - bed
+    - chest
+    - barrel
+    - table
+    - bench
+    - chest
+    - carpet
+
+# Galley — the ship's kitchen.
+galley:
+  required: [furnace, lantern]
+  optional:
+    - smoker
+    - cauldron
+    - barrel
+    - shelf
+    - crate
+    - table
