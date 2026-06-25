@@ -16,18 +16,20 @@ use std::collections::HashMap;
 
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
-use crate::minecraft::{string_to_block, BlockForm};
+use crate::minecraft::{string_to_block, Block, BlockForm};
 
 use super::super::palette::ShipPart;
 use super::super::tuning::{
     BULWARK_HEIGHT,
     FLAG_COLORS, FLAG_HOIST_HEIGHT, FLAG_MAX_LEN, FLAG_MIN_LEN, FLAG_WAVE_AMP_Y, FLAG_WAVE_AMP_Z,
     FLAG_WAVE_FREQ_Y, FLAG_WAVE_FREQ_Z, FLAG_WAVE_Z_PHASE, JIB_CHANCE_HUGE, JIB_CHANCE_LARGE,
-    JIB_CHANCE_MEDIUM, MAST_GAFF_STAIR_FACE, MAST_HEIGHT_FACTOR,
+    JIB_CHANCE_MEDIUM, JIB_CURVE_FRAC, JIB_CURVE_MAX, JIB_FOOT_HANGER_COUNT, JIB_HEAD_RIGGING,
+    MAST_GAFF_STAIR_FACE, MAST_HEIGHT_FACTOR,
     MAST_MAX_YARDS, MAST_NEST_CHANCE, MAST_NEST_HALF, MAST_NEST_HEIGHT_FRACTION,
     MAST_NEST_MIN_HEIGHT, MAST_NEST_PLATFORM_HALF, MAST_NEST_YARD_GAP, MAST_SAIL_GROWTH,
     MAST_SAIL_TOP_HEIGHT, MAST_SPANKER_BOOM_CLEARANCE, MAST_SPANKER_BOOM_FRACTION,
-    MAST_SPANKER_CHANCE, MAST_SPANKER_GAFF_RUN_FRACTION, MAST_SPANKER_LUFF_FRACTION, MAST_TOP_FENCE,
+    MAST_SPANKER_CHANCE, MAST_SPANKER_GAFF_RUN_FRACTION, MAST_SPANKER_LUFF_FRACTION, MAST_STAY_THICK,
+    MAST_TOP_FENCE, MAST_TOP_FENCE_MULTI,
     MAST_TOP_YARD_DROP_H1, MAST_TOP_YARD_DROP_H2, MAST_YARD_FORWARD, MAST_YARD_HALF_FRACTION,
     MAST_YARD_NARROW_MAX, MAST_YARD_SPAN_PER_SAIL, SAIL_BELLY_POW, SAIL_BIG_HALF_WIDTH,
     SAIL_BILLOW_DIR, SAIL_BLOCK, SAIL_COMBINED_EDGE, SAIL_CURTAIN_CURVE_POW,
@@ -36,7 +38,7 @@ use super::super::tuning::{
 };
 use super::super::{ShipDir, ShipV2Ctx};
 use super::SizeTier;
-use super::{DeckContext, DeckState, SailBillow, SailState};
+use super::{DeckContext, DeckState, RiggingMaterial, SailBillow, SailState};
 
 /// A horizontal main yard: centred on the mast at `(x, y)`, spanning `±half_width` in z.
 /// `sail_height` is how far its sail hangs below it (down toward the next yard / deck).
@@ -516,6 +518,8 @@ pub fn build_masts_model(
     deck_clearance: i32,
 ) -> MastModel {
     let main_h = ((length as f32) * MAST_HEIGHT_FACTOR).round().max(6.0) as i32;
+    // Taller finial on multi-mast ships (reads better with the mast-to-mast stays).
+    let finial = if count >= 2 { MAST_TOP_FENCE_MULTI } else { MAST_TOP_FENCE };
     let specs = layout(count);
     let aft_xf = specs.iter().map(|s| s.0).fold(f32::INFINITY, f32::min);
     let yard_base_hw = ((length as f32) * MAST_YARD_HALF_FRACTION).round().clamp(2.0, 9.0) as i32;
@@ -532,7 +536,9 @@ pub fn build_masts_model(
             let has_top_nest = top_nest && height == max_h && height >= MAST_NEST_MIN_HEIGHT;
             let top_nest_y = height - 2;
 
-            let cells = (0..height).map(|y| Point3D::new(base_x + dx(y), y, 0)).collect();
+            // Keel-stepped: the foot rests **on** the keel (y = 1), not through its bottom course
+            // (y = 0). Runs up to the masthead.
+            let cells = (1..height).map(|y| Point3D::new(base_x + dx(y), y, 0)).collect();
 
             // Main yards distributed so the **lowest sail is the largest**. Sails stack
             // from a foot base a few blocks above the deck (the bottom 2–3 carry no canvas,
@@ -592,9 +598,9 @@ pub fn build_masts_model(
                 })
                 .collect();
 
-            // Fence finial straight on top.
+            // Fence finial straight on top (taller on multi-mast ships).
             let xt = base_x + dx(height);
-            let top_fence = (0..MAST_TOP_FENCE).map(|k| Point3D::new(xt, height + k, 0)).collect();
+            let top_fence = (0..finial).map(|k| Point3D::new(xt, height + k, 0)).collect();
 
             // Masthead pennant streaming aft off the top of the finial. Length + ripple
             // phase vary per mast (seeded per ship) so no two flags match.
@@ -602,7 +608,7 @@ pub fn build_masts_model(
             let flag_len = FLAG_MIN_LEN + (flag_len_seed + base_x).rem_euclid(flag_span);
             let flag = build_flag(
                 xt,
-                height + MAST_TOP_FENCE - 1,
+                height + finial - 1,
                 flag_len,
                 flag_phase + base_x as f32 * 0.6,
                 flag_stream_sign,
@@ -645,6 +651,25 @@ pub fn build_masts_model(
     MastModel { masts }
 }
 
+/// **4-connected** staircase (`z = 0`) from `a` to `b`: each step moves exactly one cell
+/// orthogonally (never diagonally), so consecutive cells share a **face** — a continuous line
+/// with no corner-only gaps. Steps the axis with the larger remaining distance first.
+pub fn step_line_xy(a: Point3D, b: Point3D) -> Vec<(i32, i32)> {
+    let (mut x, mut y) = (a.x, a.y);
+    let (tx, ty) = (b.x, b.y);
+    let mut out = vec![(x, y)];
+    while x != tx || y != ty {
+        let (rx, ry) = ((tx - x).abs(), (ty - y).abs());
+        if (rx >= ry && x != tx) || y == ty {
+            x += (tx - x).signum();
+        } else {
+            y += (ty - y).signum();
+        }
+        out.push((x, y));
+    }
+    out
+}
+
 /// Cells (`z = 0`) along the straight segment `a`→`b` in the x–y plane (integer DDA).
 pub fn line_xy(a: Point3D, b: Point3D) -> Vec<(i32, i32)> {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
@@ -676,6 +701,102 @@ pub fn triangle_xy(a: Point3D, b: Point3D, c: Point3D) -> Vec<(i32, i32)> {
         }
     }
     out
+}
+
+/// Interior samples (excluding endpoints) of a quadratic Bézier from `p` to `q`, whose control
+/// point is the edge midpoint pushed perpendicular by `bulge` blocks **toward** `toward` — so the
+/// curve bows **inward** (a hollow toward the opposite corner). Empty for a degenerate edge / zero
+/// bulge.
+fn bezier_samples(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> Vec<(f32, f32)> {
+    let (px, py) = (p.x as f32, p.y as f32);
+    let (qx, qy) = (q.x as f32, q.y as f32);
+    let (dx, dy) = (qx - px, qy - py);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-3 || bulge.abs() < 1e-3 {
+        return Vec::new();
+    }
+    let (mx, my) = ((px + qx) / 2.0, (py + qy) / 2.0);
+    // Unit perpendicular to p→q; flip so it points **toward** the opposite corner `toward`.
+    let (mut nx, mut ny) = (-dy / len, dx / len);
+    if nx * (toward.x as f32 - mx) + ny * (toward.y as f32 - my) < 0.0 {
+        nx = -nx;
+        ny = -ny;
+    }
+    let (cx, cy) = (mx + nx * bulge, my + ny * bulge);
+    let steps = (len.round() as usize).max(2);
+    (1..steps)
+        .map(|i| {
+            let t = i as f32 / steps as f32;
+            let u = 1.0 - t;
+            (u * u * px + 2.0 * u * t * cx + t * t * qx, u * u * py + 2.0 * u * t * cy + t * t * qy)
+        })
+        .collect()
+}
+
+/// Even-odd point-in-polygon test (cell centre `+0.5`).
+fn point_in_poly(px: f32, py: f32, v: &[(f32, f32)]) -> bool {
+    let n = v.len();
+    let mut inside = false;
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = v[i];
+        let (xj, yj) = v[j];
+        if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// Cells in the **bite** between the straight edge `p`→`q` and a quadratic Bézier that bows
+/// **inward** (toward the opposite corner `toward`) by `bulge` — i.e. the sliver to *carve off* the
+/// triangle so the edge becomes concave. The bite polygon (`p` → bezier → `q`, closed straight back
+/// to `p`) is always **simple** (the single bow can't cross its own chord), so the fill is robust.
+fn edge_bite(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> std::collections::HashSet<(i32, i32)> {
+    let samples = bezier_samples(p, q, toward, bulge);
+    if samples.is_empty() {
+        return std::collections::HashSet::new();
+    }
+    let mut poly: Vec<(f32, f32)> = vec![(p.x as f32, p.y as f32)];
+    poly.extend(samples);
+    poly.push((q.x as f32, q.y as f32));
+    let (minx, maxx) = (
+        poly.iter().map(|v| v.0).fold(f32::INFINITY, f32::min).floor() as i32,
+        poly.iter().map(|v| v.0).fold(f32::NEG_INFINITY, f32::max).ceil() as i32,
+    );
+    let (miny, maxy) = (
+        poly.iter().map(|v| v.1).fold(f32::INFINITY, f32::min).floor() as i32,
+        poly.iter().map(|v| v.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32,
+    );
+    let mut out = std::collections::HashSet::new();
+    for y in miny..=maxy {
+        for x in minx..=maxx {
+            if point_in_poly(x as f32 + 0.5, y as f32 + 0.5, &poly) {
+                out.insert((x, y));
+            }
+        }
+    }
+    out
+}
+
+/// Filled jib outline (`z = 0`): the **luff** b→c stays **straight** (it's on the forestay), but the
+/// **foot** a→b and **leech** c→a bow gently **inward** (a hollow of `foot_bulge`/`leech_bulge`
+/// blocks at their midpoints), so the sail reads as cloth rather than a rigid triangle. Built as the
+/// straight triangle **minus the two edge bites** ([`edge_bite`]) — robust to the curves crossing
+/// near the shared corner (an outline polygon would self-intersect there and leave holes). The
+/// straight luff and the three corners are kept so the pinned luff/anchor cells are always present.
+pub fn curved_sail_xy(a: Point3D, b: Point3D, c: Point3D, foot_bulge: f32, leech_bulge: f32) -> Vec<(i32, i32)> {
+    let mut cells: std::collections::HashSet<(i32, i32)> = triangle_xy(a, b, c).into_iter().collect();
+    let foot_bite = edge_bite(a, b, c, foot_bulge); // foot a→b bows toward c
+    let leech_bite = edge_bite(a, c, b, leech_bulge); // leech a→c bows toward b
+    cells.retain(|p| !foot_bite.contains(p) && !leech_bite.contains(p));
+    // Keep the straight luff (pinned) + the three corners (anchors / apex) present.
+    cells.extend(line_xy(b, c));
+    for corner in [a, b, c] {
+        cells.insert((corner.x, corner.y));
+    }
+    cells.into_iter().collect()
 }
 
 /// Billow a flat triangular sail (cells in the `z = 0` plane) **sideways** to leeward, with
@@ -1012,66 +1133,231 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
         }
     }
 
-    // Jib: a triangular headsail set between the **bowsprit start (A)**, **bowsprit tip (B)**
-    // and **foremast top (C)**. Built only when rolled (size-gated) and a bowsprit exists. It
-    // bellies sideways to leeward (same side as the spanker). The **foot (A→B) drapes over the
-    // bowsprit as wool** (raised `SAIL_JIB_FOOT_RAISE` above the spar), the **luff/forestay
-    // (B→C) is a chain**, and the leech billows off them.
-    if has_jib {
-        if let (Some(bowsprit), Some(fore)) =
-            (&state.bowsprit, model.masts.iter().max_by_key(|m| m.base_x))
-        {
-            // Foot raised so the sail sits over the bowsprit, not on/through it.
-            let raise = Point3D::new(0, SAIL_JIB_FOOT_RAISE, 0);
-            let a = bowsprit
-                .spar
+    // Mast-to-mast stays: on **2+ mast ships**, connect the **top of each mast pole to the next**
+    // with a standing-rigging line (chain/fence), `MAST_STAY_THICK` (1) block thick, run as a
+    // **4-connected staircase** (`step_line_xy`) so the diagonal connects face-to-face with no
+    // corner gaps. It attaches to the **mast pole top, below the fence finial**, and **skips** the
+    // poles, finials, **and flag cells**, so it never carves the masts or the masthead pennants.
+    if model.masts.len() >= 2 {
+        let rig_block: Option<Block> = match dc.rigging {
+            RiggingMaterial::Chain => string_to_block("minecraft:chain"),
+            RiggingMaterial::Fence => {
+                let mut r = ctx.rng.derive();
+                ctx.palette
+                    .get_block(dc.ship_palette.role(ShipPart::Railing), &BlockForm::Fence, &ctx.data.materials, &mut r)
+                    .map(|id| Block::from_id(id.clone()))
+            }
+        };
+        if let Some(ch) = &rig_block {
+            // Masthead = top of the mast **pole** (highest `cells`), below the finial.
+            let mut tops: Vec<Point3D> = model
+                .masts
                 .iter()
-                .map(|sc| sc.local)
-                .min_by_key(|p| p.x)
-                .unwrap_or(bowsprit.tip)
-                + raise; // over the bowsprit start
-            let b = bowsprit.tip + raise; // over the bowsprit tip
-            let c = *fore.cells.iter().max_by_key(|p| p.y).unwrap(); // foremast top
+                .map(|m| m.cells.iter().max_by_key(|p| p.y).copied().unwrap_or(Point3D::new(m.base_x, m.height - 1, 0)))
+                .collect();
+            tops.sort_by_key(|p| p.x);
+            // Never overwrite mast poles, finials, or flag cells.
+            let solid: std::collections::HashSet<(i32, i32)> = model
+                .masts
+                .iter()
+                .flat_map(|m| {
+                    m.cells
+                        .iter()
+                        .chain(m.top_fence.iter())
+                        .chain(m.flag.cells.iter())
+                        .map(|p| (p.x, p.y))
+                })
+                .collect();
+            let half = MAST_STAY_THICK / 2;
+            for pair in tops.windows(2) {
+                for (x, y) in step_line_xy(pair[0], pair[1]) {
+                    for dy in -half..=(MAST_STAY_THICK - 1 - half) {
+                        let yy = y + dy;
+                        if solid.contains(&(x, yy)) {
+                            continue; // don't carve the mast poles/finials/flags
+                        }
+                        ctx.editor
+                            .place_block_forced(ch, place.to_world(Point3D::new(x, yy, 0)))
+                            .await;
+                    }
+                }
+            }
+        }
+    }
 
-            let tri = triangle_xy(a, b, c);
+    // Jib + forestay. The **forestay stay always exists** when there's a bowsprit + foremast
+    // (standing rigging), even with no jib bent on. The jib **canvas** (a triangular headsail
+    // between bowsprit start A, tip B, and the foremast head) is drawn only when the jib rolled
+    // (`has_jib`, size-gated) **and** the sails are set (`Full`); it bellies to leeward (same side
+    // as the spanker).
+    if let (Some(bowsprit), Some(fore)) =
+        (&state.bowsprit, model.masts.iter().max_by_key(|m| m.base_x))
+    {
+        // Foot raised so the sail sits over the bowsprit, not on/through it.
+        let raise = Point3D::new(0, SAIL_JIB_FOOT_RAISE, 0);
+        let a = bowsprit
+            .spar
+            .iter()
+            .map(|sc| sc.local)
+            .min_by_key(|p| p.x)
+            .unwrap_or(bowsprit.tip)
+            + raise; // over the bowsprit start
+        let b = bowsprit.tip + raise; // over the bowsprit tip
+        let c_mast = *fore.cells.iter().max_by_key(|p| p.y).unwrap(); // foremast head (masthead)
+
+        // The sail's head stops `JIB_HEAD_RIGGING` blocks **below** the masthead; the gap from
+        // there up to the head is **pure forestay rigging** (no canvas), so the jib doesn't jam
+        // solid sail into the masthead/square sails. `c_sail` is the sail's top corner; the top
+        // luff cells (`head_rig`) become the rigging bridge.
+        let luff_full = line_xy(b, c_mast);
+        let head = (JIB_HEAD_RIGGING as usize).min(luff_full.len().saturating_sub(2));
+        let c_sail = {
+            let (sx, sy) = luff_full[luff_full.len() - 1 - head];
+            Point3D::new(sx, sy, 0)
+        };
+        let head_rig: Vec<(i32, i32)> = luff_full[luff_full.len() - head..].to_vec();
+
+        // Rigging-line block (chain or palette **fence**, per the ship's `RiggingMaterial`).
+        // Chains appear to be dropped by the current live server, so fence is the safe default
+        // (see `RiggingMaterial` / `RIGGING_CHAIN_CHANCE`).
+        let rig_block: Option<Block> = match dc.rigging {
+            RiggingMaterial::Chain => string_to_block("minecraft:chain"),
+            RiggingMaterial::Fence => {
+                let mut r = ctx.rng.derive();
+                ctx.palette
+                    .get_block(
+                        dc.ship_palette.role(ShipPart::Railing),
+                        &BlockForm::Fence,
+                        &ctx.data.materials,
+                        &mut r,
+                    )
+                    .map(|id| Block::from_id(id.clone()))
+            }
+        };
+        // Don't lay canvas/rigging over the foremast pole or its yards.
+        let mut rig: std::collections::HashSet<(i32, i32)> =
+            fore.cells.iter().map(|p| (p.x, p.y)).collect();
+        for yd in &fore.yards {
+            rig.insert((yd.x, yd.y));
+        }
+        // Spar top y per x — for the foot hangers (set sail) and the no-canvas stay's foot tie.
+        let mut spar_top: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+        for sc in &bowsprit.spar {
+            let e = spar_top.entry(sc.local.x).or_insert(sc.local.y);
+            *e = (*e).max(sc.local.y);
+        }
+
+        // Canvas only when the jib **rolled** and the sails are **set** (`Full`). Otherwise just the
+        // stay (no jib, or struck/furled) — a struck jib is just the wire it would hang on.
+        let draw_canvas = has_jib && dc.sail_state == SailState::Full;
+        if draw_canvas {
+            // Roach: the foot (A→B) and leech (A→C) bow outward ~`JIB_CURVE_FRAC` of their length
+            // (capped) so the sail reads as cloth; the luff (B→C, on the forestay) stays straight.
+            let edge_len = |p: Point3D, q: Point3D| {
+                (((q.x - p.x).pow(2) + (q.y - p.y).pow(2)) as f32).sqrt()
+            };
+            let foot_bulge = (edge_len(a, b) * JIB_CURVE_FRAC).min(JIB_CURVE_MAX);
+            let leech_bulge = (edge_len(a, c_sail) * JIB_CURVE_FRAC).min(JIB_CURVE_MAX);
+            let tri = curved_sail_xy(a, b, c_sail, foot_bulge, leech_bulge);
             if tri.len() >= 6 {
                 let foot: std::collections::HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
-                let luff: std::collections::HashSet<(i32, i32)> = line_xy(b, c).into_iter().collect();
-                // Pin the foot (laced over the bowsprit) and the luff (on the forestay).
+                let luff: std::collections::HashSet<(i32, i32)> = line_xy(b, c_sail).into_iter().collect();
+                // The foot attaches to the bowsprit at only `JIB_FOOT_HANGER_COUNT` columns — the
+                // two ends (tack at the tip, clew inboard). Those columns are the **anchors** (the
+                // canvas drops to the spar there with a hanger tie); the rest of the foot is left
+                // free so it **billows up off** the bowsprit instead of lying along its whole length.
+                let mut foot_xs: Vec<i32> = foot.iter().map(|&(x, _)| x).collect();
+                foot_xs.sort_unstable();
+                foot_xs.dedup();
+                let anchor_xs: std::collections::HashSet<i32> =
+                    if foot_xs.len() <= JIB_FOOT_HANGER_COUNT || JIB_FOOT_HANGER_COUNT < 2 {
+                        foot_xs.iter().copied().collect()
+                    } else {
+                        (0..JIB_FOOT_HANGER_COUNT)
+                            .map(|i| foot_xs[i * (foot_xs.len() - 1) / (JIB_FOOT_HANGER_COUNT - 1)])
+                            .collect()
+                    };
+                let foot_anchor: std::collections::HashSet<(i32, i32)> =
+                    foot.iter().copied().filter(|(x, _)| anchor_xs.contains(x)).collect();
+                // Pin the forestay (luff) + the two foot anchors; everything else billows free.
                 let pinned: std::collections::HashSet<(i32, i32)> =
-                    foot.union(&luff).copied().collect();
+                    luff.union(&foot_anchor).copied().collect();
                 let depth = jib_billow(&tri, dc.wind * SAIL_JIB_WIND_FACTOR, &pinned);
                 let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))
                     .expect("SAIL_BLOCK should parse");
-                // Plain chain (default `axis=y`) — no explicit blockstate, so nothing for the
-                // live server to reject; visually identical for the near-vertical forestay.
-                let chain = string_to_block("minecraft:chain");
-                // The forestay runs up to the foremast head — don't carve the pole or its yards.
-                let mut rig: std::collections::HashSet<(i32, i32)> =
-                    fore.cells.iter().map(|p| (p.x, p.y)).collect();
-                for yd in &fore.yards {
-                    rig.insert((yd.x, yd.y));
-                }
 
                 for &(x, y) in &tri {
                     let d = depth[&(x, y)];
-                    if d >= 1 {
-                        // Belly (interior + leech) offset to leeward.
-                        ctx.editor
-                            .place_block(&sail_block, place.to_world(Point3D::new(x, y, d * spanker_side)))
-                            .await;
-                    } else if foot.contains(&(x, y)) {
-                        // Foot: wool draped over the bowsprit (centreline, z = 0).
+                    if foot_anchor.contains(&(x, y)) {
+                        // Foot anchor (one of the two ends): the canvas corner drapes on the
+                        // centreline (z = 0) over the bowsprit, raised clear of the spar, and a
+                        // **hanger tie** (chain/fence) drops from just under it to the spar top.
                         ctx.editor.place_block(&sail_block, place.to_world(Point3D::new(x, y, 0))).await;
-                    } else if !rig.contains(&(x, y)) {
-                        // Luff: the forestay chain. **Force-placed** so the density check can't
-                        // silently drop it where it crosses other thin rig; skips the foremast
-                        // pole/yards so it never carves them.
-                        if let Some(ch) = &chain {
-                            ctx.editor
-                                .place_block_forced(ch, place.to_world(Point3D::new(x, y, 0)))
-                                .await;
+                        if let (Some(ch), Some(&st)) = (&rig_block, spar_top.get(&x)) {
+                            for yy in (st + 1)..y {
+                                ctx.editor
+                                    .place_block_forced(ch, place.to_world(Point3D::new(x, yy, 0)))
+                                    .await;
+                            }
                         }
+                    } else if !rig.contains(&(x, y)) {
+                        // Sail canvas: billow to leeward. The **luff (top edge)** is pinned (d = 0)
+                        // so it lands at **z = 0** — the sail's head runs along the bowsprit-tip→
+                        // first-mast forestay line, over the bowsprit. The leech and the free foot
+                        // between the anchors billow out to z = d*side. Skips the foremast pole/
+                        // yards, and **skips any cell already holding a sail** (square sails,
+                        // spanker, or any future sail — all placed before the jib) so it never
+                        // intersects them.
+                        let wp = place.to_world(Point3D::new(x, y, d * spanker_side));
+                        let occupied = ctx
+                            .editor
+                            .get_cached_block(wp)
+                            .map_or(false, |b| b.id.as_str().contains("wool"));
+                        if !occupied {
+                            ctx.editor.place_block(&sail_block, wp).await;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Forestay/stay rigging — **always** present (chain/fence). With canvas, only the head
+        // **bridge** (the top `JIB_HEAD_RIGGING` blocks above the sail head) is bare rigging; with
+        // no canvas the **whole stay** (bowsprit tip B → masthead) is rigging, so its shape is fully
+        // visible. It **starts one block above the masthead** (ties into the finial) and runs **two
+        // blocks tall per column using the cell *above* each step** (`[y, y+1]`) so the stay sits a
+        // touch higher and connects face-to-face down the diagonal. It **skips any cell already
+        // holding canvas wool**, so its low end rests on **top** of the sail's head wool block (we
+        // also push `c_sail` so that on-top block is always placed) rather than carving the sail.
+        if let Some(ch) = &rig_block {
+            let mut cells: Vec<(i32, i32)> = if draw_canvas {
+                let mut h = head_rig;
+                h.push((c_sail.x, c_sail.y)); // its y+1 lands the stay on top of the sail head wool
+                h
+            } else {
+                luff_full
+            };
+            cells.push((c_mast.x, c_mast.y + 1)); // start 1 block higher (into the finial)
+            for (x, y) in cells {
+                for yy in [y, y + 1] {
+                    if rig.contains(&(x, yy)) {
+                        continue; // never carve the mast pole/yards
+                    }
+                    let wp = place.to_world(Point3D::new(x, yy, 0));
+                    if ctx.editor.get_cached_block(wp).map_or(false, |b2| b2.id.as_str().contains("wool")) {
+                        continue; // sit on **top** of the canvas, don't replace it
+                    }
+                    ctx.editor.place_block_forced(ch, wp).await;
+                }
+            }
+            // No canvas: tie the stay's forward end down to the bowsprit so it isn't left floating
+            // above the spar tip (with canvas, the foot anchor does this).
+            if !draw_canvas {
+                if let Some(&st) = spar_top.get(&b.x) {
+                    for yy in (st + 1)..b.y {
+                        ctx.editor
+                            .place_block_forced(ch, place.to_world(Point3D::new(b.x, yy, 0)))
+                            .await;
                     }
                 }
             }

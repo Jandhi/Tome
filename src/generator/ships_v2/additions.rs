@@ -26,6 +26,7 @@ use super::{Placement, ShipDir, ShipV2Ctx};
 
 pub mod additional_deck;
 pub mod bowsprit;
+pub mod helm;
 pub mod masts;
 pub mod railing;
 
@@ -198,6 +199,28 @@ impl SailBillow {
     }
 }
 
+/// What thin **rigging lines** (the jib forestay + foot hangers, and later shrouds/stays)
+/// are built from — a `minecraft:chain` or a palette **fence** post. Chosen per ship by
+/// [`RiggingMaterial::pick`] (chance) or forced via `ShipV2Spec::with_rigging` (option).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RiggingMaterial {
+    /// Iron chain (`minecraft:chain`).
+    Chain,
+    /// A wooden fence post drawn from the ship palette (matches the railing wood).
+    Fence,
+}
+
+impl RiggingMaterial {
+    /// Roll a rigging material for a ship — [`RIGGING_CHAIN_CHANCE`] percent chain, else fence.
+    pub fn pick(rng: &mut crate::noise::RNG) -> RiggingMaterial {
+        if rng.rand_i32_range(0, 100) < super::tuning::RIGGING_CHAIN_CHANCE {
+            RiggingMaterial::Chain
+        } else {
+            RiggingMaterial::Fence
+        }
+    }
+}
+
 /// Read-only context every deck addition builds against: the ship-so-far (placement
 /// + hull/deck geometry), the ship palette, the size tier, and the footing. Mutable
 /// access (editor/rng/data/base palette) comes via the [`ShipV2Ctx`] passed
@@ -216,6 +239,8 @@ pub struct DeckContext<'a> {
     pub sail_state: SailState,
     /// Wind strength — deepest billow (blocks) of a deployed [`SailState::Full`] sail.
     pub wind: f32,
+    /// What thin rigging lines (jib forestay + hangers) are built from (chain / fence).
+    pub rigging: RiggingMaterial,
 }
 
 /// **Debug toggle** — additions to skip building, for isolating issues. Normally empty;
@@ -256,6 +281,7 @@ pub async fn build_addition(
         DeckAddition::MainRailing => railing::build(ctx, dc, state).await,
         DeckAddition::Bowsprit => bowsprit::build(ctx, dc, state).await,
         DeckAddition::Masts => masts::build(ctx, dc, state).await,
+        DeckAddition::HelmCapstan => helm::build(ctx, dc, state).await,
         _ => {}
     }
 }

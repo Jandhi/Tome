@@ -322,13 +322,70 @@ each arrives only with the user's algorithm for it.
    `jib_billow`). Set between three points: the **bowsprit start (A)**, **bowsprit tip (B)** and
    **foremast top (C)** (foremost mast = max `base_x`; A = the spar's inboard cell; B =
    `bowsprit.tip`). The filled triangle bellies **sideways to leeward** (same `spanker_side` as
-   the spanker), pinned along the **foot (A→B)** and **luff (B→C)** with the leech free, relaxed
-   hole-free (asserted by `jib_sail_has_no_holes`). The **foot drapes over the bowsprit as wool**
-   — raised `SAIL_JIB_FOOT_RAISE` (1) above the spar so it rests **over** it, not beside/through
-   it — and the **luff/forestay (B→C) is a chain** (skipping the masthead); the leech bellies off
-   them. **Size-gated, chance rising with size** (`JIB_CHANCE_MEDIUM`/`LARGE`/`HUGE` = 55/80/100;
-   Small has no bowsprit → none) and only when a bowsprit exists. Billow depth
-   `dc.wind · SAIL_JIB_WIND_FACTOR`. Placement verified by `jib_places_chains_and_wool`.
+   the spanker), relaxed hole-free (asserted by `jib_sail_has_no_holes`). **What's pinned at `z = 0`
+   (over the bowsprit centreline) vs. free to billow:**
+   - The **luff (B→C)** — the sail's **head/top edge**, which runs along the bowsprit-tip→first-mast
+     **forestay**. It's pinned, so the sail's top lands at `z = 0` **on that stay line**, over the
+     bowsprit, exactly as it would be tied to the forestay. The canvas (wool) *is* placed along it
+     (it's no longer a bare rigging line — the sail covers the stay), so the head reads as sail, not
+     a thin chain.
+   - The **foot (A→B)** touches the bowsprit at **only `JIB_FOOT_HANGER_COUNT` (2) anchor columns**
+     — the two ends (forward tack at the tip, clew inboard). Each anchor drapes a wool corner on the
+     centreline and drops a **hanger tie** (chain/fence) to the spar top (`SAIL_JIB_FOOT_RAISE` = 3
+     of clearance). The **rest of the foot is free**, so it billows **up off** the bowsprit instead
+     of lying along its whole length (that earlier "row of feet" is gone).
+   - The **leech (A→C)** and the interior are free → billow out to `z = d·spanker_side`.
+   - **Curved outline (not a bare triangle):** the **foot (A→B)** and **leech (A→C)** edges bow
+     gently **inward** (a hollow, `JIB_CURVE_FRAC` of edge length, capped `JIB_CURVE_MAX`) via
+     `curved_sail_xy`, so the sail reads as cloth. The **luff (B→C)** — sail head → forward bowsprit
+     tip, on the forestay — is the **only straight edge**. Built as the straight triangle **minus two
+     `edge_bite`s** (each a simple, non-self-intersecting Bézier sliver) — an outline polygon would
+     **self-intersect** where the two inward curves meet at the shared corner and even-odd fill would
+     drop a whole sail section (the bug that left holes). `jib_sail_has_no_holes` asserts no interior
+     holes on the curved outline.
+   - **Head rigging bridge:** the sail's head corner stops **`JIB_HEAD_RIGGING` (4) blocks below the
+     masthead** (`c_sail`, not the masthead `c_mast`); the gap from there up to the head is **pure
+     forestay rigging** (chain/fence, no canvas), so the jib ties to the mast with rigging instead of
+     ramming solid sail into the masthead. The bridge **starts one block higher than the masthead**
+     (ties into the finial) and runs **two blocks tall per column using the cell *above* each step**
+     (`[y, y+1]`). It **skips any cell already holding canvas wool** and explicitly includes `c_sail`,
+     so a rigging block always lands **on top** of the sail's head wool block (not beside it / not
+     carving it), while consecutive steps connect face-to-face down the diagonal.
+   - **No sail-on-sail intersection:** before laying each canvas cell the jib checks the placement
+     cache (`get_cached_block`) and **skips any cell already holding a sail** (`*wool`). Since the
+     square sails + spanker (and any future sail) are placed earlier in `masts::build`, the jib never
+     overlaps them.
+
+   - **Stay always present + sail-state gating:** the **forestay stay is built whenever there's a
+     bowsprit + foremast** (standing rigging), independent of the jib roll — so a ship with **no jib
+     bent on** still shows its stay. The **canvas** is drawn only when the jib **rolled** (`has_jib`)
+     **and** the sails are **set** (`draw_canvas = has_jib && Full`). With no canvas (no jib, or
+     `None`/`Furled`) the **whole forestay stay** (bowsprit tip B → masthead, 2-tall, tied down to
+     the bowsprit at its forward end) is rigging and nothing else; with canvas, only the head bridge
+     is bare rigging and the rest of the stay is the canvas luff. Asserted by
+     `jib_furled_is_rigging_only`.
+
+   So the sail's head sits over the bowsprit on the stay, the foot pinches to 2 ties, and the body
+   bellies to one side. The foremast pole/yards are skipped so the canvas never carves them.
+   **Size-gated, chance rising with size** (`JIB_CHANCE_MEDIUM`/`LARGE`/`HUGE` = 55/80/100; Small
+   has no bowsprit → none) and only when a bowsprit exists. Billow depth `dc.wind ·
+   SAIL_JIB_WIND_FACTOR`. Placement verified by `jib_places_rigging_and_wool`.
+
+   **Rigging material (chain / fence) — `RiggingMaterial` (`additions.rs`).** All thin rigging
+   lines (the jib forestay + foot hangers; later shrouds/stays) are drawn from **one per-ship
+   material**: a `minecraft:chain` or a palette **fence** post (railing-wood role). Chosen by
+   **chance** (`RiggingMaterial::pick`, `RIGGING_CHAIN_CHANCE`) or **forced as an option**
+   (`ShipV2Spec::with_rigging`), resolved once in `build_ship_v2` and carried on `DeckContext`.
+   **Chains appear to be silently dropped by the current live server** (offline scans place them
+   fine, in-game shows none — the adjacent wool places normally), so `RIGGING_CHAIN_CHANCE`
+   defaults to **0 (always fence)** until that's understood; flip it up (or per-ship roll) once
+   chains place reliably. `jib_places_rigging_and_wool` asserts both materials are honoured
+   (chain → chains present; fence → zero chains, fences present).
+
+   _Verify on the live screenshot:_ forestay reads as a clean diagonal from the bowsprit tip up to
+   the foremast head (not occluded by the course); the jib foot floats above the bowsprit with
+   short hanger ties (tune `SAIL_JIB_FOOT_RAISE`); fences read as the rigging line; no line carves
+   the mast or yards.
 
    **Yard/sail stacking** is sized so the **lowest sail (course) is the largest** — yards
    are laid out **bottom→top** from the foot base (rail clearance excluded from the budget),
@@ -354,6 +411,29 @@ each arrives only with the user's algorithm for it.
    _Verify on the live screenshot:_ flag reads as a flapping pennant (tune `FLAG_WAVE_AMP_Y`
    / `FLAG_WAVE_AMP_Z` / the freqs); streams clear aft of the rigging; length range looks
    right; colour variety across the fleet.
+
+   **Helm (ship's wheel) — implemented** (`additions/helm.rs`, `DeckAddition::HelmCapstan`). A
+   three-block fitting on the **quarterdeck** (centreline, **halfway between the aftmost mast and the
+   stern**, but never closer than `HELM_STERN_CLEARANCE` (2) clear blocks to the stern railing; masts
+   lean forward so a station below the aft mast's `base_x` is clear of the pole, and the wheel cell
+   `hx-1` is kept on deck): a **lectern** base, a
+   **fence** post, and an **open trapdoor as the wheel** — folded up **vertical on the stern (rear)
+   side** of the post. A trapdoor hinges to the block **opposite** its `facing`, so `facing=stern`
+   hinges it **onto the fence** (attached, not floating) with the disc standing on the rear as the
+   wheel. Lectern/trapdoor are hardcoded oak for now (ship is `ship_oak`), the fence is palette wood.
+   Built for all ships (Medium+ gating deferred). Asserted by `helm_places_wheel`.
+
+   **Masts keel-stepped fix:** the mast pole now starts at **`y = 1`** (resting **on** the keel's
+   bottom course), not `y = 0` (which poked through the keel underside).
+
+   **Mast-to-mast stays — implemented** (`additions/masts.rs`). On **2+ mast ships**, a
+   standing-rigging line (chain/fence per `RiggingMaterial`) connects **each mast to the next** —
+   **`MAST_STAY_THICK` (1) block thick** but run as a **4-connected staircase** (`step_line_xy`) so
+   the diagonal connects face-to-face with no corner gaps. It attaches to the **top of the mast pole
+   (below the fence finial)** and **skips the poles, finials, and flag cells**, so it never carves
+   the masts or the masthead pennants. The finial itself is bumped from `MAST_TOP_FENCE` (2) to
+   `MAST_TOP_FENCE_MULTI` (3) on multi-mast ships, so the taller top reads better with the stays.
+   Asserted by `mast_stays_connect_tops`.
 
    **More detail above water (user principle):** above-water features need finer
    detail than the mostly-blocks/large-shapes underwater work — use stairs/slabs,

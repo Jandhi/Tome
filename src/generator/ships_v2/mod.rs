@@ -32,7 +32,7 @@ use crate::noise::RNG;
 // Reused harness from v1: the local→world transform and ship-relative facings.
 pub use super::ships::{Placement, ShipDir};
 
-pub use additions::{DeckAddition, SailBillow, SailState, SizeTier};
+pub use additions::{DeckAddition, RiggingMaterial, SailBillow, SailState, SizeTier};
 pub use hull::HullShape;
 use additions::bowsprit::BowspritModel;
 use additions::masts::MastModel;
@@ -81,6 +81,9 @@ pub struct ShipV2Spec {
     pub sail_state: SailState,
     /// Wind strength — deepest billow (blocks) of a deployed `Full` sail. `0.0` = flat.
     pub wind: f32,
+    /// What thin rigging lines (jib forestay + hangers) are built from. `None` = roll per
+    /// ship by chance ([`RiggingMaterial::pick`]); `Some` forces it.
+    pub rigging: Option<RiggingMaterial>,
 }
 
 impl ShipV2Spec {
@@ -95,7 +98,14 @@ impl ShipV2Spec {
             mast_lean: tuning::MAST_LEAN,
             sail_state: SailState::Full,
             wind: tuning::SAIL_WIND,
+            rigging: None,
         }
+    }
+
+    /// Force the rigging-line material (chain / fence). Leave unset to roll per ship.
+    pub fn with_rigging(mut self, rigging: RiggingMaterial) -> Self {
+        self.rigging = Some(rigging);
+        self
     }
 
     /// Set how the sails are rendered (none / furled / full).
@@ -209,6 +219,8 @@ pub async fn build_ship_v2(
     //    main deck); the other additions still build for all sizes until their gating
     //    is wired up.
     let tier = SizeTier::from_length(spec.length);
+    // Rigging-line material: forced by the spec, else rolled per ship by chance.
+    let rigging = spec.rigging.unwrap_or_else(|| RiggingMaterial::pick(ctx.rng));
     let deck_ctx = additions::DeckContext {
         placement: &placement,
         keel: &keel,
@@ -220,6 +232,7 @@ pub async fn build_ship_v2(
         mast_lean: spec.mast_lean,
         sail_state: spec.sail_state,
         wind: spec.wind,
+        rigging,
     };
     // Running top-weather-deck state: structural additions raise it, fittings read it.
     let mut deck_state = additions::DeckState::initial(&hull, &deck);

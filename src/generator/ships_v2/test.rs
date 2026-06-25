@@ -396,10 +396,175 @@ fn spanker_sail_has_no_holes() {
     }
 }
 
-/// End-to-end: a Huge ship (jib chance 100%) actually **places the jib** — chain (forestay)
-/// blocks and white-wool (sail) blocks land in the world. Confirms the rigging is built.
+/// End-to-end: a Huge ship (jib chance 100%) actually **places the jib** — its rigging line
+/// (forestay + hangers) and white-wool (sail) blocks land in the world. Runs once with the
+/// rigging **forced to chain** and once **forced to fence**, asserting the chosen material
+/// shows up (and the other doesn't), so the `RiggingMaterial` option is honoured.
 #[tokio::test]
-async fn jib_places_chains_and_wool() {
+async fn jib_places_rigging_and_wool() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, RiggingMaterial, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    // Scan the build volume for rigging (chain / fence) + white_wool, building a Huge ship
+    // with the rigging material forced.
+    async fn scan(rigging: RiggingMaterial) -> (i32, i32, i32) {
+        let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+        let data = LoadedData::load().expect("data");
+        let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+
+        let world = World::synthetic_water(build_area, 50, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(3);
+        let spec = ShipV2Spec::new(Cardinal::North, 46).with_rigging(rigging); // Huge → jib always
+        let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+        let _ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+        editor.flush_buffer().await;
+
+        let (mut chains, mut fences, mut wool) = (0, 0, 0);
+        for x in 0..180 {
+            for y in 40..110 {
+                for z in 0..180 {
+                    if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
+                        let id = b.id.as_str();
+                        if id.contains("chain") {
+                            chains += 1;
+                        } else if id.contains("fence") {
+                            fences += 1;
+                        } else if id.contains("white_wool") {
+                            wool += 1;
+                        }
+                    }
+                }
+            }
+        }
+        (chains, fences, wool)
+    }
+
+    let (chains, _fences, wool) = scan(RiggingMaterial::Chain).await;
+    println!("jib scan (chain): chains={chains}, white_wool={wool}");
+    assert!(chains > 0, "chain rigging: expected forestay/hanger chain blocks");
+    assert!(wool > 0, "chain rigging: expected jib/sail wool blocks");
+
+    // With fence rigging the jib's lines become fences. (Other fences exist — railing, mast
+    // finials — so we only assert wool is present and the forestay didn't fall back to chain
+    // for the *jib*; a clean count of jib-only fences isn't separable here, so we assert no
+    // chain blocks anywhere, proving the jib used fence not chain.)
+    let (chains_f, fences_f, wool_f) = scan(RiggingMaterial::Fence).await;
+    println!("jib scan (fence): chains={chains_f}, fences={fences_f}, white_wool={wool_f}");
+    assert_eq!(chains_f, 0, "fence rigging: no chain blocks should be placed");
+    assert!(fences_f > 0, "fence rigging: expected fence blocks (rigging + railing)");
+    assert!(wool_f > 0, "fence rigging: expected jib/sail wool blocks");
+}
+
+/// Under a **furled / struck** sail state the jib shows **only its rigging** (the forestay stay) —
+/// no canvas. Builds the same Huge ship `Full` vs `Furled` (chain rigging forced) and asserts the
+/// stay rigging is still placed while the canvas wool collapses to near nothing.
+#[tokio::test]
+async fn jib_furled_is_rigging_only() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, RiggingMaterial, SailState, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    async fn scan(state: SailState) -> (i32, i32) {
+        let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+        let data = LoadedData::load().expect("data");
+        let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+        let world = World::synthetic_water(build_area, 50, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(3);
+        let spec = ShipV2Spec::new(Cardinal::North, 46)
+            .with_rigging(RiggingMaterial::Chain)
+            .with_sail_state(state);
+        let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+        let _ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+        editor.flush_buffer().await;
+        let (mut chains, mut wool) = (0, 0);
+        for x in 0..180 {
+            for y in 40..110 {
+                for z in 0..180 {
+                    if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
+                        let id = b.id.as_str();
+                        if id.contains("chain") {
+                            chains += 1;
+                        } else if id.contains("white_wool") {
+                            wool += 1;
+                        }
+                    }
+                }
+            }
+        }
+        (chains, wool)
+    }
+
+    let (full_ch, full_wool) = scan(SailState::Full).await;
+    let (furl_ch, furl_wool) = scan(SailState::Furled).await;
+    println!("jib full: chains={full_ch}, wool={full_wool} | furled: chains={furl_ch}, wool={furl_wool}");
+    assert!(furl_ch > 0, "furled jib should still place its forestay stay rigging");
+    // Canvas is gone under furled — only a stray white flag could remain, far below the set sail.
+    assert!(
+        furl_wool * 5 < full_wool,
+        "furled should have far less wool than full (no jib canvas): full={full_wool} furled={furl_wool}",
+    );
+}
+
+/// On a 2+ mast ship, a **mast-to-mast stay** (rigging) connects the mastheads — assert a chain
+/// lands near the midpoint between the two forward mastheads (well above the deck).
+#[tokio::test]
+async fn mast_stays_connect_tops() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::ships_v2::{build_ship_v2, RiggingMaterial, ShipV2Ctx, ShipV2Spec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
+    let world = World::synthetic_water(build_area, 50, 64);
+    let mut editor = world.get_offline_editor();
+    let mut rng = RNG::new(7);
+    let spec = ShipV2Spec::new(Cardinal::North, 36).with_rigging(RiggingMaterial::Chain); // Large → 3 masts
+    let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
+    let ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
+    editor.flush_buffer().await;
+
+    let masts = ship.masts.as_ref().expect("masts");
+    assert!(masts.masts.len() >= 2, "need 2+ masts for a stay");
+    let mut tops: Vec<Point3D> = masts
+        .masts
+        .iter()
+        .map(|m| m.cells.iter().max_by_key(|p| p.y).copied().unwrap())
+        .collect();
+    tops.sort_by_key(|p| p.x);
+    let (m1, m2) = (tops[0], tops[1]);
+    let (midx, midy) = ((m1.x + m2.x) / 2, (m1.y + m2.y) / 2);
+    // The cache is keyed by the local point passed to `place_block` (= `placement.to_world(local)`),
+    // so read it back the same way.
+    let mut found = false;
+    for dx in -1..=1 {
+        for dy in -2..=2 {
+            let local = Point3D::new(midx + dx, midy + dy, 0);
+            if let Some(b) = editor.get_cached_block(ship.placement.to_world(local)) {
+                if b.id.as_str().contains("chain") {
+                    found = true;
+                }
+            }
+        }
+    }
+    assert!(found, "expected a mast-to-mast stay chain near the midpoint between the two mastheads");
+}
+
+/// The helm (ship's wheel) places its lectern base + trapdoor wheel on the deck.
+#[tokio::test]
+async fn helm_places_wheel() {
     use crate::editor::World;
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
@@ -410,41 +575,39 @@ async fn jib_places_chains_and_wool() {
     let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
     let data = LoadedData::load().expect("data");
     let palette = data.palettes.get(&PaletteId::from("ship_oak")).expect("ship_oak").clone();
-
     let world = World::synthetic_water(build_area, 50, 64);
     let mut editor = world.get_offline_editor();
-    let mut rng = RNG::new(3);
-    let spec = ShipV2Spec::new(Cardinal::North, 46); // Huge → jib always
+    let mut rng = RNG::new(5);
+    let spec = ShipV2Spec::new(Cardinal::North, 32);
     let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
     let _ship = build_ship_v2(&mut ctx, &spec, Point2D::new(96, 96)).await;
     editor.flush_buffer().await;
 
-    // Scan the build volume for chain + white_wool blocks.
-    let (mut chains, mut wool) = (0, 0);
+    let (mut lecterns, mut trapdoors) = (0, 0);
     for x in 0..180 {
-        for y in 40..110 {
+        for y in 40..127 {
             for z in 0..180 {
                 if let Some(b) = editor.try_get_block(Point3D::new(x, y, z)) {
                     let id = b.id.as_str();
-                    if id.contains("chain") {
-                        chains += 1;
-                    } else if id.contains("white_wool") {
-                        wool += 1;
+                    if id.contains("lectern") {
+                        lecterns += 1;
+                    } else if id.contains("trapdoor") {
+                        trapdoors += 1;
                     }
                 }
             }
         }
     }
-    println!("jib scan: chains={chains}, white_wool={wool}");
-    assert!(chains > 0, "expected forestay chain blocks to be placed");
-    assert!(wool > 0, "expected jib/sail wool blocks to be placed");
+    println!("helm scan: lecterns={lecterns}, trapdoors={trapdoors}");
+    assert!(lecterns > 0, "expected a lectern (helm base)");
+    assert!(trapdoors > 0, "expected a trapdoor (helm wheel)");
 }
 
 /// The jib's billowed triangle has **no holes**: the depth field never steps more than 1
 /// between neighbouring cells. Swept across a range of triangle shapes and winds.
 #[test]
 fn jib_sail_has_no_holes() {
-    use crate::generator::ships_v2::additions::masts::{jib_billow, line_xy, triangle_xy};
+    use crate::generator::ships_v2::additions::masts::{curved_sail_xy, jib_billow, line_xy};
     use crate::geometry::Point3D;
     use std::collections::HashSet;
 
@@ -455,8 +618,24 @@ fn jib_sail_has_no_holes() {
         (Point3D::new(40, 8, 0), Point3D::new(58, 9, 0), Point3D::new(35, 40, 0)),
     ];
     for (a, b, c) in cases {
-        let tri = triangle_xy(a, b, c);
+        // The real path: a roached (curved foot/leech) outline, not a bare triangle.
+        let tri = curved_sail_xy(a, b, c, 2.0, 2.0);
         let cellset: HashSet<(i32, i32)> = tri.iter().copied().collect();
+        // No **interior holes**: a cell with region neighbours on all four sides must itself be in
+        // the region (guards the inward-curve self-intersection bug that dropped sail sections).
+        let (x0, x1) = (a.x.min(b.x).min(c.x), a.x.max(b.x).max(c.x));
+        let (y0, y1) = (a.y.min(b.y).min(c.y), a.y.max(b.y).max(c.y));
+        for x in x0..=x1 {
+            for y in y0..=y1 {
+                if !cellset.contains(&(x, y))
+                    && [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                        .iter()
+                        .all(|n| cellset.contains(n))
+                {
+                    panic!("curved jib interior hole at ({x},{y}) for corners {a:?} {b:?} {c:?}");
+                }
+            }
+        }
         // Pin the foot (A→B) and luff (B→C), as the build does.
         let mut pinned: HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
         pinned.extend(line_xy(b, c));
@@ -843,7 +1022,7 @@ async fn build_ship_v2_live() {
     use crate::editor::{Editor, World};
     use crate::generator::data::LoadedData;
     use crate::generator::materials::PaletteId;
-    use crate::generator::ships_v2::{ShipV2Spec, ShipV2Ctx};
+    use crate::generator::ships_v2::{SailState, ShipV2Spec, ShipV2Ctx};
     use crate::geometry::{Cardinal, Point2D};
     use crate::http_mod::GDMCHTTPProvider;
     use crate::noise::RNG;
@@ -900,7 +1079,11 @@ async fn build_ship_v2_live() {
             crate::generator::ships_v2::HullShape::Oval
         };
         // The deployed-sail billow shape is rolled per ship (weighted Combined/Curtain/Domed).
-        let spec = ShipV2Spec::new(Cardinal::North, length).with_hull_shape(hull_shape);
+        // TODO(jib rigging): testing the **furled** (rolled-up) jib — only the rigging/stay should
+        // show, no canvas. Switch back to the default `Full` once the stay shape is dialled in.
+        let spec = ShipV2Spec::new(Cardinal::North, length)
+            .with_hull_shape(hull_shape)
+            .with_sail_state(SailState::Full);
 
         let mut ctx = ShipV2Ctx::new(&mut editor, &data, &palette, &mut rng);
         let ship = crate::generator::ships_v2::build_ship_v2(&mut ctx, &spec, anchor).await;

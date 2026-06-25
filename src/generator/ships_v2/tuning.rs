@@ -149,8 +149,17 @@ pub const MAST_YARD_NARROW_MAX: i32 = 3;
 /// Forward (`+x`, toward the bow) offset of the yards from the mast centreline, in blocks
 /// — so the yard (and its sail) sits just ahead of the mast rather than through it.
 pub const MAST_YARD_FORWARD: i32 = 1;
-/// Fence blocks stacked on top of each mast (the straight finial spar).
+/// Fence blocks stacked on top of each mast (the straight finial spar). `MAST_TOP_FENCE_MULTI`
+/// applies on **2+ mast ships** (a taller finial reads better with the mast-to-mast stays).
 pub const MAST_TOP_FENCE: i32 = 2;
+pub const MAST_TOP_FENCE_MULTI: i32 = 3;
+/// On 2+ mast ships, a standing-rigging **stay** connects each masthead to the next. Drawn this
+/// many blocks tall (centred on the masthead-to-masthead line); `1` = a single clean line.
+pub const MAST_STAY_THICK: i32 = 1;
+
+/// Minimum **clear deck blocks between the helm's wheel and the stern railing** — the helm sits
+/// halfway between the aftmost mast and the stern, but never closer than this to the stern rail.
+pub const HELM_STERN_CLEARANCE: i32 = 2;
 
 // --- Masthead flags (wool pennants) ----------------------------------------
 
@@ -241,6 +250,13 @@ pub const SAIL_SPANKER_WIND_FACTOR: f32 = 1.6;
 /// a straight foot along the boom.
 pub const SAIL_SPANKER_FOOT_LIFT: i32 = 2;
 
+// --- Rigging lines (jib forestay + hangers; later shrouds/stays) -----------
+
+/// Per-ship chance (percent) that thin rigging lines are **chain** rather than **fence**.
+/// `0` = always fence, `100` = always chain. (Chains appear not to survive on the current
+/// live server, so fence is the safe default for now — see `RiggingMaterial`.)
+pub const RIGGING_CHAIN_CHANCE: i32 = 0;
+
 // --- Jib (triangular headsail, bowsprit → foremast) ------------------------
 
 /// Per-ship chance (percent) of a jib, by size tier — **rises with ship size**. A jib needs
@@ -250,9 +266,26 @@ pub const JIB_CHANCE_LARGE: i32 = 80;
 pub const JIB_CHANCE_HUGE: i32 = 100;
 /// Wind multiplier for the jib billow relative to the square sails (`SAIL_WIND`).
 pub const SAIL_JIB_WIND_FACTOR: f32 = 1.3;
-/// Blocks the jib's foot (the A→B edge) sits **above** the bowsprit, so the sail drapes
-/// **over** the spar rather than beside it. `1` rests it just on top.
-pub const SAIL_JIB_FOOT_RAISE: i32 = 1;
+/// Blocks the jib's foot (the A→B edge) sits **above** the bowsprit, so the sail's bottom
+/// line floats clear of the spar (not embedded in it). The gap between the foot and the spar
+/// top is bridged by **hanger ties** (`JIB_FOOT_HANGER_COUNT` of them), tying the canvas down
+/// to the bowsprit like the references. `3` leaves ~2 blocks of visible hang.
+pub const SAIL_JIB_FOOT_RAISE: i32 = 2;
+
+/// How many **hanger ties** drop from the jib foot to the bowsprit — *not* one per column.
+/// `2` ties the two ends (the forward tack + the inboard end), per the references.
+pub const JIB_FOOT_HANGER_COUNT: usize = 2;
+
+/// Blocks of **pure rigging** (chain/fence, no canvas) between the foremast head and the jib's
+/// head: the sail's top corner stops this far below the masthead and a forestay line bridges the
+/// gap, so the jib doesn't read as solid sail jammed into the masthead/square sails.
+pub const JIB_HEAD_RIGGING: i32 = 4;
+
+/// How far the jib's **foot** and **leech** edges bow **outward** (a roach), as a fraction of the
+/// edge length, so the sail isn't a rigid triangle. The **luff** (forestay edge, sail head → forward
+/// bowsprit tip) stays straight. Capped by `JIB_CURVE_MAX` blocks.
+pub const JIB_CURVE_FRAC: f32 = 0.13;
+pub const JIB_CURVE_MAX: f32 = 3.0;
 
 // --- Spanker (gaff + boom on the aftmost mast) -----------------------------
 
