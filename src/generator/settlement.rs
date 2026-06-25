@@ -11,7 +11,7 @@ use crate::generator::placement::{resolve_rural_production, try_place_rural, Pla
 use crate::generator::resource_chain::paint_production_area_for;
 use crate::generator::terrain::{flatten_urban_area, force_height, log_trees};
 use crate::geometry::{Point2D, Point3D};
-use crate::minecraft::Block;
+use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
 
 /// Full town-generation pipeline: feathered urban flatten + tiered A* road
@@ -27,6 +27,47 @@ use crate::noise::{Seed, RNG};
 /// `max(1, round(beds * POPULATION_PER_BED))`, so a single-bed house houses ~2
 /// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
 const POPULATION_PER_BED: f32 = 1.5;
+
+/// The settlement's colour identity. Picked once per town from the culture's
+/// curated [`Culture::color_pool`], it gives the town two recurring colours plus
+/// a unique family colour per manor, so a street reads as a coherent palette
+/// with two dominant hues and occasional variety rather than 16 random dyes.
+struct ColorScheme {
+    /// The two recurring town colours: `town[0]` is dominant, `town[1]` second.
+    town: [Color; 2],
+    /// One family colour per manor (`MANOR_CAP` entries), handed out in
+    /// placement order. Drawn freely from the pool — they may coincide with a
+    /// town colour, but never with each other.
+    manor: Vec<Color>,
+    /// The full culture pool, sampled for the occasional off-scheme accent.
+    pool: Vec<Color>,
+}
+
+impl ColorScheme {
+    /// Pick two distinct town colours and `manor_count` distinct manor colours
+    /// from the culture pool. The pool always has ≥ 4 entries (see
+    /// `Culture::color_pool`), so the distinct draws never run dry.
+    fn new(culture: crate::generator::buildings_v2::Culture, manor_count: usize, rng: &mut RNG) -> Self {
+        let pool = culture.color_pool();
+        let mut town_pick = pool.clone();
+        rng.shuffle(&mut town_pick);
+        let town = [town_pick[0], town_pick[1 % town_pick.len()]];
+        let mut manor_pick = pool.clone();
+        rng.shuffle(&mut manor_pick);
+        let manor: Vec<Color> = manor_pick.into_iter().take(manor_count.max(1)).collect();
+        Self { town, manor, pool }
+    }
+
+    /// A colour for one ordinary building: 50% the dominant town colour, 25% the
+    /// second town colour, 25% a random pool colour for variety.
+    fn next_color(&self, rng: &mut RNG) -> Color {
+        match rng.rand_i32_range(0, 100) {
+            0..=49 => self.town[0],
+            50..=74 => self.town[1],
+            _ => *rng.choose(&self.pool),
+        }
+    }
+}
 
 pub async fn generate_town(
     editor: &mut Editor,
@@ -597,17 +638,74 @@ pub async fn generate_town(
         } else {
             (eligible_for_band(&collector_band), 1, "collector (arterial empty)")
         };
-    let manor_lots: HashSet<usize> = {
-        let mut pool = eligible.clone();
-        rng.derive().shuffle(&mut pool);
-        pool.into_iter().take(MANOR_CAP).collect()
-    };
-    println!(
-        "Manor pre-pass: {} {}-eligible lots, chose {} to host Manors",
-        eligible.len(),
-        manor_tier_label,
-        manor_lots.len(),
-    );
+    // Japanese manors are always engawa, which insets the interior by 2 cells a
+    // side and so makes the default Manor footprint feel cramped. For that
+    // culture only, run a candidate scan: dry-evaluate every eligible lot's manor
+    // tier, find the slice with the largest *usable interior* (floorspace left
+    // after the veranda inset), and build the two best at a widened, forced size.
+    // Other cultures keep the original behaviour — two random eligible lots, the
+    // standard Manor range, default random placement.
+    #[derive(Clone, Copy)]
+    struct ManorChoice { frontage_idx: usize, cursor: i32, fw: i32, depth: i32, score: i32 }
+    let (manor_lots, manor_choices): (HashSet<usize>, HashMap<usize, ManorChoice>) =
+        if culture == Culture::Japanese {
+            const MANOR_MIN_FIT_DEPTH: i32 = 5; // mirrors MIN_FIT_DEPTH in the build loop
+            // Widened range for engawa manors so the picked spot yields a grander
+            // hall once the veranda eats its ring. Engawa-only — does not touch
+            // the culture-agnostic `SizeClass::Manor` range other cultures use.
+            const ENGAWA_MANOR_FW: std::ops::RangeInclusive<i32> = 11..=14;
+            const ENGAWA_MANOR_DEPTH_HI: i32 = 16;
+            let manor_band: &HashSet<Point2D> =
+                if manor_tier_idx == 0 { &arterial_band } else { &collector_band };
+            let mut best_by_lot: Vec<(usize, ManorChoice)> = Vec::new();
+            for &lot_idx in &eligible {
+                let Some(plot) = plot_from_block(&sub_blocks[lot_idx]) else { continue; };
+                let mut best: Option<ManorChoice> = None;
+                for (fi, frontage) in frontage_from_roads(&sub_blocks[lot_idx], manor_band).into_iter().enumerate() {
+                    let chain_len = frontage.cells.len() as i32;
+                    let mut cursor = 0;
+                    while cursor + *ENGAWA_MANOR_FW.start() <= chain_len {
+                        // Largest front width that fits at this cursor, then the
+                        // deepest depth that fits — the biggest box this slice holds.
+                        for fw in ENGAWA_MANOR_FW.rev() {
+                            if cursor + fw > chain_len { continue; }
+                            let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
+                            let Some(depth) = (MANOR_MIN_FIT_DEPTH..=ENGAWA_MANOR_DEPTH_HI).rev()
+                                .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
+                            else { continue; };
+                            // Usable interior after the 2-cell engawa inset a side.
+                            let score = (fw - 4).max(0) * (depth - 4).max(0);
+                            if best.map_or(true, |b| score > b.score) {
+                                best = Some(ManorChoice { frontage_idx: fi, cursor, fw, depth, score });
+                            }
+                            break; // largest fw at this cursor found
+                        }
+                        cursor += 1;
+                    }
+                }
+                if let Some(c) = best { best_by_lot.push((lot_idx, c)); }
+            }
+            // Highest usable interior first; lot index breaks ties for determinism.
+            best_by_lot.sort_by(|a, b| b.1.score.cmp(&a.1.score).then(a.0.cmp(&b.0)));
+            best_by_lot.truncate(MANOR_CAP);
+            println!(
+                "Manor pre-pass (engawa scan): {} {}-eligible lots, chose {} by largest interior (scores {:?})",
+                eligible.len(), manor_tier_label, best_by_lot.len(),
+                best_by_lot.iter().map(|(_, c)| c.score).collect::<Vec<_>>(),
+            );
+            let choices: HashMap<usize, ManorChoice> = best_by_lot.iter().copied().collect();
+            let lots: HashSet<usize> = choices.keys().copied().collect();
+            (lots, choices)
+        } else {
+            let mut pool = eligible.clone();
+            rng.derive().shuffle(&mut pool);
+            let lots: HashSet<usize> = pool.into_iter().take(MANOR_CAP).collect();
+            println!(
+                "Manor pre-pass: {} {}-eligible lots, chose {} to host Manors",
+                eligible.len(), manor_tier_label, lots.len(),
+            );
+            (lots, HashMap::new())
+        };
     // Iterate manor-lots first (in shuffled order), then everything else in
     // natural sub_block order. "Before the rest of the houses" is enforced
     // by the iteration order alone — no separate code path.
@@ -616,6 +714,17 @@ pub async fn generate_town(
         .copied()
         .chain((0..sub_blocks.len()).filter(|i| !manor_lots.contains(i)))
         .collect();
+
+    // Town colour identity: two recurring colours sampled per ordinary building
+    // (50/25/25 with a random accent) plus a unique family colour per manor. A
+    // dedicated derived RNG keeps colour draws from shifting the placement
+    // streams. The two town colours feed the settlement namer further below.
+    let color_scheme = ColorScheme::new(culture, MANOR_CAP, &mut rng.derive());
+    let mut color_rng = rng.derive();
+    println!(
+        "Town colours: dominant={:?}, second={:?}; manor family colours={:?}",
+        color_scheme.town[0], color_scheme.town[1], color_scheme.manor,
+    );
 
     let mut total_buildings = 0usize;
     // Per-house NPC anchors + bed-derived population budget, gathered from every
@@ -667,38 +776,73 @@ pub async fn generate_town(
 
         'tier_loop: for (ti, (band, pool)) in tiers_local.iter().enumerate() {
             let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
-            for frontage in frontage_from_roads(lot, band) {
+            for (fi, frontage) in frontage_from_roads(lot, band).into_iter().enumerate() {
                 tier_cells[ti] += frontage.cells.len();
                 tier_frontage[ti].extend(&frontage.cells);
                 let chain_len = frontage.cells.len() as i32;
                 if chain_len < min_front { tier_short[ti] += 1; continue; }
-                let mut cursor: i32 = if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 };
+                // On a manor lot's manor tier, place the one manor the scan sized
+                // at its chosen slice; skip every other frontage of that tier so
+                // no second, smaller manor gets seated.
+                let manor_here: Option<ManorChoice> = if is_manor_lot && ti == manor_tier_idx {
+                    match manor_choices.get(&lot_idx) {
+                        // Engawa scan picked this lot: build only at its chosen
+                        // slice, skipping the tier's other frontages.
+                        Some(c) if c.frontage_idx == fi => Some(*c),
+                        Some(_) => continue,
+                        // No scan (non-engawa culture): fall through to the
+                        // default random Manor placement on this tier.
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                let mut cursor: i32 = match manor_here {
+                    Some(c) => c.cursor,
+                    None => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
+                };
                 // Shallowest depth we'll accept on a slice that can't take the
                 // rolled depth — lets diagonal frontage (where an axis-aligned
                 // rect overruns the staircased ribbon) still seat a house.
                 const MIN_FIT_DEPTH: i32 = 5;
                 while cursor + min_front <= chain_len {
-                    let size_class = *rng.choose(pool);
-                    let fw = rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1);
-                    let max_depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
-                    if cursor + fw > chain_len { cursor += 1; continue; }
+                    // A scanned manor forces its size + slice; everything else
+                    // rolls a size from the tier pool and the deepest fitting depth.
+                    let size_class = match manor_here {
+                        Some(_) => SizeClass::Manor,
+                        None => *rng.choose(pool),
+                    };
+                    let fw = match manor_here {
+                        Some(c) => c.fw,
+                        None => rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
+                    };
+                    if cursor + fw > chain_len {
+                        if manor_here.is_some() { break; }
+                        cursor += 1; continue;
+                    }
                     let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
-                    // Square-frontage bias: with the culture's square chance,
-                    // make the house a square (depth = front width) if it fits,
-                    // so it gets a dome. Guarded so a 0 bias never draws RNG.
-                    // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
-                    // that fits, shrinking the house to hug a diagonal ribbon.
-                    let want_square = culture.square_bias() > 0
-                        && rng.percent(culture.square_bias())
-                        && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
-                    let depth = if want_square {
-                        fw
-                    } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
-                        .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
-                    {
-                        d
-                    } else {
-                        tier_unfit[ti] += 1; cursor += 1; continue;
+                    let depth = match manor_here {
+                        Some(c) => c.depth,
+                        None => {
+                            // Square-frontage bias: with the culture's square chance,
+                            // make the house a square (depth = front width) if it fits,
+                            // so it gets a dome. Guarded so a 0 bias never draws RNG.
+                            // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
+                            // that fits, shrinking the house to hug a diagonal ribbon.
+                            let max_depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
+                            let want_square = culture.square_bias() > 0
+                                && rng.percent(culture.square_bias())
+                                && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
+                            if want_square {
+                                fw
+                            } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
+                                .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
+                            {
+                                d
+                            } else {
+                                tier_unfit[ti] += 1; cursor += 1; continue;
+                            }
+                        }
                     };
                     let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
                     // The frontage rect becomes the core; try to grow wings
@@ -708,10 +852,22 @@ pub async fn generate_town(
 
                     // Desert keeps a uniform sandstone palette; other cultures
                     // roll wood/stone/roof variants per house for variety.
-                    let palette = match culture {
+                    let mut palette = match culture {
                         Culture::Desert => base_palette.clone(),
                         _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
                     };
+                    // Apply the town colour identity: a manor flies its unique
+                    // family colour; every other building draws from the weighted
+                    // town scheme. This `primary_color` then tints the building's
+                    // dyed accents (banners, beds, carpets) via the recolour pass.
+                    let family_color: Option<Color> = if size_class == SizeClass::Manor {
+                        color_scheme.manor.get(manors_placed).copied()
+                    } else {
+                        None
+                    };
+                    palette.primary_color = Some(
+                        family_color.unwrap_or_else(|| color_scheme.next_color(&mut color_rng)),
+                    );
                     // Roof style weighted by culture + size (irimoya skews to the
                     // grander buildings; see `roof_styles_for`).
                     let roof_styles = culture.roof_styles_for(size_class);
@@ -760,6 +916,15 @@ pub async fn generate_town(
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
+                            // A manor flies its family colour: banners flanking
+                            // the front door so the street reads the household
+                            // before you step inside. Other buildings carry their
+                            // colour only on interior accents.
+                            if let Some(color) = family_color {
+                                crate::generator::buildings_v2::exterior::place_family_banner(
+                                    &mut bctx_editor, &output.wall_segs, color,
+                                ).await;
+                            }
                             // Population budget tracks sleeping capacity, not bed
                             // furniture: a double/canopy bed sleeps two. Each
                             // bed-tagged item's capacity is its number of
@@ -787,6 +952,7 @@ pub async fn generate_town(
                                 population,
                                 wealth: crate::generator::population::Wealth::from_size_class(size_class),
                                 pos: output.footprint.bounds().midpoint(),
+                                family_color,
                             });
                             // Mark every rect in the footprint (core + wings)
                             // as used so subsequent placements on this lot
@@ -832,6 +998,9 @@ pub async fn generate_town(
                         Err(msg) => {
                             tier_fail[ti] += 1;
                             log::warn!("placement build_house failed: {}", msg);
+                            // A scanned manor gets one shot; on failure give up its
+                            // tier rather than retrying the forced size shifted over.
+                            if manor_here.is_some() { continue 'tier_loop; }
                             cursor += 1;
                         }
                     }
@@ -1322,13 +1491,13 @@ pub async fn generate_town(
     // Requires `enable-command-block=true` on the server.
     {
         let mut name_rng = RNG::new(seed).derive();
-        let name = crate::generator::naming::generate_settlement_name(
-            editor.world(), &urban, &civic_features, culture, &mut name_rng,
+        let named = crate::generator::naming::generate_settlement_name(
+            editor.world(), &urban, &civic_features, culture, &color_scheme.town, &mut name_rng,
         );
         crate::generator::welcome::place_welcome_title(
-            editor, &urban, &name, "Welcome, traveller",
+            editor, &urban, &named.name, &named.subtitle,
         ).await;
-        println!("Placed welcome-title sensor for \"{}\"", name);
+        println!("Placed welcome-title sensor for \"{}\" ({})", named.name, named.subtitle);
     }
 
     editor.flush_buffer().await;

@@ -12,12 +12,52 @@ use crate::editor::Editor;
 use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
-use crate::minecraft::{string_to_block, Block};
+use crate::minecraft::{string_to_block, Block, Color};
 use crate::noise::RNG;
 
 use super::footprint::Footprint;
 use super::pipeline::BuildCtx;
 use super::walls::{segment_cells, WallSegments};
+
+/// Hang a manor's family colour as wall banners flanking its front door, so the
+/// street reads the household before you step inside. Placed on the solid wall
+/// to either side of the ground-floor doorway (not above — an archway doorway
+/// has no wall block over it to support a banner), facing out toward the street.
+/// A no-op if the building has no ground-floor door.
+pub async fn place_family_banner(
+    ctx: &mut BuildCtx<'_>,
+    wall_segs: &WallSegments,
+    color: Color,
+) {
+    let Some((seg, opening)) = wall_segs.doors().find(|(s, _)| s.floor == 0) else {
+        return;
+    };
+    let cells = segment_cells(seg);
+    // `seg.facing` is the INWARD normal; the street side is its negation.
+    let out: Point2D = (-seg.facing).into();
+    let facing = (-seg.facing).to_string();
+    let color_str: String = color.into();
+    // Mid-wall row: solid infill beside the door on every door height.
+    let y = seg.base_y + 1;
+    // The wall cell just left and just right of the doorway.
+    let flanks = [opening.offset as i32 - 1, (opening.offset + opening.width) as i32];
+    for idx in flanks {
+        if idx < 0 || idx as usize >= cells.len() {
+            continue;
+        }
+        let wall_cell = cells[idx as usize];
+        // The banner hangs in the exterior air cell, supported by the wall block
+        // behind it. Forced so a verge lip or terrain can't block the placement.
+        let pos = wall_cell + out;
+        let banner = format!("minecraft:{color_str}_wall_banner[facing={facing}]");
+        ctx.editor
+            .place_block_forced(
+                &string_to_block(&banner).expect("family banner block"),
+                Point3D::new(pos.x, y, pos.y),
+            )
+            .await;
+    }
+}
 
 /// Prop blocks placed against exterior walls — a varied, mostly single-block
 /// set of everyday household clutter. Keep this list 10+ deep so a street shows

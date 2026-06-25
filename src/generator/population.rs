@@ -45,6 +45,7 @@ use crate::generator::buildings_v2::footprint::SizeClass;
 use crate::generator::buildings_v2::Culture;
 use crate::generator::nbts::{Structure, StructureType};
 use crate::geometry::{Point2D, Point3D};
+use crate::minecraft::Color;
 use crate::noise::RNG;
 
 use super::npc::{
@@ -482,9 +483,33 @@ pub struct Fixture {
 }
 
 
+/// Per-culture name pools (currently just first names). Loaded from the
+/// `cultures` map in `data/npcs.yaml`, keyed by [`culture_key`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct CultureNames {
+    /// Localized first names, picked verbatim by [`roll_first_name`]. Mixes
+    /// masculine and feminine names; one is assigned per NPC at random.
+    #[serde(default)]
+    pub first_names: Vec<String>,
+}
+
+/// The `data/npcs.yaml` key for a culture's name pools.
+fn culture_key(culture: Culture) -> &'static str {
+    match culture {
+        Culture::Desert => "desert",
+        Culture::Japanese => "japanese",
+        Culture::Medieval => "medieval",
+    }
+}
+
 /// Name + dialogue pools, loaded from `data/npcs.yaml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct NpcData {
+    /// Per-culture name pools, keyed by [`culture_key`] (`medieval`, `japanese`,
+    /// `desert`). A culture's `first_names` list, when non-empty, supersedes the
+    /// legacy `first_name_prefixes`/`first_name_suffixes` composition.
+    #[serde(default)]
+    pub cultures: HashMap<String, CultureNames>,
     /// Consonant-ending stems that open a generated first name (Ael, Cor,
     /// Hild, Theod, …). Combined with [`Self::first_name_suffixes`] in
     /// [`roll_first_name`] to mint first names — Aelric, Coran, Hilda,
@@ -723,11 +748,17 @@ fn professions_for(wealth: Wealth) -> &'static [Profession] {
 // Name + epithet rolls
 // ============================================================================
 
-/// Mint a first name by combining a random stem prefix with a random suffix —
-/// "Cor" + "an" → "Coran", "Hild" + "a" → "Hilda", "Theod" + "ric" →
-/// "Theodric". Falls back to `"Stranger"` if either pool is empty (so a
-/// partial yaml doesn't panic).
-fn roll_first_name(data: &NpcData, rng: &mut RNG) -> String {
+/// Pick a first name localized to `culture`. Prefers the culture's explicit
+/// `first_names` list from `data/npcs.yaml` (Anglo-Saxon for medieval, Japanese,
+/// Arabic for desert). Falls back to the legacy prefix×suffix composition —
+/// "Cor" + "an" → "Coran" — when the culture lists no names, and to
+/// `"Stranger"` only if every pool is empty (so a partial yaml doesn't panic).
+fn roll_first_name(culture: Culture, data: &NpcData, rng: &mut RNG) -> String {
+    if let Some(names) = data.cultures.get(culture_key(culture)) {
+        if !names.first_names.is_empty() {
+            return rng.choose(&names.first_names).clone();
+        }
+    }
     if data.first_name_prefixes.is_empty() || data.first_name_suffixes.is_empty() {
         return "Stranger".to_string();
     }
@@ -967,6 +998,7 @@ fn expand_shape(
     alloc: &mut IdAllocator,
     primary_surname: &str,
     data: &NpcData,
+    culture: Culture,
     biome: VillagerBiome,
     rng: &mut RNG,
 ) {
@@ -986,13 +1018,13 @@ fn expand_shape(
         HouseholdShape::SoloAdult => {
             let stage = LifeStage::Adult;
             push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(stage, data, rng), stage, biome);
         }
         HouseholdShape::SoloElder => {
             let stage = LifeStage::Elder;
             push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(stage, data, rng), stage, biome);
         }
         HouseholdShape::Couple => {
@@ -1002,21 +1034,21 @@ fn expand_shape(
             let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
             let stage = LifeStage::Adult;
             let a = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(stage, data, rng), stage, biome);
             let b = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), sn_b,
+                roll_first_name(culture, data, rng), sn_b,
                 roll_epithet(stage, data, rng), stage, biome);
             link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
         }
         HouseholdShape::SingleParent(n_kids) => {
             let parent = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             let mut kid_idxs = Vec::with_capacity(n_kids as usize);
             for _ in 0..n_kids {
                 let k = push_member(h_idx, members, by_id, alloc,
-                    roll_first_name(data, rng), primary_surname.to_string(),
+                    roll_first_name(culture, data, rng), primary_surname.to_string(),
                     None, LifeStage::Child, biome);
                 link_pair(members, parent, k, RelationshipKind::Child, RelationshipKind::Parent);
                 kid_idxs.push(k);
@@ -1027,17 +1059,17 @@ fn expand_shape(
             let married_in = rng.percent(40);
             let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
             let a = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             let b = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), sn_b,
+                roll_first_name(culture, data, rng), sn_b,
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
             // Kids take the primary surname (the family name).
             let mut kid_idxs = Vec::with_capacity(n_kids as usize);
             for _ in 0..n_kids {
                 let k = push_member(h_idx, members, by_id, alloc,
-                    roll_first_name(data, rng), primary_surname.to_string(),
+                    roll_first_name(culture, data, rng), primary_surname.to_string(),
                     None, LifeStage::Child, biome);
                 link_pair(members, a, k, RelationshipKind::Child, RelationshipKind::Parent);
                 link_pair(members, b, k, RelationshipKind::Child, RelationshipKind::Parent);
@@ -1049,15 +1081,15 @@ fn expand_shape(
             let married_in = rng.percent(40);
             let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
             let a = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             let b = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), sn_b,
+                roll_first_name(culture, data, rng), sn_b,
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
             // Elder is a parent of whichever spouse shares the family name.
             let elder = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
             link_pair(members, elder, a, RelationshipKind::Child, RelationshipKind::Parent);
         }
@@ -1065,20 +1097,20 @@ fn expand_shape(
             let married_in = rng.percent(40);
             let sn_b = if married_in { alt_surname(rng) } else { primary_surname.to_string() };
             let a = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             let b = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), sn_b,
+                roll_first_name(culture, data, rng), sn_b,
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             link_pair(members, a, b, RelationshipKind::Spouse, RelationshipKind::Spouse);
             let elder = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
             link_pair(members, elder, a, RelationshipKind::Child, RelationshipKind::Parent);
             let mut kid_idxs = Vec::with_capacity(n_kids as usize);
             for _ in 0..n_kids {
                 let k = push_member(h_idx, members, by_id, alloc,
-                    roll_first_name(data, rng), primary_surname.to_string(),
+                    roll_first_name(culture, data, rng), primary_surname.to_string(),
                     None, LifeStage::Child, biome);
                 link_pair(members, a, k, RelationshipKind::Child, RelationshipKind::Parent);
                 link_pair(members, b, k, RelationshipKind::Child, RelationshipKind::Parent);
@@ -1093,7 +1125,7 @@ fn expand_shape(
             let mut idxs = Vec::with_capacity(n as usize);
             for _ in 0..n {
                 let i = push_member(h_idx, members, by_id, alloc,
-                    roll_first_name(data, rng), primary_surname.to_string(),
+                    roll_first_name(culture, data, rng), primary_surname.to_string(),
                     roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
                 idxs.push(i);
             }
@@ -1110,16 +1142,16 @@ fn expand_shape(
                     alt_surname(rng)
                 };
                 push_member(h_idx, members, by_id, alloc,
-                    roll_first_name(data, rng), sn,
+                    roll_first_name(culture, data, rng), sn,
                     roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             }
         }
         HouseholdShape::ElderWithAdultChild => {
             let elder = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Elder, data, rng), LifeStage::Elder, biome);
             let child = push_member(h_idx, members, by_id, alloc,
-                roll_first_name(data, rng), primary_surname.to_string(),
+                roll_first_name(culture, data, rng), primary_surname.to_string(),
                 roll_epithet(LifeStage::Adult, data, rng), LifeStage::Adult, biome);
             link_pair(members, elder, child, RelationshipKind::Child, RelationshipKind::Parent);
         }
@@ -1161,19 +1193,34 @@ pub fn build_households(
     for (h_idx, house) in houses.iter().enumerate() {
         let budget = house.population.max(1);
         let wealth = house.wealth;
-        let mut primary_surname = roll_surname(data, rng);
+        // A manor usually takes its surname from its family colour (Black →
+        // Blackwell), matching the colour it flies on its banners; 40% of the
+        // time it falls back to a plain random surname. The colour choice is made
+        // once per house so the uniqueness loop re-rolls a fresh colour *suffix*
+        // (preserving the colour) rather than silently dropping it on collision.
+        const COLOR_SURNAME_PCT: i32 = 40;
+        let color_root = house.family_color.and_then(|c| c.surname_root());
+        let use_color =
+            color_root.is_some() && !data.surname_suffixes.is_empty() && rng.percent(COLOR_SURNAME_PCT);
+        let roll = |rng: &mut RNG| -> String {
+            match color_root {
+                Some(root) if use_color => format!("{root}{}", rng.choose(&data.surname_suffixes)),
+                _ => roll_surname(data, rng),
+            }
+        };
+        let mut primary_surname = roll(rng);
         for _ in 0..SURNAME_MAX_TRIES {
             if !used_surnames.contains(&primary_surname) {
                 break;
             }
-            primary_surname = roll_surname(data, rng);
+            primary_surname = roll(rng);
         }
         used_surnames.insert(primary_surname.clone());
         let mut members: Vec<Npc> = Vec::new();
         let shape = pick_household_shape(budget, wealth, rng);
         expand_shape(
             shape, h_idx, &mut members, &mut pop.by_id, alloc,
-            &primary_surname, data, biome, rng,
+            &primary_surname, data, culture, biome, rng,
         );
         pop.households.push(Household {
             surname: primary_surname,
@@ -1674,7 +1721,7 @@ pub fn build_roster(
             };
             Npc {
                 id: alloc.next_id(),
-                first_name: roll_first_name(data, rng),
+                first_name: roll_first_name(culture, data, rng),
                 surname: roll_surname(data, rng),
                 epithet: roll_epithet(stage, data, rng),
                 life_stage: stage,
@@ -1706,6 +1753,11 @@ pub struct HouseAnchors {
     /// cheap proximity queries (work-binding to nearby workplaces, friendship
     /// drafting between neighbours).
     pub pos: Point2D,
+    /// A manor's unique family colour, if this house is a manor. The household it
+    /// seeds takes its surname from this colour most of the time (Black →
+    /// Blackwell), matching the colour it flies on its exterior banners. `None`
+    /// for ordinary houses, which keep a plain random surname.
+    pub family_color: Option<Color>,
 }
 
 /// One candidate scene in the town-wide draw, tagged with the house it belongs
@@ -2207,6 +2259,37 @@ mod tests {
         assert!(data.small_talk.contains(&none));
     }
 
+    /// Every culture defines a non-empty localized first-name pool, and
+    /// `roll_first_name` draws from that culture's list (not another's). Guards
+    /// the `cultures` block in `npcs.yaml` against drifting away from the code.
+    /// No server.
+    #[test]
+    fn first_names_are_localized_per_culture() {
+        let data = NpcData::load().expect("load npcs.yaml");
+        for culture in [Culture::Medieval, Culture::Japanese, Culture::Desert] {
+            let pool = data
+                .cultures
+                .get(culture_key(culture))
+                .map(|c| &c.first_names)
+                .unwrap_or_else(|| panic!("npcs.yaml: no `cultures.{}` block", culture_key(culture)));
+            assert!(
+                !pool.is_empty(),
+                "culture '{}' has an empty first_names pool",
+                culture_key(culture),
+            );
+            // Several draws all land in this culture's own pool.
+            let mut rng = RNG::new(Seed(42));
+            for _ in 0..20 {
+                let name = roll_first_name(culture, &data, &mut rng);
+                assert!(
+                    pool.contains(&name),
+                    "roll_first_name({}) produced '{name}', not in that culture's pool",
+                    culture_key(culture),
+                );
+            }
+        }
+    }
+
     /// `exchange_of_len` returns only entries with the requested line count, so a
     /// fixed-size stage scene draws a script that fits its cast. No server.
     #[test]
@@ -2314,6 +2397,7 @@ mod tests {
                 population: pop,
                 wealth: Wealth::Modest,
                 pos: Point2D::new(pop as i32 * 16, 0),
+                family_color: None,
             })
             .collect();
         let pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);
@@ -2371,6 +2455,7 @@ mod tests {
                 population: pop,
                 wealth: Wealth::Modest,
                 pos: Point2D::new(pop as i32 * 16, 0),
+                family_color: None,
             })
             .collect();
         let mut pop = build_households(&houses, Culture::Medieval, &data, &mut alloc, &mut rng);

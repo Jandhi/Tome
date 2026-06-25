@@ -5,14 +5,19 @@
 //!
 //! Detection is **culture-neutral** — each feature maps to an abstract *concept*
 //! (`water`, `hill`, `market`, `wood`, …). Each culture then translates the
-//! concept into its OWN words and morphology, so a river town is `Brookford`
-//! (medieval), `Kawamura` (japanese), or `Bir Wadi` (desert) — never an English
-//! stem glued onto a foreign suffix (the "Gardenyama" problem).
+//! concept into its OWN words and morphology, so a river town is `Brocford`
+//! (medieval, Old English), `Kawamura` (japanese), or `Bir Wadi` (desert) —
+//! never an English stem glued onto a foreign suffix (the "Gardenyama" problem).
 //!
 //! Each detected concept becomes a weighted theme. A lead word is drawn from a
 //! weighted theme, then the name is composed as either:
-//!   - **stem + suffix** — `Mill` + `ford` → `Millford`, `Yama` + `mura` → `Yamamura`
+//!   - **stem + suffix** — `Myln` + `ham` → `Mylnham`, `Yama` + `mura` → `Yamamura`
 //!   - **two words** — pairing two themes, `Bir` + `Wadi` → `Bir Wadi`
+//!
+//! Alongside the name we build an **English subtitle** from the same words via
+//! each culture's `glosses` map — `Mylnham` → "Mill Homestead", `Bir al-Raml` →
+//! "Well of the Sand". Medieval names use readable Old-English (Anglo-Saxon)
+//! forms, so their subtitle is the modern-English reading.
 //!
 //! Everything is drawn from the town's seeded RNG, so a given seed always yields
 //! the same name. Vocabulary + tuning live in `data/settlement_names.yaml`.
@@ -26,6 +31,7 @@ use crate::editor::World;
 use crate::generator::buildings_v2::Culture;
 use crate::generator::BuildClaim;
 use crate::geometry::{Point2D, CARDINALS_2D};
+use crate::minecraft::Color;
 use crate::noise::RNG;
 
 /// Vocabulary + tuning, loaded from `data/settlement_names.yaml`.
@@ -83,11 +89,19 @@ struct CultureWords {
     article: Option<ArticleCfg>,
     /// capitalised second words for the two-word form.
     fillers: Vec<String>,
-    /// colour modifiers — always lead the name (never a trailing word).
+    /// colour-name words, keyed by the dye colour's id (`red`, `light_blue`, …)
+    /// → this culture's word for it (`Aka`, `Zarqa`, …). The namer renders the
+    /// town's actual scheme colours, so this bridges the `Color` enum to
+    /// vocabulary. Colour words always LEAD the name, never trail.
     #[serde(default)]
-    colors: Vec<String>,
+    colors: HashMap<String, String>,
     /// concept -> this culture's words for it.
     concepts: HashMap<String, Vec<String>>,
+    /// every name word (and suffix) -> its plain-English meaning. Used to render
+    /// the English-translation subtitle. Every word the namer can emit must have
+    /// an entry (guarded by `every_name_word_has_a_gloss`).
+    #[serde(default)]
+    glosses: HashMap<String, String>,
 }
 
 /// Tuning for definite-article naming. The remainder after `prefix_pct +
@@ -108,6 +122,26 @@ impl CultureWords {
             .map(|v| v.iter().map(String::as_str).collect())
             .unwrap_or_default()
     }
+
+    /// The plain-English meaning of a name token (concept word or suffix). Tries
+    /// the token verbatim, then lower-cased (suffixes are stored lower-case),
+    /// falling back to the token itself so a missing gloss degrades gracefully.
+    fn gloss(&self, token: &str) -> String {
+        self.glosses
+            .get(token)
+            .or_else(|| self.glosses.get(&token.to_ascii_lowercase()))
+            .cloned()
+            .unwrap_or_else(|| token.to_string())
+    }
+}
+
+/// A composed settlement name plus its English-translation subtitle.
+/// For medieval (Old-English) names the subtitle is the modern-English reading
+/// ("Mylnham" → "Mill Homestead"); for japanese/desert it is the translation
+/// ("Bir al-Raml" → "Well of the Sand").
+pub struct SettlementName {
+    pub name: String,
+    pub subtitle: String,
 }
 
 /// A name source: a word pool plus the weight it carries when picking the lead.
@@ -132,15 +166,17 @@ fn culture_key(culture: Culture) -> &'static str {
 /// coords). Reads the dominant building, civic landmarks (the open-space feature
 /// keys in `civic_features` — plaza/park `.key()` strings), land shape, and
 /// biome as concepts, renders them in the culture's vocabulary, and composes a
-/// name with `rng`. Falls back to a culture-appropriate default if the
+/// name with `rng`. Returns the name plus an English-translation subtitle built
+/// from the same words. Falls back to a culture-appropriate default if the
 /// vocabulary file can't be loaded.
 pub fn generate_settlement_name(
     world: &World,
     urban: &HashSet<Point2D>,
     civic_features: &[String],
     culture: Culture,
+    town_colors: &[Color],
     rng: &mut RNG,
-) -> String {
+) -> SettlementName {
     let cfg: NamesCfg = match load_yaml("settlement_names.yaml") {
         Ok(c) => c,
         Err(e) => {
@@ -212,14 +248,21 @@ pub fn generate_settlement_name(
             themes.push(Theme { words, weight: cfg.weights.landform, modifier: false });
         }
     }
-    // Colour: a modifier theme — always available, leads the name only. Future:
-    // bias this pool toward the build palette's dominant material colour.
-    if !cul.colors.is_empty() {
-        themes.push(Theme {
-            words: cul.colors.iter().map(String::as_str).collect(),
-            weight: cfg.weights.color,
-            modifier: true,
-        });
+    // Colour: a modifier theme — leads the name only. Built from the town's
+    // actual scheme colours so a mostly-red town tends to a red-rooted name. The
+    // dominant colour (index 0) is repeated 2:1 over the second so it wins more
+    // often within the theme.
+    let mut color_words: Vec<&str> = Vec::new();
+    for (i, c) in town_colors.iter().enumerate() {
+        let key: String = (*c).into();
+        if let Some(word) = cul.colors.get(&key) {
+            for _ in 0..if i == 0 { 2 } else { 1 } {
+                color_words.push(word.as_str());
+            }
+        }
+    }
+    if !color_words.is_empty() {
+        themes.push(Theme { words: color_words, weight: cfg.weights.color, modifier: true });
     }
     // Biome theme always contributes: fall back to the culture's `green` words
     // when it doesn't translate this specific biome concept.
@@ -243,13 +286,16 @@ pub fn generate_settlement_name(
     let lead_idx = pick_weighted_theme(&themes, rng);
     let lead = (*rng.choose(&themes[lead_idx].words)).to_string();
 
-    let name = if let Some(article) = &cul.article {
+    let (name, subtitle) = if let Some(article) = &cul.article {
         compose_article(article, &themes, lead_idx, &lead, cul, rng)
     } else {
         let two_word_pct = cul.two_word_pct.unwrap_or(cfg.two_word_pct);
         if themes.len() > 1 && rng.percent(two_word_pct) {
             match second_word(&themes, lead_idx, &lead, cul, rng) {
-                Some(w) => format!("{lead} {w}"),
+                Some(w) => (
+                    format!("{lead} {w}"),
+                    format!("{} {}", cul.gloss(&lead), cul.gloss(&w)),
+                ),
                 None => attach_suffix(&lead, cul, rng),
             }
         } else {
@@ -258,8 +304,9 @@ pub fn generate_settlement_name(
     };
 
     log::info!(
-        "settlement name '{}' (building={:?}, civic={:?}, landform={:?}, relief={}, biome='{}'->{})",
+        "settlement name '{}' / '{}' (building={:?}, civic={:?}, landform={:?}, relief={}, biome='{}'->{})",
         name,
+        subtitle,
         building_concept,
         civic_concepts,
         landform_concept,
@@ -267,21 +314,27 @@ pub fn generate_settlement_name(
         biome.name(),
         biome_concept,
     );
-    name
+    SettlementName { name, subtitle }
 }
 
-/// Append a culture suffix to the lead word (`Mill` + `ford` → `Millford`).
-fn attach_suffix(lead: &str, cul: &CultureWords, rng: &mut RNG) -> String {
+/// Append a culture suffix to the lead word (`Myln` + `ham` → `Mylnham`),
+/// returning the name and its English gloss (`Mill Homestead`).
+fn attach_suffix(lead: &str, cul: &CultureWords, rng: &mut RNG) -> (String, String) {
     if cul.suffixes.is_empty() {
-        return lead.to_string();
+        return (lead.to_string(), cul.gloss(lead));
     }
     let suffix = rng.choose(&cul.suffixes);
-    format!("{lead}{suffix}")
+    (
+        format!("{lead}{suffix}"),
+        format!("{} {}", cul.gloss(lead), cul.gloss(suffix)),
+    )
 }
 
 /// Arabic-style composition: `Al-{lead}` (article prefix), `{lead} al-{second}`
 /// (construct/iḍāfa), or a bare `{lead} {second}` compound. The article
-/// assimilates to sun letters (`al-Raml` → `ar-Raml`).
+/// assimilates to sun letters (`al-Raml` → `ar-Raml`). Returns the name and its
+/// English gloss: prefix → "The {lead}", construct → "{lead} of the {second}",
+/// bare → "{lead} {second}".
 fn compose_article(
     article: &ArticleCfg,
     themes: &[Theme],
@@ -289,24 +342,33 @@ fn compose_article(
     lead: &str,
     cul: &CultureWords,
     rng: &mut RNG,
-) -> String {
+) -> (String, String) {
     let roll = rng.rand_i32_range(0, 100);
     let prefixed = |word: &str| {
         let art = assimilated_article(word);
-        format!("{}-{}", capitalize(&art), word)
+        (
+            format!("{}-{}", capitalize(&art), word),
+            format!("The {}", cul.gloss(word)),
+        )
     };
     if roll < article.prefix_pct {
         prefixed(lead)
     } else if roll < article.prefix_pct + article.construct_pct {
         // {lead} al-{second}, with the article lower-case in mid-name.
         match second_word(themes, lead_idx, lead, cul, rng) {
-            Some(second) => format!("{lead} {}-{second}", assimilated_article(&second)),
+            Some(second) => (
+                format!("{lead} {}-{second}", assimilated_article(&second)),
+                format!("{} of the {}", cul.gloss(lead), cul.gloss(&second)),
+            ),
             None => prefixed(lead),
         }
     } else {
         // Bare compound: Bir Zeit, Wadi Rum.
         match second_word(themes, lead_idx, lead, cul, rng) {
-            Some(second) => format!("{lead} {second}"),
+            Some(second) => (
+                format!("{lead} {second}"),
+                format!("{} {}", cul.gloss(lead), cul.gloss(&second)),
+            ),
             None => prefixed(lead),
         }
     }
@@ -440,18 +502,59 @@ fn centroid(urban: &HashSet<Point2D>) -> Point2D {
 }
 
 /// Culture-appropriate fallback when the vocabulary file is missing.
-fn default_name(culture: Culture) -> String {
-    match culture {
-        Culture::Desert => "Sandhaven",
-        Culture::Japanese => "Yamamura",
-        Culture::Medieval => "Blackbarrow",
-    }
-    .to_string()
+fn default_name(culture: Culture) -> SettlementName {
+    let (name, subtitle) = match culture {
+        Culture::Desert => ("Ar-Raml", "The Sand"),
+        Culture::Japanese => ("Yamamura", "Mountain Village"),
+        Culture::Medieval => ("Blacbarrow", "Black Barrow"),
+    };
+    SettlementName { name: name.to_string(), subtitle: subtitle.to_string() }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The vocabulary file parses, and every dye colour a culture can actually
+    /// build with (`Culture::color_pool`) has a name word — so a town named
+    /// after its dominant colour can always render it. Guards the two from
+    /// drifting apart.
+    #[test]
+    fn every_pool_colour_has_a_name_word() {
+        let cfg: NamesCfg = load_yaml("settlement_names.yaml").expect("settlement_names.yaml parses");
+        for culture in [Culture::Medieval, Culture::Japanese, Culture::Desert] {
+            let cul = cfg.cultures.get(culture_key(culture)).expect("culture vocab present");
+            for color in culture.color_pool() {
+                let key: String = color.into();
+                assert!(
+                    cul.colors.contains_key(&key),
+                    "{} pool colour '{key}' has no name word in settlement_names.yaml",
+                    culture_key(culture),
+                );
+            }
+        }
+    }
+
+    /// Every word the namer can emit — concept words, fillers, colour words, and
+    /// suffixes — has a gloss, so the English-translation subtitle never falls
+    /// back to the raw foreign token. Guards the vocabulary and glosses from
+    /// drifting apart.
+    #[test]
+    fn every_name_word_has_a_gloss() {
+        let cfg: NamesCfg = load_yaml("settlement_names.yaml").expect("settlement_names.yaml parses");
+        for (key, cul) in &cfg.cultures {
+            let mut tokens: Vec<String> = Vec::new();
+            tokens.extend(cul.concepts.values().flatten().cloned());
+            tokens.extend(cul.fillers.iter().cloned());
+            tokens.extend(cul.colors.values().cloned());
+            tokens.extend(cul.suffixes.iter().cloned());
+            for t in tokens {
+                let has = cul.glosses.contains_key(&t)
+                    || cul.glosses.contains_key(&t.to_ascii_lowercase());
+                assert!(has, "culture '{key}': name word '{t}' has no gloss in settlement_names.yaml");
+            }
+        }
+    }
 
     #[test]
     fn article_assimilates_sun_letters() {
