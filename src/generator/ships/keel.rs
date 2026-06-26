@@ -1,5 +1,5 @@
 //! Stage 1 · **Keel** — the backbone spine, and the parameter that sets the ship's
-//! length. See `docs/plans/ship-builder-v2.md` (Stage 1 → Keel).
+//! length. See `docs/plans/ship-builder.md` (Stage 1 → Keel).
 //!
 //! Local frame: `x` = stern(0) → bow(+x), `z` = beam (centerline 0), `y` = up from
 //! the flat keel bottom (0). The flat run sits at `y = 0`; the ends rise to ~the
@@ -31,7 +31,7 @@ use crate::minecraft::BlockForm;
 
 use super::palette::{ShipPalette, ShipPart};
 use super::tuning::{BOW_CURVE_POW, BOW_RAKE_STAIR_FACE};
-use super::{Placement, ShipDir, ShipV2Ctx};
+use super::{Placement, ShipDir, ShipCtx};
 
 /// One placed keel block in the local frame.
 #[derive(Debug, Clone)]
@@ -193,7 +193,7 @@ pub fn build_keel_model(length: i32) -> KeelModel {
 /// from its [`ShipPalette`] role. Stairs/slabs are waterlogged only when the ship
 /// is built **on water** — never on land (Stage-1 rule).
 pub async fn place_keel(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     model: &KeelModel,
     placement: &Placement,
     ship_palette: &ShipPalette,

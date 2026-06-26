@@ -14,7 +14,7 @@ use crate::minecraft::BlockForm;
 
 use super::super::palette::ShipPart;
 use super::super::tuning::BULWARK_HEIGHT;
-use super::super::ShipV2Ctx;
+use super::super::ShipCtx;
 use super::{DeckContext, DeckState};
 
 /// Pure-geometry railing: the bulwark (solid) cells and the fence rail-cap cells, in
@@ -72,7 +72,7 @@ pub fn build_railing_model(outline: &[i32], deck_y: i32) -> RailingModel {
 /// Place the railing around the current top weather deck and record it in `state`. Uses
 /// the deck's **outer rim** outline (`DeckState::rail_outline`) — pure geometry, no block
 /// look-ups (those don't survive the offline→live coordinate shift).
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let place = dc.placement;
     let model = build_railing_model(&state.top_outline, state.top_y);
 

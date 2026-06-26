@@ -1,6 +1,6 @@
 //! Palette seam for ship **components**. Each major component (keel, hull, …) is
 //! one material, looked up through a [`ShipPart`] role rather than hardcoded, so it
-//! stays swappable (see `docs/plans/ship-builder-v2.md`, "palette-driven blocks").
+//! stays swappable (see `docs/plans/ship-builder.md`, "palette-driven blocks").
 //! Granularity is per component — the keel is a single part, not subdivided.
 
 use std::collections::HashMap;

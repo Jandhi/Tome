@@ -1,422 +1,675 @@
-# Ship Builder — Initial Implementation Plan
+# Ship Builder — Interactive Co-Design
 
-Procedural ship generator for Tome, modeled on the `buildings_v2` pipeline. Goal:
-several **size classes** that compose independently chosen **hull shapes** and
-**sail/rig plans**, placed into the world through the existing `Editor`.
+## Context
 
-## Goals & Non-Goals
+`src/generator/ships/` is the procedural ship generator. It was built by
+**interactive co-design** — the user supplied each geometry algorithm step by
+step, verified in-game via screenshots before moving on. (An earlier fully
+procedural rib+plank generator was scrapped for its realism gaps — pointy
+bow/stern, boxy sections — and replaced wholesale by this module.)
 
-**Goals**
-- Multiple size classes (rowboat → galleon) with sensible dimension envelopes.
-- Hull shape as a swappable strategy (rowboat, cog, caravel, longship, …).
-- Sail/rig plan as a swappable strategy (none/oars, single-mast, multi-mast).
-- Deterministic from a seed (`noise::RNG`), like every other generator.
-- Offline/dry-run buildable + an ASCII/SVG diagnostic, mirroring buildings_v2.
+The working method was a tight build→screenshot→correct loop: each hull/deck/rig
+algorithm filled in one at a time, as the user dictated it. This doc is the
+running design log; the sections below are the algorithms in the order they
+landed.
 
-**Non-Goals (v1)**
-- Below-deck interior rooms/furnishing (designed below, but **not implemented in
-  the first pass** — v1 stubs an empty hold).
-- Sailing/physics or animated sails.
-- Settlement-level placement (docks, harbors) — separate follow-up.
+## Decisions
 
-## Architecture
+- **Approach:** interactive co-design — user drives each algorithm; we iterate
+  from screenshots.
+- **Ship sizes:** there is a **minimum ship size — no rowboat**. (Keel test
+  lengths span ~14–46; a len-100 giant exercises the scaling.)
+- **Verify loop:** live `build_ship` test run against the Minecraft server, then
+  screenshots back. Offline ASCII as a fast pre-check.
+- **Geometry:** self-contained. Reuse only the placement harness, the offline
+  editor, palettes, and the buildings_v2 furnishing engine.
 
-New module tree under `src/generator/ships/` (sibling of `buildings_v2`), declared
-in `src/generator/mod.rs`. Reuse, don't fork: `Editor`, `World::synthetic`,
-`noise::RNG`, `materials::Palette`, `geometry` (Point2D/3D, Rect2D/3D, Cardinal),
-`minecraft::Block`.
+## Module layout
+
+`src/generator/ships/`, declared in `src/generator/mod.rs`. Submodules appear as
+the algorithm that needs them lands, so the tree reflects what exists.
 
 ```
 src/generator/ships/
-  mod.rs           # ShipClass, HullShape, RigPlan enums; ShipContext; re-exports
-  pipeline.rs      # ShipCtx (editor/data/palette/rng) + build_ship() orchestrator
-  dimensions.rs    # ShipClass -> length/beam/depth/freeboard/mast-count envelopes
-  hull/
-    mod.rs         # HullShape dispatch; HullModel output struct
-    rib.rs         # cross-section profiles (rib curves) per shape
-    plank.rs       # plank the ribs: keel, hull planking, gunwale, stem/stern
-    deck.rs        # deck planking + hatches/openings from HullModel
-  rig/
-    mod.rs         # RigPlan dispatch
-    mast.rs        # mast + crow's nest + boom/yard placement
-    sail.rs        # sail surfaces (wool/banner), furled vs full
-    rigging.rs     # shrouds/stays via fences/chains/tripwire
-  fittings.rs      # rudder, oars, railings, ladders, lanterns, anchor, figurehead
-  blueprint.rs     # ShipBlueprint + render_ascii (per-deck) for diagnostics
-  test.rs          # offline build_ships_offline + invariant/property tests
+  mod.rs          # ShipCtx / ShipSpec / ShipOutput + build_ship entry; Placement / ShipDir
+  keel.rs hull.rs rudder.rs deck.rs   # Stage 1–2 geometry
+  additions.rs additions/             # railing, bowsprit, masts/sails, helm, companionway, …
+  levels.rs interior.rs               # Stage 3 interior levels + furnishing
+  tuning.rs       # central tuning surface — every hand-tunable constant
+  blueprint.rs    # render_ascii diagnostic
+  test.rs         # offline build + live build_ship (the screenshot loop)
 ```
 
-### Pipeline order (`build_ship`)
+## What we reuse (do not re-implement)
 
-Mirrors the buildings_v2 "stage producing a model, later stage consuming it" style.
+- `Placement` / `ShipDir` (`src/generator/ships/mod.rs`) — local→world transform
+  and ship-relative facings.
+- `World::synthetic_water(build_area, floor_y, water_y)` + `World::get_offline_editor`
+  (`src/editor/world.rs`) — offline ocean flatworld.
+- Live placement pattern: `GDMCHTTPProvider::new` → `World::new` → `Editor::new` →
+  build → `editor.flush_buffer().await`, reading `waterline_y` from
+  `get_motion_blocking_height_at(center)`.
+- `data/palettes/ships/*.json` via `data.palettes.get(&"ship_oak".into())`.
+- The **buildings_v2 furnishing engine** (`furnish::furnish_interior`,
+  `rooms::ConstraintMap`, `footprint::find_largest_rect`) — Stage 3 interiors.
+- `Editor` block writes, `Block`, `BlockForm`, `geometry` (Point2D/3D, Cardinal),
+  `noise::RNG` (`RNG::new(i64)`, `rng.derive()`).
 
-1. `dimensions::resolve(class, rng)` → `ShipDimensions` (length, beam, depth, mast slots).
-2. `hull.build_model(dims, rng)` → `HullModel`: ordered ribs, keel line, deck Y,
-   waterline Y, gunwale outline, hatch cells. Pure geometry, no block writes.
-3. `hull::plank(ctx, &model)` — keel, hull planking, stem/stern posts, gunwale.
-4. `hull::deck(ctx, &model)` — deck planking, rails, hatch openings.
-5. `rig.build_plan(&model, dims, rng)` → `RigModel` (mast bases, yard heights, sail rects).
-6. `rig::raise(ctx, &rig_model)` — masts, yards, sails, rigging.
-7. `fittings::place(ctx, &model, &rig_model, rng)` — rudder, ladders, lanterns, anchor.
-8. `check_ship_invariants(&model, &rig_model)` — see below.
-9. Return `ShipOutput { dims, hull_model, rig_model, class, hull_shape, rig_plan }`.
+## The iteration loop (working agreement)
 
-`build_ship` is `async` (block writes are async); caller owns the final
-`editor.flush_buffer()`, exactly like `build_house`.
+Per algorithm:
 
-### Coordinate convention
+1. User describes the algorithm (e.g. "keel = slab line at y=0 from x=0..L";
+   "each station's half-width = f(x)").
+2. Implement it in the smallest fitting `ships` module, keeping all math in the
+   local frame (`x`=stern→bow, `z`=±beam, `y`=up from keel), transformed by
+   `Placement` — never bake world coords or hardcode facings (use `ShipDir` +
+   `placement.world_cardinal`).
+3. Run the offline test as a compile + sanity pre-check, dumping ASCII when useful.
+4. User runs the live test and pastes screenshots:
+   `cargo test build_ship -- --nocapture` (build area set over water with
+   `/setbuildarea`).
+5. Correct from the screenshot; repeat until the stage looks right, then next
+   algorithm.
 
-Build the ship in a **local frame** (bow toward +X, length along X, beam along Z,
-keel at Y=0) and translate/rotate to the world via a `Cardinal` heading + origin.
-Keeps hull math symmetric about the Z centerline and rotation a single transform —
-do not bake world coords into the hull/rig models.
+## Conventions to hold
 
-## Type sketches
+- Local frame only; transform via `Placement`. Bow = local +x.
+- Stair/trapdoor/ladder/slab facings: always derive from a `ShipDir` via
+  `placement.world_cardinal(dir)`. Never hardcode a `Cardinal`.
+- `RNG::new` takes `i64`; use `rng.derive()` per placer.
+- Watertightness is a property of the shell algorithm — keep a sealed inboard face.
+- NBT reference ships in `data/structures/ship/` are **visual reference only** and
+  use the plural `palettes` key (won't parse via `NBTStructure`). Not placed by code.
 
-```rust
-// mod.rs
-pub enum ShipClass { Rowboat, Sloop, Cog, Caravel, Galleon }
-pub enum HullShape { RowboatHull, RoundCog, SleekCaravel, Longship }
-pub enum RigPlan   { Oars, SingleMast, TwoMast, ThreeMast }
+## Verification
 
-pub struct ShipContext {           // analogous to BuildingContext
-    pub class: ShipClass,
-    pub hull_shape: HullShape,
-    pub rig_plan: RigPlan,
-    pub heading: Cardinal,
-    pub waterline_y: i32,          // where the hull sits in world Y
-}
-
-// pipeline.rs
-pub struct ShipCtx<'a> {           // analogous to BuildCtx
-    pub editor: &'a mut Editor,
-    pub data: &'a LoadedData,
-    pub palette: &'a Palette,
-    pub rng: &'a mut RNG,
-}
-```
-
-`HullShape` / `RigPlan` start as enums with a `match` dispatch (matches the
-codebase's `RoofStyle`/`TimberPattern` idiom). Promote to traits only if the match
-arms get unwieldy.
-
-### Size class envelopes (first-pass numbers, tune later)
-
-| Class    | Length | Beam | Decks | Masts |
-|----------|--------|------|-------|-------|
-| Rowboat  | 5–7    | 2–3  | 1     | 0 (oars) |
-| Sloop    | 9–13   | 3–4  | 1     | 1 |
-| Cog      | 14–18  | 5–6  | 1+hold| 1 |
-| Caravel  | 18–24  | 6–7  | 2     | 2 |
-| Galleon  | 26–36  | 8–11 | 2–3   | 3 |
-
-`dimensions.rs` owns these as a `match` returning ranges, like
-`SizeClass::target_area_min`.
-
-### Class → valid combinations
-
-Not every hull/rig pairs with every class. `mod.rs` exposes
-`ShipClass::hull_shapes()` and `ShipClass::rig_plans()` returning the allowed
-variants (mirrors `Culture::roof_styles()`), so callers/random selection stay valid.
-
-## Hull generation detail
-
-The hard part. Approach: **rib + plank**, not voxel-fill.
-
-1. **Spine**: keel line along X at Y=0; stem (bow) and sternpost rise at the ends.
-2. **Ribs**: at each X station, a cross-section curve in the Z–Y plane giving hull
-   half-width and depth. Shape strategy controls the curve:
-   - `RoundCog`: near-semicircular, full beam amidships, tucked ends.
-   - `SleekCaravel`: V-bottom, finer entry, pronounced sheer.
-   - `Longship`: shallow, symmetric double-ended, low freeboard.
-   - `RowboatHull`: tiny, near-flat bottom.
-   Taper beam toward bow/stern with an easing curve over X.
-3. **Plank**: connect adjacent ribs with stair/slab/full blocks following the curve.
-   **Reuse `roof::blocks` stair-stepping helpers first** (decision #4) before
-   writing ship-specific sloped-surface code. Gunwale = top edge ring.
-4. **Deck**: fill the deck plane at deck-Y inside the gunwale; cut hatches.
-
-`HullModel` carries everything downstream needs without re-deriving: rib outlines,
-deck cells, gunwale ring, mast-base candidate cells, waterline/deck Y, **and the
-hold volume** (interior cells below deck) so the future interior system has a clean
-input without re-running hull math.
-
-## Resolved decisions
-
-1. **Water vs dry-dock (v1):** ships **float at a fixed waterline on a water
-   flatworld**. Offline tests use `World::synthetic` filled with water at a known Y;
-   `ShipContext.waterline_y` pins where the hull sits. No terrain/water-finding in
-   v1 — that's Phase 4.
-2. **Rotation:** **cardinal headings only** to start (`Cardinal`). Hull/rig models
-   are built in the local bow=+X frame and transformed by one cardinal rotation +
-   origin translation at placement. Diagonal hulls are explicitly out of scope for now.
-3. **Below-deck interiors:** **designed now, implemented later** (see next section).
-   v1 builds the hold as an empty enclosed volume with a deck hatch + ladder; no
-   rooms or furniture.
-4. **Sloped-surface helpers:** reuse `roof::blocks` stair-stepping first; only fork
-   ship-specific helpers if the roof helpers can't express hull curvature cleanly.
-
-## Below-deck interiors (design only — NOT in first implementation)
-
-Goal: when enabled, partition and furnish the hold using a system parallel to
-`buildings_v2/rooms` + `furnish`, so the two share concepts (CellState, room types,
-furniture data) without ships depending on building internals.
-
-### Shared input
-
-`HullModel.hold_volume` already exposes the below-deck interior: per-deck-level a
-set of walkable cells bounded by the curved hull. This is the ship analogue of a
-building `Frame` floor plan — an irregular (non-rectangular) cell region.
-
-### Module sketch (future `src/generator/ships/hold/`)
-
-```
-hold/
-  mod.rs       # build_hold(ctx, &hull_model, class) entry; HoldPlan output
-  partition.rs # split the hold into compartments along bulkheads (X-stations)
-  assign.rs    # assign CompartmentType per compartment (fore/aft/by class)
-  furnish.rs   # place furniture per CompartmentType
-  cells.rs     # CellState grid over the irregular hold footprint
-```
-
-### Key design choices
-
-- **CellState reuse:** lift the `Empty / Blocked / BlockedReachable /
-  UnblockedReachable` semantics from buildings_v2 (documented in CLAUDE.md). Either
-  share the enum via a small common module or mirror it — decide when implementing;
-  prefer extracting a shared `cells` type so invariants stay identical.
-- **Partitioning:** ships partition along the length (bulkheads at chosen X-stations)
-  rather than the rectangle-subdivision used for houses, because the hold is a long
-  curved tube. Compartments get progressively smaller toward bow/stern as beam tapers.
-- **Compartment types (ship-flavored room types):** `Hold` (cargo: barrels, crates,
-  chests), `Quarters` (bunks/beds), `Galley` (furnace, cauldron, smoker),
-  `CaptainsCabin` (aft, larger — desk, bookshelf, bed, chest), `Brig` (iron bars),
-  `PowderStore`. Allowed set scales with `ShipClass`, mirroring how `RoomType`
-  availability scales with `SizeClass`.
-- **Furnishing:** reuse the furniture-data approach from `furnish/data.rs` (JSON
-  furniture catalogs keyed by compartment type) and the placement/approach-cell
-  logic. The `BlockedReachable` approach-cell invariant carries over unchanged.
-- **Headroom & access:** decks 2.5–3 blocks of clearance; deck hatch + ladder is the
-  vertical link (the same role attic ladders play in buildings). Companionway stairs
-  for larger classes.
-- **Invariants (when built):** every compartment reachable from the deck hatch;
-  every `BlockedReachable` furniture cell has a walkable neighbor; bulkhead doorways
-  connect adjacent compartments; no furniture clips the curved hull wall.
-
-### Why deferred
-
-Interiors depend on a *stable* `HullModel.hold_volume` and a working deck/hatch.
-Building them against a still-changing hull would churn. So v1 ships the hold as an
-empty, enclosed, laddered volume; interiors land once hull geometry is locked.
-
-## Diagnostics & testing (copy the buildings_v2 discipline)
-
-- `render_ascii(&ShipBlueprint)` per deck + a side-profile view; write SVG + `.txt`
-  to `output/` from an offline test, exactly like `build_furnished_houses_offline`.
-- `build_ships_offline` test: `World::synthetic` (water-filled to `waterline_y`) +
-  `get_offline_editor`, build one of each class×shape×rig, no server. Canonical
-  local iteration loop.
-- `check_ship_invariants`:
-  - deck is watertight (no deck cell directly over open water / hull gap),
-  - every mast base sits on a deck cell,
-  - hull is symmetric about the Z centerline (within stem/stern asymmetry),
-  - gunwale forms a closed ring,
-  - hold volume is enclosed by hull on all sides (precondition for interiors),
-  - bounding box stays within declared dimensions.
-- `ship_invariants_property_test`: N classes × M seeds through the offline pipeline
-  with invariants asserted, mirroring `pipeline_invariants_property_test`.
-
-## Materials
-
-Reuse `materials::Palette`. Add ship-oriented palettes in `data/palettes/ships/`
-(hull planks, deck, trim, sail wool color, accent). Sails: white wool or banners;
-later support dyed/heraldic. Follow the JSON `Loadable` pattern — no hardcoded blocks.
-
-
-## Resources for help
-
-General tips:
-The Keel: Place a horizontal line of slabs underwater to serve as the baseline and backbone of the build.
-The Hull: Build an elongated teardrop shape around the keel. The widest part of the ship should sit near the middle/bottom, tapering inward as you build up toward the waterline.
-Decks & Ribbing: Place internal rib supports every 3 to 5 blocks. Use slabs for the main deck to preserve interior headroom for cabins.
-Masts & Sails & Rigging: Erect vertical pillar logs, add horizontal spars, and shape wool or banners for billowing sails. Use chain for rigging.
-Details: Add lanterns, fences for rigging, trapdoors for cannon ports, and a rudder at the stern
-
-https://piratemc.com/2020/09/09/minecraft-ship-tutorial-30-gun-frigate/
-https://www.instructables.com/How-To-Build-a-Ship/
-https://www.planetminecraft.com/blog/shipbuilding-guide-w-tips-17th-18th-century-ships/
-https://www.minecraftforum.net/forums/minecraft-java-edition/creative-mode/362537-shipbuilding-tutorial
-
-## Build phases
-
-- **Phase 1 — skeleton — ✅ COMPLETE:** module tree (`src/generator/ships/`),
-  enums, `dimensions.rs`, `HullModel` (incl. `hold_volume`), and a single
-  `RowboatHull` planked + decked on the water flatworld. Offline test renders
-  ASCII (`output/ships/rowboat.txt`); a property test runs all 5 size envelopes ×
-  40 seeds through `check_ship_invariants`; a live `build_rowboat_in_minecraft`
-  test places it on the running server. No rig, sealed empty hold.
-  - Watertightness comes from a solid-volume → boundary-shell assembly, not
-    stair-stepping. Verified in-game: it floats. **Observation:** the rowboat
-    reads as boxy at 5×3 because its sides are vertical (one width per station)
-    and it only tapers at the tips. Phase 2's per-height widths (curved
-    cross-sections) fix this, and a gentle bilge is back-applied to the rowboat.
-- **Phase 2 — one real ship — ✅ COMPLETE:** `RoundCog` hull + `SingleMast` rig +
-  billowing wool sail + rudder/hatch/ladder fittings + accessible empty hold. Ribs
-  carry **per-height half-widths** so cross-sections curve (rounded bilge), which
-  de-boxes the rowboat too. Hull shell cells choose their block form — **stair
-  bevels** round the bilge/flare/sheer (mirroring the `roof::blocks` technique;
-  the inboard face stays solid so it's watertight), full blocks on the verticals.
-  Sail billows on a sinusoidal pillow hump. Invariants (mast on deck, hatch over
-  hold) + property + offline cog test (`output/ships/cog.txt`) + live `build_cog`.
-- **Phase 3 — variety — ✅ COMPLETE:** all four hull shapes (`SleekCaravel` =
-  asymmetric fine bow + V-bottom + lifting bow; `Longship` = slender symmetric
-  dragon-prow), every shape reachable through `ShipClass::hull_shapes()`.
-  Multi-mast rigs (`TwoMast`/`ThreeMast`) with staggered fore/main/mizzen heights,
-  each carrying a billowing sail and shrouds; masts dodge the hatch column.
-  Fittings polish: bowsprit, stern lantern, bow anchor chain. `ShipClass::pick_combo`
-  + `SHIP_CLASSES` + `default_ship_palette`; ship palettes in
-  `data/palettes/ships/` (`ship_oak`, `ship_spruce`, `ship_dark`). Variety property
-  test (every class × hull × rig × seeds) + `build_fleet_offline`
-  (`output/ships/fleet_*.txt`).
-- **Phase 3.5 — reference pass — ✅ COMPLETE:** drew on the NBT reference ships
-  (`data/structures/ship/`, ~28×9×8) and the guides in *Resources for help*.
-  - **Bigger classes** across the board (cog ~20–26 long × 7 beam × 5 deep;
-    galleon up to 44 × 13 × 8).
-  - **Teardrop section with tumblehome:** ribs widen from a narrow keel to the
-    **widest beam at the waterline**, then draw back in to a narrower deck
-    (`rib::teardrop`).
-  - **Slab keel** backbone under the flat of the bottom; **internal rib posts**
-    (logs hugging the hull) every 3–5 stations; **two-tone wale** (secondary wood
-    at the top strake).
-  - **Chain rigging** (was fences); **mast height ~0.6 × length** (was overly
-    tall). Stern lantern / bowsprit / anchor retained.
-  - Deferred (noted): raised fore/stern castles, and a slab main deck.
-- **Phase 3.6 — rig & topsides from the guides — ✅ COMPLETE:** read the linked
-  tutorials (*Resources for help*) and applied:
-  - **Bulwarks:** the deck is recessed with solid topsides rising 2 (1 for small
-    craft) above it and a rail cap, replacing the bare fence gunwale.
-  - **Gun ports:** trapdoors punched into the lower bulwark course every ~3
-    stations along the sides.
-  - **Tall-ship rig:** keel-stepped masts (run down to the hull bottom), **stacked
-    sails** (course → topsail → topgallant) that shrink upward on **yards that
-    shorten with height**, masts thinning to a **fenced topmast**, and **crow's
-    nests**. Multi-mast layouts keep the staggered fore/main/mizzen heights.
-  - **Rigging:** iron-bar shrouds/ratlines narrowing from the rail to the nest.
-  - **Fittings:** a ship's wheel (stair on a fence post) aft, a longer bowsprit
-    (~⅓ length), stern lantern raised above the rail.
-  - Still deferred: rounded-bow/transom-stern reshaping, gradient sails, diagonal yards.
-- **Phase 3.7 — castle, spanker & fixes — ✅ COMPLETE:**
-  - **Raised aft quarterdeck (poop)** for Cog/Caravel/Galleon (`superstructure.rs`):
-    a railed solid raised deck over the aft ~¼, with a ladder up its forward face;
-    the helm, stern lantern, and flag now sit on it. The hatch moved to the waist
-    (amidships) so it stays clear of the castle.
-  - **Spanker:** a triangular fore-aft driver sail trailing aft of the aftmost
-    mast (the guides' lateen/gaff rear sail).
-  - **Stern flag** streaming aft on a pole.
-  - **Bug fix:** mast ordering — the foremast now sits toward the **bow**, the
-    mizzen toward the **stern** (was reversed).
-- **Phase 4 — integration:** placement near water/docks in the settlement pipeline
-  (terrain/water queries, claim cells) — separate plan.
-- **Phase 5 — interiors:** implement the `hold/` system above once hull geometry is
-  stable.
+- **Offline (fast, every change):** `cargo test ships:: -- --skip _live`
+  runs the property + offline-editor builds and asserts; `cargo check` for
+  compile-only. (Offline tests write `output/ships/*.txt`.)
+- **Live (screenshot, per stage):** `cargo test build_ship_live -- --nocapture`
+  against the GDMC server with a water build area.
 
 ---
 
-## Handoff — state for the next session (as of Phase 3.7)
+## Algorithms (user-supplied, step by step)
 
-### Where things live
-- `src/generator/ships/`
-  - `mod.rs` — `ShipClass`, `HullShape`, `RigPlan`, `ShipContext`, `Placement`
-    (local→world transform), `ShipDir` (ship-relative facings → world `Cardinal`
-    via `placement.world_cardinal`), `SHIP_CLASSES`, `pick_combo`, `default_ship_palette`.
-  - `dimensions.rs` — per-class length/beam/depth/freeboard/mast envelopes + `resolve`.
-  - `hull/rib.rs` — per-shape cross-sections; `teardrop()` is the shared section
-    builder (keel→waterline widen, then tumblehome to deck).
-  - `hull/mod.rs` — `build_model` (solid→boundary-shell, watertight by
-    construction), `HullModel` (`hull_cells` as `HullPlank{local,form,cut}`,
-    `deck_cells`, `gunwale`, `hold_volume`, `frame_posts`, `keel_slabs`, `hatch`),
-    `check_ship_invariants`.
-  - `hull/plank.rs` — `plank_hull` (blocks + stair bevels + two-tone wale),
-    `place_keel`, `place_frames`.
-  - `hull/deck.rs` — deck floor, bulwarks (recessed deck + solid topsides + rail),
-    gun-port trapdoors.
-  - `rig/` — `mod.rs` (`build_plan`, `Mast{base,foot_y,top_y,nest_y,yards}`,
-    `Yard{y,half}`, spanker, `check_rig_invariants`), `mast.rs` (keel-stepped pole,
-    fenced topmast, yards, crow's nest), `sail.rs` (white wool), `rigging.rs`
-    (iron-bar shrouds).
-  - `superstructure.rs` — `maybe_quarterdeck` → `CastleInfo{top_y,front_x}`.
-  - `fittings.rs` — rudder, bowsprit, helm (stair on fence), stern lantern, stern
-    flag, bow anchor, hatch+ladder; all castle-aware via `CastleInfo`.
-  - `pipeline.rs` — `build_ship` orchestration order: dimensions → hull model →
-    plank/keel/frames → deck/bulwark → quarterdeck → rig → fittings → invariants.
-  - `blueprint.rs` — `render_ascii` (top-down, side profile, stern elevation).
-  - `test.rs` — see below.
-- `data/palettes/ships/` — `ship_oak` (default), `ship_spruce`, `ship_dark`.
-- `data/structures/ship/*.nbt` — hand-built reference ships (NOT placed by code;
-  used for visual reference only). Format note: they use Minecraft's `palettes`
-  (plural, multi-variant) key, so they will NOT parse via `NBTStructure` (which
-  expects singular `palette`). Read them with a raw `fastnbt::Value` + GzDecoder if
-  you need to inspect again.
-- `World::synthetic_water(build_area, floor_y, water_y)` in `src/editor/world.rs`
-  — ocean flatworld for offline tests.
+> The algorithms in the order they landed. Rough notes sketch the math/intent;
+> the implementation lives in the `ships` module noted per section.
 
-### Running tests
-- Offline (no server, fast, the iteration loop):
-  `cargo test ships:: -- --skip in_minecraft --skip build_rowboat --skip build_cog --skip build_fleet`
-  (the property tests + `*_offline` builds). Writes `output/ships/*.txt`.
-- Live (needs a running GDMC server + `/setbuildarea` over water): `build_rowboat`,
-  `build_cog`, `build_fleet`. NOTE: these are plain `#[tokio::test]` (NOT
-  `#[ignore]`), so a bare `cargo test` WILL try to hit the server. The user runs a
-  live server, so they pass for them; in CI/serverless they'd fail — keep using the
-  `--skip` filters above when iterating without a server.
-- ASCII diagnostics can't show solid/placement detail (bulwarks, frames, keel,
-  quarterdeck, wheel, flag, gun ports, ratlines) — only hull section, deck plan,
-  masts and sails. Real verification is in-game screenshots.
+### Stage 2 — Deck & above-water
 
-### Conventions / gotchas
-- Local frame: `x` = stern(0)→bow(+x), `z` = beam (centerline 0, ±), `y` = up from
-  keel(0). Everything is built local then transformed by `Placement`. Bow points
-  along `ShipContext.heading`. Only cardinal headings supported.
-- Stair/trapdoor/ladder facings: ALWAYS derive world facing from a `ShipDir` via
-  `placement.world_cardinal(dir)` so it rotates with heading. Never hardcode.
-- Watertightness invariant depends on the boundary-shell: don't punch holes in the
-  hull shell that open into `hold_volume` without keeping a sealed face. Gun ports
-  are on the *bulwark* (above deck), not the hull shell, so they're safe.
-- Stair-bevel orientation (`plank.rs`) and ladder/helm facings are my best reading
-  of MC blockstate semantics and are UNVERIFIED visually. If a screenshot shows
-  bevels notched the wrong way or ladders detached, the fix is a one-line flip
-  (`out.opposite()` ↔ `out`, or toggle the `top_half` bool / facing).
-- RNG: `RNG::new` takes `i64` (not `u64`). Use `rng.derive()` for each placer so
-  adding a stage doesn't shift the main stream.
+1. **Initial deck** — **implemented** (`deck.rs`). Covers the hull's open top (the
+   hollow at the waterline, `y = depth`) with **top slabs** — the floor that
+   further superstructure is built on. Deck cells = the hull's top-layer interior
+   cells (`HullModel.interior` filtered to `deck_y`). Own `Deck` palette component
+   (defaults to the same wood). Not waterlogged (at/above the surface).
 
-### Reference material (already read — see `## Resources for help`)
-The inline "General tips" + 3 reachable guides (PirateMC frigate, MinecraftForum
-tutorial, PlanetMinecraft/Lowry69 — the richest). Key techniques STILL not done:
-- **Rounded bow + transom stern** (guides build hulls as stacked ellipses, rounded
-  bow rather than a sharp point; flat transom at the stern with windows/gallery).
-  Current hulls just taper to a point both ends — this is the biggest remaining
-  realism gap.
-- **Forecastle** (raised bow deck) to balance the quarterdeck.
-- **Stern gallery/windows** (trapdoors + fence-gates for gilded detail; glass/stair
-  windows on the transom).
-- **Gradient sails** (birch→sandstone→bone_block) and **diagonal yards** (rotate
-  yards a few blocks for organic, wind-filled look).
-- **Cannons** at the gun ports (dispenser + iron block behind), **stored cargo**
-  (barrels/chests) and **ship's boats** on deck.
-- Hull **colour bands** (dark wale line, accent bulwark colour per "nation").
+2. **Deck additions (size-gated)** — framework in `additions.rs` (`SizeTier`,
+   `DeckAddition`, gating). Each addition is **its own submodule** under
+   `additions/` (e.g. `additions/gallery.rs`) — they're complex. `ShipOutput.tier`
+   carries the derived tier.
 
-### Suggested next steps (priority order)
-1. **In-game screenshot pass** to verify stair/ladder/helm facings before building
-   more on top of them.
-2. **Forecastle** (mirror `superstructure.rs` for the bow) — quick win, balances
-   the silhouette.
-3. **Rounded bow / transom stern** reshaping in `rib.rs` — highest realism payoff,
-   most involved (the bow currently comes to a 1-wide point; guides want a blunt
-   rounded stem and a flat transom).
-4. Cannons in gun ports + cargo in the hold (ties into Phase 5 interiors).
+   **Size tiers** (from length, tunable): Small ≤20 · Medium 21–30 · Large 31–40 ·
+   Huge 41+. `mast_count`: 1 / 2 / 3 / 3. `extra_decks`: 0 / 1 / 1 / 2.
 
-### Open questions for the user
-- Should the live ship tests become `#[ignore]` so `cargo test` is clean without a
-  server? (Left as-is per their preference — they run a live server.)
-- Keep an offline `build_fleet_offline` for serverless coverage of every shape, or
-  is the live `build_fleet` enough? (Currently live-only.)
+   **Catalog + gating** (`SizeTier::has`):
+   | Addition | Gate |
+   |---|---|
+   | MainRailing (required) | all |
+   | Masts + sails (required) | all (count scales) |
+   | Bowsprit (required) | Medium+ |
+   | AdditionalDeck (gun deck, windows/gun ports) | Medium+ |
+   | CargoHatch (+ stairs below) | Medium+ |
+   | HelmCapstan | Medium+ |
+   | Forecastle (bow box structure) | Large+ |
+   | Gallery (stern box structure) | Large+ |
+   | Cabin / deckhouse | Large+ |
+
+   **Gallery tips (user):** a "box" of **upside-down stairs**, **5 long**, width =
+   **hull beam − 2** (e.g. beam 11 → 9 wide). Window holes in a **secondary colour**;
+   optional back wall + door to close it. Stairs/slabs decoration on top; windows,
+   torches, final detail. (No single correct design — varies.)
+
+   **Additional deck — implemented** (`additions/additional_deck.rs`). Walls rise
+   from the main deck following the hull's waterline outline (`HullModel.top_half`),
+   curving **inward (tumblehome)** as they climb (gentle, scales with height); **gun
+   ports** every ~2 blocks on the sides, each **randomly a trapdoor lid or an open
+   hole**; a new deck floor (top slabs) caps the level. Level **height is a fn input**
+   (`level_height(tier)`, const 4 for now, later size-scaled). Bowsprit support
+   deferred to the bowsprit step. Built for all ships for now (size gating deferred);
+   stacking multiple levels (Huge) is a follow-up.
+
+   Tumblehome curves **inward at the very top** (cubic), stays **near-vertical at
+   the stern** (aft ramp), and the step is **stair-bevelled on both faces** (inside
+   upside-down + outside bottom). Stern is a **mix**: a small transom (`stern_min`)
+   blended into the natural stern taper. Because `stern_min` *falls* toward the bow
+   while the hull taper *rises*, their `max` used to carve a V-shaped **pinch** in the
+   stern outline (the deck/walls/railing then followed the notch → weird stepped
+   terraces); the stern side (`x ≤ peak_x`) is now forced **non-decreasing** via a
+   cumulative max, so the transom blends into the hull as a clean flat-ish wall and
+   stacked levels align. Gun ports sit 2 above the deck floor. Levels
+   **stack** (`num_levels`: Large+ may get 2) with **varied heights** (random 3–5),
+   each level's inset top becoming the next level's base — rng-driven variation.
+
+   _Above-water detailing TODO:_ rail/trim, windows, more refined topsides — per the
+   "more detail above water" principle below.
+
+   **Main railing — implemented** (`additions/railing.rs`). A short solid **bulwark**
+   course (`BULWARK_HEIGHT`, 1 for now) capped with a **fence rail** around the
+   **topmost open weather deck**. To sit on whatever the structural additions raised
+   (not the raw main deck), the additions pipeline now threads a mutable
+   `additions::DeckState { top_outline, top_y, railing }` — initialised to the main
+   deck, updated by the additional deck(s) to their inset top outline + floor Y, and
+   read by the railing. `ShipOutput.railing` carries the built `RailingModel`. So
+   once size gating is on, a Small ship (no additional deck) gets the rail on its main
+   deck; larger ships get it around the raised top deck — no manual coordination.
+
+   _Verify on the live screenshot:_ rail follows the top-deck edge cleanly; bulwark
+   height reads right (tune `BULWARK_HEIGHT`); no gaps/double-walls where it meets the
+   additional-deck wall top.
+
+   **Bowsprit tips (user):** length ≈ **a little less than half the hull length**
+   (hull ~35 → bowsprit ~15). The mast that pokes out the front; sits on the
+   bowsprit support; figurehead/decoration later.
+
+   **Bowsprit — Approach B (`additions/bowsprit.rs`).** Reverse-engineered from the
+   user's hand-fixed NBTs (`analyze_bowsprit_nbt`, ignored test): the prow is **the hull
+   continued forward** — a flared cross-section (rounded bilge, `PROW_FLARE_POW`)
+   tapering in plan to a **stem point** and in section to a **keel point**, decked +
+   railed on top, **solid for Small ships / a hollow shell** (with a deck-floor slab)
+   for larger. It rebuilds the forward `~0.30·length` of the bow (blending from
+   `hull_top_half` at `x0`) and runs out `ext` past the bow to the stem, with the keel
+   point sweeping up from the keel crest (`keel_top`) to the deck. The spar projects on
+   from the stem (`reach_factor`-shortened by rake). Threaded `keel` into `DeckContext`
+   for the crest. **Shell smoothing** added: the flaring bilge outer edge and the deck
+   rim are beveled with inboard-facing upside-down stairs, and the deck surface is top
+   slabs (matching the ship deck) — the `//---//` look from the NBT. Stair facings are
+   stored per cell (`stair_at`), decoupled from the spar's flip. Checkpoint commit
+   `c8bed1b` precedes this; if the hull seam looks bad, revert and move to Approach A
+   (fold into `hull.rs`). Underside steps are smoothed with upside-down stairs (`prow_bevel`); the
+   prow-top edges get `rail` fences. The centerline (z=0) spar projects on from the prow
+   point (`REACH_FRACTION = 0.4·length`, **shortened by `rake.reach_factor()`** so steep
+   rakes don't climb away). Rake is still `BowspritRake::pick` (all four with a deck). **Smoothed:** the spar (z=0) is tracked at **half-block
+   resolution** (`ramp`) — per column a slab (flat), a single stair on a half-block step
+   (upside-down in the cell's upper half, right-side-up in the lower), or, on a
+   **full-block step**, a **double-stair wedge** (`push_step`): an upside-down stair on
+   the lower cell + a right-side-up stair on the upper, facings flipped opposite so the
+   two bevels meet into one continuous diagonal (stairs "on both sides"). Top/bottom
+   slabs across columns give the shallow "two slabs" ramp. The knee is the same 45°
+   wedge brace from the bow to the spar underside. `RAKE_STAIR_FACE` is the stair-facing
+   flip candidate (upside-down stairs auto-face its opposite). This needs
+   stair/slab variants, so the `Spar` palette role is **plank wood** (`PrimaryWood`),
+   not a log. **Two roots converge** (per the user): primary at the **hull bow tip /
+   stem**; with a raised deck, a secondary at the **deck bow**, the knee rising from
+   the bow tip to meet the forward spar.
+   **Rake** (`BowspritRake` enum: Straight/Gentle/Medium/Steep) is **chosen by
+   `BowspritRake::pick(has_deck, rng)`**: a raised deck gives a high anchor so **all
+   four** are allowed (Straight = horizontal at `top_y + DECK_CLEARANCE`, clearing the
+   bow rail); without a deck, Straight is excluded and we pick among the **angled**
+   rakes (rakes up from the low stem). Randomised for now — _later a higher-level
+   system may decide which parts/rake go together per ship_ (so the selection lives in
+   one `pick` fn, separate from the pure `build_bowsprit_model`). `BowspritModel`
+   (spar + knee + tip) is recorded on `ShipOutput.bowsprit`. Built for all ships for
+   now (Medium+ gating deferred, like the additional deck).
+
+   _Verify on the live screenshot:_ spar clears the bow rail and reads as a beam; knee
+   converges cleanly (tune the `k` offset / `DECK_CLEARANCE`); forward reach length
+   looks right (tune `REACH_FRACTION`); log **axis** is along the spar (heading-derived
+   x/z) not stacked; on a deckless/Small ship the Medium up-rake reads right.
+
+   **Mast tips (user):** masts run down to the **very bottom of the ship**
+   (keel-stepped) and stand **as tall as the hull length** (hull ~35 → main mast
+   ~35 from the bottom). Secondary mast(s) a few blocks shorter. All masts **lean
+   forward slightly** (helps sails/nests/rigging).
+
+   **Spar tips (user):** add **spars** (the cross-pieces holding the sails),
+   **angled slightly** for style. Add a spar at the **back** for the
+   ~triangular rear (spanker) sail. Add the small **platforms** (crow's nests) on
+   the masts.
+
+   **Sail tips (user):** treat the wind as coming from a **slight angle** (not
+   axis-aligned) for an organic look — rotate the **yards** to a consistent
+   direction (max ~**45°** for square rig; keep a fleet's sails parallel). Sail
+   shape depends on size / wind / yard angle; build each sail **separately** (not to
+   one fixed plan) and tweak. **Courses** (bottom sails) **draw in at the bottom**
+   (bottom corners secured to the hull); **topsails/topgallants/royals** are
+   slightly **wider at the bottom** than the top (secured to the yard below). (The
+   copy-paste-with-water building trick is workflow-only — N/A for generation.)
+
+   **Square sails (deployed / `SailState::Full`) — implemented** (`additions/masts.rs`).
+   A billowing **white-wool** sheet hangs from each main yard: **head** pinned just under
+   its own yard ("bottom of the stays"), **foot** just above the next yard down — or, for
+   the lowest sail, on `mast.sail_foot_base`: **2–3 blocks of open air above the deck
+   *railing*** (`SAIL_FOOT_CLEARANCE`, +1 for a wide course). The clearance is measured above
+   the rail, not the bare deck — the rail (`BULWARK_HEIGHT` + fence) is added at build time —
+   so the course no longer lands on the bulwark. The sheet **bellies forward** (toward the
+   bow, into a following wind): one wool block per `(z, y)` at `x = yard.x + bulge`, from the
+   bulge field `billow_field`, which is **relaxed to a 1-block gradient** so neighbours never
+   step >1 → a single **hole-free** surface (asserted by `square_sail_surface_has_no_holes`).
+   Depth = **wind strength**, configurable via `ShipSpec::with_wind` (default `SAIL_WIND`);
+   `SAIL_BILLOW_DIR` the direction (flip candidate). `ShipSpec::new` defaults to `Full`.
+
+   Three **billow shapes** (`SailBillow`, `ShipSpec::with_sail_billow`; the live test
+   cycles them so all show in one shot):
+   - **`Domed`** (attempt 1) — curve runs **across the width**: a parabola in `z` (deepest at
+     centre, pinned at the luff edges) × a `sin` down the height; the vertical **sides stay
+     straight** at the yard. A pillow. `SAIL_BELLY_POW` tunes fullness.
+   - **`Curtain`** (attempt 2, current default) — each row is **flat** (all blocks at one
+     `x`), so the curve runs **down the whole length and the sides curve too**. A 1-D profile
+     (`sin^SAIL_CURTAIN_CURVE_POW`, `p<1`) bulges **more drastically at the head/foot and
+     flattens through the middle**, broadcast across the width; **larger sails curve deeper**
+     (`SAIL_CURTAIN_SIZE_GAIN`). The no-holes relaxation caps the end-sweep at ~45°.
+   - **`Combined`** (attempt 3) — a blend: the domed `sin`×parabola belly (centre-weighted),
+     but the across-width factor only drops to `SAIL_COMBINED_EDGE` at the luff edges (not 0)
+     **and those edges are left free** in the relax (curtain-style), so the **sides billow
+     partway** instead of pinning flat. Fuller/rounder than `Domed`, more centre-weighted than
+     `Curtain`. `SAIL_COMBINED_EDGE` = 0 → `Domed`, = 1 → `Curtain`.
+
+   (Course-foot draw-in is a later pass.)
+
+   **Spanker (deployed) — implemented** (`additions/masts.rs`, `spanker_billow`). The aft
+   fore-and-aft sail (**wool**) is **bent to the gaff (head) and mast (luff)** with the
+   **leech** the free aft edge — `build_spanker` records the flat (`z = 0`) `sail`
+   quadrilateral. Under `Full` it bellies **sideways to leeward**, the side (`±z`) **rolled
+   randomly per ship** for now (a real wind input would decide it later — that's the single
+   spot to change): each cell offset to `z = depth · side`. `spanker_billow` pins the **head,
+   luff and leech to 0** (so the canvas tapers onto the spars — the row under the gaff lands at
+   `z = 0`, a **wool block bent onto the upside-down gaff stair**), but leaves the **foot (boom)
+   free except at its two corners** (tack + clew, held by the luff/leech) so the foot **billows
+   off the boom** for a less boxy belly. To exaggerate the wind, the **foot also arcs upward**
+   in the centre (`SAIL_SPANKER_FOOT_LIFT`, 0 at the corners) — the bottom edge lifts off the
+   boom (which stays visible below). The **leech** runs straight from the gaff tip to the boom
+   tip, with at least one canvas row kept above the boom along its **full length**
+   (`leech_top.max(boom_y+1)`) so the boom's aft end (clew) is **under sail, not a bare spar
+   tip**. The interior starts at `dc.wind · SAIL_SPANKER_WIND_FACTOR`
+   (spankers get large, so they billow deeper) and is **relaxed hole-free** (1-block gradient,
+   foot underside excluded from pinning via the per-column `foot_cells`). Boom/gaff spar cells
+   skipped. `Furled` keeps the stowed roll on the boom. Asserted by `spanker_sail_has_no_holes`.
+   Rolled per ship by `MAST_SPANKER_CHANCE` (50%).
+
+   **Jib (triangular headsail) — implemented** (`additions/masts.rs`: `triangle_xy`, `line_xy`,
+   `jib_billow`). Set between three points: the **bowsprit start (A)**, **bowsprit tip (B)** and
+   **foremast top (C)** (foremost mast = max `base_x`; A = the spar's inboard cell; B =
+   `bowsprit.tip`). The filled triangle bellies **sideways to leeward** (same `spanker_side` as
+   the spanker), relaxed hole-free (asserted by `jib_sail_has_no_holes`). **What's pinned at `z = 0`
+   (over the bowsprit centreline) vs. free to billow:**
+   - The **luff (B→C)** — the sail's **head/top edge**, which runs along the bowsprit-tip→first-mast
+     **forestay**. It's pinned, so the sail's top lands at `z = 0` **on that stay line**, over the
+     bowsprit, exactly as it would be tied to the forestay. The canvas (wool) *is* placed along it
+     (it's no longer a bare rigging line — the sail covers the stay), so the head reads as sail, not
+     a thin chain.
+   - The **foot (A→B)** touches the bowsprit at **only `JIB_FOOT_HANGER_COUNT` (2) anchor columns**
+     — the two ends (forward tack at the tip, clew inboard). Each anchor drapes a wool corner on the
+     centreline and drops a **hanger tie** (chain/fence) to the spar top (`SAIL_JIB_FOOT_RAISE` = 3
+     of clearance). The **rest of the foot is free**, so it billows **up off** the bowsprit instead
+     of lying along its whole length (that earlier "row of feet" is gone).
+   - The **leech (A→C)** and the interior are free → billow out to `z = d·spanker_side`.
+   - **Curved outline (not a bare triangle):** the **foot (A→B)** and **leech (A→C)** edges bow
+     gently **inward** (a hollow, `JIB_CURVE_FRAC` of edge length, capped `JIB_CURVE_MAX`) via
+     `curved_sail_xy`, so the sail reads as cloth. The **luff (B→C)** — sail head → forward bowsprit
+     tip, on the forestay — is the **only straight edge**. Built as the straight triangle **minus two
+     `edge_bite`s** (each a simple, non-self-intersecting Bézier sliver) — an outline polygon would
+     **self-intersect** where the two inward curves meet at the shared corner and even-odd fill would
+     drop a whole sail section (the bug that left holes). `jib_sail_has_no_holes` asserts no interior
+     holes on the curved outline.
+   - **Head rigging bridge:** the sail's head corner stops **`JIB_HEAD_RIGGING` (4) blocks below the
+     masthead** (`c_sail`, not the masthead `c_mast`); the gap from there up to the head is **pure
+     forestay rigging** (chain/fence, no canvas), so the jib ties to the mast with rigging instead of
+     ramming solid sail into the masthead. The bridge **starts one block higher than the masthead**
+     (ties into the finial) and runs **two blocks tall per column using the cell *above* each step**
+     (`[y, y+1]`). It **skips any cell already holding canvas wool** and explicitly includes `c_sail`,
+     so a rigging block always lands **on top** of the sail's head wool block (not beside it / not
+     carving it), while consecutive steps connect face-to-face down the diagonal.
+   - **No sail-on-sail intersection:** before laying each canvas cell the jib checks the placement
+     cache (`get_cached_block`) and **skips any cell already holding a sail** (`*wool`). Since the
+     square sails + spanker (and any future sail) are placed earlier in `masts::build`, the jib never
+     overlaps them.
+
+   - **Stay always present + sail-state gating:** the **forestay stay is built whenever there's a
+     bowsprit + foremast** (standing rigging), independent of the jib roll — so a ship with **no jib
+     bent on** still shows its stay. The **canvas** is drawn only when the jib **rolled** (`has_jib`)
+     **and** the sails are **set** (`draw_canvas = has_jib && Full`). With no canvas (no jib, or
+     `None`/`Furled`) the **whole forestay stay** (bowsprit tip B → masthead, 2-tall, tied down to
+     the bowsprit at its forward end) is rigging and nothing else; with canvas, only the head bridge
+     is bare rigging and the rest of the stay is the canvas luff. Asserted by
+     `jib_furled_is_rigging_only`.
+
+   So the sail's head sits over the bowsprit on the stay, the foot pinches to 2 ties, and the body
+   bellies to one side. The foremast pole/yards are skipped so the canvas never carves them.
+   **Size-gated, chance rising with size** (`JIB_CHANCE_MEDIUM`/`LARGE`/`HUGE` = 55/80/100; Small
+   has no bowsprit → none) and only when a bowsprit exists. Billow depth `dc.wind ·
+   SAIL_JIB_WIND_FACTOR`. Placement verified by `jib_places_rigging_and_wool`.
+
+   **Rigging material (chain / fence) — `RiggingMaterial` (`additions.rs`).** All thin rigging
+   lines (the jib forestay + foot hangers; later shrouds/stays) are drawn from **one per-ship
+   material**: a `minecraft:chain` or a palette **fence** post (railing-wood role). Chosen by
+   **chance** (`RiggingMaterial::pick`, `RIGGING_CHAIN_CHANCE`) or **forced as an option**
+   (`ShipSpec::with_rigging`), resolved once in `build_ship` and carried on `DeckContext`.
+   **Chains appear to be silently dropped by the current live server** (offline scans place them
+   fine, in-game shows none — the adjacent wool places normally), so `RIGGING_CHAIN_CHANCE`
+   defaults to **0 (always fence)** until that's understood; flip it up (or per-ship roll) once
+   chains place reliably. `jib_places_rigging_and_wool` asserts both materials are honoured
+   (chain → chains present; fence → zero chains, fences present).
+
+   _Verify on the live screenshot:_ forestay reads as a clean diagonal from the bowsprit tip up to
+   the foremast head (not occluded by the course); the jib foot floats above the bowsprit with
+   short hanger ties (tune `SAIL_JIB_FOOT_RAISE`); fences read as the rigging line; no line carves
+   the mast or yards.
+
+   **Yard/sail stacking** is sized so the **lowest sail (course) is the largest** — yards
+   are laid out **bottom→top** from the foot base (rail clearance excluded from the budget),
+   each sail height weighted heaviest at the bottom and shrinking upward (`MAST_SAIL_GROWTH`);
+   bottom yard is also widest. `MAST_YARD_SPAN_PER_SAIL` (now 11) sets how many yards/stays a
+   mast gets — larger = fewer stays, taller sails. Asserted by `square_sails_largest_at_bottom`.
+
+   _Verify on the live screenshot:_ curve reads as wind-filled (tune `SAIL_WIND`); billow
+   faces forward (flip `SAIL_BILLOW_DIR` if not); sails span cleanly stay-to-stay with the
+   lowest ending 2–3 above deck; no clipping into the mast or yards.
+
+   **Masthead flags — implemented** (`additions/masts.rs`, `build_flag`). A small wool
+   **pennant** streams **aft** off each mast's fence finial: **4–7 blocks long** (rolled
+   per mast), **1 block tall** (`FLAG_HOIST_HEIGHT`; can taper from a taller hoist body).
+   To read as cloth flapping (not a rigid flat plane), each column aft is **staggered in
+   both `y` and `z`** on two out-of-phase sine ripples whose **amplitude grows toward the
+   free fly end** (the hoist is pinned to the staff) — a curved 3-D ribbon, the wind on a
+   slight angle. One heraldic **wool colour per ship** (`FLAG_COLORS`, hardcoded like the
+   quartz sails until a cloth palette role exists); ripple phase + length seed rolled per
+   ship and varied per mast. Flies regardless of `sail_state`. Tunables: `FLAG_*` in
+   `tuning.rs`.
+
+   _Verify on the live screenshot:_ flag reads as a flapping pennant (tune `FLAG_WAVE_AMP_Y`
+   / `FLAG_WAVE_AMP_Z` / the freqs); streams clear aft of the rigging; length range looks
+   right; colour variety across the fleet.
+
+   **Helm (ship's wheel) — implemented** (`additions/helm.rs`, `DeckAddition::HelmCapstan`). A
+   three-block fitting on the **quarterdeck** (centreline, **halfway between the aftmost mast and the
+   stern**, but never closer than `HELM_STERN_CLEARANCE` (2) clear blocks to the stern railing; masts
+   lean forward so a station below the aft mast's `base_x` is clear of the pole, and the wheel cell
+   `hx-1` is kept on deck): a **lectern** base, a
+   **fence** post, and an **open trapdoor as the wheel** — folded up **vertical on the stern (rear)
+   side** of the post. A trapdoor hinges to the block **opposite** its `facing`, so `facing=stern`
+   hinges it **onto the fence** (attached, not floating) with the disc standing on the rear as the
+   wheel. Lectern/trapdoor are hardcoded oak for now (ship is `ship_oak`), the fence is palette wood.
+   Built for all ships (Medium+ gating deferred). Asserted by `helm_places_wheel`.
+
+   **Masts keel-stepped fix:** the mast pole now starts at **`y = 1`** (resting **on** the keel's
+   bottom course), not `y = 0` (which poked through the keel underside).
+
+   **Mast-to-mast stays — implemented** (`additions/masts.rs`). On **2+ mast ships**, a
+   standing-rigging line (chain/fence per `RiggingMaterial`) connects **each mast to the next** —
+   **`MAST_STAY_THICK` (1) block thick** but run as a **4-connected staircase** (`step_line_xy`) so
+   the diagonal connects face-to-face with no corner gaps. It attaches to the **top of the mast pole
+   (below the fence finial)** and **skips the poles, finials, and flag cells**, so it never carves
+   the masts or the masthead pennants. The finial itself is bumped from `MAST_TOP_FENCE` (2) to
+   `MAST_TOP_FENCE_MULTI` (3) on multi-mast ships, so the taller top reads better with the stays.
+   Asserted by `mast_stays_connect_tops`.
+
+   **More detail above water (user principle):** above-water features need finer
+   detail than the mostly-blocks/large-shapes underwater work — use stairs/slabs,
+   trim, secondary colours, windows. Example idea: **side ladders as climbing ropes**
+   for boarding.
+
+   **Modularity:** each addition is a submodule `additions/<name>.rs` exposing
+   `build(ctx, dc: &DeckContext)`; `additions::BUILD_ORDER` + `build_addition`
+   dispatch run them. Adding one = new file + `pub mod` + match arm.
+
+### Stage 1 — Underwater portion
+
+The first stage builds the underwater portion of the boat, largely consisting of
+the **keel**, **hull** (below-waterline shell), and **rudder**.
+
+**Stage 1 rule:** any **stairs or slabs** placed as part of the keel, rudder, or
+underwater hull must be **waterlogged** (`waterlogged=true` blockstate) **when built
+on water** so they sit flush instead of trapping air pockets. **On land, nothing is
+waterlogged** (threaded via `on_water` into `place_keel`/`cell_state`).
+
+**Stage 1 design principle — palette-driven blocks:** as much as possible, the
+block each step places should be looked up from a **palette role** (a named
+ship-part → block mapping) rather than hardcoded, so the materials can be reassigned
+/ edited later without touching the shape code. For now we wire it to `ship_oak`;
+**the priority right now is getting the shape of each step correct**, with palette
+roles as the seam that keeps materials swappable later.
+
+**Stage 1 rule — land vs water footing:** the ship's vertical anchoring adapts to
+the terrain at the anchor:
+- **On water:** build the below-water portion below the surface as applicable — the
+  keel's flat bottom sits `depth` below the water surface, structure rises to the
+  waterline and above (current behaviour).
+- **On land:** build **everything above the ground** — the keel's flat bottom rests
+  on the ground surface, nothing buried.
+
+**Resolved & implemented** (`mod.rs::build_ship`): the generator **auto-detects**
+from the world at the anchor — `world.is_water(anchor)`. Water footing = keel
+bottom at `motion_blocking_height - depth`, clamped to `ocean_floor_height` (rests
+on the seabed in shallow water = "as applicable"). Land footing = keel bottom at
+`get_height_at` (ground surface). `ShipOutput.on_water` reports which was used.
+
+Sub-algorithms (to be detailed):
+
+1. **Keel** — the backbone spine, and the parameter that **sets the ship's
+   length**. (Reference: `1.png`.)
+
+   Shape, from the reference image:
+   - A **1-wide thin spine** along the centerline (local `z = 0`), running
+     bow↔stern along x. _(Assumed thin spine per the image — confirm on first
+     screenshot, not a deep solid beam.)_
+   - **Longitudinal profile** (total length is **tip-to-tip**, stern post → bow tip):
+     - **Stern (back, local origin, x=0):** a near-vertical **post**, rising from
+       the flat bottom up to ~the waterline. The **rudder attaches here**.
+     - **Flat bottom run:** the **majority** of the length, a single bottom course
+       sitting at the lowest point (`depth` below water).
+     - **Bow (front, +x):** the front **~15–20% of the length** is the **bow
+       rake** — an upward **curve** from the flat bottom to ~the waterline at the
+       bow tip, shaped with **full blocks + stairs + slabs**.
+   - Block forms: the **flat run** is the single bottom course (top slabs, see
+     below); the **bow rake** is a curve of blocks/stairs/slabs; the **stern post**
+     is full blocks.
+
+   Depth & materials:
+   - **Keel depth (underwater height) is proportional to length.** A ~30-long keel
+     sits ~5–6 blocks underwater; the smallest size only 1–2 blocks. (Roughly
+     `depth ≈ length / ~5.5`, clamped to a 1–2 minimum.)
+   - The keel is **mostly fully submerged**: the flat bottom sits `depth` below the
+     waterline, and the bow/stern ends rise up to **about the waterline** — poking
+     up to ~1 block **above** water only on the larger ships.
+   - The **bottommost course of the keel is always a top slab** (slab in the top
+     half of its cell), running the length — gives the keel a recessed, tapered
+     underside.
+   - **Largely full blocks**, with **stairs and slabs used for smoothing**
+     transitions (the rakes and any curvature).
+
+   Input & derivation:
+   - **`length` is a passed-in parameter** (chosen per ship class upstream). The
+     keel routine consumes it and derives a good keel of that length — depth, bow
+     rake (~15–20% of length), stern post height (≈ depth), and the flat run
+     (the remaining majority) are all scaled proportionally from `length`. I'll
+     pick first-pass proportions and we tune them from the screenshot.
+
+   Blocks: **`ship_oak` palette** (the default ship palette). Logs/planks for the
+   flat run / post, matching stairs + slabs (waterlogged) for the bow rake curve
+   and the bottom course.
+
+   _All parameters resolved — ready to implement._
+
+   **Status: implemented** (`src/generator/ships/keel.rs`, palette seam in
+   `palette.rs`, build entry `mod.rs::build_ship`). Offline + property tests
+   green. Final shape (per the user's sketch):
+   - **Stern = straight vertical post + a couple of small base steps** (size-scaled,
+     `stern_steps = (depth/2).clamp(1,3)`). Not a rake.
+   - **Bow = a real parabolic stem curve** `y = depth · t²` (`BOW_CURVE_POW`),
+     sampled per block-column and approximated: top slab (gentle) → upside-down
+     stair (slope ≈ 1) → full block (steep, near the stem). Small classes degrade
+     to a plain stair staircase (acceptable approximation).
+   - Bottom edge is a continuous **top-slab** line (incl. the stern tip).
+   - All step/curve stairs are **upside-down (top-half)** → solid keel top, curve on
+     the underside. Waterlogged on water only; never on land.
+
+   **Verify on the live screenshot:**
+   - bow **stair facing/half** (the known MC flip point — `BOW_RAKE_STAIR_FACE` /
+     `top_half` in `keel.rs`);
+   - bow reads as an **actual curve** (tune `BOW_CURVE_POW` / the `0.18` length
+     fraction);
+   - stern reads **straight** with a clean couple-of-steps base;
+   - **proportional depth** across sizes; **waterlogging** correct on water, absent
+     on land.
+2. **Hull (shell)** — built **upon the keel**, layer by layer. Each layer (a Y
+   level) is a **stretched-teardrop-shaped outline** in the X–Z plane — only the
+   **perimeter** is placed (interior left as air), so the hull is a hollow shell.
+   The teardrop changes as layers rise (flare). Reference technique: the piratemc
+   30-gun frigate tutorial (screenshots).
+
+   **Blocks only for now** — slab/stair smoothing of the shell comes in a later
+   pass. Palette: one `Hull` component role (per the per-component palette rule).
+
+   From the piratemc tutorial:
+   - Stretched teardrop, built in horizontal layers **from the keel up to the
+     waterline**, **perimeter only** (interior air; deck/fill later).
+   - Layer beam **expands** going up to a **max beam near the waterline**, then
+     tumblehome above (above-water = a later stage).
+   - Ref dims: length ~30, **max beam ~11** (≈ length/2.7); **stern rounded**, bow
+     has tumblehome.
+   - Tutorial says "pointy end at the back" — conflicts with our keel (fine bow,
+     blunt stern); orientation resolved by the user below.
+
+   **Implemented** (`hull.rs`):
+   - Two plan shapes via `HullShape` (`ShipSpec::with_hull_shape`):
+     **Teardrop** (asymmetric — fuller round bow, blunter/wider stern, widest ~⅓
+     fwd; taper via `STERN_TAPER`/`BOW_TAPER`) and **Oval** (symmetric ellipse, both
+     ends rounded, widest amidships).
+   - Max beam ≈ `length / beam_ratio` — `beam_ratio` is an input param
+     (`with_beam_ratio`, default `DEFAULT_BEAM_RATIO = 2.7`).
+   - Vertical flare: beam 0 at the keel → max at the waterline via a rounded-bilge
+     power curve (`HULL_BILGE_POW`).
+   - Shell = **boundary of the 3D hull volume** (sides + underside exposed → placed;
+     **top left open** = hollow). This seals the flare-ledge undersides (the earlier
+     holes). Full blocks only; slab/stair smoothing later.
+   - **Interior cleared to air on water:** the hollow interior cells (`HullModel.
+     interior`) are set to air so the hull stays dry (skipped on land — already air).
+     (Full dryness up to the rim awaits the above-water hull/bulwarks stage.)
+   - **Respects the keel:** the hull volume stays strictly above the keel's **crest**
+     (`KeelModel::top_profile()` — highest keel cell per station — fed to
+     `build_hull_model`), so the keel protrudes below and its underside touches
+     water. The hull floor conforms to the **bow rocker** *and* the solid **stern
+     step-up** (sits on top of the steps rather than letting them poke through).
+     Enforced by an offline invariant.
+   - Live test alternates Teardrop/Oval across the fleet; offline writes both
+     `hull.txt` and `hull_oval.txt` plan diagnostics.
+3. **Rudder** — **implemented** (`rudder.rs`). A **solid raked fin** (filled X–Y,
+   1 thick): vertical leading edge just aft of the post, **raked trailing edge**
+   (bottom further aft, `RUDDER_RAKE`) smoothed with **stairs**, from the keel
+   bottom up to the waterline. A **vertical line of fences** (1-block gap) connects
+   the whole sternpost to the fin. Underwater cells waterlogged on water; the top
+   not. Own `Rudder` palette component. Stair facing/half (`RUDDER_STAIR_FACE`/
+   `RUDDER_STAIR_TOP`) are screenshot-flip candidates.
+
+### Stage 3 — Interior: levels, connections, furnishing
+
+Two goals: (1) **connect the deck levels and the hull interior** with stairs/ladders, and
+(2) **furnish** the below-deck spaces — reusing the buildings_v2 furnishing engine. **Decisions
+(user):** build **levels + connections first** (furnishing on top); divide the interior into
+**cabins via bulkheads** (not one open volume); use **stairs where they fit, ladders as the
+fallback**.
+
+**Reuse (confirmed):**
+- `buildings_v2::furnish::furnish_interior` (`pub(crate)`) — furnishes an arbitrary `Rect2D`
+  against a seeded `ConstraintMap` from a `RoomFurnitureList`; returns the placed items. The whole
+  engine is room-agnostic.
+- `rooms::ConstraintMap` (`Empty`/`Blocked`/`BlockedReachable`/`UnblockedReachable`).
+- `ctx.data.furniture` (`FurnitureData`: items + `rooms.yaml` lists + loot) — already on the ship's
+  `LoadedData`.
+- `footprint::maximal_rect::find_largest_rect` — largest interior rectangle from a boolean mask
+  (carve furnishable rects out of the curved hull / each cabin).
+- The furnish engine works in **absolute editor coords**; ships use **cardinal-only `Placement`**,
+  so a ship-local rect maps to an axis-aligned world `Rect2D` cleanly.
+
+**Shared prerequisite — `ShipLevels` model.** Enumerate the stacked enclosed spaces, each
+`{ floor_y, ceiling_y, outline }`:
+1. **Hold (orlop)** — inside the hull below the main deck; lay a flat plank floor ~2–3 above the
+   keel (the hull bottom is curved/narrow), ceiling = main-deck slabs.
+2. **Main deck** — `deck_y`.
+3. **'Tween / gun deck(s)** — between the main deck and each raised additional deck (walls =
+   tumblehome walls, ceiling = that deck's floor); already partly enclosed.
+Built from `HullModel.interior`, `DeckModel`, `DeckState` (additional decks track inset outline +
+`top_y`).
+
+**Task B (first) — connections (`additions/companionway.rs`; wire `CargoHatch`).** Cut a hatch
+(hole + coaming) through a deck/floor at a clear spot (centreline, clear of masts/helm); connect
+adjacent levels with a **short straight stair flight** where headroom/footprint allow (geometry
+mirrors `floors/stairs.rs`), else a **ladder column** (`ladder[facing]`). Links: main deck ↔ hold,
+raised deck ↔ main deck, stacked decks ↔ each other (Huge). Reserve hatch cells `Blocked` for the
+later furnish pass so furniture routes around them.
+
+**Bulkheads.** Divide the tween/hold volumes into cabins with dividing walls + a door before
+furnishing — e.g. a stern **great cabin**, **crew quarters**, **galley**; below, the **hold**.
+
+**Task A — furnishing (`additions/interior.rs`).** Add ship room keys to `data/rooms.yaml`
+(`hold`, `gun_deck`, `captain_cabin`, `crew_quarters`, `galley`) from mostly-existing items + a few
+ship items (hammock, cannon, sea-chest). Per cabin: rasterize its outline → `find_largest_rect` →
+world `Rect2D` → `ConstraintMap` (seed `Blocked` for masts/hatch coamings/posts) → `furnish_interior`
+with that level's `floor_y`/`ceiling_y`. Guard ≥2 headroom.
+
+**Pipeline order:** `…masts/helm` → levels model → connections → bulkheads/floors → furnish (added
+after `Masts` in `BUILD_ORDER`; levels threaded via `DeckState`).
+
+**Verification:** offline `furnish_ship_offline` (places furniture + loot, like
+`build_furnished_houses_offline`); a connectivity invariant (every level's hatch stays reachable
+after furnish); per-level ASCII dump. Live screenshot loop.
+
+**Companionways — implemented** (`additions/companionway.rs`, wired as `CargoHatch`, built **last** so
+the masts/helm exist to route around). Per interior level it lays the **hold floor** (planks; the gun
+deck's floor is the existing main deck), cuts a **hatch** through the level's ceiling, and drops a
+**stair flight** to the floor (a **ladder** with a backing post when there's no clear straight run).
+The connector sits **off the centreline** (`z = cz != 0`) so it never fouls the keel-stepped masts
+(at `z = 0`); the stair run is the most central window of `drop + 2` stations with deck.
+- **Lead-in stair:** a **right-side-up** stair at the deck level, one station back toward the
+  approach, so it steps down toward the hatch and you walk onto it smoothly instead of dropping in.
+- **Weather-deck hatch:** the ceiling opening spans the top **three** steps (headroom to walk down),
+  covered by **openable trapdoor lids** (oak, `half=top`, closed, flush with the top-slab deck) that
+  **open to the side** (a beam direction) so they swing clear of the fore-aft stairway; below-decks
+  hatches stay open holes.
+- **Bottom step skipped:** the lowest step (at `floor_y`) isn't placed — you step straight onto the
+  deck / laid floor it would land on.
+- **Underside thickness:** each step gets an **upside-down stair beneath it** (same facing) so the
+  gangway reads as a solid, sloped flight rather than thin floating steps.
+- **Mirrored on large ships:** `Large`+ ships get a **mirrored pair** of flights (port + starboard,
+  `±cz`) for a symmetric gangway; the whole flight is factored into `place_stair_flight`.
+Hatch + connector cells are recorded on `DeckState::hatch_cells` → `ShipOutput.hatch_cells` for the
+later furnish pass. Asserted by `companionways_connect_levels`. _Stair **facing/half** and the exact
+landing are screenshot-flip candidates._
+
+**Giant ship.** `giant_ship_length_100` (offline smoke) + `build_giant_ship_live` build a
+keel-length-**100** ship — everything (hull depth/beam, mast height, levels) scales off the length
+(len-100 → depth ~18, beam ~37, mainmast ~105, hold + gun deck). Live needs a big water build area:
+`cargo test build_giant_ship_live -- --nocapture`.
+
+**Furnishing — implemented** (`interior.rs`, reusing the buildings_v2 engine). `build_ship` calls
+`interior::furnish` after the additions: for each level with a matching `data/rooms.yaml` list
+(`hold` / `lower_hold` / `gun_deck`; `captain_cabin` / `crew_quarters` / `galley` await bulkheads), it
+carves the **largest interior rectangle** from the deck outline (`footprint::find_largest_rect`,
+re-exported), transforms it to a world `Rect2D` (cardinal heading → axis-aligned), seeds a
+`ConstraintMap` blocking the **masts** + **companionway hatches**, and calls
+`furnish_interior(...)`. Furniture stands one above the laid floor; ceiling items hang under the deck
+above. **Perf:** the rect is capped to `FURNISH_MAX_SPAN` (14) per side and the cargo rooms use a
+**single optional pass** (no `fill_threshold` → not the aggressive multi-pass packing) — without
+these a len-100 ship's huge holds took ~130 s; now the whole offline suite is ~3 s.
+
+**Bulkheads → cabins — implemented** (`interior.rs`). The **gun deck** is divided **fore→aft** into
+**cabins** by plank **bulkheads** (full-height across the rect's beam, with a 2-tall centreline
+**doorway**): a stern **great cabin** (`captain_cabin`), then **crew quarters**, then the **galley**
+(`CABIN_ROOMS`, stern→bow; count from the rect length / `CABIN_MIN_LEN`, capped at 3). Each cabin is
+furnished from its own `rooms.yaml` list via the same `furnish_local_rect` path (transform → seed
+masts/hatches → `furnish_interior`). Holds stay single-rect cargo. Verified by
+`ship_interior_furnished` (cargo in the holds + beds from the cabins). _Doorways are open gaps for
+now (a real door block is a follow-up); cabin room assignment is fixed stern→bow._
+
+**Stacked lower holds + mast ladders — implemented** (`levels.rs`, `companionway.rs`). A deep hull is
+divided into **multiple stacked hold levels** (the **hold** under the main deck, then **lower holds**
+below it for as long as the hull stays deep + wide enough — `build_ship_levels` walks down in
+`HOLD_MAX_HEIGHT` steps to `HOLD_KEEL_CLEARANCE`). The companionway lays every hold floor; the **stair
+companionway** serves the upper decks (gun deck + main hold), and the **lower holds are reached by
+ladders on the masts** — the keel-stepped masts run down the centreline through every level, so a
+ladder on a mast's **aft face** (`base_x - 1`, `z = 0`, facing the stern → its back is the mast)
+spans them, with a 1-cell hole cut through each hold floor at the ladder. Built only when there's
+more than one hold level. Verified by `giant_ship_length_100` (len-100 → 5 levels / 3 lower holds /
+mast ladders).

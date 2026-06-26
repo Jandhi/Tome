@@ -252,7 +252,7 @@ cellar_workshop:
     - cauldron
     - furnace
 
-# --- Ship interiors (ships_v2 Stage 3) -------------------------------------
+# --- Ship interiors (ships Stage 3) ----------------------------------------
 # The hull hold + lower holds — packed cargo. (No fill_threshold → a single optional pass, not the
 # aggressive multi-pass packing; the repeated entries give density without the cost.)
 hold:

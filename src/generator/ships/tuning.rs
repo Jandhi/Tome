@@ -1,4 +1,4 @@
-//! Ships v2 · **central tuning surface** — every hand-tunable constant in one place.
+//! Ships · **central tuning surface** — every hand-tunable constant in one place.
 //!
 //! These are the knobs we iterate on in the build→screenshot→correct loop. Each module
 //! imports the ones it needs from here (`use super::tuning::*` / `use
@@ -8,11 +8,11 @@
 //! ## How to tune
 //!
 //! 1. Change a value here.
-//! 2. `cargo test ships_v2:: -- --skip _live` — fast offline pre-check; the offline test
-//!    writes ASCII diagnostics to `output/ships_v2/*.txt` (keel side profile, hull plan +
+//! 2. `cargo test ships:: -- --skip _live` — fast offline pre-check; the offline test
+//!    writes ASCII diagnostics to `output/ships/*.txt` (keel side profile, hull plan +
 //!    cross-section, bowsprit spar profiles). Read those first — they catch most shape
 //!    mistakes without a server.
-//! 3. `cargo test build_ship_v2_live -- --nocapture` — builds against the live GDMC
+//! 3. `cargo test build_ship_live -- --nocapture` — builds against the live GDMC
 //!    server for a screenshot. Correct from what you see; repeat.
 //!
 //! ## "Flip candidates"
@@ -24,7 +24,7 @@
 //!
 //! ## Convention — keep this file current
 //!
-//! **When you add a new tunable constant anywhere in `ships_v2`, define it here** (in the
+//! **When you add a new tunable constant anywhere in `ships`, define it here** (in the
 //! right section, with a doc comment covering what it does and which way to push it) and
 //! reference it from the module. If a knob lives elsewhere because it can't be a plain
 //! `const` (e.g. a value baked into a `match` arm or a `let`), note it under
@@ -38,7 +38,7 @@ use super::ShipDir;
 
 /// Default length : beam ratio. Max beam ≈ `length / ratio`. Lower = stouter/wider hull
 /// (≈2.7 is the tutorial's stout look); higher = sleeker/narrower. Overridable per ship
-/// via `ShipV2Spec::with_beam_ratio`.
+/// via `ShipSpec::with_beam_ratio`.
 pub const DEFAULT_BEAM_RATIO: f32 = 2.7;
 
 // ===========================================================================
@@ -115,7 +115,7 @@ pub const MAST_HEIGHT_FACTOR: f32 = 1.0;
 
 /// Default forward lean of the masts: blocks of `+x` (toward the bow) per block of
 /// height. `0.0` = straight (vertical) masts — the current default; leaning is a future
-/// feature, available per-ship via `ShipV2Spec::with_mast_lean`.
+/// feature, available per-ship via `ShipSpec::with_mast_lean`.
 pub const MAST_LEAN: f32 = 0.0;
 
 // --- Spars (yards / top fences / aft stays) --------------------------------
@@ -207,7 +207,7 @@ pub const FLAG_COLORS: &[&str] =
 
 /// Default **wind strength** = the deepest billow (blocks the belly bulges past the yard)
 /// for a deployed square sail. `0.0` = a flat sheet; larger = a fuller, more curved sail.
-/// Overridable per ship via `ShipV2Spec::with_wind`.
+/// Overridable per ship via `ShipSpec::with_wind`.
 pub const SAIL_WIND: f32 = 2.0;
 /// Which way a filled sail bellies — `Bow` (driven by a following wind, the usual set) or
 /// `Stern`. Local fore/aft displacement, **flip candidate** if the curve faces the wrong way.

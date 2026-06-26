@@ -7,7 +7,7 @@
 //! This module is the catalog + gating + dispatch. Each addition is complex enough
 //! to live in its own submodule under `additions/` (e.g. `additions/gallery.rs`,
 //! `additions/railing.rs`, …), declared here as it's built. Every addition exposes
-//! a uniform `pub async fn build(ctx: &mut ShipV2Ctx, dc: &DeckContext)`, so adding
+//! a uniform `pub async fn build(ctx: &mut ShipCtx, dc: &DeckContext)`, so adding
 //! one is: new file + `pub mod x;` + a match arm in [`build_addition`]. The pipeline
 //! just iterates [`BUILD_ORDER`].
 
@@ -22,7 +22,7 @@ use super::hull::HullModel;
 use super::keel::KeelModel;
 use super::palette::{ShipPalette, ShipPart};
 use super::tuning::GUN_PORT_STEP;
-use super::{Placement, ShipDir, ShipV2Ctx};
+use super::{Placement, ShipDir, ShipCtx};
 
 pub mod additional_deck;
 pub mod bowsprit;
@@ -206,7 +206,7 @@ impl SailBillow {
 
 /// What thin **rigging lines** (the jib forestay + foot hangers, and later shrouds/stays)
 /// are built from — a `minecraft:chain` or a palette **fence** post. Chosen per ship by
-/// [`RiggingMaterial::pick`] (chance) or forced via `ShipV2Spec::with_rigging` (option).
+/// [`RiggingMaterial::pick`] (chance) or forced via `ShipSpec::with_rigging` (option).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RiggingMaterial {
     /// Iron chain (`minecraft:chain`).
@@ -228,7 +228,7 @@ impl RiggingMaterial {
 
 /// Read-only context every deck addition builds against: the ship-so-far (placement
 /// + hull/deck geometry), the ship palette, the size tier, and the footing. Mutable
-/// access (editor/rng/data/base palette) comes via the [`ShipV2Ctx`] passed
+/// access (editor/rng/data/base palette) comes via the [`ShipCtx`] passed
 /// alongside.
 pub struct DeckContext<'a> {
     pub placement: &'a Placement,
@@ -279,7 +279,7 @@ pub const BUILD_ORDER: [DeckAddition; 9] = [
 #[allow(unused_variables)]
 pub async fn build_addition(
     addition: DeckAddition,
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     dc: &DeckContext<'_>,
     state: &mut DeckState,
 ) {
@@ -330,7 +330,7 @@ fn prow_side_ports(prow: &[Point3D], gun_row: i32) -> Vec<(Point3D, ShipDir)> {
 /// Trapdoor lids are re-placed; open holes are forced back to air. Forced placement is
 /// needed to punch through the prow's solid blocks.
 pub async fn restamp_gun_ports(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     place: &Placement,
     ship_palette: &ShipPalette,
     state: &DeckState,

@@ -36,7 +36,7 @@ use super::super::tuning::{
     SAIL_CURTAIN_SIZE_GAIN, SAIL_FOOT_CLEARANCE, SAIL_JIB_FOOT_RAISE, SAIL_JIB_WIND_FACTOR,
     SAIL_SPANKER_FOOT_LIFT, SAIL_SPANKER_WIND_FACTOR,
 };
-use super::super::{ShipDir, ShipV2Ctx};
+use super::super::{ShipDir, ShipCtx};
 use super::SizeTier;
 use super::{DeckContext, DeckState, RiggingMaterial, SailBillow, SailState};
 
@@ -848,7 +848,7 @@ pub fn jib_billow(
 }
 
 /// Place the masts (logs) + spars (slabs/fences/stairs) and record them in `state`.
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let deck_rise = (state.top_y - dc.deck.deck_y).max(0);
     let has_spanker = ctx.rng.rand_i32_range(0, 100) < MAST_SPANKER_CHANCE;
     let has_top_nest = ctx.rng.rand_i32_range(0, 100) < MAST_NEST_CHANCE;

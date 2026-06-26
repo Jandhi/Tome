@@ -1,5 +1,5 @@
 //! Stage 1 · **Hull** — the shell built upon the keel, layer by layer.
-//! See `docs/plans/ship-builder-v2.md` (Stage 1 → Hull). Technique from the
+//! See `docs/plans/ship-builder.md` (Stage 1 → Hull). Technique from the
 //! piratemc 30-gun frigate tutorial.
 //!
 //! Each Y layer (keel → waterline) is a **stretched-teardrop outline** in the X–Z
@@ -18,7 +18,7 @@ use crate::minecraft::{Block, BlockForm};
 
 use super::palette::{ShipPalette, ShipPart};
 use super::tuning::{BOW_TAPER, HULL_BEVEL_FACE_OUTBOARD, HULL_BILGE_POW, STERN_TAPER};
-use super::{Placement, ShipDir, ShipV2Ctx};
+use super::{Placement, ShipDir, ShipCtx};
 
 /// Plan-view shape of the hull (the X–Z outline family).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,7 +207,7 @@ pub fn build_hull_model(
 /// Place the hull shell cells as full blocks (from the `Hull` palette role) and,
 /// when on water, clear the hollow interior to air so the hull stays dry.
 pub async fn place_hull(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     model: &HullModel,
     placement: &Placement,
     ship_palette: &ShipPalette,

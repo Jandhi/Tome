@@ -15,7 +15,7 @@ use crate::minecraft::{string_to_block, BlockForm};
 
 use super::super::levels::{build_ship_levels, ShipLevel};
 use super::super::palette::ShipPart;
-use super::super::{ShipDir, ShipV2Ctx};
+use super::super::{ShipDir, ShipCtx};
 use super::{DeckContext, DeckState, SizeTier};
 
 /// How a level is connected to the space above it.
@@ -26,7 +26,7 @@ enum Connector {
     Ladder { cx: i32, cz: i32 },
 }
 
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let deck_y = dc.deck.deck_y;
     let levels = build_ship_levels(dc.hull, deck_y, state.top_y);
     if levels.levels.is_empty() {
@@ -148,7 +148,7 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
 /// beneath each step** for a solid, sloped underside (gangway thickness).
 #[allow(clippy::too_many_arguments)]
 async fn place_stair_flight(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     dc: &DeckContext<'_>,
     state: &mut DeckState,
     level: &ShipLevel,

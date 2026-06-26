@@ -1,5 +1,5 @@
 //! Stage 2 · **Deck** — cover the hull's open top with a slab deck.
-//! See `docs/plans/ship-builder-v2.md` (Stage 2 → Initial deck).
+//! See `docs/plans/ship-builder.md` (Stage 2 → Initial deck).
 //!
 //! The hull is a hollow shell open at the top (the waterline, `y = depth`). The
 //! deck simply caps that opening with **top slabs** — the floor that further
@@ -13,7 +13,7 @@ use crate::minecraft::BlockForm;
 
 use super::hull::HullModel;
 use super::palette::{ShipPalette, ShipPart};
-use super::{Placement, ShipV2Ctx};
+use super::{Placement, ShipCtx};
 
 /// Pure-geometry deck: the slab cells (local frame) and the deck level.
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ pub fn build_deck_model(hull: &HullModel) -> DeckModel {
 /// Place the deck as top slabs (from the `Deck` palette role). Not waterlogged —
 /// the deck sits at/above the surface.
 pub async fn place_deck(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     model: &DeckModel,
     placement: &Placement,
     ship_palette: &ShipPalette,

@@ -33,7 +33,7 @@ use super::super::tuning::{
     BOWSPRIT_STRAIGHT_REACH, BOWSPRIT_TIERED_CLIMB_RUN, BOWSPRIT_TIERED_FLAT_RUN,
     BOWSPRIT_TIERED_REACH, PROW_FLARE_POW, RAKE_STAIR_FACE, REACH_FRACTION,
 };
-use super::super::{Placement, ShipDir, ShipV2Ctx};
+use super::super::{Placement, ShipDir, ShipCtx};
 use super::{DeckContext, DeckState, SizeTier};
 
 /// Upward rake of the spar, built from **full blocks + slabs only** (no stairs). A rake
@@ -351,7 +351,7 @@ pub fn build_bowsprit_model(
 
 /// Place the bowsprit (flared prow + the projecting block/slab spar) and record it in
 /// `state`.
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let has_deck = state.top_y > dc.deck.deck_y;
     let rake = BowspritRake::pick(has_deck, ctx.rng);
     let keel_top = dc.keel.top_profile();

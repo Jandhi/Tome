@@ -20,7 +20,7 @@ use crate::minecraft::BlockForm;
 
 use super::levels::{ShipLevel, ShipLevels};
 use super::palette::{ShipPalette, ShipPart};
-use super::{Placement, ShipV2Ctx};
+use super::{Placement, ShipCtx};
 
 /// A room's furnishable rect must be at least this many cells to bother dressing it.
 const MIN_FURNISH_AREA: i32 = 6;
@@ -33,7 +33,7 @@ const CABIN_ROOMS: &[&str] = &["captain_cabin", "crew_quarters", "galley"];
 
 /// Furnish every interior level — holds as cargo, the gun deck as bulkheaded cabins.
 pub async fn furnish(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     placement: &Placement,
     ship_palette: &ShipPalette,
     levels: &ShipLevels,
@@ -76,7 +76,7 @@ fn local_rect(level: &ShipLevel) -> Option<(i32, i32, i32, i32)> {
 /// Divide the gun deck's rect fore→aft into cabins separated by plank bulkheads (with a centreline
 /// doorway), furnishing each cabin from its own room list.
 async fn furnish_cabins(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     placement: &Placement,
     ship_palette: &ShipPalette,
     level: &ShipLevel,
@@ -127,7 +127,7 @@ async fn furnish_cabins(
 /// Furnish one local rect with `room_name`: transform to world, seed the constraint map (masts +
 /// hatches), and run the buildings_v2 furnishing engine.
 async fn furnish_local_rect(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     placement: &Placement,
     level: &ShipLevel,
     (lx0, lx1, lz0, lz1): (i32, i32, i32, i32),

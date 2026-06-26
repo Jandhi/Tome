@@ -1,176 +1,185 @@
-//! Terminal-friendly diagnostics for a [`HullModel`] (+ optional [`RigModel`]) —
-//! the ship analogue of `buildings_v2::blueprint::render_ascii`. Two views: a
-//! top-down deck plan and a side profile. Operates in the local build frame.
+//! Minimal diagnostics. A side-profile (x = length →, y = up) dump of the keel
+//! for quick offline sanity checks before a live screenshot.
 
-use std::collections::HashSet;
+use crate::minecraft::BlockForm;
 
-use crate::geometry::{Point2D, Point3D};
-
+use super::additions::bowsprit::BowspritModel;
 use super::hull::HullModel;
-use super::rig::RigModel;
+use super::keel::KeelModel;
+use super::ShipDir;
 
-/// Render a top-down deck plan, a side profile, and a stern elevation as a single
-/// string. Pass the rig to overlay masts/sails (the sail reads in the stern view,
-/// which looks along the length).
-pub fn render_ascii(model: &HullModel, rig: Option<&RigModel>) -> String {
+/// Render the keel as a side profile: stern (`x = 0`) at the left, bow at the
+/// right; `#` = full block, `/` = stair, `_` = slab. The waterline row is marked
+/// with `~`.
+pub fn render_keel_ascii(model: &KeelModel) -> String {
+    let w = model.length.max(1) as usize;
+    let h = (model.depth + 2).max(1) as usize;
+    let mut grid = vec![vec![' '; w]; h];
+
+    for cell in &model.cells {
+        let (x, y) = (cell.local.x, cell.local.y);
+        if x < 0 || y < 0 || x as usize >= w || y as usize >= h {
+            continue;
+        }
+        let ch = match cell.form {
+            BlockForm::Block => '#',
+            BlockForm::Stairs => match cell.facing {
+                Some(ShipDir::Stern) => '\\',
+                _ => '/',
+            },
+            BlockForm::Slab => '_',
+            _ => '?',
+        };
+        grid[y as usize][x as usize] = ch;
+    }
+
     let mut out = String::new();
-    out.push_str(&render_top(model, rig));
-    out.push('\n');
-    out.push_str(&render_side(model, rig));
-    out.push('\n');
-    out.push_str(&render_stern(model, rig));
+    out.push_str(&format!(
+        "keel  length={}  depth={}  bow_rake={}  stern_steps={}x{}\n",
+        model.length, model.depth, model.bow_rake_len, model.stern_steps, model.stern_step_run
+    ));
+    out.push_str("(stern x=0 left, bow right;  # block  / \\ stair  _ slab;  ~ = waterline)\n");
+    for y in (0..h).rev() {
+        out.push(if y as i32 == model.waterline_y { '~' } else { ' ' });
+        for x in 0..w {
+            out.push(grid[y][x]);
+        }
+        out.push('\n');
+    }
     out
 }
 
-/// Top-down: rows are stations (stern→bow, top→bottom), columns are the beam.
-/// `+` gunwale, `#` deck, `O` hatch, `I` mast.
-fn render_top(model: &HullModel, rig: Option<&RigModel>) -> String {
-    let half = model.dims.beam / 2;
-    let deck: HashSet<Point2D> = model.deck_cells.iter().copied().collect();
-    let gunwale: HashSet<Point2D> = model.gunwale.iter().copied().collect();
-    let masts: HashSet<Point2D> = rig
-        .map(|r| r.masts.iter().map(|m| Point2D::new(m.base.x, m.base.z)).collect())
-        .unwrap_or_default();
+/// Top-down plan of the hull shell at the **widest layer** (the waterline). Stern
+/// (x=0) at the left, bow at the right; centreline marked, `#` = shell block.
+pub fn render_hull_plan(model: &HullModel) -> String {
+    let w = model.length.max(1) as usize;
+    let max_hw = (model.max_beam / 2).max(0);
+    let zspan = (max_hw * 2 + 1).max(1) as usize; // -max_hw..=max_hw
+    let mut grid = vec![vec![' '; w]; zspan];
 
-    let mut s = String::from("Deck (top-down, bow at bottom):\n");
-    for x in 0..model.dims.length {
-        for z in -half..=half {
-            let p = Point2D::new(x, z);
-            let ch = if masts.contains(&p) {
-                'I'
-            } else if model.hatch == Some(p) {
-                'O'
-            } else if gunwale.contains(&p) {
-                '+'
-            } else if deck.contains(&p) {
-                '#'
-            } else {
-                ' '
-            };
-            s.push(ch);
+    let top_layer = model.cells.iter().map(|c| c.y).max().unwrap_or(0);
+    for c in model.cells.iter().filter(|c| c.y == top_layer) {
+        let x = c.x;
+        let zi = c.z + max_hw; // shift so -max_hw → 0
+        if x < 0 || zi < 0 || x as usize >= w || zi as usize >= zspan {
+            continue;
         }
-        s.push('\n');
+        grid[zi as usize][x as usize] = '#';
     }
-    s
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "hull plan @ waterline  length={}  max_beam={}\n",
+        model.length, model.max_beam
+    ));
+    out.push_str("(stern x=0 left, bow right; rows = beam, centre marked; # = shell)\n");
+    for (zi, row) in grid.iter().enumerate() {
+        out.push(if zi as i32 == max_hw { '|' } else { ' ' });
+        out.extend(row.iter());
+        out.push('\n');
+    }
+    out
 }
 
-/// Side profile: rows are y, columns are the length (bow at right). `=` deck,
-/// `|` rail, `#` hull, `~` waterline, plus `I` mast, `T` yard, `V` sail.
-fn render_side(model: &HullModel, rig: Option<&RigModel>) -> String {
-    let hull: HashSet<Point3D> = model.hull_cells.iter().map(|p| p.local).collect();
-    let deck_xs: HashSet<i32> = model.deck_cells.iter().map(|p| p.x).collect();
-    let rail_xs: HashSet<i32> = model.gunwale.iter().map(|p| p.x).collect();
+/// Cross-section of the hull at the widest station: beam (z) across, keel→waterline
+/// (y) up. `#` = full-block shell, `/`/`\` = bilge-flare bevel stair (facing inboard),
+/// `.` = hollow interior. The fast pre-check for the bilge smoothing before a live
+/// screenshot.
+pub fn render_hull_section(model: &HullModel) -> String {
+    // Widest station = the one with the most shell+bevel cells across all layers.
+    let station = {
+        let mut counts = vec![0usize; model.length.max(1) as usize];
+        for c in &model.cells {
+            if (0..model.length).contains(&c.x) {
+                counts[c.x as usize] += 1;
+            }
+        }
+        for b in &model.bevel {
+            if (0..model.length).contains(&b.local.x) {
+                counts[b.local.x as usize] += 1;
+            }
+        }
+        counts
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, n)| **n)
+            .map(|(x, _)| x as i32)
+            .unwrap_or(0)
+    };
 
-    // Project the rig onto the centerline plane (side view looks along z).
-    let mut mast_cells: HashSet<Point2D> = HashSet::new(); // (x, y)
-    let mut yard_cells: HashSet<Point2D> = HashSet::new(); // (x, y) at each yard
-    let mut sail_cells: HashSet<Point2D> = HashSet::new();
-    let mut top = model.deck_y + 1;
-    if let Some(r) = rig {
-        for m in &r.masts {
-            for y in (m.foot_y + 1)..=m.top_y {
-                mast_cells.insert(Point2D::new(m.base.x, y));
-            }
-            for yard in &m.yards {
-                yard_cells.insert(Point2D::new(m.base.x, yard.y));
-            }
-            top = top.max(m.top_y);
+    let max_hw = (model.max_beam / 2).max(0);
+    let zspan = (max_hw * 2 + 1).max(1) as usize; // -max_hw..=max_hw
+    let h = (model.depth + 1).max(1) as usize;
+    let mut grid = vec![vec![' '; zspan]; h];
+
+    let plot = |grid: &mut Vec<Vec<char>>, y: i32, z: i32, ch: char| {
+        let zi = z + max_hw;
+        if y >= 0 && (y as usize) < grid.len() && zi >= 0 && (zi as usize) < zspan {
+            grid[y as usize][zi as usize] = ch;
         }
-        for c in &r.sail_cells {
-            sail_cells.insert(Point2D::new(c.x, c.y));
-        }
+    };
+
+    for c in model.cells.iter().filter(|c| c.x == station) {
+        plot(&mut grid, c.y, c.z, '#');
+    }
+    for c in model.interior.iter().filter(|c| c.x == station) {
+        plot(&mut grid, c.y, c.z, '.');
+    }
+    for b in model.bevel.iter().filter(|b| b.local.x == station) {
+        // Bevel faces inboard: a port-side cell (z>0) reads as `\`, starboard as `/`.
+        let ch = if b.local.z > 0 { '\\' } else { '/' };
+        plot(&mut grid, b.local.y, b.local.z, ch);
     }
 
-    let mut s = String::from("Side profile (bow at right, waterline ~):\n");
-    for y in (0..=top).rev() {
-        for x in 0..model.dims.length {
-            let xy = Point2D::new(x, y);
-            let ch = if yard_cells.contains(&xy) {
-                'T'
-            } else if mast_cells.contains(&xy) {
-                'I'
-            } else if sail_cells.contains(&xy) {
-                'V'
-            } else if y == model.deck_y + 1 && rail_xs.contains(&x) {
-                '|'
-            } else if y == model.deck_y && deck_xs.contains(&x) {
-                '='
-            } else if hull.contains(&Point3D::new(x, y, 0)) {
-                '#'
-            } else if y == model.waterline_y {
-                '~'
-            } else {
-                ' '
-            };
-            s.push(ch);
-        }
-        s.push('\n');
+    let mut out = String::new();
+    out.push_str(&format!(
+        "hull section @ x={station}  max_beam={}  depth={}\n",
+        model.max_beam, model.depth
+    ));
+    out.push_str("(beam across, keel bottom → waterline up; # block  / \\ bilge bevel  . hollow)\n");
+    for y in (0..h).rev() {
+        out.extend(grid[y].iter());
+        out.push('\n');
     }
-    s
+    out
 }
 
-/// Stern elevation: looking along the length at the mast station. Rows are y,
-/// columns are the beam. Shows the hull cross-section plus `I` mast, `T` yard,
-/// `V` sail — the view where a square sail is legible.
-fn render_stern(model: &HullModel, rig: Option<&RigModel>) -> String {
-    let mast = rig.and_then(|r| r.masts.first());
-    let station_x = mast.map(|m| m.base.x).unwrap_or(model.dims.length / 2);
-    let rib = model.ribs.iter().find(|r| r.x == station_x);
-
-    // Hull cross-section (z, y) at this station.
-    let mut hull: HashSet<Point2D> = HashSet::new();
-    if let Some(r) = rib {
-        for (i, &hw) in r.half_widths.iter().enumerate() {
-            let y = r.bottom_y + i as i32;
-            for z in -hw..=hw {
-                hull.insert(Point2D::new(z, y));
-            }
-        }
+/// Side profile of the bowsprit **spar** (the centerline z=0 beam): stem at the left,
+/// forward tip at the right; `x` →, `y` up. `#` = full block, `^` = top slab (upper
+/// half), `_` = bottom slab (lower half). The fast pre-check for the block/slab step
+/// pattern before a live screenshot.
+pub fn render_spar_profile(model: &BowspritModel) -> String {
+    let cells = &model.spar;
+    let (mut x0, mut x1, mut y0, mut y1) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
+    for c in cells {
+        x0 = x0.min(c.local.x);
+        x1 = x1.max(c.local.x);
+        y0 = y0.min(c.local.y);
+        y1 = y1.max(c.local.y);
     }
-    let deck_half = rib.map(|r| r.deck_half_width()).unwrap_or(model.dims.beam / 2);
-
-    let sail: HashSet<Point2D> = rig
-        .map(|r| r.sail_cells.iter().map(|c| Point2D::new(c.z, c.y)).collect())
-        .unwrap_or_default();
-    let max_yard_half = mast.map(|m| m.yards.iter().map(|y| y.half).max().unwrap_or(0)).unwrap_or(0);
-    let top = mast.map(|m| m.top_y).unwrap_or(model.deck_y + 1);
-    let cols_half = deck_half.max(max_yard_half).max(model.dims.beam / 2);
-
-    let mut s = String::from("Stern elevation (sail across the beam):\n");
-    for y in (0..=top).rev() {
-        for z in -cols_half..=cols_half {
-            let zy = Point2D::new(z, y);
-            let yard_here = mast.map_or(false, |m| m.yards.iter().any(|yd| yd.y == y && z.abs() <= yd.half));
-            let ch = if let Some(m) = mast {
-                if z == 0 && y > m.base.y && y <= m.top_y {
-                    'I'
-                } else if yard_here {
-                    'T'
-                } else if sail.contains(&zy) {
-                    'V'
-                } else {
-                    hull_char(model, &hull, deck_half, z, y)
-                }
-            } else {
-                hull_char(model, &hull, deck_half, z, y)
-            };
-            s.push(ch);
-        }
-        s.push('\n');
+    if cells.is_empty() {
+        return format!("spar {:?}: (empty)\n", model.rake);
     }
-    s
-}
-
-fn hull_char(model: &HullModel, hull: &HashSet<Point2D>, deck_half: i32, z: i32, y: i32) -> char {
-    if y == model.deck_y + 1 && z.abs() == deck_half {
-        '|'
-    } else if y == model.deck_y && z.abs() <= deck_half {
-        '='
-    } else if hull.contains(&Point2D::new(z, y)) {
-        '#'
-    } else if y == model.waterline_y {
-        '~'
-    } else {
-        ' '
+    let w = (x1 - x0 + 1) as usize;
+    let h = (y1 - y0 + 1) as usize;
+    let mut grid = vec![vec![' '; w]; h];
+    for c in cells {
+        let ch = match (c.form, c.top_half) {
+            (BlockForm::Slab, true) => '^',
+            (BlockForm::Slab, false) => '_',
+            _ => '#',
+        };
+        grid[(c.local.y - y0) as usize][(c.local.x - x0) as usize] = ch;
     }
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "spar {:?}  (stem left → tip right;  # block  ^ top slab  _ bottom slab)\n",
+        model.rake
+    ));
+    for y in (0..h).rev() {
+        out.extend(grid[y].iter());
+        out.push('\n');
+    }
+    out
 }

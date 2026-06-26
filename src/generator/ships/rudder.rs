@@ -1,6 +1,6 @@
 //! Stage 1 · **Rudder** — a solid raked fin hung aft of the sternpost, connected
 //! along its whole height to the stern by fences. See
-//! `docs/plans/ship-builder-v2.md` (Stage 1 → Rudder).
+//! `docs/plans/ship-builder.md` (Stage 1 → Rudder).
 //!
 //! Local frame: the sternpost is at `x = 0`; the rudder hangs **aft** (`-x`) on the
 //! centreline (`z = 0`), spanning the keel bottom (`y = 0`) up to the waterline
@@ -17,7 +17,7 @@ use crate::minecraft::BlockForm;
 
 use super::palette::{ShipPalette, ShipPart};
 use super::tuning::{FIN_LEAD_X, RUDDER_RAKE, RUDDER_STAIR_FACE, RUDDER_STAIR_TOP};
-use super::{Placement, ShipDir, ShipV2Ctx};
+use super::{Placement, ShipDir, ShipCtx};
 
 /// One fin cell (full block in the body, stair on a trailing-edge step).
 #[derive(Debug, Clone)]
@@ -80,7 +80,7 @@ pub fn build_rudder_model(depth: i32) -> RudderModel {
 /// Place the rudder: solid fin as blocks/stairs, connection as fences. Underwater
 /// cells (below the waterline) are waterlogged on water; the top is not.
 pub async fn place_rudder(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     model: &RudderModel,
     placement: &Placement,
     ship_palette: &ShipPalette,

@@ -12,11 +12,11 @@ use crate::minecraft::string_to_block;
 
 use super::super::palette::ShipPart;
 use super::super::tuning::HELM_STERN_CLEARANCE;
-use super::super::{ShipDir, ShipV2Ctx};
+use super::super::{ShipDir, ShipCtx};
 use super::{DeckContext, DeckState};
 
 /// Build the helm on the aft weather deck and place it.
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let place = dc.placement;
     let outline = &state.top_outline;
     let n = outline.len() as i32;

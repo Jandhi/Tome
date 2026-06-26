@@ -16,7 +16,7 @@ use crate::noise::RNG;
 
 use super::super::palette::ShipPart;
 use super::super::tuning::GUN_PORT_STEP;
-use super::super::{ShipDir, ShipV2Ctx};
+use super::super::{ShipDir, ShipCtx};
 use super::{DeckContext, DeckState, SizeTier};
 
 /// A randomly varied level height.
@@ -51,7 +51,7 @@ fn plan_step_dir(in_ring: &impl Fn(i32, i32, i32) -> bool, r: i32, x: i32, z: i3
 /// height. Each level's inset top outline becomes the next level's base. The final
 /// level's inset top outline + floor Y are written back into [`DeckState`] so later
 /// additions (the railing) sit on the new top weather deck.
-pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
+pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut DeckState) {
     let levels = num_levels(dc.tier, ctx.rng);
     // Decide once per ship whether the gun ports are trapdoor lids or open holes.
     let ports_are_trapdoors = ctx.rng.rand_i32_range(0, 2) == 0;
@@ -82,7 +82,7 @@ pub async fn build(ctx: &mut ShipV2Ctx<'_>, dc: &DeckContext<'_>, state: &mut De
 /// the inset for stacking the next level, the rim for the railing, and the planned gun-port
 /// cells (re-stamped after the bowsprit).
 async fn build_level(
-    ctx: &mut ShipV2Ctx<'_>,
+    ctx: &mut ShipCtx<'_>,
     dc: &DeckContext<'_>,
     base: &[i32],
     base_y: i32,
