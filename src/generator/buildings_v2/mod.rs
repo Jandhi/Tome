@@ -7,10 +7,12 @@ pub mod floors;
 pub mod footprint;
 pub mod foundation;
 pub mod frame;
+pub mod climate;
 pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod style;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};

@@ -78,13 +78,318 @@ impl ColorScheme {
     }
 }
 
+/// A manor family harvested during generation for the chronicle. Surname is only
+/// known after the population pass, so these are gathered when each manor sign is
+/// lettered (where surname + the house's `HouseAnchors` meet) and converted to a
+/// [`Landmark`] in [`assemble_dossier`].
+struct ManorFact {
+    surname: String,
+    designation: String,
+    pos: Point2D,
+    color: Option<Color>,
+    blazon: Option<String>,
+}
+
+/// Culture → its lowercase word for the dossier/prose.
+fn culture_word(culture: crate::generator::buildings_v2::Culture) -> String {
+    use crate::generator::buildings_v2::Culture;
+    match culture {
+        Culture::Medieval => "medieval",
+        Culture::Desert => "desert",
+        Culture::Japanese => "japanese",
+    }
+    .to_string()
+}
+
+/// A colour as an English word for prose ("light_blue" → "light blue").
+fn color_word(c: Color) -> String {
+    let s: String = c.into();
+    s.replace('_', " ")
+}
+
+/// Average of a set of cells (rounded). Empty → origin.
+fn cells_centroid(cells: &[Point2D]) -> Point2D {
+    if cells.is_empty() {
+        return Point2D::new(0, 0);
+    }
+    let (sx, sz) = cells.iter().fold((0i64, 0i64), |(x, z), p| (x + p.x as i64, z + p.y as i64));
+    let n = cells.len() as i64;
+    Point2D::new((sx / n) as i32, (sz / n) as i32)
+}
+
+/// Coarse adjectival quarter of `p` relative to the town centre: "central",
+/// "eastern", "on the northern edge". Deterministic, so it can't contradict the
+/// built town. `radius` is the town's outer reach (max cell distance from centre).
+fn quarter_of(p: Point2D, centre: Point2D, radius: f32) -> String {
+    let dx = (p.x - centre.x) as f32;
+    let dz = (p.y - centre.y) as f32; // Point2D.y is the Z (north/south) axis.
+    let dist = (dx * dx + dz * dz).sqrt();
+    if radius <= 0.0 || dist < radius * 0.30 {
+        return "central".to_string();
+    }
+    // North is -Z, south +Z, east +X, west -X.
+    let dir = if dx.abs() >= dz.abs() {
+        if dx >= 0.0 { "eastern" } else { "western" }
+    } else if dz >= 0.0 {
+        "southern"
+    } else {
+        "northern"
+    };
+    if dist > radius * 0.75 {
+        format!("on the {dir} edge")
+    } else {
+        dir.to_string()
+    }
+}
+
+/// Cardinal word of `p` relative to centre — for gates, which always sit on the
+/// perimeter, so "central" never applies.
+fn compass_word(p: Point2D, centre: Point2D) -> &'static str {
+    let dx = p.x - centre.x;
+    let dz = p.y - centre.y;
+    if dx.abs() >= dz.abs() {
+        if dx >= 0 { "east" } else { "west" }
+    } else if dz >= 0 {
+        "south"
+    } else {
+        "north"
+    }
+}
+
+/// The name of the labelled road nearest `p`, or `None` if the closest road is
+/// further than `max_d` cells (don't claim "by X" for something across town).
+fn nearest_road(
+    p: Point2D,
+    road_labels: &HashMap<Point2D, u32>,
+    road_names: &HashMap<u32, String>,
+    max_d: i32,
+) -> Option<String> {
+    let mut best: Option<(i32, u32)> = None;
+    for (&cell, &rid) in road_labels {
+        let dx = cell.x - p.x;
+        let dz = cell.y - p.y;
+        let d2 = dx * dx + dz * dz;
+        if best.map_or(true, |(bd, _)| d2 < bd) {
+            best = Some((d2, rid));
+        }
+    }
+    let (d2, rid) = best?;
+    if d2 > max_d * max_d {
+        return None;
+    }
+    road_names.get(&rid).cloned()
+}
+
+/// Biomes across the town's parcels, most common first.
+fn biome_counts(world: &crate::editor::World) -> Vec<(crate::minecraft::Biome, u32)> {
+    let mut by_count: Vec<(crate::minecraft::Biome, u32)> = world
+        .parcel_analysis_data
+        .iter()
+        .flat_map(|(_, data)| data.biome_count())
+        .fold(HashMap::new(), |mut acc, (biome, count)| {
+            *acc.entry(biome.clone()).or_insert(0u32) += *count;
+            acc
+        })
+        .into_iter()
+        .collect();
+    by_count.sort_by_key(|(_, c)| std::cmp::Reverse(*c));
+    by_count
+}
+
+/// Top-`n` biomes, prettified ("snowy_taiga" → "snowy taiga").
+fn top_biomes(world: &crate::editor::World, n: usize) -> Vec<String> {
+    biome_counts(world).into_iter().take(n).map(|(b, _)| b.name().replace('_', " ")).collect()
+}
+
+/// The single most common biome across the town's parcels — used by the legacy
+/// `place_buildings` pipeline to pick a paving type. `None` if no parcels were
+/// analysed.
+pub fn dominant_biome(world: &crate::editor::World) -> Option<crate::minecraft::Biome> {
+    biome_counts(world).into_iter().next().map(|(b, _)| b)
+}
+
+/// Assemble the chronicle's [`CityDossier`] from the final settlement state. All
+/// inputs are locals still in scope at the end of [`generate_town`]; this does the
+/// id→name / colour→word / coords→quarter conversion so the LLM sees only
+/// human-readable, relational facts. Roads are emitted first because they are the
+/// `near` vocabulary every other landmark anchors to.
+fn assemble_dossier(
+    editor: &Editor,
+    urban: &HashSet<Point2D>,
+    culture: crate::generator::buildings_v2::Culture,
+    named: &crate::generator::naming::SettlementName,
+    town_colors: &[Color],
+    road_names: &HashMap<u32, String>,
+    road_labels: &HashMap<Point2D, u32>,
+    place_labels: &[(Point2D, String)],
+    manor_facts: &[ManorFact],
+    house_count: usize,
+) -> crate::generator::chronicle::CityDossier {
+    use crate::generator::chronicle::{size_word, CityDossier, Landmark};
+    use crate::generator::BuildClaim;
+
+    let centre = cells_centroid(&urban.iter().copied().collect::<Vec<_>>());
+    let radius = urban
+        .iter()
+        .map(|&c| {
+            let dx = (c.x - centre.x) as f32;
+            let dz = (c.y - centre.y) as f32;
+            (dx * dx + dz * dz).sqrt()
+        })
+        .fold(0.0_f32, f32::max);
+
+    let mut landmarks: Vec<Landmark> = Vec::new();
+
+    // ── Roads first (the `near` vocabulary) ──
+    let mut road_cells: HashMap<u32, Vec<Point2D>> = HashMap::new();
+    for (&c, &rid) in road_labels {
+        road_cells.entry(rid).or_default().push(c);
+    }
+    let mut rids: Vec<u32> = road_names.keys().copied().collect();
+    rids.sort_unstable();
+    for rid in rids {
+        let Some(name) = road_names.get(&rid) else { continue };
+        let quarter = road_cells
+            .get(&rid)
+            .map(|cs| quarter_of(cells_centroid(cs), centre, radius))
+            .unwrap_or_default();
+        landmarks.push(Landmark { kind: "road".into(), name: name.clone(), quarter, near: vec![], notes: vec![] });
+    }
+
+    // ── Industries: distinct workplace structure types, by location ──
+    let mut scan: Vec<Point2D> = editor.world().get_urban_points().into_iter().collect();
+    for sd in editor.world().districts.values() {
+        if sd.data.parcel_type == ParcelType::Rural {
+            scan.extend(sd.data.points_2d.iter().copied());
+        }
+    }
+    let mut by_kind: HashMap<String, Vec<Point2D>> = HashMap::new();
+    for p in scan {
+        if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
+            by_kind.entry(id.structure_type.0.clone()).or_default().push(p);
+        }
+    }
+    let mut kinds: Vec<String> = by_kind.keys().cloned().collect();
+    kinds.sort();
+    for kind in kinds {
+        let cen = cells_centroid(&by_kind[&kind]);
+        let quarter = quarter_of(cen, centre, radius);
+        let near = nearest_road(cen, road_labels, road_names, 6).into_iter().collect();
+        landmarks.push(Landmark {
+            kind: "industry".into(),
+            name: format!("the {}", kind.replace('_', " ")),
+            quarter,
+            near,
+            notes: vec![],
+        });
+    }
+
+    // ── Families (manors) ──
+    for mf in manor_facts {
+        let quarter = quarter_of(mf.pos, centre, radius);
+        let near = nearest_road(mf.pos, road_labels, road_names, 8).into_iter().collect();
+        let mut notes = Vec::new();
+        if let Some(c) = mf.color {
+            notes.push(color_word(c));
+        }
+        if let Some(b) = &mf.blazon {
+            notes.push(b.clone());
+        }
+        landmarks.push(Landmark {
+            kind: "manor".into(),
+            name: format!("the {} {}", mf.surname, mf.designation),
+            quarter,
+            near,
+            notes,
+        });
+    }
+
+    // ── Greens & squares (named open spaces) ──
+    for (pos, name) in place_labels {
+        let quarter = quarter_of(*pos, centre, radius);
+        let near = nearest_road(*pos, road_labels, road_names, 6).into_iter().collect();
+        landmarks.push(Landmark { kind: "park".into(), name: name.clone(), quarter, near, notes: vec![] });
+    }
+
+    // ── Gates (deduped by side) ──
+    let mut gate_names: HashSet<String> = HashSet::new();
+    for (gpos, _dir) in &editor.world().gate_locations {
+        let dir = compass_word(gpos.drop_y(), centre);
+        let name = format!("the {dir} gate");
+        if gate_names.insert(name.clone()) {
+            landmarks.push(Landmark {
+                kind: "gate".into(),
+                name,
+                quarter: format!("on the {dir} edge"),
+                near: vec![],
+                notes: vec![],
+            });
+        }
+    }
+
+    // Town colours as words, deduped.
+    let mut town_colours: Vec<String> = Vec::new();
+    for &c in town_colors {
+        let w = color_word(c);
+        if !town_colours.contains(&w) {
+            town_colours.push(w);
+        }
+    }
+
+    CityDossier {
+        name: named.name.clone(),
+        subtitle: named.subtitle.clone(),
+        culture: culture_word(culture),
+        town_colours,
+        biomes: top_biomes(editor.world(), 3),
+        size: size_word(house_count),
+        walled: !editor.world().gate_locations.is_empty(),
+        landmarks,
+    }
+}
+
+/// A bare dossier for callers that don't run the full town pipeline (the legacy
+/// `place_buildings` path / visualizer): a procedurally-named town with whatever
+/// industries and gates exist in the world, but no roads/families/greens. Gives
+/// the chronicle a real name without the old AI namer.
+pub fn minimal_dossier(
+    editor: &Editor,
+    culture: crate::generator::buildings_v2::Culture,
+    rng: &mut RNG,
+) -> crate::generator::chronicle::CityDossier {
+    let urban = editor.world().get_urban_points();
+    let named = crate::generator::naming::generate_settlement_name(
+        editor.world(), &urban, &[], culture, &[], rng,
+    );
+    let no_roads: HashMap<u32, String> = HashMap::new();
+    let no_labels: HashMap<Point2D, u32> = HashMap::new();
+    assemble_dossier(
+        editor, &urban, culture, &named, &[], &no_roads, &no_labels, &[], &[],
+        editor.world().buildings.len(),
+    )
+}
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
-    culture: crate::generator::buildings_v2::Culture,
+    culture: Option<crate::generator::buildings_v2::Culture>,
 ) {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
+
+    // Settlement culture: an explicit override (tests) wins; otherwise auto-select
+    // from the build area's climate so the town fits its biome while the cultures
+    // stay roughly even across worlds (see `buildings_v2::climate`). The selection
+    // RNG is keyed off the seed independently so it never perturbs `rng`/`rng2`.
+    let culture = culture.unwrap_or_else(|| {
+        let mut culture_rng = RNG::from_seed_and_string(seed, "culture_select");
+        let c = crate::generator::buildings_v2::climate::select_culture(
+            editor.world().get_ground_biome_map(),
+            &mut culture_rng,
+        );
+        println!("Auto-selected culture {c:?} from build-area climate");
+        c
+    });
 
     // Infrastructure materials follow the culture: a desert town gets sandstone
     // roads and walls, a Japanese town a blackstone wall (matching its palette-
@@ -483,10 +788,14 @@ pub async fn generate_town(
     // at the slice's interior extreme reaches `rise + depth` into the band).
     const RIBBON_DEPTH: i32 = 14;
     let mut sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
+    // Block index each lot belongs to (parallel to `sub_blocks`), so a lot can be
+    // mapped back to its district's style scheme. A "district" here is one city
+    // block from `find_blocks`.
+    let mut lot_block: Vec<usize> = Vec::new();
     let mut alley_band: HashSet<Point2D> = HashSet::new();
     let mut ribbon_lot_count = 0usize;
     let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
-    for block in &blocks {
+    for (block_idx, block) in blocks.iter().enumerate() {
         let (mut ribbon_lots, interior) =
             crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
         let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
@@ -504,10 +813,13 @@ pub async fn generate_town(
 
         ribbon_lot_count += ribbon_lots.len();
         for rp in &ribbon_lots { ribbon_cells.extend(rp); }
+        let lots_this_block = ribbon_lots.len() + subs.len();
         sub_blocks.extend(ribbon_lots);
         alley_band.extend(&alleys);
         alley_band.extend(&connectors);
         sub_blocks.extend(subs);
+        // Every lot just added (ribbons then subs) belongs to this block.
+        lot_block.extend(std::iter::repeat(block_idx).take(lots_this_block));
     }
     println!(
         "Subdivided into {} lots ({} road-frontage ribbons), {} subdivider-road cells",
@@ -596,26 +908,42 @@ pub async fn generate_town(
     use crate::generator::materials::{Palette, PaletteId};
     use crate::geometry::Point2D as P2;
 
-    // Culture for this settlement. Medieval → spruce/stone palette, gable
-    // roofs, glass windows, and timber-frame jetties (square_bias 0, so no
-    // domes; per-house wood/stone/roof variety via roll_palette below).
-    let base_palette: Palette = data.palettes.get(&culture.palette_id())
-        .expect("base palette not found").clone();
-    let wood_ids: Vec<PaletteId> = vec!["oak".into(), "spruce".into(), "dark_oak".into()];
-    let stone_ids: Vec<PaletteId> = vec!["stone_bricks".into(), "cobblestone".into(), "deepslate".into()];
-    let roof_ids: Vec<PaletteId> = vec![
-        "acacia_wood_roof".into(), "brick_roof".into(), "oak_wood_roof".into(), "red_wood_roof".into(),
-    ];
-
-    fn roll_palette(rng: &mut RNG, base: &Palette, data: &LoadedData, woods: &[PaletteId], stones: &[PaletteId], roofs: &[PaletteId]) -> Palette {
-        let w = &woods[rng.rand_i32_range(0, woods.len() as i32) as usize];
-        let s = &stones[rng.rand_i32_range(0, stones.len() as i32) as usize];
-        let r = &roofs[rng.rand_i32_range(0, roofs.len() as i32) as usize];
-        base.clone()
-            .merged_with(data.palettes.get(w).expect("wood palette not found"))
-            .merged_with(data.palettes.get(s).expect("stone palette not found"))
-            .merged_with(data.palettes.get(r).expect("roof palette not found"))
-    }
+    // Per-settlement style composition: pick a dominant/secondary/accent trio
+    // from this culture's catalog and apply them to buildings in a weighted
+    // 60/30/10 mix (see StyleScheme), so the town reads as one coherent material
+    // story with rare landmark punctuation. Variable wood pools lean toward the
+    // local biome's timber. `style_rng` is derived so style selection doesn't
+    // perturb the placement RNG stream.
+    use crate::generator::buildings_v2::style::{StyleScheme, local_wood_palette};
+    let local_wood: Option<PaletteId> = editor
+        .world()
+        .get_surface_biome_at(editor.world().world_rect_2d().midpoint())
+        .and_then(local_wood_palette);
+    let mut style_rng = rng.derive();
+    let style_scheme = StyleScheme::generate(culture, &mut style_rng);
+    println!(
+        "Style scheme ({culture:?}): 60% {} / 30% {} / 10% {} — local wood {:?}",
+        style_scheme.dominant().name,
+        style_scheme.secondary().name,
+        style_scheme.accent().name,
+        local_wood.as_ref().map(|p| p.clone()),
+    );
+    // Per-district twist: each city block keeps the town's dominant (60%) and
+    // accent (10%) but re-rolls its 30% secondary to a different everyday style,
+    // so a quarter reads as its own while the city stays one place (see
+    // `StyleScheme::district_variant`). Keyed off the seed per block index so it's
+    // deterministic and independent of the placement streams. `lot_block` (built
+    // during subdivision) maps each lot to its block, hence to its scheme.
+    let district_schemes: Vec<StyleScheme> = (0..blocks.len())
+        .map(|bi| {
+            let mut drng = RNG::from_seed_and_string(seed, &format!("district_style_{bi}"));
+            style_scheme.district_variant(culture, &mut drng)
+        })
+        .collect();
+    println!(
+        "Per-district secondaries: {:?}",
+        district_schemes.iter().map(|s| s.secondary().name).collect::<Vec<_>>(),
+    );
     // Densest tier first; size pool per tier (houses on the main roads,
     // cottages on the back lanes).
     // House + Hall on every tier. Manor is no longer opportunistic — it's
@@ -748,6 +1076,9 @@ pub async fn generate_town(
     let mut sign_rng = rng.derive();
     let mut manor_sign_sites: Vec<crate::generator::buildings_v2::exterior::ManorSignSite> =
         Vec::new();
+    // Manor families for the chronicle, paired with their surname once the
+    // population pass names each household (see the manor-sign lettering loop).
+    let mut manor_facts: Vec<ManorFact> = Vec::new();
 
     let mut total_buildings = 0usize;
     // Per-house NPC anchors + bed-derived population budget, gathered from every
@@ -873,12 +1204,12 @@ pub async fn generate_town(
                     // road). Square_bias = 0 here matches the live town gen —
                     // domes on wings haven't been wired through yet.
 
-                    // Desert keeps a uniform sandstone palette; other cultures
-                    // roll wood/stone/roof variants per house for variety.
-                    let mut palette = match culture {
-                        Culture::Desert => base_palette.clone(),
-                        _ => roll_palette(&mut rng, &base_palette, &data, &wood_ids, &stone_ids, &roof_ids),
-                    };
+                    // Pick this building's style from its *district's* scheme
+                    // (60% town dominant / 30% district secondary / 10% town
+                    // accent) and roll its palette, leaning on the local wood.
+                    let mut palette = district_schemes[lot_block[lot_idx]]
+                        .next_style(&mut style_rng)
+                        .roll_palette(&mut style_rng, &data, local_wood.as_ref());
                     // Apply the town colour identity: a manor flies its unique
                     // family colour; every other building draws from the weighted
                     // town scheme. This `primary_color` then tints the building's
@@ -1337,10 +1668,20 @@ pub async fn generate_town(
         log_population_stats(&population);
         log_sample_households(&population, 8);
 
-        // Letter each manor's name sign now its household surname is known.
+        // Letter each manor's name sign now its household surname is known, and
+        // record the family for the chronicle (surname + the manor's location,
+        // colour, and blazon from its `HouseAnchors`).
         for site in &manor_sign_sites {
             if let Some(hh) = population.households.iter().find(|h| h.home == site.anchor_idx) {
                 println!("Manor sign: {} {}", hh.surname, site.designation());
+                let anchor = &town_anchors[site.anchor_idx];
+                manor_facts.push(ManorFact {
+                    surname: hh.surname.clone(),
+                    designation: site.designation().to_string(),
+                    pos: anchor.pos,
+                    color: anchor.family_color,
+                    blazon: anchor.banner_blazon.clone(),
+                });
                 crate::generator::buildings_v2::exterior::place_manor_sign(
                     editor, site, &hh.surname,
                 ).await;
@@ -1570,6 +1911,19 @@ pub async fn generate_town(
             editor, &urban, &named.name, &named.subtitle,
         ).await;
         println!("Placed welcome-title sensor for \"{}\" ({})", named.name, named.subtitle);
+
+        // Chronicle: digest the finished town into a dossier (name, colours,
+        // biomes, roads, trades, families, greens, gates) and have the AI write a
+        // guidebook, dropped into the player's inventory. Live-only — `give_player
+        // _book` posts to the server; failures are non-fatal.
+        let dossier = assemble_dossier(
+            editor, &urban, culture, &named, &color_scheme.town,
+            &road_names, &road_network.road_labels, &place_labels, &manor_facts,
+            total_buildings,
+        );
+        if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
+            log::warn!("Chronicle generation failed: {e}");
+        }
     }
 
     editor.flush_buffer().await;

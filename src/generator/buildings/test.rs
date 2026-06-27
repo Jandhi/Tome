@@ -4,7 +4,7 @@ mod tests {
 
     use log::info;
 
-    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::{SettlementInfo, generate_chronicle}, data::LoadedData, districts::{WallType, build_wall, generate_parcels}, materials::{Material, MaterialId, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+    use crate::{data::Loadable, editor::World, generator::{buildings::{Grid, placement::{place_building, place_buildings}, shape::{BuildingShape, WallPlacement}, stairs::StairPlacement, walls::WallComponent}, chronicle::generate_chronicle, data::LoadedData, districts::{WallType, build_wall, generate_parcels}, materials::{Material, MaterialId, Placer}, nbts::Structure, style::Style, terrain::log_trees}, geometry::{Cardinal, NORTH, Point3D, UP}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
     #[tokio::test]
@@ -150,7 +150,6 @@ mod tests {
         let mut rng = RNG::new(32);
 
         generate_parcels(rng.next_i64().into(), &mut editor).await;
-        let mut info = SettlementInfo::new(editor.world());
 
         let data = LoadedData::load().expect("Failed to load generator data");
 
@@ -165,10 +164,12 @@ mod tests {
         let urban_points = &editor.world().get_urban_points();
         log_trees(&mut editor, urban_points.clone()).await;
 
-        place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()], &info).await;
-        info = SettlementInfo::new(editor.world());
+        place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()]).await;
         build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade, None).await;
-        let _ = generate_chronicle(&mut editor, &mut info).await;
+        let dossier = crate::generator::settlement::minimal_dossier(
+            &editor, crate::generator::buildings_v2::Culture::Medieval, &mut rng.derive(),
+        );
+        let _ = generate_chronicle(&mut editor, &dossier).await;
         editor.flush_buffer().await;
     }
     

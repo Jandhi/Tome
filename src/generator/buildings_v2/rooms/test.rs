@@ -609,6 +609,118 @@ async fn build_manors_with_signs() {
     build_single_class_with_signs("Manor", SizeClass::Manor, 12, 13).await;
 }
 
+/// Live: build the whole style catalog for one culture so the variants can be
+/// compared in-game and curated. Styles run as rows (north→south); each row is
+/// `SAMPLES` houses of one style (so high-variance styles show their jitter),
+/// and a sign on the first house of each row names the style. Run one culture at
+/// a time against a running GDMC server:
+///   cargo test build_medieval_catalog -- --nocapture
+///   cargo test build_japanese_catalog -- --nocapture
+///   cargo test build_desert_catalog   -- --nocapture
+async fn build_style_catalog(culture: crate::generator::buildings_v2::Culture, seed: i64) {
+    use crate::editor::World;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::buildings_v2::footprint::Footprint;
+    use crate::generator::buildings_v2::{BuildCtx, build_house, BuildingContext};
+
+    const SAMPLES: i32 = 3;  // houses per style — enough to read internal variance
+    const CELL: i32 = 16;    // grid spacing between house origins
+    const HOUSE_W: i32 = 11; // footprint extent on X
+    const HOUSE_D: i32 = 9;  // footprint extent on Z
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let world = World::new(&provider).await.unwrap();
+    let mut editor = world.get_editor();
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let catalog = culture.style_catalog();
+
+    let world_rect = editor.world().world_rect_2d();
+    let center = world_rect.midpoint();
+    // Whole-area bounds passed to every build (used only for door-distance
+    // scoring; each foundation levels terrain around its own footprint).
+    let bounds = Rect2D::from_points(
+        Point2D::new(center.x - 100, center.y - 100),
+        Point2D::new(center.x + 100, center.y + 100),
+    );
+
+    // Local timber: variable wood pools lean toward whatever grows in the
+    // build-area biome (see `BuildingStyle::roll_palette`).
+    let local_wood = editor
+        .world()
+        .get_surface_biome_at(center)
+        .and_then(crate::generator::buildings_v2::style::local_wood_palette);
+    println!("Local wood bias: {local_wood:?}");
+
+    // Top-left origin of the grid, centred on the build area.
+    let origin_x = center.x - (SAMPLES * CELL) / 2;
+    let origin_z = center.y - (catalog.len() as i32 * CELL) / 2;
+
+    let size_class = SizeClass::House;
+    let roof_style = culture.roof_styles_for(size_class)[0];
+    let mut rng = RNG::new(seed);
+
+    for (s, bstyle) in catalog.iter().enumerate() {
+        let row_z = origin_z + s as i32 * CELL;
+        let mut placed = 0;
+
+        for j in 0..SAMPLES {
+            let x = origin_x + j * CELL;
+            let rect = Rect2D::from_points(
+                Point2D::new(x, row_z),
+                Point2D::new(x + HOUSE_W - 1, row_z + HOUSE_D - 1),
+            );
+            let footprint = Footprint::from_rect(rect);
+
+            // Roll this house's palette from the style's pools, then build.
+            let palette = bstyle.roll_palette(&mut rng, &data, local_wood.as_ref());
+            let house_res = {
+                let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+                let bctx = BuildingContext::new(culture, size_class, roof_style);
+                build_house(&mut ctx, footprint, &bctx, bounds).await
+            };
+
+            match house_res {
+                Ok(house) => {
+                    placed += 1;
+                    // Label the row on its first house's ground floor.
+                    if j == 0 {
+                        let cx = (rect.min().x + rect.max().x) / 2;
+                        let cz = (rect.min().y + rect.max().y) / 2;
+                        let y = house.frame.floor_y(0) + 1;
+                        let sign = sign_block(bstyle.name, &format!("{:?}", culture));
+                        editor.place_block_forced(&sign, Point3D::new(cx, y, cz)).await;
+                    }
+                }
+                Err(e) => println!("  style '{}' sample {j}: FAILED: {e}", bstyle.name),
+            }
+        }
+        println!("Style '{}' placed ({}/{} samples)", bstyle.name, placed, SAMPLES);
+    }
+
+    editor.flush_buffer().await;
+    println!("Done — {:?}: {} styles × {} samples", culture, catalog.len(), SAMPLES);
+}
+
+#[tokio::test]
+async fn build_medieval_catalog() {
+    build_style_catalog(crate::generator::buildings_v2::Culture::Medieval, 13).await;
+}
+
+#[tokio::test]
+async fn build_japanese_catalog() {
+    build_style_catalog(crate::generator::buildings_v2::Culture::Japanese, 13).await;
+}
+
+#[tokio::test]
+async fn build_desert_catalog() {
+    build_style_catalog(crate::generator::buildings_v2::Culture::Desert, 13).await;
+}
+
 /// Builds exactly one Manor for debugging. Change `SEED` and re-run to inspect
 /// different layouts in-game: `cargo test build_single_manor -- --nocapture`.
 /// Asserts the manor got a cellar so a dud seed fails loudly.
