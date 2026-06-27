@@ -34,6 +34,7 @@ mod tests {
             parcel::ParcelType::Urban => Block { id: "blue_wool".into(), data: None, state: None },
             parcel::ParcelType::Rural => Block { id: "green_wool".into(), data: None, state: None },
             parcel::ParcelType::OffLimits => Block { id: "red_wool".into(), data: None, state: None },
+            parcel::ParcelType::Water => Block { id: "light_blue_wool".into(), data: None, state: None },
             _ => Block { id: "bedrock".into(), data: None, state: None }, // Default case for unknown types
         }
     }

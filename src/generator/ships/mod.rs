@@ -20,6 +20,7 @@ pub mod levels;
 pub mod interior;
 pub mod blueprint;
 pub mod tuning;
+pub mod fleet;
 
 #[cfg(test)]
 mod test;
@@ -291,6 +292,17 @@ pub async fn build_ship(
     let tier = SizeTier::from_length(spec.length);
     // Rigging-line material: forced by the spec, else rolled per ship by chance.
     let rigging = spec.rigging.unwrap_or_else(|| RiggingMaterial::pick(ctx.rng));
+    // Sails are tied to the footing: a ship resting on land is a hulk with bare yards
+    // (`None`), while a ship afloat always carries canvas (a water ship never goes bare —
+    // a `None` spec is bumped to `Full`).
+    let sail_state = if on_water {
+        match spec.sail_state {
+            SailState::None => SailState::Full,
+            set => set,
+        }
+    } else {
+        SailState::None
+    };
     let deck_ctx = additions::DeckContext {
         placement: &placement,
         keel: &keel,
@@ -300,7 +312,7 @@ pub async fn build_ship(
         tier,
         on_water,
         mast_lean: spec.mast_lean,
-        sail_state: spec.sail_state,
+        sail_state,
         wind: spec.wind,
         rigging,
     };

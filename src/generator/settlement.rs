@@ -668,5 +668,9 @@ pub async fn generate_town(
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
     println!("Placed {} street lamps", lamps.len());
 
+    // Scatter free-floating ships onto the settlement's water districts.
+    let ships = crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
+    println!("Placed {} ships across water districts", ships);
+
     editor.flush_buffer().await;
 }

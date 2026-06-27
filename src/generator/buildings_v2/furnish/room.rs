@@ -161,7 +161,7 @@ pub(super) async fn furnish_room(
     // Only attics have a sloped roof above the room — flat-ceiling rooms get
     // None and skip the per-cell clearance check entirely.
     let roof_clearance: Option<RoofClearance> = if is_attic {
-        roof_heightmap.map(|hm| RoofClearance { hm, roof_y: frame.roof_y(room.rect_index) })
+        roof_heightmap.map(|hm| RoofClearance::roof(hm, frame.roof_y(room.rect_index)))
     } else {
         None
     };

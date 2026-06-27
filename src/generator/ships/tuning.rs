@@ -385,6 +385,50 @@ pub const BOWSPRIT_STEEP_REACH: f32 = 0.6;
 pub const BOWSPRIT_TIERED_REACH: f32 = 0.65;
 
 // ===========================================================================
+// Ship placement (`fleet.rs`) — seating individual ships on Water districts
+// ===========================================================================
+//
+// The pass places **one ship at a time** and repeats until a body is full; these knobs
+// govern a single ship's fit (size, depth, clearance) plus the per-body guards.
+
+/// Candidate keel lengths the fit-solver tries for a ship, **largest first** — it seats
+/// the biggest ship that fits the open water (and the build-height ceiling). Spans the
+/// no-rowboat size range (Small … Huge), matching `build_ship_live`.
+pub const SHIP_LENGTHS: &[i32] = &[44, 38, 32, 26, 20, 14];
+
+/// Max keel length on a **non-ocean** water district (river / lake / other) — only open
+/// ocean / deep-ocean biomes get the full [`SHIP_LENGTHS`] range; smaller water keeps to
+/// modest hulls. The solver picks the largest `SHIP_LENGTHS` entry not exceeding this.
+pub const RIVER_MAX_LENGTH: i32 = 24;
+
+/// Blocks of clear water a ship's keel keeps **above the seabed** — so it floats and the
+/// keel never touches the bottom. Required water depth at every footprint cell is
+/// `keel_depth(length) + KEEL_CLEARANCE`.
+pub const KEEL_CLEARANCE: i32 = 1;
+
+/// Extra water cells a ship keeps clear **beyond its hull edge** on every side (beam
+/// sides + bow/stern), so it doesn't graze the shore or the next ship.
+pub const HULL_MARGIN: i32 = 1;
+
+/// Minimum shore distance (cells) for a candidate ship **centre** — a cheap pre-filter so
+/// placement starts from genuinely open water rather than hugging the bank.
+pub const MIN_CENTRE_SHORE: i32 = 4;
+
+/// Vertical headroom (blocks) kept between the **sea surface + masts** and the build-area
+/// ceiling, so a ship's length-scaled masts/flags never clip the top of the world.
+pub const VERTICAL_HEADROOM: i32 = 12;
+
+/// Rejection-sampling attempts to seat one ship (each tries a fresh centre × orientation
+/// × length); after this many misses the body is treated as full.
+pub const PLACE_ATTEMPTS: usize = 48;
+
+/// Per-ship chance (percent) the sails are **furled** rather than `Full`.
+pub const FURLED_CHANCE: i32 = 20;
+
+/// A water district below this many water cells gets no ships (too small to seat one).
+pub const MIN_WATER_CELLS: usize = 150;
+
+// ===========================================================================
 // Not-yet-centralized
 // ===========================================================================
 //

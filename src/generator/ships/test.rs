@@ -1200,6 +1200,64 @@ async fn build_ship_offline_land() {
     );
 }
 
+/// Offline: the scatter pass seats ships on a `Water` district, and every ship floats —
+/// each footprint cell is water deep enough that the keel clears the seabed. Builds a
+/// synthetic water world, inserts one Water district over a central rect, runs
+/// `scatter_ships`, and checks the resulting `Ship` claims.
+#[tokio::test]
+async fn scatter_ships_offline() {
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::districts::{District, DistrictID, ParcelType};
+    use crate::generator::ships::fleet::scatter_ships;
+    use crate::generator::ships::keel::keel_depth;
+    use crate::generator::BuildClaim;
+    use crate::geometry::{Point2D, Point3D, Rect3D};
+    use crate::noise::Seed;
+
+    // All-water flatworld: seabed at y=50, sea surface at y=64 → 14 blocks of water.
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let mut world = World::synthetic_water(build_area, 50, 64);
+
+    // One Water district covering a central rect (must run before get_offline_editor,
+    // which consumes the world).
+    let mut district = District::new(DistrictID(0));
+    district.data.parcel_type = ParcelType::Water;
+    for x in 40..200 {
+        for z in 40..200 {
+            district.data.points_2d.insert(Point2D::new(x, z));
+        }
+    }
+    world.districts.insert(DistrictID(0), district);
+
+    let mut editor = world.get_offline_editor();
+    let data = LoadedData::load().expect("data");
+
+    let n = scatter_ships(&mut editor, &data, Seed(7)).await;
+    assert!(n > 0, "expected ships scattered onto the water district");
+
+    // Every cell claimed for a ship must be water; the deepest keel we could place needs
+    // at least this much water under the surface to float clear of the seabed.
+    let surface = editor.world().get_motion_blocking_height_at(Point2D::new(96, 96));
+    let mut ship_cells = 0usize;
+    for x in 0..256 {
+        for z in 0..256 {
+            let c = Point2D::new(x, z);
+            if editor.world().get_claim(c) == Some(BuildClaim::Ship) {
+                ship_cells += 1;
+                assert!(editor.world().is_water(c), "ship claim on non-water cell {c:?}");
+                let depth = surface - editor.world().get_ocean_floor_height_at(c);
+                assert!(
+                    depth >= keel_depth(14) + 1,
+                    "ship footprint cell {c:?} too shallow (depth {depth}) — keel would touch bottom",
+                );
+            }
+        }
+    }
+    assert!(ship_cells >= n, "expected at least one claimed footprint cell per ship");
+    println!("scatter_ships_offline: placed {n} ships, {ship_cells} claimed footprint cells");
+}
+
 /// Live build: places a row of keels of increasing length into the running
 /// For fun: build a single **giant** ship (keel length 100) into the live server's build area, so
 /// the whole length-scaled rig can be screenshotted. Needs a **big** build area over water (~200×200,
@@ -1346,6 +1404,58 @@ async fn build_ship_live() {
             ship.keel.depth,
             ship.hull.max_beam,
         );
+    }
+
+    editor.flush_buffer().await;
+}
+
+/// Live end-to-end: classify the build area into districts (so water bodies become `Water`
+/// districts), then scatter free-floating ships onto them. Set a build area that spans some
+/// open water — ideally a coast or lake — with `/setbuildarea`, then:
+///
+/// ```text
+/// cargo test scatter_ships_live -- --nocapture
+/// ```
+///
+/// Prints how many Water districts were found and how many ships were placed; with no water
+/// in the build area it places none (and says so). The ships flush to the server for a
+/// screenshot.
+#[tokio::test]
+async fn scatter_ships_live() {
+    use crate::editor::{Editor, World};
+    use crate::generator::data::LoadedData;
+    use crate::generator::districts::{generate_parcels, ParcelType};
+    use crate::generator::ships::fleet::scatter_ships;
+    use crate::http_mod::GDMCHTTPProvider;
+    use crate::noise::Seed;
+    use crate::util::init_logger;
+
+    init_logger();
+
+    let provider = GDMCHTTPProvider::new();
+    let build_area = provider.get_build_area().await.expect("Failed to get build area");
+    let world = World::new(&provider).await.expect("Failed to create world");
+    let mut editor = Editor::new(build_area, world);
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let seed = Seed(12345);
+
+    // Partition + classify the terrain; lakes/oceans fall out as `Water` districts.
+    generate_parcels(seed, &mut editor).await;
+
+    let water_districts = editor
+        .world()
+        .districts
+        .values()
+        .filter(|d| d.data.parcel_type == ParcelType::Water)
+        .count();
+    println!("Found {water_districts} water district(s)");
+
+    let n = scatter_ships(&mut editor, &data, seed).await;
+    println!("Scattered {n} ship(s) across {water_districts} water district(s)");
+
+    if water_districts == 0 {
+        println!("(no water in the build area — set a build area over a lake/coast to place ships)");
     }
 
     editor.flush_buffer().await;

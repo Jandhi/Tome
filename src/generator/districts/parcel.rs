@@ -14,6 +14,9 @@ pub enum ParcelType {
     Unknown, // placeholder for unclassified parcels
     Urban,
     Rural,
+    /// A district dominated by water (lake / ocean / wide river). Excluded from
+    /// urban and rural building placement; consumed by the ship-placement pass.
+    Water,
     OffLimits,
 }
 

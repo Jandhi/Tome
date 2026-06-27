@@ -161,27 +161,51 @@ fn ground_block_cells(
         .collect()
 }
 
-/// Per-cell roof-block y for an attic room. Used to reject furniture cells
-/// that would poke into (or against) the sloped roof.
+/// The lowest solid block above the floor at each cell, used to reject furniture
+/// that would poke into (or against) the ceiling. Two flavours:
+/// - **sloped** (attic): per-cell heights from a [`RoofHeightmap`], with a
+///   one-block air gap required above furniture (`flush = false`);
+/// - **flat** (e.g. a ship's 'tween deck): a uniform ceiling at `roof_y` with no
+///   heightmap, furniture allowed flush against it (`flush = true`).
 pub(crate) struct RoofClearance<'a> {
-    pub(super) hm: &'a RoofHeightmap,
-    /// Wall-top y for this rect (= roof_y from Frame). The lowest roof block
-    /// at (x, z) sits at `roof_y + heightmap.get(x, z).floor()`.
-    pub(super) roof_y: i32,
+    /// Per-cell heights above `roof_y`; `None` = a flat ceiling at `roof_y` everywhere.
+    hm: Option<&'a RoofHeightmap>,
+    /// Wall-top / ceiling y for this rect. With a heightmap, the lowest roof block
+    /// at (x, z) sits at `roof_y + heightmap.get(x, z).floor()`; flat = `roof_y`.
+    roof_y: i32,
+    /// `true` = furniture may sit flush under the ceiling (top block at `rb_y - 1`);
+    /// `false` = require an extra air cell of headroom above it.
+    flush: bool,
 }
 
-impl RoofClearance<'_> {
-    /// Y of the lowest roof block at (x, z), or None if outside the heightmap.
-    fn roof_block_y(&self, cell: (i32, i32)) -> Option<i32> {
-        let h = self.hm.get(cell.0, cell.1);
-        if h == f32::NEG_INFINITY { None } else { Some(self.roof_y + h.floor() as i32) }
+impl<'a> RoofClearance<'a> {
+    /// Sloped-roof clearance from a per-cell heightmap (requires an air gap above).
+    pub(crate) fn roof(hm: &'a RoofHeightmap, roof_y: i32) -> Self {
+        Self { hm: Some(hm), roof_y, flush: false }
     }
 
-    /// True if a furniture block at (cell, world_y) leaves at least one air
-    /// cell of headroom above it (block at y, air at y+1, roof block at ≥y+2).
+    /// Flat-ceiling clearance at `ceiling_y` (the solid ceiling block), with
+    /// furniture allowed flush against it — for rooms with a level deck/slab above.
+    pub(crate) fn flat(ceiling_y: i32) -> Self {
+        Self { hm: None, roof_y: ceiling_y, flush: true }
+    }
+
+    /// Y of the lowest roof/ceiling block at (x, z), or None if outside a heightmap.
+    fn roof_block_y(&self, cell: (i32, i32)) -> Option<i32> {
+        match self.hm {
+            Some(hm) => {
+                let h = hm.get(cell.0, cell.1);
+                if h == f32::NEG_INFINITY { None } else { Some(self.roof_y + h.floor() as i32) }
+            }
+            None => Some(self.roof_y),
+        }
+    }
+
+    /// True if a furniture block at (cell, world_y) fits under the ceiling: flush
+    /// mode wants `world_y < rb_y`; otherwise an extra air cell (`world_y + 1 < rb_y`).
     fn allows_block(&self, cell: (i32, i32), world_y: i32) -> bool {
         match self.roof_block_y(cell) {
-            Some(rb_y) => world_y + 1 < rb_y,
+            Some(rb_y) => if self.flush { world_y < rb_y } else { world_y + 1 < rb_y },
             None => false,
         }
     }

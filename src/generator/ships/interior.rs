@@ -12,7 +12,7 @@
 //! calls `furnish_interior`.
 
 use crate::generator::buildings_v2::footprint::find_largest_rect;
-use crate::generator::buildings_v2::furnish::furnish_interior;
+use crate::generator::buildings_v2::furnish::{furnish_interior, RoofClearance};
 use crate::generator::buildings_v2::rooms::{CellState, ConstraintMap};
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::{Point2D, Point3D, Rect2D};
@@ -164,6 +164,9 @@ async fn furnish_local_rect(
 
     let room_list = &ctx.data.furniture.rooms[room_name];
     let mut rng = ctx.rng.derive();
+    // The deck above is a flat ceiling at `ceiling_y`; reject furniture that would
+    // poke into it (furniture may sit flush, top block at `ceiling_y - 1`).
+    let roof_clearance = RoofClearance::flat(ceiling_y);
     let _placed = furnish_interior(
         ctx.editor,
         &interior,
@@ -172,7 +175,7 @@ async fn furnish_local_rect(
         &ctx.data.furniture.items,
         floor_y,
         ceiling_y,
-        None,
+        Some(&roof_clearance),
         false,
         ctx.palette,
         &ctx.data.materials,
