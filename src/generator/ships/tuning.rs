@@ -430,7 +430,7 @@ pub const MIN_WATER_CELLS: usize = 150;
 
 /// Chance (percent, 0–100) that a qualifying water district gets a ship at all. `100` =
 /// every water body is populated; lower leaves some empty for variety.
-pub const SHIP_CHANCE_PER_DISTRICT: i32 = 100;
+pub const SHIP_CHANCE_PER_DISTRICT: i32 = 50;
 
 // ===========================================================================
 // Not-yet-centralized
