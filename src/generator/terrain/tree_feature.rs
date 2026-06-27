@@ -44,6 +44,9 @@ pub fn tree_feature_id(tree: Tree) -> &'static str {
             "minecraft:acacia"
         }
 
+        // Cherry blossom: the one vanilla cherry feature for every size.
+        Tree::SmallCherry | Tree::MediumCherry | Tree::LargeCherry => "minecraft:cherry",
+
         // Cactus has no vanilla tree feature — `generate_tree_feature` intercepts
         // it and builds a column directly, so this id is never actually queried.
         Tree::Cactus => "minecraft:cactus",

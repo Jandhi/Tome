@@ -4,6 +4,11 @@
 
 use crate::generator::buildings_v2::Culture;
 
+/// Percent chance that any single park / nook tree in a [`Theme::cherry_blossom`]
+/// settlement (Japanese) grows as a flowering cherry instead of its usual
+/// biome species.
+pub const CHERRY_CHANCE: i32 = 35;
+
 /// Block ids (and a few option lists) the open-space furnishers draw from, so a
 /// desert town reads as sandstone instead of cobblestone.
 #[derive(Clone, Copy)]
@@ -41,6 +46,9 @@ pub struct Theme {
     /// Arid (desert) style: gates the cactus park and grows the wooded park as
     /// jungle trees, regardless of the underlying world biome.
     pub arid: bool,
+    /// Japanese style: any park / nook tree has a [`CHERRY_CHANCE`] chance to
+    /// grow as a flowering cherry instead of its biome species.
+    pub cherry_blossom: bool,
 }
 
 const MEDIEVAL: Theme = Theme {
@@ -70,6 +78,7 @@ const MEDIEVAL: Theme = Theme {
         "minecraft:mossy_stone_bricks",
     ],
     arid: false,
+    cherry_blossom: false,
 };
 
 const DESERT: Theme = Theme {
@@ -99,6 +108,7 @@ const DESERT: Theme = Theme {
         "minecraft:chiseled_sandstone",
     ],
     arid: true,
+    cherry_blossom: false,
 };
 
 /// Japanese: a green garden town whose worked stone is deepslate, matching the
@@ -130,6 +140,7 @@ const JAPANESE: Theme = Theme {
         "minecraft:cracked_deepslate_bricks",
     ],
     arid: false,
+    cherry_blossom: true,
 };
 
 impl Theme {

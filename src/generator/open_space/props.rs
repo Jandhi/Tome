@@ -11,7 +11,7 @@ use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::minecraft::{string_to_block, Biome};
 use crate::noise::RNG;
 
-use super::theme::Theme;
+use super::theme::{Theme, CHERRY_CHANCE};
 
 /// Place a single block from an id string (`"id"` or `"id[state=…]"`).
 pub(super) async fn put(editor: &Editor, x: i32, y: i32, z: i32, id: &str) {
@@ -106,12 +106,17 @@ pub(super) fn inward_dir(world: &World, c: Point2D, cells: &HashSet<Point2D>) ->
     None
 }
 
-/// A small tree species. A desert-*style* settlement always grows small jungle
-/// trees (matching its warm palette) whatever the biome; every other style
-/// picks a small, biome-appropriate species, or `None` for biomes where a tree
-/// looks out of place (desert/badlands/etc.). All returned variants have a
+/// A small tree species. A Japanese settlement has a [`CHERRY_CHANCE`] chance of
+/// a small flowering cherry. A desert-*style* settlement always grows small
+/// jungle trees (matching its warm palette) whatever the biome; every other
+/// style picks a small, biome-appropriate species, or `None` for biomes where a
+/// tree looks out of place (desert/badlands/etc.). All returned variants have a
 /// palette in the `small_mixed` forest.
 pub(super) fn biome_tree(theme: &Theme, biome: &Biome, rng: &mut RNG) -> Option<Tree> {
+    // Japanese style: a chance of a small flowering cherry, whatever the biome.
+    if theme.cherry_blossom && rng.percent(CHERRY_CHANCE) {
+        return Some(Tree::SmallCherry);
+    }
     if theme.arid {
         let weights = vec![(Tree::SmallJungle, 4.0), (Tree::MediumJungle, 1.0)];
         return Some(*rng.choose_weighted_vec(&weights));
