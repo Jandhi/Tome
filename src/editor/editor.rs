@@ -313,6 +313,16 @@ impl Editor {
         Ok(())
     }
 
+    /// Set a server gamerule, e.g. `set_gamerule("blockdrops", "false")`. Goes
+    /// straight to the server; a no-op in offline mode.
+    pub async fn set_gamerule(&self, rule: &str, value: &str) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        self.provider.command(vec![format!("gamerule {} {}", rule, value)]).await?;
+        Ok(())
+    }
+
     /// Spawn an entity of type `id` (e.g. `"minecraft:villager"`) at build-area-
     /// local `point`, with optional SNBT `data` (entity tags such as `NoAI`,
     /// `CustomName`, `Rotation`, …).

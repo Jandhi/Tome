@@ -154,7 +154,7 @@ struct Theme<'a> {
 }
 
 /// The yaml key for a culture's vocabulary.
-fn culture_key(culture: Culture) -> &'static str {
+pub(crate) fn culture_key(culture: Culture) -> &'static str {
     match culture {
         Culture::Desert => "desert",
         Culture::Japanese => "japanese",
@@ -381,7 +381,7 @@ fn compose_article(
 /// `al` before moon letters, else `a` + the sun consonant (`ar`, `as`, `at`,
 /// `an`, `ad`, `az`, and the digraphs `ash`/`ath`/`adh`). Lower-case; the caller
 /// capitalises it when it leads the name.
-fn assimilated_article(word: &str) -> String {
+pub(crate) fn assimilated_article(word: &str) -> String {
     let lower = word.to_ascii_lowercase();
     // Sun-letter digraphs (sh/th/dh) double in transliteration: ash-Shams.
     if let Some(two) = lower.get(0..2) {
@@ -397,7 +397,7 @@ fn assimilated_article(word: &str) -> String {
 }
 
 /// Upper-case the first ASCII letter (`ar` → `Ar`).
-fn capitalize(s: &str) -> String {
+pub(crate) fn capitalize(s: &str) -> String {
     let mut chars = s.chars();
     match chars.next() {
         Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),

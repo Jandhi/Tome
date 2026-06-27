@@ -58,6 +58,11 @@ pub struct World {
     /// walkable feet positions (walkway cell at surface + 1) just outside one
     /// tower's base, where a guard NPC can stand. Populated by `build_wall_towers`.
     pub tower_guard_posts : Vec<Vec<Point3D>>,
+    /// Per wall tower: `(base_centre, support_y)` — the tower's 5×5 base centre
+    /// (build-area local) and a height within its solid base ring. Used to hang
+    /// the civic banner on the tower's outward face without reading blocks back
+    /// (see `generator/civic_banner.rs`). Populated by `build_wall_towers`.
+    pub tower_bases : Vec<(Point2D, i32)>,
     /// Regularized "inside the wall" cell set. When `Some`, `get_urban_points`
     /// returns it instead of the raw district union (see districts/footprint.rs).
     pub urban_footprint : Option<HashSet<Point2D>>,
@@ -138,6 +143,7 @@ impl World {
             structures: Vec::new(),
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
+            tower_bases: Vec::new(),
             urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
@@ -213,6 +219,7 @@ impl World {
             structures: Vec::new(),
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
+            tower_bases: Vec::new(),
             urban_footprint: None,
             ground_height_map,
             ground_block_map,
@@ -305,6 +312,23 @@ impl World {
             self.ground_height_map[point.x as usize][point.z as usize] = point.y;
             self.ocean_floor_height_map[point.x as usize][point.z as usize] = point.y;
         }
+    }
+
+    /// Record a column whose liquid was drained and back-filled with solid: the
+    /// new surface is solid `block` capped at `surface_air - 1`, with the first
+    /// air at `surface_air`. Updates ALL height maps *and* the cached
+    /// `ground_block_map` so `is_water` / `get_ground_block` no longer report the
+    /// (now removed) liquid here — `set_heights` alone leaves the block cache
+    /// stale and `is_water` would keep returning true. No-op out of bounds.
+    pub fn set_drained_surface(&mut self, point : Point2D, surface_air : i32, block : Block) {
+        if !self.is_in_bounds_2d(point) {
+            return;
+        }
+        let (x, z) = (point.x as usize, point.y as usize);
+        self.ground_height_map[x][z] = surface_air;
+        self.ocean_floor_height_map[x][z] = surface_air;
+        self.motion_blocking_height_map[x][z] = surface_air;
+        self.ground_block_map[x][z] = block;
     }
 
     /// Test-only: mark a surface cell as water so `is_water` reports it. Used by the
