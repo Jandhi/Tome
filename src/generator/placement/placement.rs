@@ -787,12 +787,48 @@ async fn execute_placement(
     };
     editor.world_mut().structures.push(instance_id.clone());
 
-    let claim = BuildClaim::Structure(instance_id);
+    let claim = BuildClaim::Structure(instance_id.clone());
     for cell in &footprint_cells {
         editor.world_mut().claim(*cell, claim.clone());
     }
 
+    // Step 7 — transform the structure's hand-authored worker anchors into world
+    // coords + yaw and record them, so the worker pass can stand this building's
+    // crew at its declared interior spots.
+    let posts = anchor_world_posts(structure, offset, candidate.direction);
+    if !posts.is_empty() {
+        editor.world_mut().structure_anchors.insert(instance_id.id, posts);
+    }
+
     Ok(())
+}
+
+/// Transform a structure's hand-authored [`WorkAnchor`](crate::generator::nbts::WorkAnchor)s
+/// (NBT-local `stand`/`look` cells) into world-space worker posts `(feet, yaw)`,
+/// applying the same rotation + origin shift `place_structure` uses to place the
+/// blocks. `offset` is the world anchor the NBT is pasted at (its origin cell),
+/// `direction` the facing it was placed toward. Placement never mirrors resource
+/// buildings, so mirror is not modelled here. Both `stand` and `look` go through
+/// the same transform, so the derived facing stays correct under any rotation.
+pub fn anchor_world_posts(
+    structure: &Structure,
+    offset: Point3D,
+    direction: Cardinal,
+) -> Vec<(Point3D, f32)> {
+    use crate::generator::nbts::{Rotation, Transform};
+    use crate::generator::population::yaw_toward;
+    let rotation = Rotation::from(structure.facing) - Rotation::from(direction);
+    let mut transform = Transform::new(offset, rotation);
+    transform.shift(rotation.apply_to_point(-structure.origin));
+    structure
+        .anchors
+        .iter()
+        .map(|a| {
+            let stand = transform.apply(Point3D::new(a.stand[0], a.stand[1], a.stand[2]));
+            let look = transform.apply(Point3D::new(a.look[0], a.look[1], a.look[2]));
+            (stand, yaw_toward(stand, look))
+        })
+        .collect()
 }
 
 fn rect_inside_points(rect: &Rect2D, points: &HashSet<Point2D>) -> bool {

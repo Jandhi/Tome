@@ -76,6 +76,27 @@ pub struct Structure {
     /// pass; a building without it falls back to `NpcData::default_staffing`.
     #[serde(default, skip_serializing)]
     pub staffing : Option<crate::generator::npc::Staffing>,
+
+    /// Hand-authored worker stand posts, in NBT-local coordinates. Each anchor is
+    /// a cell the worker's feet occupy (`stand`) and a cell it looks toward
+    /// (`look`) — usually the workstation it tends. At placement these are run
+    /// through the structure's rotation/offset into world coords and recorded on
+    /// `World::structure_anchors`, so the settlement worker pass stands the crew
+    /// at these exact interior spots instead of auto-discovered cells outside.
+    /// Empty for buildings that should keep the outside-stand fallback (mines,
+    /// open fields). Authored off the `dump_nbt_floorplans` ASCII dumps.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchors : Vec<WorkAnchor>,
+}
+
+/// One hand-authored worker post in NBT-local coordinates: where the worker
+/// stands (`stand`, its feet) and the cell it faces (`look`). Both are
+/// transformed by the structure's placement rotation/offset together, so the
+/// derived facing (`yaw_toward(stand, look)`) stays correct under any rotation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkAnchor {
+    pub stand : [i32; 3],
+    pub look : [i32; 3],
 }
 
 fn default_weight() -> f32 {

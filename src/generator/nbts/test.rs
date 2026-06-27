@@ -10,6 +10,247 @@ mod tests {
     use fastnbt::to_writer;
 
 
+    /// Authoring aid: dump a labeled per-Y-layer ASCII floor plan for every
+    /// resource-building NBT to `output/nbt_inspect/<name>.txt`, so anchor coords
+    /// can be read straight off the grid and hand-curated into the JSON sidecars.
+    ///
+    /// Legend: ` ` air/void, `#` generic solid, `.` walkable floor cell (non-solid
+    /// with a solid floor below + headroom above), `o` a walkable cell whose floor
+    /// is the layer below (same as `.`), plus a per-station letter for recognised
+    /// workstation blocks (printed in a key at the top of each file). Rows are X,
+    /// columns are Z; axis tick labels give the local coords. Run:
+    /// `cargo test dump_nbt_floorplans -- --nocapture`.
+    #[test]
+    fn dump_nbt_floorplans() {
+        use std::collections::{BTreeMap, HashSet};
+        use std::io::Read;
+        use flate2::read::GzDecoder;
+
+        fn load(path: &str) -> NBTStructure {
+            let raw = std::fs::read(path).expect("read nbt");
+            match fastnbt::from_bytes::<NBTStructure>(&raw) {
+                Ok(s) => s,
+                Err(_) => {
+                    let mut d = GzDecoder::new(raw.as_slice());
+                    let mut buf = vec![];
+                    d.read_to_end(&mut buf).expect("gunzip");
+                    fastnbt::from_bytes(&buf).expect("parse nbt")
+                }
+            }
+        }
+
+        // Block id (stripped of `minecraft:`) -> single-char station glyph.
+        let station_glyph = |id: &str| -> Option<char> {
+            Some(match id {
+                "furnace" => 'F',
+                "blast_furnace" => 'B',
+                "smoker" => 'K',
+                "smithing_table" => 'S',
+                "anvil" | "chipped_anvil" | "damaged_anvil" => 'A',
+                "grindstone" => 'G',
+                "stonecutter" => 'C',
+                "loom" => 'L',
+                "fletching_table" => 'T',
+                "cartography_table" => 'M',
+                "cauldron" | "water_cauldron" => 'U',
+                "barrel" => 'R',
+                "brewing_stand" => 'W',
+                "composter" => 'O',
+                "lectern" => 'E',
+                "bell" => 'b',
+                "beehive" | "bee_nest" => 'H',
+                "chest" => 'h',
+                _ => return None,
+            })
+        };
+
+        let out_dir = std::path::Path::new("output/nbt_inspect");
+        std::fs::create_dir_all(out_dir).expect("mkdir output/nbt_inspect");
+
+        let dir = std::path::Path::new("data/structures/resource_buildings");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("read resource_buildings dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("nbt"))
+            .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()))
+            .collect();
+        names.sort();
+
+        for name in &names {
+            let s = load(&format!("data/structures/resource_buildings/{name}.nbt"));
+            let short = |st: usize| {
+                let id = s.palette[st].name.as_str().to_string();
+                id.strip_prefix("minecraft:").unwrap_or(&id).to_string()
+            };
+            let is_air = |n: &str| n == "air" || n == "cave_air" || n == "void_air" || n.ends_with("structure_void");
+
+            // pos -> stripped id (last write wins; NBTs don't double-place a cell).
+            let mut at: std::collections::HashMap<(i32, i32, i32), String> = std::collections::HashMap::new();
+            for b in &s.blocks {
+                at.insert((b.pos[0], b.pos[1], b.pos[2]), short(b.state));
+            }
+            let solid = |p: (i32, i32, i32)| at.get(&p).map_or(false, |n| !is_air(n));
+            let walkable = |p: (i32, i32, i32)| {
+                !solid(p) && solid((p.0, p.1 - 1, p.2)) && !solid((p.0, p.1 + 1, p.2))
+            };
+
+            let (sx, sy, sz) = (s.size[0], s.size[1], s.size[2]);
+            let mut out = String::new();
+            out.push_str(&format!("{name}  size=[{sx},{sy},{sz}]  (rows=X, cols=Z)\n"));
+            out.push_str("legend: ' '=air  '#'=solid  '.'=walkable floor  <letter>=station\n");
+
+            // Station key for this building.
+            let mut key: BTreeMap<char, String> = BTreeMap::new();
+            for n in at.values() {
+                if let Some(g) = station_glyph(n) {
+                    key.insert(g, n.clone());
+                }
+            }
+            if !key.is_empty() {
+                out.push_str("stations: ");
+                out.push_str(&key.iter().map(|(g, n)| format!("{g}={n}")).collect::<Vec<_>>().join("  "));
+                out.push('\n');
+            }
+
+            for y in 0..sy {
+                out.push_str(&format!("\n--- y={y} ---\n"));
+                // Z header (cols), tens then ones.
+                out.push_str("    ");
+                for z in 0..sz { out.push_str(&format!("{}", (z / 10) % 10)); }
+                out.push('\n');
+                out.push_str("    ");
+                for z in 0..sz { out.push_str(&format!("{}", z % 10)); }
+                out.push('\n');
+                for x in 0..sx {
+                    out.push_str(&format!("{x:3} "));
+                    for z in 0..sz {
+                        let p = (x, y, z);
+                        let glyph = at.get(&p).and_then(|n| station_glyph(n));
+                        let ch = if let Some(g) = glyph {
+                            g
+                        } else if solid(p) {
+                            '#'
+                        } else if walkable(p) {
+                            '.'
+                        } else {
+                            ' '
+                        };
+                        out.push(ch);
+                    }
+                    out.push('\n');
+                }
+            }
+            let path = out_dir.join(format!("{name}.txt"));
+            write(&path, out).expect("write floorplan");
+            let _ = HashSet::<i32>::new();
+            println!("wrote {}", path.display());
+        }
+    }
+
+    /// Authoring aid: for every resource-building NBT, list each ground/first-floor
+    /// workstation block and one cardinally-adjacent standable cell next to it,
+    /// formatted as ready-to-paste `{ "stand": [...], "look": [...] }` anchor
+    /// entries. Curate these down to the building's worker count in its JSON
+    /// sidecar. Run: `cargo test dump_anchor_candidates -- --nocapture`.
+    #[test]
+    fn dump_anchor_candidates() {
+        use std::collections::HashSet;
+        use std::io::Read;
+        use flate2::read::GzDecoder;
+
+        fn load(path: &str) -> NBTStructure {
+            let raw = std::fs::read(path).expect("read nbt");
+            match fastnbt::from_bytes::<NBTStructure>(&raw) {
+                Ok(s) => s,
+                Err(_) => {
+                    let mut d = GzDecoder::new(raw.as_slice());
+                    let mut buf = vec![];
+                    d.read_to_end(&mut buf).expect("gunzip");
+                    fastnbt::from_bytes(&buf).expect("parse nbt")
+                }
+            }
+        }
+
+        let is_station = |id: &str| {
+            matches!(id,
+                "furnace" | "blast_furnace" | "smoker" | "smithing_table" | "anvil"
+                | "chipped_anvil" | "damaged_anvil" | "grindstone" | "stonecutter"
+                | "loom" | "fletching_table" | "cartography_table" | "cauldron"
+                | "water_cauldron" | "barrel" | "brewing_stand" | "composter"
+                | "lectern" | "beehive" | "bee_nest")
+        };
+
+        let dir = std::path::Path::new("data/structures/resource_buildings");
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|x| x.to_str()) == Some("nbt"))
+            .filter_map(|p| p.file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()))
+            .collect();
+        names.sort();
+
+        for name in &names {
+            let s = load(&format!("data/structures/resource_buildings/{name}.nbt"));
+            let short = |st: usize| {
+                let id = s.palette[st].name.as_str().to_string();
+                id.strip_prefix("minecraft:").unwrap_or(&id).to_string()
+            };
+            let is_air = |n: &str| n == "air" || n == "cave_air" || n == "void_air" || n.ends_with("structure_void");
+            let mut at: std::collections::HashMap<(i32, i32, i32), String> = std::collections::HashMap::new();
+            for b in &s.blocks {
+                at.insert((b.pos[0], b.pos[1], b.pos[2]), short(b.state));
+            }
+            let solid = |p: (i32, i32, i32)| at.get(&p).map_or(false, |n| !is_air(n));
+            let standable = |p: (i32, i32, i32)| {
+                !solid(p) && solid((p.0, p.1 - 1, p.2)) && !solid((p.0, p.1 + 1, p.2))
+            };
+
+            println!("\n===== {name} =====");
+            let mut used: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut stations: Vec<(String, (i32, i32, i32))> = s.blocks.iter()
+                .filter(|b| b.pos[1] >= 1 && b.pos[1] <= 2)
+                .filter_map(|b| {
+                    let n = short(b.state);
+                    is_station(&n).then(|| (n, (b.pos[0], b.pos[1], b.pos[2])))
+                })
+                .collect();
+            stations.sort_by_key(|(_, p)| (p.1, p.0, p.2));
+            for (n, st) in &stations {
+                let cands = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+                let pick = cands.iter().copied()
+                    .map(|(dx, dz)| (st.0 + dx, st.1, st.2 + dz))
+                    .filter(|&c| standable(c))
+                    .min_by_key(|&c| (used.contains(&c), c.0, c.2));
+                if let Some(stand) = pick {
+                    used.insert(stand);
+                    println!("  {{ \"stand\": [{},{},{}], \"look\": [{},{},{}] }},  // {n}",
+                        stand.0, stand.1, stand.2, st.0, st.1, st.2);
+                } else {
+                    println!("  // {n}@{:?}: no standable adjacent cell", st);
+                }
+            }
+            if stations.is_empty() {
+                println!("  // no recognised stations (field/mine — keep outside fallback)");
+            }
+
+            // For the awkward interiors (wall-embedded stations / kiln mound) list
+            // every standable ground-floor cell so floor anchors can be curated.
+            if matches!(name.as_str(), "carpenter" | "charcoal_burner") {
+                println!("  // standable ground-floor (y=1) cells:");
+                let (sx, _sy, sz) = (s.size[0], s.size[1], s.size[2]);
+                for x in 0..sx {
+                    for z in 0..sz {
+                        if standable((x, 1, z)) {
+                            println!("    [{},1,{}]", x, z);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Authoring aid: for each industrial NBT, propose standable cells next to
     /// ground-floor workstations so anchor coords can be hand-curated into the
     /// JSON sidecars. A "stand" cell is non-solid with a solid floor below and
@@ -215,6 +456,7 @@ mod tests {
                 y_offset: 0,
                 allow_steep: false,
                 staffing: None,
+                anchors: Vec::new(),
             },
             wall_type: Some(WallType::Support),
             vertical_position: Some(VerticalWallPosition::Bottom),
@@ -289,6 +531,7 @@ mod tests {
                 y_offset: 0,
                 allow_steep: false,
                 staffing: None,
+                anchors: Vec::new(),
             },
             roof_type: RoofType::Hip(HipRoofPart::Inner),
         };

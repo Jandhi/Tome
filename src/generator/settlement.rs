@@ -225,6 +225,9 @@ fn assemble_dossier(
     place_labels: &[(Point2D, String)],
     manor_facts: &[ManorFact],
     house_count: usize,
+    population: usize,
+    harvests: &[String],
+    produces: &[String],
     rng: &mut RNG,
 ) -> crate::generator::chronicle::CityDossier {
     use crate::generator::chronicle::{size_word, CityDossier, DossierDistrict, Landmark};
@@ -400,6 +403,9 @@ fn assemble_dossier(
         biomes: top_biomes(editor.world(), 3),
         size: size_word(house_count),
         walled: !editor.world().gate_locations.is_empty(),
+        population,
+        harvests: harvests.to_vec(),
+        produces: produces.to_vec(),
         districts,
         landmarks,
     }
@@ -422,7 +428,7 @@ pub fn minimal_dossier(
     let no_labels: HashMap<Point2D, u32> = HashMap::new();
     assemble_dossier(
         editor, &urban, culture, &named, &[], "", &no_roads, &no_labels, &[], &[],
-        editor.world().buildings.len(), rng,
+        editor.world().buildings.len(), 0, &[], &[], rng,
     )
 }
 
@@ -1749,6 +1755,11 @@ pub async fn generate_town(
     let mut bound_worker_count = 0usize;
     let mut workplace_count = 0usize;
     let mut worker_by_job: HashMap<String, usize> = HashMap::new();
+    // Resident headcount (sum of per-house bed budgets), captured from the
+    // population block below so the chronicle can quote the town's size. This is
+    // the deterministic target the crowd is sized to, computed regardless of the
+    // live NPC placement (which is a no-op offline).
+    let mut population_count = 0usize;
 
     // ---- Population: size the resident crowd to beds, scatter it town-wide ----
     // Each house's budget is max(1, beds); the town total is their sum.
@@ -1763,6 +1774,7 @@ pub async fn generate_town(
             log_population_stats, log_sample_households, populate_town,
         };
         let budget: usize = town_anchors.iter().map(|h| h.population).sum();
+        population_count = budget;
         let candidate_anchors: usize = town_anchors.iter().map(|h| h.scenes.len()).sum();
         println!(
             "Population target: {} residents across {} houses ({} candidate anchors)",
@@ -1861,7 +1873,7 @@ pub async fn generate_town(
         let mut worker_scenes: Vec<AnchorScene> = Vec::new();
         for slot in &workplace_backfill {
             let look = *worker_rng.choose(&slot.looks);
-            worker_scenes.push(AnchorScene::worker(slot.stand, slot.facing, look));
+            worker_scenes.push(AnchorScene::worker(slot.stand, slot.facing, look, &slot.employment));
         }
 
         // Total worker posts = residents bound in the population pass + the
@@ -2035,10 +2047,25 @@ pub async fn generate_town(
         // guidebook, dropped into the player's inventory. Live-only — `give_player
         // _book` posts to the server; failures are non-fatal.
         let mut chronicle_rng = RNG::from_seed_and_string(seed, "district_names");
+        // The settlement's economy as lowercased English nouns: harvests are the
+        // raw resources the rural parcels gathered (`supply`), produces are the
+        // finished goods the chains turned them into. Pretty names come from the
+        // resource registry; ids fall back to underscore-stripped form. Sorted +
+        // deduped so the chronicle's fact list is stable across runs.
+        let reg = &data.resource_registry;
+        let pretty = |id: &str| reg.resources().get(id)
+            .map(|r| r.name.to_lowercase())
+            .unwrap_or_else(|| id.replace('_', " "));
+        let mut harvests: Vec<String> = result.supply.keys().map(|id| pretty(id)).collect();
+        harvests.sort();
+        harvests.dedup();
+        let mut produces: Vec<String> = result.finished_goods.iter().map(|(id, _)| pretty(id)).collect();
+        produces.sort();
+        produces.dedup();
         let dossier = assemble_dossier(
             editor, &urban, culture, &named, &color_scheme.town, &civic_blazon,
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
-            total_buildings, &mut chronicle_rng,
+            total_buildings, population_count, &harvests, &produces, &mut chronicle_rng,
         );
         if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
@@ -2111,6 +2138,29 @@ fn discover_worker_slots(
         let centroid =
             cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
 
+        // Staffing (skin pool + job label) comes from the building's own structure
+        // JSON, falling back to the town-wide default.
+        let staffing = npc_data.staffing_for(kind, &data.structures);
+
+        // Hand-authored interior anchors win when present: stand the crew at the
+        // exact spots the building declared (already in world coords + yaw), and
+        // skip the outside-stand discovery entirely for this building.
+        if let Some(posts) = editor.world().structure_anchors.get(&id) {
+            if !posts.is_empty() {
+                workplaces += 1;
+                for &(stand, facing) in posts {
+                    slots.push(WorkerSlot {
+                        stand,
+                        facing,
+                        workplace: centroid,
+                        looks: staffing.looks.clone(),
+                        employment: staffing.employment.clone(),
+                    });
+                }
+                continue;
+            }
+        }
+
         let mut candidates: Vec<Point2D> = Vec::new();
         let mut seen: HashSet<Point2D> = HashSet::new();
         for &fc in cells {
@@ -2124,18 +2174,39 @@ fn discover_worker_slots(
                 }
             }
         }
+        // Road-side cells first (so the seed faces the street), then deterministic.
         candidates.sort_unstable_by_key(|c| (!road_side(*c), c.x, c.y));
 
-        // Staffing comes from the building's own structure JSON (its `staffing`
-        // block), falling back to the town-wide default.
-        let staffing = npc_data.staffing_for(kind, &data.structures);
         let want = staffing.workers.min(candidates.len());
         if want == 0 {
             log::warn!("no clear stand cell for building '{}' (id {})", kind, id);
             continue;
         }
         workplaces += 1;
-        for &stand in candidates.iter().take(want) {
+
+        // Spread the crew around the building rather than bunching them at the
+        // door: seed from the road-side cell, then greedily add the candidate
+        // farthest from everyone already chosen (farthest-point sampling). With a
+        // small crew this lands one worker per side, all facing the building.
+        let mut chosen: Vec<Point2D> = vec![candidates[0]];
+        while chosen.len() < want {
+            let Some(&next) = candidates
+                .iter()
+                .filter(|c| !chosen.contains(c))
+                .max_by_key(|c| {
+                    chosen
+                        .iter()
+                        .map(|ch| (ch.x - c.x).pow(2) + (ch.y - c.y).pow(2))
+                        .min()
+                        .unwrap_or(0)
+                })
+            else {
+                break;
+            };
+            chosen.push(next);
+        }
+
+        for stand in chosen {
             // Stand on the ground at the cell; face the footprint centroid.
             let Some(y) = editor.world().get_ocean_floor_height_at(stand) else { continue; };
             let stand3 = Point3D::new(stand.x, y, stand.y);

@@ -63,6 +63,13 @@ pub struct World {
     /// the civic banner on the tower's outward face without reading blocks back
     /// (see `generator/civic_banner.rs`). Populated by `build_wall_towers`.
     pub tower_bases : Vec<(Point2D, i32)>,
+    /// Per placed structure instance (keyed by `StructureID::id`): the
+    /// hand-authored worker stand posts transformed into world coords —
+    /// `(feet_position, yaw_degrees)`. Populated at placement from the
+    /// structure's `anchors` (NBT-local stand/look cells); consumed by the
+    /// settlement worker pass so a building's crew stands at its declared
+    /// interior spots instead of the auto-discovered cells outside.
+    pub structure_anchors : HashMap<u32, Vec<(Point3D, f32)>>,
     /// Regularized "inside the wall" cell set. When `Some`, `get_urban_points`
     /// returns it instead of the raw district union (see districts/footprint.rs).
     pub urban_footprint : Option<HashSet<Point2D>>,
@@ -144,6 +151,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
+            structure_anchors: HashMap::new(),
             urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
@@ -220,6 +228,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
+            structure_anchors: HashMap::new(),
             urban_footprint: None,
             ground_height_map,
             ground_block_map,

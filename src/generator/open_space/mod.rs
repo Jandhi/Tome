@@ -220,12 +220,13 @@ impl OpenSpaceNames {
     }
 }
 
-/// A green cell is an urban cell that nothing has claimed (or only `Nature`).
+/// A green cell is an unclaimed (or only `Nature`) urban cell that isn't water —
+/// open spaces must not expand onto rivers/lakes/ponds, only the dry gaps.
 fn is_green(world: &World, c: Point2D) -> bool {
     matches!(
         world.get_claim(c),
         None | Some(BuildClaim::None) | Some(BuildClaim::Nature)
-    )
+    ) && !world.is_water(c)
 }
 
 /// Minimum width (cells) a strip must have to survive the thin-strip cull. A

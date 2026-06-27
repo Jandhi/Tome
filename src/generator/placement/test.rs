@@ -23,6 +23,44 @@ mod tests {
         util::init_logger,
     };
 
+    /// Offline check that hand-authored worker anchors load from the JSON sidecar
+    /// and transform into world posts correctly. No server: pure data + geometry.
+    #[test]
+    fn worker_anchors_load_and_transform() {
+        use crate::generator::nbts::Structure;
+        use crate::generator::placement::anchor_world_posts;
+        use crate::geometry::Cardinal;
+        use crate::data::Loadable;
+
+        let structures = Structure::load().expect("load structures");
+        let smithy = structures
+            .get(&StructureType("smithy".into()))
+            .expect("smithy structure");
+        assert_eq!(smithy.anchors.len(), 3, "smithy should declare 3 anchors");
+        assert_eq!(smithy.facing, Cardinal::North, "test assumes default North facing");
+
+        // North placement = no rotation: world = local - origin + offset.
+        let offset = Point3D::new(100, 64, 100);
+        let posts = anchor_world_posts(smithy, offset, Cardinal::North);
+        assert_eq!(posts.len(), 3);
+
+        // First anchor: stand local (6,1,7), look local (6,1,6); origin (10,0,8).
+        let (stand, yaw) = posts[0];
+        assert_eq!(stand, Point3D::new(6 - 10 + 100, 1 + 64, 7 - 8 + 100));
+        // look is one cell north (−z) of stand, so the worker faces due north (±180°).
+        assert!((yaw.abs() - 180.0).abs() < 0.01, "expected ±180°, got {yaw}");
+
+        // A rotated placement must still keep stand and look one cell apart, and
+        // turn the facing by a quarter (no longer due north).
+        let rotated = anchor_world_posts(smithy, offset, Cardinal::East);
+        assert_eq!(rotated.len(), 3);
+        assert!(
+            (rotated[0].1 - 180.0).abs() > 1.0,
+            "facing should rotate away from 180° under an East placement, got {}",
+            rotated[0].1
+        );
+    }
+
     /// Change this to any resource building name to place that building in every rural
     /// super-parcel. Useful for quickly eyeballing a single building + its production
     /// area on a flat Minecraft world without changing the resource chain data.

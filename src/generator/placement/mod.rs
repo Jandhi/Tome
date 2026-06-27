@@ -16,4 +16,5 @@ pub use placement::{
 pub use placement::{
     footprint_dims_for_rotation,
     anchor_offset_for_rotation,
+    anchor_world_posts,
 };
