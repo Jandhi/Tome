@@ -207,9 +207,12 @@ impl AnchorScene {
     }
 
     /// A one-person workplace fixture: a single required [`SlotRole::Worker`]
-    /// with a skin bound to the workplace (a smith look at a smithy, etc.). Name
-    /// and dialogue still come from the roster; only the look is forced.
-    pub fn worker(pos: Point3D, facing: f32, look: NpcLook) -> Self {
+    /// with a skin bound to the workplace (a smith look at a smithy, etc.). The
+    /// `employment` job label is used as the dialogue key, so the worker speaks
+    /// trade-specific lines (a smith about the forge, a baker about bread) when a
+    /// matching pool exists in `npcs.yaml`, falling back to generic small talk
+    /// otherwise. Name and look still come from the roster / the forced look.
+    pub fn worker(pos: Point3D, facing: f32, look: NpcLook, employment: &str) -> Self {
         AnchorScene {
             kind: SceneKind::Solo,
             slots: vec![AnchorSlot {
@@ -219,7 +222,7 @@ impl AnchorScene {
                 occupant: Occupant::AdultOnly,
                 required: true,
                 look: Some(look),
-                dialogue: None,
+                dialogue: Some(employment.to_string()),
                 volume: DialogueVolume::Normal,
                 y_offset: 0.0,
             }],
@@ -2239,7 +2242,7 @@ pub async fn bind_workers(
         // Spawn this specific resident via the shared scene path (name, dialogue,
         // home tag) with the post's look forced.
         let npc = population.households[hi].members[mi].clone();
-        let scene = AnchorScene::worker(slot.stand, slot.facing, look);
+        let scene = AnchorScene::worker(slot.stand, slot.facing, look, &slot.employment);
         let mut one = vec![npc];
         bound += staff_scene(editor, &scene, &mut one, data, rng, Some(home)).await?;
     }
@@ -2299,6 +2302,43 @@ mod tests {
         // No key at all also falls back.
         let none = data.line(None, &mut rng);
         assert!(data.small_talk.contains(&none));
+    }
+
+    /// A workplace fixture carries its trade as the dialogue key, and every
+    /// `employment` label a resource building can declare has its own dialogue
+    /// pool in `npcs.yaml` — so industry workers speak trade-specific lines rather
+    /// than generic small talk. Guards the pools against drifting from the
+    /// staffing labels. No server.
+    #[test]
+    fn worker_scenes_use_trade_dialogue() {
+        use crate::data::Loadable;
+        use crate::generator::nbts::Structure;
+
+        let data = NpcData::load().expect("load npcs.yaml");
+
+        // The fixture sets its dialogue key to the employment label.
+        let scene = AnchorScene::worker(Point3D::new(0, 0, 0), 0.0, NpcLook::Villager(Profession::Weaponsmith), "smith");
+        assert_eq!(scene.slots[0].dialogue.as_deref(), Some("smith"));
+
+        // A smith draws from the smith pool, not generic small talk.
+        let mut rng = RNG::new(Seed(7));
+        let smith_pool = data.dialogue.get("smith").expect("smith dialogue pool");
+        assert!(!smith_pool.is_empty());
+        let line = data.line(Some("smith"), &mut rng);
+        assert!(smith_pool.contains(&line), "smith line must come from the smith pool");
+
+        // Every staffed resource building's employment label has a pool.
+        let structures = Structure::load().expect("load structures");
+        for s in structures.values() {
+            if let Some(staffing) = &s.staffing {
+                let emp = &staffing.employment;
+                assert!(
+                    data.dialogue.contains_key(emp),
+                    "employment '{emp}' (building '{}') has no dialogue pool in npcs.yaml",
+                    s.id.0
+                );
+            }
+        }
     }
 
     /// Every culture defines a non-empty localized first-name pool, and

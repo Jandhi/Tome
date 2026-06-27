@@ -67,6 +67,16 @@ pub struct CityDossier {
     /// Size bucket ("hamlet"/"village"/"town"/"large town").
     pub size: String,
     pub walled: bool,
+    /// Resident headcount — the town's bed-budget population. `0` when unknown
+    /// (the minimal pipeline), in which case the chronicle omits it.
+    pub population: usize,
+    /// What the town gathers from the land around it — raw resources its rural
+    /// parcels harvest, as lowercased English nouns ("wheat", "wool", "wood").
+    /// Empty when the economy is unknown (the minimal pipeline).
+    pub harvests: Vec<String>,
+    /// What the town's workshops turn those raws into — finished goods, as
+    /// lowercased English nouns ("bread", "leather"). Empty when unknown.
+    pub produces: Vec<String>,
     /// The town's named districts, in stable order (by quarter then name). The
     /// chronicle walks these one at a time; empty for the minimal pipeline.
     pub districts: Vec<DossierDistrict>,
@@ -167,6 +177,9 @@ pub fn build_instruction(d: &CityDossier) -> String {
     } else {
         s.push_str(&format!("  A{walled} {} in the {} style\n", d.size, d.culture));
     }
+    if d.population > 0 {
+        s.push_str(&format!("  Home to about {} residents\n", d.population));
+    }
     if !d.biomes.is_empty() {
         s.push_str(&format!("  Set in {} country\n", join_natural(&d.biomes)));
     }
@@ -175,6 +188,14 @@ pub fn build_instruction(d: &CityDossier) -> String {
     }
     if !d.civic_blazon.is_empty() {
         s.push_str(&format!("  Its civic banner, on the towers and gates: {}\n", d.civic_blazon));
+    }
+    // What the place lives off — the trade worth a line in the welcome. Harvests
+    // are the raws gathered from the land; produces are what the workshops make.
+    if !d.harvests.is_empty() {
+        s.push_str(&format!("  It harvests {} from the land around it\n", join_natural(&d.harvests)));
+    }
+    if !d.produces.is_empty() {
+        s.push_str(&format!("  Its workshops produce {}\n", join_natural(&d.produces)));
     }
     s.push('\n');
 
@@ -222,7 +243,8 @@ pub fn build_instruction(d: &CityDossier) -> String {
     s.push_str(
         "Then organise the rest as a handful of SHORT titled sections, each opening with a brief \
          bold heading and then a few flowing lines. Follow the welcome with an at-a-glance sense \
-         of the town (what kind of place it is, its colours and setting, the feel of arriving). \
+         of the town (what kind of place it is, its colours and setting, the feel of arriving, and \
+         what it lives off — what it harvests from the land and what its workshops make). \
          Then give roughly ONE section to each named DISTRICT, in turn: use the district's own \
          name as the heading, and describe what a traveller would find as they walk it — weaving \
          its streets, trades, families and greens together into a sense of that one place, not a \
@@ -554,6 +576,9 @@ mod tests {
             biomes: vec!["forest".to_string(), "river".to_string()],
             size: "town".to_string(),
             walled: true,
+            population: 142,
+            harvests: vec!["wheat".to_string(), "wool".to_string()],
+            produces: vec!["bread".to_string(), "wool cloth".to_string()],
             districts: vec![
                 DossierDistrict { name: "Old Quarter".into(), quarter: "central".into() },
                 DossierDistrict { name: "Smith Row".into(), quarter: "eastern".into() },
@@ -579,9 +604,13 @@ mod tests {
         // Scalars.
         assert!(s.contains("Blackbarrow — \"Dark Hill\""), "{s}");
         assert!(s.contains("walled town in the medieval style"), "{s}");
+        assert!(s.contains("Home to about 142 residents"), "population line missing:\n{s}");
         assert!(s.contains("forest and river country"), "{s}");
         assert!(s.contains("flies deep red and black"), "{s}");
         assert!(s.contains("civic banner, on the towers and gates: a red cross on a black background"), "{s}");
+        // What the town lives off — harvests and workshop produce.
+        assert!(s.contains("It harvests wheat and wool from the land around it"), "harvest line missing:\n{s}");
+        assert!(s.contains("Its workshops produce bread and wool cloth"), "produce line missing:\n{s}");
         // Facts are grouped under district headings (NAME — quarter), in
         // quarter-sorted order, each landmark tagged with its kind.
         assert!(s.contains("SMITH ROW — eastern"), "district heading missing:\n{s}");
@@ -700,12 +729,20 @@ mod tests {
             biomes: vec![],
             size: "hamlet".into(),
             walled: false,
+            population: 0,
+            harvests: vec![],
+            produces: vec![],
             districts: vec![],
             landmarks: vec![],
         };
         let s = build_instruction(&d);
         assert!(s.contains("Name: Nowhere\n"), "no bare-name line:\n{s}");
         assert!(s.contains("A hamlet\n"), "{s}");
+        // No harvest/produce lines when the economy is unknown.
+        assert!(!s.contains("It harvests"), "{s}");
+        assert!(!s.contains("workshops produce"), "{s}");
+        // No population line when the headcount is unknown.
+        assert!(!s.contains("Home to about"), "{s}");
         // No district intro or edge block when there's nothing to place.
         assert!(!s.contains("named DISTRICTS"), "{s}");
         assert!(!s.contains("AROUND THE EDGE"), "{s}");

@@ -129,6 +129,72 @@ pub fn terraform_layers(surface: &Block) -> (Block, Block) {
     }
 }
 
+/// Drain every standing liquid (water *and* lava) out of `area`, back-filling
+/// each liquid column with solid ground so nothing can flow back in. Meant to run
+/// BEFORE the urban flatten: it leaves the whole city bounds dry, so the later
+/// terraform only has to grade solid ground.
+///
+/// For each cell we anchor on the OCEAN-FLOOR height — the height map that stops
+/// at the first fluid/air above the solid floor — and drill upward, replacing
+/// every liquid block with solid until we hit air. The floor's own surface block
+/// chooses the fill (sand→sandstone body, grass→dirt, …) via [`terraform_layers`]
+/// so the plug matches the surrounding geology. Each drained column's new dry
+/// surface is written back to the world (heights + ground block) so `is_water`
+/// and the height maps no longer report the removed liquid.
+pub async fn drain_liquids(editor: &mut Editor, area: &HashSet<Point2D>) {
+    // Same large-buffer rationale as `force_height`: draining touches many blocks
+    // per column over a wide area, so batch hard and restore the caller's size.
+    const TERRAFORM_BUFFER: usize = 4096;
+    let prev_buffer = editor.buffer_size();
+    editor.set_buffer_size(TERRAFORM_BUFFER);
+
+    let mut updated: HashMap<Point2D, (i32, Block)> = HashMap::new();
+    for &xz in area {
+        // The ocean-floor height is the first fluid/air cell above the solid
+        // floor: on a liquid cell it's the BOTTOM liquid block, on dry land it's
+        // just the first air (so the scan below finds no liquid and does nothing).
+        let Some(floor) = editor.world().get_ocean_floor_height_at(xz) else {
+            continue;
+        };
+
+        // The floor's top solid sits one below; sample it to match the fill to the
+        // surrounding ground, defaulting to dirt if the column isn't loaded.
+        let surface = editor
+            .world()
+            .get_block(Point3D::new(xz.x, floor - 1, xz.y))
+            .unwrap_or_else(|| Block::from_id("minecraft:dirt".into()));
+        let (fill, top) = terraform_layers(&surface);
+
+        // Drill up from the floor, replacing every liquid block with solid fill
+        // until we reach air. (Above the ocean floor, liquid is the only thing in
+        // the way.)
+        let mut y = floor;
+        let mut filled = false;
+        while editor
+            .world()
+            .get_block(Point3D::new(xz.x, y, xz.y))
+            .is_some_and(|b| b.id.is_liquid())
+        {
+            editor.place_block_forced(&fill, Point3D::new(xz.x, y, xz.y)).await;
+            filled = true;
+            y += 1;
+        }
+        if filled {
+            // Cap the plug in the floor's surface material and record the new dry
+            // surface (first air at `y`).
+            editor.place_block_forced(&top, Point3D::new(xz.x, y - 1, xz.y)).await;
+            updated.insert(xz, (y, top));
+        }
+    }
+
+    editor.flush_buffer().await;
+    editor.set_buffer_size(prev_buffer);
+
+    for (xz, (surface_air, block)) in updated {
+        editor.world_mut().set_drained_surface(xz, surface_air, block);
+    }
+}
+
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     // Terraforming writes many blocks per column over a wide area. The default
     // 32-block buffer flushes an HTTP PUT every 32 placements, so the cost is
