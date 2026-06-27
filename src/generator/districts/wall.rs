@@ -925,6 +925,11 @@ pub async fn build_wall_towers(
                     Point3D::new(point.x, top_y, point.y),
                     Point3D::new(point.x + 1, top_y, point.y),
                 ]);
+                // Anchor for the civic banner: the 5×5 base is solid from
+                // `point_height-1` to `+5` on the cells perpendicular to the wall
+                // (off-walkway), so a banner on the outward face at `+4` always has
+                // a wall block behind it. The post-pass picks the outward face.
+                editor.world_mut().tower_bases.push((*point, point_height + 4));
             }
         } else {
                 tower_possible -= 1;

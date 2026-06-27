@@ -310,7 +310,7 @@ pub async fn spawn_villager_npc(
     // `Invulnerable` so a fixture never dies — no suffocation if it ends up a
     // hair inside a block, no mob/fire/fall damage in a persistent town.
     let villager_data = format!(
-        "{{NoAI:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
+        "{{NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f],\
          VillagerData:{{type:\"{}\",profession:\"{}\",level:1}}{}{}}}",
         escape_snbt(name),
         angle,
@@ -357,8 +357,12 @@ pub async fn spawn_mob_npc(
 ) -> anyhow::Result<()> {
     // Frozen, named, faced, and invulnerable — same fixture treatment as a
     // villager NPC (see `spawn_villager_npc` for why `Invulnerable`).
+    // `PersistenceRequired` is ESSENTIAL here: every `Mob` variant (pillager,
+    // vindicator, husk, …) despawns when no player is nearby, and `NoAI` does NOT
+    // prevent despawning — without this the guard vanishes after generation while
+    // its (never-despawning) dialogue bubble is left orphaned.
     let mob_data = format!(
-        "{{NoAI:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f]}}",
+        "{{NoAI:1b,PersistenceRequired:1b,Invulnerable:1b,CustomName:{{text:\"{}\"}},CustomNameVisible:1b,Rotation:[{}f,0f]}}",
         escape_snbt(name),
         angle,
     );

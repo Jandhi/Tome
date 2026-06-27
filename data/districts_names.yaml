@@ -1,0 +1,123 @@
+# District-name vocabulary for generator/districts/naming.rs (name_districts).
+#
+# Each urban district (3-5 per city, see districts/constants.rs) is named from a
+# SPREAD weighted mix of its own features, so any source can lead: its dominant
+# trade, a resident family, a park/green, its cardinal direction, or just generic
+# cultural vocab. Composition mirrors the town namer (generator/naming.rs): a lead
+# word is drawn from a weighted theme, then a culture suffix is attached
+# ("Smith" + " Row" -> "Smith Row", "Kaji" + "machi" -> "Kajimachi") — or, for the
+# desert, the Arabic quarter-prefix form ("Hayy" + as-Souk -> "Hayy as-Souk").
+# Seeded by the town seed, so a district always gets the same name.
+
+# Relative weight of each theme when picking the lead. Kept roughly even on
+# purpose: a district is about as likely to be named for its direction or generic
+# vocab as for its trade, so names stay varied across a town.
+weights:
+  trade: 3
+  family: 3
+  green: 2
+  direction: 3
+  generic: 3
+
+# Urban structure-type id -> trade concept. Same id space as
+# settlement_names.yaml `buildings`. A district's most common mapped type wins.
+trades:
+  mill: mill
+  smithy: smith
+  bakery: baker
+  carpenter: carpenter
+  tannery: tanner
+  weaver: weaver
+  brewery: brewer
+  butcher: butcher
+  sawmill: sawyer
+  chandlery: chandler
+  scriptorium: scribe
+  farm: field
+  ranch: stock
+  mine: delve
+
+# ── Per-culture vocabulary + morphology ───────────────────────────────────────
+# `suffixes` attach to the lead (a leading space makes it a separate word:
+# " Row" -> "Smith Row"; no space attaches: "gate" -> "Smithgate"). `directions`
+# translate a cardinal (north/east/.../central) into that culture's word.
+# `trade_words` translate a trade concept; `greens`/`generic` are flat word pools.
+# Desert uses `prefix: Hayy` with the definite article instead of suffixes.
+cultures:
+  medieval:
+    suffixes: ["gate", " Ward", " Row", " End", " Quarter", "side"]
+    directions:
+      north: North
+      south: South
+      east: East
+      west: West
+      central: Old
+    trade_words:
+      mill: [Mill]
+      smith: [Smith, Forge]
+      baker: [Baker]
+      carpenter: [Wright]
+      tanner: [Tanner, Barker]
+      weaver: [Weaver, Webb]
+      brewer: [Brewer, Malt]
+      butcher: [Shamble]
+      sawyer: [Sawyer]
+      chandler: [Chandler]
+      scribe: [Scrivener]
+      field: [Field]
+      stock: [Stock]
+      delve: [Delve]
+    greens: [Garden, Green, Orchard, Grove]
+    generic: [Old, Upper, Lower, High, Stone, Grey, New]
+  japanese:
+    suffixes: ["machi", "chō", "dōri"]
+    directions:
+      north: Kita
+      south: Minami
+      east: Higashi
+      west: Nishi
+      central: Naka
+    trade_words:
+      mill: [Ko]
+      smith: [Kaji]
+      baker: []
+      carpenter: [Daiku]
+      tanner: []
+      weaver: [Hata]
+      brewer: [Sake]
+      butcher: []
+      sawyer: [Kiba]
+      chandler: []
+      scribe: [Fumi]
+      field: [Ta]
+      stock: []
+      delve: []
+    greens: [Niwa, Sono, Hana]
+    generic: [Hon, Moto, Shin, Naka, Kami, Shimo]
+  desert:
+    # Arabic quarter form: "Hayy" (neighbourhood) + definite article + the lead,
+    # with sun-letter assimilation ("Hayy as-Souk", "Hayy ash-Shamali").
+    prefix: Hayy
+    directions:
+      north: Shamali
+      south: Janubi
+      east: Sharqi
+      west: Gharbi
+      central: Wasat
+    trade_words:
+      mill: [Tahuna]
+      smith: [Haddad]
+      baker: [Khabbaz]
+      carpenter: [Najjar]
+      tanner: [Dabbagh]
+      weaver: [Hayek]
+      brewer: []
+      butcher: [Jazzar]
+      sawyer: [Nashar]
+      chandler: []
+      scribe: [Warraq]
+      field: [Bustan]
+      stock: [Raï]
+      delve: [Manjam]
+    greens: [Bustan, Riyad]
+    generic: [Atiq, Jadid, Fawqani, Tahtani]
