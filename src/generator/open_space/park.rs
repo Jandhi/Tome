@@ -32,7 +32,7 @@ use super::props::{
     chebyshev, edge_depth, flatten_blend, inward_dir, is_building, is_path, lay_soil,
     lay_soil_patch, place_bench, place_lantern_post, put, put_forced,
 };
-use super::theme::Theme;
+use super::theme::{Theme, CHERRY_CHANCE};
 use super::Region;
 
 /// What kind of park a region becomes.
@@ -146,11 +146,17 @@ fn biome_park_tree(biome: &Biome, rng: &mut RNG) -> Option<Tree> {
     Some(*rng.choose_weighted_vec(&weights))
 }
 
-/// The species for a park tree. A desert-*style* settlement always grows jungle
+/// The species for a park tree. A Japanese settlement has a [`CHERRY_CHANCE`]
+/// chance of a flowering cherry. A desert-*style* settlement always grows jungle
 /// trees — a lush, warm canopy that suits the sandstone palette — whatever the
 /// underlying biome. Every other style picks a biome-appropriate species, or
 /// `None` where a full-size tree looks out of place.
 fn park_tree(theme: &Theme, biome: &Biome, rng: &mut RNG) -> Option<Tree> {
+    // Japanese style: a flowering cherry now and then, whatever the biome.
+    if theme.cherry_blossom && rng.percent(CHERRY_CHANCE) {
+        let weights = vec![(Tree::MediumCherry, 3.0), (Tree::LargeCherry, 2.0)];
+        return Some(*rng.choose_weighted_vec(&weights));
+    }
     if theme.arid {
         let weights = vec![
             (Tree::MediumJungle, 3.0),

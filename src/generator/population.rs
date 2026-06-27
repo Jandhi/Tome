@@ -487,14 +487,24 @@ pub struct Fixture {
 }
 
 
-/// Per-culture name pools (currently just first names). Loaded from the
-/// `cultures` map in `data/npcs.yaml`, keyed by [`culture_key`].
+/// Per-culture name pools. Loaded from the `cultures` map in `data/npcs.yaml`,
+/// keyed by [`culture_key`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct CultureNames {
     /// Localized first names, picked verbatim by [`roll_first_name`]. Mixes
     /// masculine and feminine names; one is assigned per NPC at random.
     #[serde(default)]
     pub first_names: Vec<String>,
+    /// Capitalized surname roots for this culture, combined with
+    /// [`Self::surname_suffixes`] in [`roll_surname`]. When non-empty (together
+    /// with the suffixes), supersedes the legacy top-level
+    /// `surname_prefixes`/`surname_suffixes` for this culture.
+    #[serde(default)]
+    pub surname_prefixes: Vec<String>,
+    /// Surname endings for this culture, appended to a
+    /// [`Self::surname_prefixes`] root. See [`roll_surname`].
+    #[serde(default)]
+    pub surname_suffixes: Vec<String>,
 }
 
 /// The `data/npcs.yaml` key for a culture's name pools.
@@ -771,16 +781,34 @@ fn roll_first_name(culture: Culture, data: &NpcData, rng: &mut RNG) -> String {
     format!("{}{}", prefix, suffix)
 }
 
-/// Mint a family name by combining a random prefix with a random suffix —
-/// "Ash" + "wood" → "Ashwood", "Under" + "hill" → "Underhill". Falls back to
-/// `"Townsfolk"` if either pool is empty (so a partial yaml doesn't panic).
-fn roll_surname(data: &NpcData, rng: &mut RNG) -> String {
-    if data.surname_prefixes.is_empty() || data.surname_suffixes.is_empty() {
+/// The surname prefix/suffix pools that apply to `culture`. Every culture keeps
+/// the same English place-name *structure* (prefix root + place-name ending) so
+/// names stay readable — only the word pools change to carry the culture's
+/// vibe: Anglo-Saxon for medieval (Ashwood), pine/crane/mist imagery for
+/// japanese (Pinevale, Cranebrook), sun/sand/dune imagery for desert
+/// (Sandford, Sunmere). Returns the culture's own pools when it defines both;
+/// otherwise the shared legacy top-level pools (so a partial yaml still works).
+fn surname_pools<'a>(culture: Culture, data: &'a NpcData) -> (&'a [String], &'a [String]) {
+    if let Some(names) = data.cultures.get(culture_key(culture)) {
+        if !names.surname_prefixes.is_empty() && !names.surname_suffixes.is_empty() {
+            return (&names.surname_prefixes, &names.surname_suffixes);
+        }
+    }
+    (&data.surname_prefixes, &data.surname_suffixes)
+}
+
+/// Mint a family name localized to `culture` by combining a random prefix with a
+/// place-name suffix — "Ash" + "wood" → "Ashwood" (medieval), "Pine" + "vale" →
+/// "Pinevale" (japanese), "Sand" + "ford" → "Sandford" (desert). The structure
+/// is shared across cultures; only the word pools differ (see [`surname_pools`]).
+/// Returns `"Townsfolk"` only if the pools are empty (so a partial yaml doesn't
+/// panic).
+fn roll_surname(culture: Culture, data: &NpcData, rng: &mut RNG) -> String {
+    let (prefixes, suffixes) = surname_pools(culture, data);
+    if prefixes.is_empty() || suffixes.is_empty() {
         return "Townsfolk".to_string();
     }
-    let prefix = rng.choose(&data.surname_prefixes);
-    let suffix = rng.choose(&data.surname_suffixes);
-    format!("{}{}", prefix, suffix)
+    format!("{}{}", rng.choose(prefixes), rng.choose(suffixes))
 }
 
 /// Roll an epithet for a member of `stage`, weighted toward elders. Elders
@@ -1010,7 +1038,7 @@ fn expand_shape(
     // back to the primary if every roll matches (small surname pool).
     let alt_surname = |rng: &mut RNG| -> String {
         for _ in 0..6 {
-            let s = roll_surname(data, rng);
+            let s = roll_surname(culture, data, rng);
             if s != primary_surname {
                 return s;
             }
@@ -1197,19 +1225,22 @@ pub fn build_households(
     for (h_idx, house) in houses.iter().enumerate() {
         let budget = house.population.max(1);
         let wealth = house.wealth;
-        // A manor usually takes its surname from its family colour (Black →
-        // Blackwell), matching the colour it flies on its banners; 40% of the
-        // time it falls back to a plain random surname. The colour choice is made
-        // once per house so the uniqueness loop re-rolls a fresh colour *suffix*
-        // (preserving the colour) rather than silently dropping it on collision.
+        // A manor usually takes its surname from its family colour, matching the
+        // colour it flies on its banners — the colour root joins the culture's
+        // own suffix pool (Black → Blackwood for medieval, Blacksand for desert,
+        // Blackvale for japanese); 40% of the time it falls back to a plain
+        // random surname. The colour choice is made once per house so the
+        // uniqueness loop re-rolls a fresh colour *suffix* (preserving the
+        // colour) rather than silently dropping it on collision.
         const COLOR_SURNAME_PCT: i32 = 40;
+        let (_, color_suffixes) = surname_pools(culture, data);
         let color_root = house.family_color.and_then(|c| c.surname_root());
         let use_color =
-            color_root.is_some() && !data.surname_suffixes.is_empty() && rng.percent(COLOR_SURNAME_PCT);
+            color_root.is_some() && !color_suffixes.is_empty() && rng.percent(COLOR_SURNAME_PCT);
         let roll = |rng: &mut RNG| -> String {
             match color_root {
-                Some(root) if use_color => format!("{root}{}", rng.choose(&data.surname_suffixes)),
-                _ => roll_surname(data, rng),
+                Some(root) if use_color => format!("{root}{}", rng.choose(color_suffixes)),
+                _ => roll_surname(culture, data, rng),
             }
         };
         let mut primary_surname = roll(rng);
@@ -1727,7 +1758,7 @@ pub fn build_roster(
             Npc {
                 id: alloc.next_id(),
                 first_name: roll_first_name(culture, data, rng),
-                surname: roll_surname(data, rng),
+                surname: roll_surname(culture, data, rng),
                 epithet: roll_epithet(stage, data, rng),
                 life_stage: stage,
                 biome,
@@ -2243,9 +2274,11 @@ mod tests {
         let data = NpcData::load().expect("load npcs.yaml");
         assert!(!data.surname_prefixes.is_empty(), "surname_prefixes must be non-empty");
         assert!(!data.surname_suffixes.is_empty(), "surname_suffixes must be non-empty");
-        // The combined surname is the literal prefix+suffix concat (no separator).
+        // Medieval has no culture-specific surname pool, so it falls back to the
+        // legacy top-level pools: the combined surname is the literal
+        // prefix+suffix concat (no separator).
         let mut sn_rng = RNG::new(Seed(123));
-        let sn = roll_surname(&data, &mut sn_rng);
+        let sn = roll_surname(Culture::Medieval, &data, &mut sn_rng);
         assert!(
             data.surname_prefixes.iter().any(|p| sn.starts_with(p)),
             "generated surname '{sn}' should start with one of the prefixes",
@@ -2293,6 +2326,38 @@ mod tests {
                 assert!(
                     pool.contains(&name),
                     "roll_first_name({}) produced '{name}', not in that culture's pool",
+                    culture_key(culture),
+                );
+            }
+        }
+    }
+
+    /// Japanese and desert define their own (anglicized, culturally-themed)
+    /// surname pools, and `roll_surname` draws from a culture's own prefix+suffix
+    /// pools when present (medieval falls back to the shared English pool).
+    /// Guards the per-culture surname blocks in `npcs.yaml` against drifting away
+    /// from the code. No server.
+    #[test]
+    fn surnames_are_localized_per_culture() {
+        let data = NpcData::load().expect("load npcs.yaml");
+        for culture in [Culture::Japanese, Culture::Desert] {
+            let pool = data
+                .cultures
+                .get(culture_key(culture))
+                .unwrap_or_else(|| panic!("npcs.yaml: no `cultures.{}` block", culture_key(culture)));
+            assert!(
+                !pool.surname_prefixes.is_empty() && !pool.surname_suffixes.is_empty(),
+                "culture '{}' has an empty surname pool",
+                culture_key(culture),
+            );
+            // Several draws all combine this culture's own prefix and suffix.
+            let mut rng = RNG::new(Seed(42));
+            for _ in 0..20 {
+                let sn = roll_surname(culture, &data, &mut rng);
+                assert!(
+                    pool.surname_prefixes.iter().any(|p| sn.starts_with(p))
+                        && pool.surname_suffixes.iter().any(|s| sn.ends_with(s)),
+                    "roll_surname({}) produced '{sn}', not from that culture's pool",
                     culture_key(culture),
                 );
             }

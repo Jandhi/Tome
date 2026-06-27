@@ -130,6 +130,15 @@ pub fn terraform_layers(surface: &Block) -> (Block, Block) {
 }
 
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
+    // Terraforming writes many blocks per column over a wide area. The default
+    // 32-block buffer flushes an HTTP PUT every 32 placements, so the cost is
+    // dominated by round-trip latency × request count. Batch much larger here
+    // (one PUT per ~4096 blocks instead of per 32) to cut the request count by
+    // two orders of magnitude, then flush and restore the caller's buffer size.
+    const TERRAFORM_BUFFER: usize = 4096;
+    let prev_buffer = editor.buffer_size();
+    editor.set_buffer_size(TERRAFORM_BUFFER);
+
     // Only the points we actually terraform may be written back to the
     // heightmap. Asserting heights for skipped water cells would make the map
     // claim land that was never built — downstream consumers (e.g. the wall's
@@ -236,6 +245,11 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
             updated.insert(point.with_y(surface_air));
         }
     }
+
+    // With the large buffer, most placements above are still pending; flush
+    // them in as few requests as possible before restoring the caller's size.
+    editor.flush_buffer().await;
+    editor.set_buffer_size(prev_buffer);
 
     editor.world_mut().set_heights(&updated);
 }

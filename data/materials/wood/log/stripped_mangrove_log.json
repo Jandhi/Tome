@@ -1,0 +1,8 @@
+{
+    "id" : "stripped_mangrove_log",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:stripped_mangrove_log",
+        "shelf" : "minecraft:mangrove_shelf"
+    }
+}

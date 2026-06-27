@@ -1206,7 +1206,7 @@ mod tests {
         crate::generator::settlement::generate_town(
             &mut editor,
             Seed(12345),
-            crate::generator::buildings_v2::Culture::Medieval,
+            Some(crate::generator::buildings_v2::Culture::Medieval),
         ).await;
     }
 
@@ -1223,7 +1223,7 @@ mod tests {
         crate::generator::settlement::generate_town(
             &mut editor,
             Seed(12345),
-            crate::generator::buildings_v2::Culture::Desert,
+            Some(crate::generator::buildings_v2::Culture::Desert),
         ).await;
 
         let urban = editor.world().get_urban_points();

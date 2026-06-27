@@ -71,6 +71,10 @@ impl Editor {
         self.buffer_size = size;
     }
 
+    pub fn buffer_size(&self) -> usize {
+        self.buffer_size
+    }
+
     /// Controls whether buffered blocks are flushed with block updates on
     /// (`true`, the default) or off. Flushes any pending buffer first so the
     /// switch only affects blocks placed afterwards. Disable around a structure

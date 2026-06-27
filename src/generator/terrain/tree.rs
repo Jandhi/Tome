@@ -54,6 +54,12 @@ pub enum Tree {
     MediumOak,
     #[serde(rename = "small_oak")]
     SmallOak,
+    #[serde(rename = "small_cherry")]
+    SmallCherry,
+    #[serde(rename = "medium_cherry")]
+    MediumCherry,
+    #[serde(rename = "large_cherry")]
+    LargeCherry,
     #[serde(rename = "cactus")]
     Cactus,
 }
@@ -169,6 +175,10 @@ pub async fn generate_tree(
         Tree::SmallOak => {
             // Generate a small oak tree
             generate_small_oak(editor, point, &wood_block, &leaf_block, rng, 100).await
+        }
+        Tree::SmallCherry | Tree::MediumCherry | Tree::LargeCherry => {
+            // Cherry blossoms are only grown via the vanilla `place feature`
+            // path (see tree_feature.rs); there's no hand-authored variant.
         }
         Tree::Cactus => {
             // Cactus ignores the wood/leaf palette — it's a short column on sand.

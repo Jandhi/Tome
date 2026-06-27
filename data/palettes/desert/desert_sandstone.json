@@ -6,10 +6,10 @@
   "secondary_roof" : "cut_sandstone",
   "primary_wood" : "birch_planks",
   "secondary_wood" : "birch_planks",
-  "wood_pillar" : "cut_sandstone",
+  "wood_pillar" : "smooth_sandstone",
   "primary_stone" : "smooth_sandstone",
   "secondary_stone" : "cut_sandstone",
-  "flower" : "japanese_flowers",
+  "flower" : "warm_flowers",
   "ground_floor" : "smooth_sandstone",
   "upper_floor" : "cut_sandstone",
 

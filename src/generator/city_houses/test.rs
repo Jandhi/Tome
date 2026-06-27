@@ -144,7 +144,6 @@ async fn settlement_with_city_houses() {
     use crate::generator::city_houses::{
         default_interior_size_pool, fill_interior, place_block_frontage, plot_from_block,
     };
-    use crate::generator::chronicle::SettlementInfo;
     use crate::generator::districts::generate_parcels;
     use crate::generator::materials::PaletteId;
     use crate::generator::buildings_v2::roof::gable::GablePitch;
@@ -188,11 +187,7 @@ async fn settlement_with_city_houses() {
     outers.extend(off_limits.iter().copied());
     let road_points: HashSet<Point2D> = outers.difference(&urban_area_edge).copied().collect();
 
-    let settlement_info = SettlementInfo::new(editor.world());
-    let paving = settlement_info
-        .top_three_biomes
-        .first()
-        .cloned()
+    let paving = crate::generator::settlement::dominant_biome(editor.world())
         .map(PavingType::from_biome)
         .unwrap_or(PavingType::Stone);
     smooth_and_pave_road(&mut editor, &mut rng, &road_points, paving).await;

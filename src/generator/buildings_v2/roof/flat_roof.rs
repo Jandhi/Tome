@@ -50,9 +50,14 @@ pub(super) async fn place_flat_roof(
     );
 
     let mut parapet_rng = rng.derive();
+    // Parapet draws on the Accent role, which backs off to PrimaryStone when a
+    // palette defines no accent (so plain sandstone styles are unchanged). A
+    // style that *does* set an accent (e.g. green terracotta) gets a coloured
+    // crown — see the solid-band branch below.
+    let has_accent = palette.materials.contains_key(&MaterialRole::Accent);
     let parapet_material = palette
-        .get_material(MaterialRole::PrimaryStone)
-        .expect("No primary stone material")
+        .get_material(MaterialRole::Accent)
+        .expect("No accent or stone material for parapet")
         .clone();
     let mut parapet_placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut parapet_rng),
@@ -149,6 +154,21 @@ pub(super) async fn place_flat_roof(
     // Place parapet blocks according to style
     use std::collections::HashMap;
     for &(point, roof_y) in &parapet_cells {
+        // Accented styles render a clean solid band instead of the random
+        // sandstone parapet styles: a full block on every parapet cell with a
+        // raised cap at corners. All Block form, so an accent material with no
+        // slab/wall variant (terracotta) never leaves gaps.
+        if has_accent {
+            parapet_placer
+                .place_block(editor, point.add_y(roof_y - 1), BlockForm::Block, None, None)
+                .await;
+            if is_corner(point) {
+                parapet_placer
+                    .place_block(editor, point.add_y(roof_y), BlockForm::Block, None, None)
+                    .await;
+            }
+            continue;
+        }
         let checkerboard = (point.x + point.y) % 2 == 0;
         match parapet_style {
             ParapetStyle::Crenellated => {
