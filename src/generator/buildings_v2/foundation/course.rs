@@ -62,10 +62,7 @@ pub fn analyze_terrain(footprint: &Footprint, world: &World, base_y_override: Op
 
     let heights: HashMap<Point2D, i32> = points
         .iter()
-        .map(|&p| {
-            let h = world.get_ocean_floor_height_at(p);
-            (p, h)
-        })
+        .filter_map(|&p| world.get_ocean_floor_height_at(p).map(|h| (p, h)))
         .collect();
 
     let min_height = *heights.values().min().expect("Footprint has no points");

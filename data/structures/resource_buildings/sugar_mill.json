@@ -11,5 +11,50 @@
     15,
     23
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "miller",
+    "looks": [
+      "Farmer"
+    ],
+    "workers": 3
+  },
+  "anchors": [
+    {
+      "stand": [
+        2,
+        1,
+        5
+      ],
+      "look": [
+        2,
+        1,
+        4
+      ]
+    },
+    {
+      "stand": [
+        11,
+        1,
+        10
+      ],
+      "look": [
+        12,
+        1,
+        10
+      ]
+    },
+    {
+      "stand": [
+        7,
+        1,
+        20
+      ],
+      "look": [
+        8,
+        1,
+        20
+      ]
+    }
+  ]
 }

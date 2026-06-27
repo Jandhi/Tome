@@ -1,0 +1,7 @@
+{
+    "id" : "green_terracotta",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:green_terracotta"
+    }
+}

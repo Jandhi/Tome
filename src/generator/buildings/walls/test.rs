@@ -27,7 +27,7 @@ mod tests {
         );
 
         let midpoint = editor.world_mut().world_rect_2d().size / 2;
-        let point = editor.world_mut().add_height(midpoint);
+        let point = editor.world_mut().add_height(midpoint).expect("test cell in bounds");
 
         let grid = Grid::new(point.into());
 

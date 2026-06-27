@@ -11,5 +11,50 @@
     21,
     13
   ],
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "butcher",
+    "looks": [
+      "Butcher"
+    ],
+    "workers": 3
+  },
+  "anchors": [
+    {
+      "stand": [
+        4,
+        1,
+        9
+      ],
+      "look": [
+        4,
+        1,
+        10
+      ]
+    },
+    {
+      "stand": [
+        7,
+        1,
+        9
+      ],
+      "look": [
+        7,
+        1,
+        10
+      ]
+    },
+    {
+      "stand": [
+        17,
+        1,
+        9
+      ],
+      "look": [
+        18,
+        1,
+        9
+      ]
+    }
+  ]
 }

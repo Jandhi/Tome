@@ -1,3 +1,6 @@
+use std::collections::HashSet;
+
+use crate::generator::population::{Occupant, SceneKind, SlotRole};
 use crate::geometry::Rect2D;
 
 /// State of a cell in a room's interior.
@@ -24,6 +27,12 @@ pub struct ConstraintMap {
     pub ground: Vec<Vec<CellState>>,
     /// ceiling[x][z] — true if a ceiling item is placed here.
     pub ceiling: Vec<Vec<bool>>,
+    /// World (x, z) cells that belong to a staircase (steps, landings, tops, and
+    /// the stairwell air-column above). NPC anchors are never placed on these —
+    /// standing on a stair reads as a glitch — so they're tracked separately from
+    /// [`CellState`] (a stair landing is `UnblockedReachable`, indistinguishable
+    /// from a door entrance otherwise). See [`Self::is_stair`].
+    pub stairs: HashSet<(i32, i32)>,
 }
 
 impl ConstraintMap {
@@ -35,6 +44,7 @@ impl ConstraintMap {
             origin: (interior.min().x, interior.min().y),
             ground: vec![vec![CellState::Empty; h]; w],
             ceiling: vec![vec![false; h]; w],
+            stairs: HashSet::new(),
         }
     }
 
@@ -59,6 +69,16 @@ impl ConstraintMap {
         if let Some((x, z)) = self.local(cell) {
             self.ground[x][z] = state;
         }
+    }
+
+    /// Mark a world cell as part of a staircase (see [`Self::stairs`]).
+    pub fn mark_stair(&mut self, cell: (i32, i32)) {
+        self.stairs.insert(cell);
+    }
+
+    /// Whether a world cell belongs to a staircase — NPC anchors are barred here.
+    pub fn is_stair(&self, cell: (i32, i32)) -> bool {
+        self.stairs.contains(&cell)
     }
 
     pub fn ceiling_occupied(&self, cell: (i32, i32)) -> bool {
@@ -112,4 +132,37 @@ pub struct PlacedFurniture {
     pub name: String,
     /// World (x, z) cells occupied by this item.
     pub cells: Vec<(i32, i32)>,
+    /// NPC standing-spot scenes this item contributes, resolved to world cells
+    /// + facing at placement time but not yet validated against the final room
+    /// layout (see [`AnchorCandidate`]).
+    pub anchors: Vec<AnchorCandidate>,
+}
+
+/// A candidate NPC scene contributed by one placed furniture item: where people
+/// would stand around it and which way they'd face. Resolved to world cells at
+/// placement time, then validated after the whole room is furnished — a slot is
+/// kept only if its cell ended up walkable (not `Blocked`) and isn't already
+/// claimed by another anchor, so NPCs never spawn in furniture, walls, or on
+/// top of each other.
+#[derive(Debug, Clone)]
+pub struct AnchorCandidate {
+    pub kind: SceneKind,
+    pub slots: Vec<AnchorSlotCandidate>,
+}
+
+/// One person's candidate spot within an [`AnchorCandidate`].
+#[derive(Debug, Clone)]
+pub struct AnchorSlotCandidate {
+    /// World (x, z) cell the NPC would stand on.
+    pub cell: (i32, i32),
+    /// Yaw (degrees) the NPC faces — baked toward the furniture at emit time.
+    pub facing: f32,
+    pub role: SlotRole,
+    /// Which age of NPC may stand here (carried from the furniture anchor spec).
+    pub occupant: Occupant,
+    /// If false, an unusable cell drops just this slot; if true, it drops the
+    /// whole scene (e.g. one half of a two-person table is optional).
+    pub required: bool,
+    /// Context dialogue key for whoever stands here (e.g. `tending_furnace`).
+    pub dialogue: Option<String>,
 }

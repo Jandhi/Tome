@@ -54,6 +54,14 @@ pub enum Tree {
     MediumOak,
     #[serde(rename = "small_oak")]
     SmallOak,
+    #[serde(rename = "small_cherry")]
+    SmallCherry,
+    #[serde(rename = "medium_cherry")]
+    MediumCherry,
+    #[serde(rename = "large_cherry")]
+    LargeCherry,
+    #[serde(rename = "cactus")]
+    Cactus,
 }
 
 pub async fn generate_tree(
@@ -168,6 +176,29 @@ pub async fn generate_tree(
             // Generate a small oak tree
             generate_small_oak(editor, point, &wood_block, &leaf_block, rng, 100).await
         }
+        Tree::SmallCherry | Tree::MediumCherry | Tree::LargeCherry => {
+            // Cherry blossoms are only grown via the vanilla `place feature`
+            // path (see tree_feature.rs); there's no hand-authored variant.
+        }
+        Tree::Cactus => {
+            // Cactus ignores the wood/leaf palette — it's a short column on sand.
+            generate_cactus(editor, point, rng).await
+        }
+    }
+}
+
+/// A short cactus column (1–3 tall) on a sand footing. Cacti pop off any
+/// non-sand block, so we force a sand cap directly beneath the trunk.
+async fn generate_cactus(editor: &Editor, point: Point3D, rng: &mut RNG) {
+    let (x, y, z) = (point.x, point.y, point.z);
+    editor
+        .place_block_forced(&"minecraft:sand".into(), Point3D { x, y: y - 1, z })
+        .await;
+    let height = 1 + rng.rand_i32(3); // 1..=3 tall
+    for i in 0..height {
+        editor
+            .place_block(&"minecraft:cactus".into(), Point3D { x, y: y + i, z })
+            .await;
     }
 }
 

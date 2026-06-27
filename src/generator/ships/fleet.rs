@@ -114,6 +114,12 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
         }
         centres.sort_by_key(|c| (c.x, c.y));
 
+        // Roll whether this district gets a ship at all (kept at 100% by default). Rolled
+        // unconditionally so the RNG stream stays stable as the chance is tuned.
+        if !rng.percent(SHIP_CHANCE_PER_DISTRICT) {
+            continue;
+        }
+
         // Size ceiling from the body's dominant biome: open ocean → full range, otherwise
         // (river / lake / other) capped to a modest hull.
         let max_length = size_cap_for_body(editor.world(), *id);
@@ -209,7 +215,7 @@ fn try_fit(
     // Conservative vertical-clearance bound: surface + length-scaled masts + headroom must
     // fit under the world top. (Mast top ≈ surface + ~0.82·length; using `length` is a safe
     // over-estimate.)
-    let surface = world.get_motion_blocking_height_at(centre);
+    let surface = world.get_motion_blocking_height_at(centre)?;
     let length_ceiling = (build_height - surface - VERTICAL_HEADROOM).min(max_length);
 
     for heading in headings {
@@ -251,8 +257,13 @@ fn footprint_cells(
             if !world.is_in_bounds_2d(cell) || !world.is_water(cell) || placed.contains(&cell) {
                 return None;
             }
-            let depth = world.get_motion_blocking_height_at(cell) - world.get_ocean_floor_height_at(cell);
-            if depth < min_depth {
+            let (Some(surface), Some(seabed)) = (
+                world.get_motion_blocking_height_at(cell),
+                world.get_ocean_floor_height_at(cell),
+            ) else {
+                return None;
+            };
+            if surface - seabed < min_depth {
                 return None;
             }
             match world.get_claim(cell) {

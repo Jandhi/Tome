@@ -4,13 +4,13 @@ use lerp::num_traits::clamp;
 
 use crate::{editor::Editor, generator::{materials::MaterialId, paths::path::{Path, PathPriority}}, geometry::{Point2D, Point3D, ALL_8}};
 
-fn mod4_point(point : Point3D, editor : &Editor) -> Point3D {
-    let point = Point2D{
+fn mod4_point(point : Point3D, editor : &Editor) -> Option<Point3D> {
+    let snapped = Point2D{
         x : point.x - point.x.rem_euclid(4),
         y : point.z - point.z.rem_euclid(4),
     };
 
-    editor.world().add_height(point)
+    editor.world().add_height(snapped)
 }
 
 fn get_best_mod4_point(point : Point3D, editor : &Editor) -> Point3D {
@@ -22,11 +22,14 @@ fn get_best_mod4_point(point : Point3D, editor : &Editor) -> Point3D {
             z: point.z + dz,
         })
         .filter(|p| editor.world().is_in_bounds_2d(p.drop_y()))
-        .map(|p| mod4_point(p, editor))
+        .filter_map(|p| mod4_point(p, editor))
         .min_by_key(|p| {
             p.y.abs_diff(point.y)
         })
-        .unwrap_or(mod4_point(point, editor))
+        // No in-bounds mod-4 candidate had a height: fall back to the snapped
+        // point, or — if that's also OOB — the original point unchanged.
+        .or_else(|| mod4_point(point, editor))
+        .unwrap_or(point)
 }
 
 /// Tunable knobs for A* road routing. `step` is the horizontal lattice spacing
@@ -315,7 +318,7 @@ pub async fn route_path_with(
                     }
                 }
 
-                let raw = editor.world().add_height(neighbour_2d);
+                let Some(raw) = editor.world().add_height(neighbour_2d) else { continue; };
                 if (raw.y.abs_diff(state.y) as i32) <= factor {
                     let y = clamp(raw.y, state.y - params.max_grade, state.y + params.max_grade);
                     chosen = Some(Point3D { x: neighbour_2d.x, y, z: neighbour_2d.y });
@@ -354,7 +357,8 @@ pub async fn route_path_with(
                 if let Some(in_dir) = state.dir {
                     c += delta.distance(in_dir) as u64 * params.turn_weight;
                 }
-                let burrow = editor.world().get_height_at(neighbour.drop_y()).abs_diff(neighbour.y) as u64;
+                let Some(surface_y) = editor.world().get_height_at(neighbour.drop_y()) else { continue; };
+                let burrow = surface_y.abs_diff(neighbour.y) as u64;
                 c += burrow * params.burrow_weight;
                 c += neighbour.y.abs_diff(new_end.y) as u64 * params.goal_height_weight;
                 if editor.world().is_water(neighbour.drop_y()) {

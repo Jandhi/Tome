@@ -11,5 +11,50 @@
     17
   ],
   "y_offset": 0,
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "baker",
+    "looks": [
+      "Butcher"
+    ],
+    "workers": 3
+  },
+  "anchors": [
+    {
+      "stand": [
+        4,
+        1,
+        7
+      ],
+      "look": [
+        3,
+        1,
+        7
+      ]
+    },
+    {
+      "stand": [
+        4,
+        1,
+        9
+      ],
+      "look": [
+        3,
+        1,
+        9
+      ]
+    },
+    {
+      "stand": [
+        8,
+        1,
+        8
+      ],
+      "look": [
+        8,
+        1,
+        9
+      ]
+    }
+  ]
 }

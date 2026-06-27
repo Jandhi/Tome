@@ -11,5 +11,14 @@
     13
   ],
   "y_offset": 0,
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "smelter",
+    "looks": [
+      "Weaponsmith",
+      "Toolsmith",
+      "Armorer"
+    ],
+    "workers": 3
+  }
 }

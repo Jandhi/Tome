@@ -1,0 +1,1049 @@
+# Placeholder NPC name + dialogue pools for the population pass.
+# (Per-culture / per-profession pools and richer lines can come later.)
+
+# First names are generated on demand by concatenating a `first_name_prefix`
+# (consonant-ending stem) with a `first_name_suffix` (ending). All prefixes
+# are consonant-terminal so suffixes starting with a vowel don't produce
+# awkward double-vowels ("Edra"/"Mira" land naturally; we don't get "Edraa").
+# ~22 × ~12 ≈ 260 effective first names — collisions across a town of ~120
+# residents should be uncommon. See `roll_first_name` in
+# `src/generator/population.rs`.
+first_name_prefixes:
+  - Ael
+  - Bran
+  - Cael
+  - Cor
+  - Dor
+  - Edr
+  - Eldr
+  - Faer
+  - Garr
+  - Hild
+  - Iol
+  - Kael
+  - Lor
+  - Mir
+  - Nael
+  - Orin
+  - Per
+  - Rael
+  - Sel
+  - Theod
+  - Vael
+  - Wen
+  - Yor
+
+first_name_suffixes:
+  - a
+  - ad
+  - an
+  - ar
+  - ed
+  - el
+  - en
+  - er
+  - ic
+  - in
+  - ric
+  - wyn
+
+# ── Per-culture first names ───────────────────────────────────────────────────
+# Localized first-name pools, picked directly by `roll_first_name` based on the
+# town's `Culture` (see `src/generator/population.rs`). When a culture has a
+# non-empty `first_names` list it is used verbatim; otherwise generation falls
+# back to the legacy `first_name_prefixes` × `first_name_suffixes` composition
+# above. Lists mix masculine and feminine given names — a name is assigned to an
+# NPC at random regardless of villager skin. Surnames are NOT localized here
+# (still composed from `surname_*`); only first names are culture-specific.
+cultures:
+  medieval:
+    # Anglo-Saxon / early-medieval English given names, to match the Old-English
+    # settlement names.
+    first_names:
+      - Aldwin
+      - Aldric
+      - Alfred
+      - Ansel
+      - Baldric
+      - Bardolf
+      - Cedric
+      - Cuthbert
+      - Drogo
+      - Dunstan
+      - Eadric
+      - Edgar
+      - Edmund
+      - Edwin
+      - Egbert
+      - Elric
+      - Ewart
+      - Frewin
+      - Garrick
+      - Godric
+      - Godwin
+      - Hamond
+      - Harold
+      - Herewald
+      - Leofric
+      - Leofwin
+      - Maerwin
+      - Odo
+      - Osbert
+      - Osric
+      - Oswin
+      - Oswald
+      - Raedwald
+      - Roderic
+      - Selwyn
+      - Sigeric
+      - Theobald
+      - Theodric
+      - Wilfred
+      - Wulfric
+      - Wulfstan
+      - Wymer
+      - Aelfgifu
+      - Aethelflaed
+      - Aldith
+      - Alwynn
+      - Audrey
+      - Bertha
+      - Cwen
+      - Cyneburh
+      - Eadgyth
+      - Edith
+      - Elfreda
+      - Ermina
+      - Frideswide
+      - Godiva
+      - Goldwyn
+      - Hereswith
+      - Hilda
+      - Leofgyth
+      - Mathilda
+      - Merewyn
+      - Mildred
+      - Osgith
+      - Rowena
+      - Sunngifu
+      - Wilburh
+      - Winfled
+      - Wynflaed
+      - Wynne
+  japanese:
+    # Traditional Japanese given names suited to a feudal village.
+    first_names:
+      - Akio
+      - Akira
+      - Daisuke
+      - Goro
+      - Hideo
+      - Hiroshi
+      - Ichiro
+      - Isamu
+      - Jiro
+      - Jun
+      - Kaname
+      - Katsuo
+      - Kazuo
+      - Kenji
+      - Kenta
+      - Kiyoshi
+      - Kuro
+      - Mamoru
+      - Masaru
+      - Minoru
+      - Nobuo
+      - Noboru
+      - Osamu
+      - Ryo
+      - Saburo
+      - Satoshi
+      - Shin
+      - Shiro
+      - Sora
+      - Susumu
+      - Tadao
+      - Takeshi
+      - Taro
+      - Tetsuo
+      - Toru
+      - Yoshio
+      - Yutaka
+      - Aiko
+      - Akiko
+      - Asa
+      - Chiyo
+      - Emiko
+      - Hana
+      - Hanako
+      - Haru
+      - Hiroko
+      - Kaede
+      - Keiko
+      - Kiku
+      - Kimiko
+      - Mai
+      - Maki
+      - Michiko
+      - Midori
+      - Nori
+      - Rei
+      - Ren
+      - Sachiko
+      - Sakura
+      - Setsuko
+      - Sumire
+      - Tomoko
+      - Yoko
+      - Yuki
+      - Yumi
+      - Yuriko
+    # Anglicized place-name surnames (same structure as medieval — root +
+    # land-form ending) but themed to Japanese imagery: pine, bamboo, crane,
+    # maple, mist, river. Pine + vale -> Pinevale, Crane + brook -> Cranebrook.
+    surname_prefixes:
+      # — flora —
+      - Pine
+      - Bamboo
+      - Maple
+      - Cherry
+      - Plum
+      - Cedar
+      - Reed
+      - Lotus
+      # — fauna —
+      - Crane
+      - Heron
+      - Sparrow
+      # — element & sky —
+      - Mist
+      - Snow
+      - Moon
+      - Cloud
+      - Frost
+      - Jade
+      - Pearl
+      # — land & water —
+      - River
+      - Stone
+      - East
+      - High
+    surname_suffixes:
+      # — land form —
+      - vale
+      - hill
+      - ridge
+      - field
+      - dale
+      - grove
+      - hollow
+      - moor
+      - rise
+      # — water —
+      - brook
+      - spring
+      - shore
+      - mere
+      - falls
+      # — built —
+      - gate
+      - bridge
+      - garden
+  desert:
+    # Arabic given names for the desert culture.
+    first_names:
+      - Abbas
+      - Amir
+      - Anwar
+      - Aziz
+      - Bilal
+      - Faisal
+      - Farid
+      - Hamza
+      - Harun
+      - Hassan
+      - Husain
+      - Ibrahim
+      - Idris
+      - Imran
+      - Ismail
+      - Jamal
+      - Kamal
+      - Karim
+      - Khalid
+      - Mahmud
+      - Malik
+      - Mansur
+      - Marwan
+      - Musa
+      - Nadir
+      - Nasir
+      - Omar
+      - Qasim
+      - Rashid
+      - Sahl
+      - Salim
+      - Samir
+      - Suhayl
+      - Tahir
+      - Tariq
+      - Walid
+      - Yahya
+      - Yusuf
+      - Zahir
+      - Zayd
+      - Ziyad
+      - Aisha
+      - Amira
+      - Asma
+      - Basma
+      - Dunya
+      - Farida
+      - Fatima
+      - Halima
+      - Iman
+      - Jamila
+      - Karima
+      - Khadija
+      - Layla
+      - Lina
+      - Maryam
+      - Nadia
+      - Najwa
+      - Noor
+      - Rania
+      - Rasha
+      - Safiya
+      - Salma
+      - Samira
+      - Yasmin
+      - Zahra
+      - Zaynab
+      - Zubaida
+    # Anglicized place-name surnames (same structure as medieval — root +
+    # land-form ending) but themed to desert imagery: sand, dune, sun, palm,
+    # amber. Sand + ford -> Sandford, Sun + mere -> Sunmere, Black + sand ->
+    # Blacksand (the manor colour-surname picks up these suffixes too).
+    surname_prefixes:
+      # — terrain (Sand/Dune are suffix-only to avoid "Sandsand") —
+      - Dust
+      - Stone
+      - Salt
+      - Ash
+      - Clay
+      - Rock
+      # — sun & sky —
+      - Sun
+      - Day
+      - Star
+      - Dawn
+      - Fire
+      - Ember
+      # — flora & oasis —
+      - Palm
+      - Reed
+      - Cactus
+      # — quality & beast —
+      - Amber
+      - Gold
+      - Bright
+      - Hawk
+      - Jackal
+    surname_suffixes:
+      # — land form —
+      - reach
+      - ridge
+      - hollow
+      - mere
+      - vale
+      - rise
+      - mount
+      - cliff
+      # — water (rarer, desert oases) —
+      - ford
+      - well
+      - spring
+      - oasis
+      # — built —
+      - gate
+      - stead
+      - hold
+      - watch
+      - bazaar
+      # — terrain —
+      - sand
+      - dune
+
+# Surnames are generated on demand by concatenating a `surname_prefix` (capitalized,
+# noun-like root) with a `surname_suffix` (lowercase place-name ending). All
+# combinations are designed to read as plausible English family names —
+# Ashwood, Underhill, Hawkridge, Brightford, etc. With ~35 prefixes and ~25
+# suffixes the effective name space is ~875 surnames, so collisions across a
+# town of ~120 residents are rare. See `Npc.surname` and `roll_surname` in
+# `src/generator/population.rs`.
+#
+# These top-level pools are the MEDIEVAL / default surname vibe. Cultures that
+# define their own `surname_prefixes`/`surname_suffixes` under `cultures.<name>`
+# (japanese, desert) override these for that culture; the structure is the same
+# (root + land-form ending), only the imagery changes.
+surname_prefixes:
+  # — trees & growth —
+  - Ash
+  - Oak
+  - Elm
+  - Birch
+  - Yew
+  - Holly
+  - Thorn
+  - Willow
+  - Briar
+  - Hazel
+  # — ground, stone, element —
+  - Moss
+  - Fern
+  - Heath
+  - Marsh
+  - Fen
+  - Reed
+  - Stone
+  - Flint
+  - Marble
+  - Chalk
+  # — colour / quality —
+  - Bright
+  - White
+  - Black
+  - Grey
+  - Gold
+  - Silver
+  - Fair
+  - Dark
+  # — beast —
+  - Hawk
+  - Fox
+  - Wolf
+  - Raven
+  - Hart
+  - Dove
+  # — position —
+  - Under
+  - Over
+  - North
+  - High
+  - Long
+  - Old
+
+surname_suffixes:
+  # — land form —
+  - wood
+  - field
+  - hollow
+  - hill
+  - ridge
+  - dale
+  - vale
+  - glen
+  - shaw
+  - dell
+  - moor
+  - heath
+  - grove
+  - fell
+  # — water —
+  - brook
+  - ford
+  - burn
+  - bank
+  - mere
+  # — built —
+  - ton
+  - ham
+  - wick
+  - worth
+  - bury
+  - stead
+  - bridge
+  # — stone —
+  - stone
+  - crag
+
+# Epithets are flavour add-ons. When an NPC has an epithet, the display
+# replaces the surname with it ("Doral the Quiet") — but the surname is still
+# stored on the NPC for kin/family lookups. Most epithets are biased toward
+# elders (see `Npc::display_name` and household generation).
+epithets:
+  - the Elder
+  - the Younger
+  - of the Hill
+  - Stonefoot
+  - Quickhand
+  - the Quiet
+  - Fairwind
+  - the Bold
+
+small_talk:
+  - "Fine weather for it, eh?"
+  - "Mind how you go."
+  - "Haven't seen you round here before."
+  - "Long day ahead."
+  - "The well's been low all season."
+  - "Heard there's trouble on the east road."
+  - "Spare a moment, traveller?"
+  - "Market's busy today."
+  - "Watch yourself after dark."
+  - "Good to see a new face."
+  - "Rain's coming. I can feel it in my knees."
+  - "Another day, another copper, eh?"
+  - "You're not from these parts, are you?"
+  - "Mind the mud by the gate — it'll have your boots."
+  - "Quiet morning. I like it that way."
+  - "Off to the market? Tell them I sent you."
+  - "Bless you and yours, traveller."
+  - "Don't trust the weather this time of year."
+  - "Long road behind you, by the look of it."
+  - "Stay for the festival, if you can. It's a sight."
+  - "The harvest's been kind to us this year."
+  - "Keep your purse close on the square, friend."
+  - "Cold enough to freeze the ale, isn't it?"
+  - "You'll find no better folk than ours, I'll say that."
+
+# Context dialogue pools, keyed by activity. A furniture anchor names one of
+# these keys (in its `anchors:` block); the same key can be shared by several
+# items — `cooking` covers the furnace, smoker, and cauldron, etc. A slot with
+# no key (or a key missing here) falls back to `small_talk` above.
+dialogue:
+  cooking:
+    - "Mind the fire — these coals run hot."
+    - "Almost ready. Won't be long now."
+    - "A good stew needs a slow flame."
+    - "Smells done, doesn't it?"
+    - "Bread's in. Come back at dusk."
+    - "My mother's recipe, this. Never fails."
+    - "A pinch more salt and it's perfect."
+    - "Hungry work, feeding a whole house."
+    - "Taste that — go on, tell me it's not the best in town."
+    - "The trick is to never rush a roast."
+    - "Wood's near gone. I'll need more before nightfall."
+    - "Stir it slow, or it catches and burns."
+    - "There's enough here for an army, near enough."
+  # A child at the hearth (an `any_age` cooking slot — house/rooftop only).
+  cooking_child:
+    - "Is it ready yet? I'm starving!"
+    - "Can I stir it? Pleeease?"
+    - "It smells so good. Just one taste?"
+    - "Ow — the fire's too hot to sit near."
+    - "Why does it take soooo long?"
+    - "I licked the spoon. Don't tell!"
+    - "Can I have the crusty bit at the end?"
+    - "I'm helping! See? I'm a good helper."
+    - "What's that one? It looks funny."
+  crafting:
+    - "Steady hands, that's the trick."
+    - "One more and it's finished."
+    - "Measure twice, they always say."
+    - "This'll fetch a fair price."
+    - "Honest work, this."
+    - "Learned this trade from my father, I did."
+    - "No shortcuts. Folk can always tell."
+    - "A blister or two, but worth it in the end."
+    - "Good tools make half the work."
+    - "I could do this with my eyes shut by now."
+    - "Cheap goods break twice. Mine break never."
+    - "There's a rhythm to it, once you find it."
+    - "Slow and right beats quick and wrong."
+  reading:
+    - "Shh — I've nearly found the passage."
+    - "So much here I'll never read it all."
+    - "A quiet corner and a good book. Bliss."
+    - "Now where did I leave off..."
+    - "This author writes a fine line, I'll grant."
+    - "There's whole worlds in these pages, you know."
+    - "One more chapter. Just one, I promise."
+    - "The ink's faded here. Old, this one."
+    - "I'd trade a week's wages for the ending."
+    - "Quiet, please. The hero's in peril."
+  # A child with a book at an `any_age` reading slot (shelf, lectern, desk).
+  reading_child:
+    - "Look at the pictures in this one!"
+    - "What's this big word mean?"
+    - "I read a whole page all by myself!"
+    - "Is this the one with the sea monster?"
+    - "Read me the dragon part again!"
+    - "Are there any with knights in them?"
+    - "I'm getting better at the long words!"
+    - "Does this story have a happy ending?"
+  sorting:
+    - "Swear I had more of these yesterday."
+    - "Everything in its place, that's my way."
+    - "Plenty stocked for the winter."
+    - "Now where did that get to?"
+    - "A tidy store is a happy store."
+    - "Count it twice, trust it once."
+    - "Mice have been at the grain again, the wretches."
+    - "I know exactly where everything is. Mostly."
+    - "Stack it high and stack it straight."
+    - "Inventory's the dullest day of the week."
+  conversation:
+    - "You won't believe what I heard at the market."
+    - "It's been too long, friend."
+    - "Between you and me..."
+    - "Now don't go repeating this, but..."
+    - "Sit, sit — I've news worth hearing."
+    - "Have you a moment? I've much to tell."
+    - "You always did know how to listen."
+    - "Where was I? Ah, yes..."
+  resting:
+    - "Long day. I've earned a sit-down."
+    - "Just turning in. Quiet night, I hope."
+    - "These old bones need their rest."
+    - "Wake me at first light, would you?"
+    - "Ahh. Off my feet at last."
+    - "A warm bed and a full belly. What more's there?"
+    - "I'll just close my eyes a moment..."
+    - "Tomorrow's troubles can wait for tomorrow."
+    - "Nothing like a sit-down after a hard day."
+    - "Pull up a stool. Rest those legs."
+  # Spoken by a child filling a `resting` slot (an `any_age` bed). When a
+  # `<key>_child` pool exists, children draw from it instead of the adult lines.
+  resting_child:
+    - "I'm not even sleepy yet!"
+    - "Can I stay up just a little longer?"
+    - "Five more minutes, pleeease?"
+    - "Tell me the one about the dragon again!"
+    - "But I'm NOT tired. ...yawn."
+    - "Can I sleep with the candle on?"
+    - "Is it morning yet? ...Aw."
+    - "One more story and I'll go, I promise!"
+  # Market vendors hawking their wares from behind the stall counter. Rendered as
+  # a "yelled" bubble — bigger and visible from across the square.
+  market_cry:
+    - "Fresh today! Get it while it lasts!"
+    - "Finest wares in the whole town — come see!"
+    - "Two for the price of one, today only!"
+    - "Step up, step up! Best prices on the square!"
+    - "You'll not find better, I promise you that!"
+    - "Hot from the oven — come and get it!"
+    - "Half price before noon! Don't miss out!"
+    - "Come buy, come buy! Won't be here long!"
+    - "Last of the season — they'll be gone by dark!"
+    - "Quality goods, fair prices, no haggling needed!"
+    - "Taste before you buy! Go on, no charge!"
+    - "Straight from the farm this morning, still dewy!"
+    - "A bargain like this won't come twice, friend!"
+    - "Everything must go! Make me an offer!"
+    - "You there! Yes, you — come see what I've got!"
+    - "Finest in the land, and I'll stake my name on it!"
+  # A performer up on the stage, calling out over the crowd. Also yelled.
+  performing:
+    - "Gather round, good folk, gather round!"
+    - "A tale to chill your blood — come closer!"
+    - "Lend me your ears and I'll lend you a song!"
+    - "One night only — you'll tell your grandchildren!"
+    - "Strike up the tune! Let's have a dance!"
+    - "Hear ye! Hear ye! A story worth the telling!"
+    - "Clap along, good people — you know this one!"
+    - "A penny in the hat keeps the song coming!"
+    - "Stay your feet a moment and hear a marvel!"
+    - "From lands afar I bring you this tale!"
+    - "Laugh, weep, and cheer — it's all to come!"
+    - "Never has the square seen the like of this!"
+  # Idle onlookers browsing the stalls or watching the show.
+  browsing:
+    - "Now that's a fair price, I'll give them that."
+    - "Did you hear the crier? Quite the show."
+    - "I only came for bread and look at me now."
+    - "Busy on the square today, isn't it?"
+    - "Wonder if they've any of those left..."
+    - "My coin's near spent already."
+    - "I'll think on it and come back. Maybe."
+    - "Highway robbery, that price. Lovely though."
+    - "Just looking, just looking."
+    - "The cloth here's finer than last market."
+    - "Where's that smell of pies coming from?"
+    - "Half the town's out today, by the look of it."
+  # A child loose in the market crowd (a `ChildOnly` onlooker slot).
+  browsing_child:
+    - "Can we get the honey cakes? Pleeease?"
+    - "Look at all the shiny things!"
+    - "I want to see the puppets!"
+    - "Mama said stay close, but look over there!"
+    - "Are those sweets? Can I have one?"
+    - "That man's juggling! Look, look!"
+    - "Can I pet the pony? Just once?"
+    - "I found a coin! Can I spend it?"
+    - "What's THAT? I've never seen one of those!"
+    - "Wait for me! You walk too fast!"
+  # Folk loitering at the village well — fetching water, trading gossip.
+  at_the_well:
+    - "Cold and clear today — good water this year."
+    - "Heard the miller's daughter is to be wed."
+    - "Mind the bucket, the rope's frayed near the top."
+    - "Always someone to talk to at the well."
+    - "Three trips already and the trough's still low."
+    - "They say this well's never once run dry."
+    - "Best water in the district, this. No question."
+    - "My grandmother fetched from this very well."
+    - "Careful — the stones get slick when it's wet."
+    - "Any news from the road? You hear it all here."
+    - "The whole town passes through here, sooner or later."
+  at_the_well_child:
+    - "Can I drop the bucket down? I'll be careful!"
+    - "Hellooo! Hear it echo?"
+    - "How deep does it go all the way down?"
+    - "I carried the little pail all by myself!"
+    - "Is there a monster at the bottom? There might be!"
+    - "Drop a pebble — listen for the splash!"
+    - "The water's so cold it makes my teeth hurt!"
+    - "Can I have the first drink? Please?"
+  # Folk idling around the fountain — resting, chatting, enjoying the spray.
+  by_the_fountain:
+    - "Nothing finer than the sound of water on a hot day."
+    - "I come here to sit and think a while."
+    - "They say a coin in the basin brings luck."
+    - "Cooler by the water, isn't it?"
+    - "A fine spot to meet a friend."
+    - "I've made a wish here every spring since I was small."
+    - "The masons did fine work, didn't they?"
+    - "Lovers always seem to end up here. Sweet, really."
+    - "I could watch the water all afternoon."
+    - "Mind the children don't fall in, eh?"
+  by_the_fountain_child:
+    - "Watch me splash! Look, look!"
+    - "I threw a coin in — now I get a wish!"
+    - "The water's so cold! Feel it!"
+    - "Can we stay just a bit longer?"
+    - "I can see my face in the water!"
+    - "Look how many coins are down there!"
+    - "Can I make a wish too? CAN I?"
+    - "I'm gonna catch one of those little fish!"
+  # Folk pausing at the monument — paying respects, gazing up at the pillar.
+  at_the_monument:
+    - "They built it before my grandfather's time, they say."
+    - "We owe the old names more than a glance."
+    - "Stand a moment. It's only right."
+    - "Quiet here. I like to stop and remember."
+    - "My own kin's name is carved here, somewhere."
+    - "Brave folk, the lot of them. We forget too easy."
+    - "I bring a flower every year. Seems the least I can do."
+    - "The stone's worn, but the names hold."
+    - "Hard to imagine the days they speak of."
+  at_the_monument_child:
+    - "Who's it for? Were they very brave?"
+    - "It's so tall! Did giants make it?"
+    - "Why do we have to be quiet here?"
+    - "I can see the whole square from the steps!"
+    - "What do all the words say? Read them to me!"
+    - "Were there really battles here? Real ones?"
+    - "Can I climb up? Just a little bit?"
+    - "It's older than Grandpa? That's REALLY old."
+  # Folk out in a park or garden — strolling, resting on the grass, taking the air.
+  in_the_park:
+    - "A fine day for a walk in the green."
+    - "I could sit out here the whole afternoon."
+    - "The gardeners have done lovely work this year."
+    - "Nothing like a bit of shade and birdsong."
+    - "Quiet out here, away from the square."
+    - "Met my husband under a tree much like that one."
+    - "The blossoms came early this year, didn't they?"
+    - "I bring my needlework out here when it's fine."
+    - "Listen — you can almost forget the town's there."
+    - "Good for the soul, a bit of green."
+    - "The bench is taken? Ah well, the grass will do."
+    - "Watch the bees in the clover. Busy little things."
+  in_the_park_child:
+    - "Race you to the big tree!"
+    - "Look how many flowers! Can I pick one?"
+    - "I saw a frog! Over by the water!"
+    - "Push me higher — I want to touch the leaves!"
+    - "Let's play hide-and-seek in the bushes!"
+    - "I'm gonna climb all the way to the top!"
+    - "Watch me do a cartwheel! Watch!"
+    - "There's a butterfly! After it, quick!"
+    - "Can we have a picnic right here? Can we?"
+    - "I'm a knight and that tree's a dragon!"
+  # Guards posted at a gate or on a wall tower, watching the approaches.
+  guarding:
+    - "State your business at the gate."
+    - "Move along — nothing amiss here."
+    - "Keep the peace and we'll have no trouble."
+    - "Eyes on the road. You never know these days."
+    - "Halt. ...Right, on you go."
+    - "Quiet watch tonight, thank the gods."
+    - "No weapons drawn inside the walls."
+    - "Papers, if you have them. Just routine."
+    - "Cold night for it. The road's mine till dawn."
+    - "Seen anything on the road we should know of?"
+    - "Trouble's rare here, and we aim to keep it so."
+    - "Behave yourself and we'll get along fine."
+    - "I've stood this post twenty winters now."
+    - "Curfew bell's soon. Best find your bed."
+    - "Long as the lamps stay lit, all's well."
+
+  # --- Trade-specific worker lines. Keyed by the building's `employment` label
+  # (see structure JSON `staffing.employment`), set by `AnchorScene::worker`. A
+  # workplace NPC with no pool here falls back to generic small talk. ---
+  smith:
+    - "Mind the sparks — the forge runs hot today."
+    - "A good blade takes a hundred hammer-blows, no fewer."
+    - "Bring me your dull tools; I'll put an edge back on them."
+    - "Iron doesn't lie. Work it true or not at all."
+    - "Hear that ring? That's the sound of honest steel."
+    - "The bellows want pumping. Lend a hand if you've a mind."
+    - "Hinges, nails, ploughshares — I've forged them all."
+  baker:
+    - "Bread's in the oven; come back at the bell."
+    - "Nothing beats a loaf still warm from the hearth."
+    - "Mind the flour — it gets everywhere, I warn you."
+    - "Up before the cock crows, that's a baker's lot."
+    - "Smell that crust? Worth waking early for."
+    - "A town runs on bread, friend. Never forget it."
+  miller:
+    - "The stones are turning — flour by nightfall."
+    - "Bring your grain and I'll grind it fine as dust."
+    - "Mind the gears; they'll take a finger clean off."
+    - "Wheat in, flour out — that's the whole of it."
+    - "The dust gets in your lungs, but it pays the rent."
+    - "Good steady water on the wheel today."
+  brewer:
+    - "The mash is working nicely — smell that?"
+    - "Patience makes good ale; haste makes vinegar."
+    - "Come back when it's brewed and I'll stand you a cup."
+    - "A clean barrel's half the secret, mind."
+    - "This batch'll be the best yet, or I'm no brewer."
+    - "Honey and water and time — that's all mead is."
+  butcher:
+    - "Fresh cuts today — best in the district."
+    - "Nothing wasted here; every part has its use."
+    - "Mind the floor, it gets slick. Watch your step."
+    - "A sharp knife's a kind one, to beast and butcher both."
+    - "Smoked or salted, it'll keep you through winter."
+    - "Tell me what you need and I'll trim it to order."
+  carpenter:
+    - "Measure twice, cut once — my father's rule and mine."
+    - "Good seasoned oak, this. It'll outlast us both."
+    - "Mind the shavings; they're slippery underfoot."
+    - "A true joint needs no nail to hold it."
+    - "Doors, chairs, beams — if it's wood, I'll shape it."
+    - "There's a smell to fresh-cut timber I'll never tire of."
+  chandler:
+    - "Beeswax candles — the cleanest light you'll buy."
+    - "Mind the wax; it scalds before it cools."
+    - "A good candle burns slow and true, no guttering."
+    - "Tallow for the thrifty, beeswax for the fine."
+    - "Dip and cool, dip and cool — there's no rushing it."
+    - "Long winter nights keep me in good trade."
+  collier:
+    - "The mound must smoulder slow, never blaze."
+    - "Charcoal's the smith's best friend — burns hot and clean."
+    - "I tend this kiln for days, watching the smoke turn."
+    - "Let air in too quick and the whole burn's spoiled."
+    - "Black to the elbows, but it's honest soot."
+    - "Wood goes in green and comes out worth twice as much."
+  miner:
+    - "The seam runs deep here — good ore, if you dig for it."
+    - "Mind your footing; the dark hides a long drop."
+    - "A miner trusts his lamp and his luck, in that order."
+    - "Iron in this rock, plain as day. See the rust of it?"
+    - "Hard work, the digging, but the town needs its metal."
+    - "Tap the wall and listen — it tells you where to strike."
+  confectioner:
+    - "Sugar work — the sweetest trade there is."
+    - "Mind the syrup; it burns hotter than you'd think."
+    - "A boiled sweet for the little ones? Go on, then."
+    - "Patience and a steady flame, that's confectionery."
+    - "Candy's a luxury, I'll grant, but a cheap joy."
+    - "One taste and you'll be back, I promise you."
+  smelter:
+    - "The furnace must roar before the ore will run."
+    - "Ingots by the dozen, all from this rough rock."
+    - "Mind the heat — it'll singe your brows clean off."
+    - "Charcoal and patience turn stone to metal."
+    - "Pour it true or you'll spoil the whole cast."
+    - "Hot work, but the smiths can't do without us."
+  papermaker:
+    - "Pulp and press and dry — that's paper, near enough."
+    - "Mind the vats; the water's fouler than it looks."
+    - "Good paper takes a fine, even pull of the mould."
+    - "The scribes pay well for a clean white sheet."
+    - "Rags and reeds, all beaten down to slurry."
+    - "Every book in the land starts at a vat like mine."
+  sawyer:
+    - "Logs in, planks out — the saw never rests."
+    - "Mind the blade; it doesn't care whose hand it meets."
+    - "Straight grain saws clean; knotty wood fights you."
+    - "Sawdust in everything, but it's a living."
+    - "Cut it true and the carpenter blesses your name."
+    - "A day's logs become a house's bones. Think on that."
+  scribe:
+    - "Quiet, if you please — the ink's still wet."
+    - "A steady hand and a sharp quill, that's the craft."
+    - "Every letter copied true; a slip spoils the page."
+    - "Books are slow to make and quick to treasure."
+    - "My eyes ache by candle, but the words endure."
+    - "What's worth saying is worth writing down. Twice."
+  shepherd:
+    - "The flock's grazing easy today, thank the gods."
+    - "Wool comes off in spring; that's when the shears sing."
+    - "Mind where you tread — sheep aren't tidy beasts."
+    - "A good dog's worth three hands at the herding."
+    - "Lost a lamb to the hills once. Never again, if I can help it."
+    - "Quiet work, minding sheep. Suits me fine."
+  tanner:
+    - "Mind the smell — it's the price of good leather."
+    - "Hides take weeks in the vats before they're fit."
+    - "Soft as a glove when I'm done, you'll see."
+    - "It's foul work, but where'd your boots come from else?"
+    - "Bark and lime and patience, that's tanning."
+    - "Don't stand downwind, friend. I'm used to it; you're not."
+  weaver:
+    - "The loom's a music, once you know its rhythm."
+    - "Wool to cloth, thread by thread — slow but sure."
+    - "Mind the warp; one snapped thread spoils the row."
+    - "Fine weave or coarse, I'll make what you need."
+    - "My hands know the shuttle better than my own face."
+    - "A bolt of good cloth keeps a family warm and fed."
+  tailor:
+    - "Stand still a moment and I'll take your measure."
+    - "Good cloth deserves a good cut — no waste, no sag."
+    - "Mind the pins; I've a habit of leaving them about."
+    - "A fine seam hides itself. That's the whole art."
+    - "I dress half the town and gossip with the other half."
+    - "Bring me your torn things; I'll make them new."
+  woodcutter:
+    - "Timber's down — mind the falling boughs."
+    - "A sharp axe and a true eye, that's the whole of it."
+    - "I take the old trees and leave the young to grow."
+    - "Hard on the back, this work, but the forest's generous."
+    - "Hear the axe ring? That's the town's hearths being fed."
+    - "Stack it to season; green wood's no good to anyone."
+  beekeeper:
+    - "Gently now — the bees mind a calm hand."
+    - "Honey's nearly ready; the comb's near bursting."
+    - "Mind the hives; a sting's the price of sweetness."
+    - "A little smoke keeps them drowsy while I work."
+    - "Beeswax for candles, honey for the table — naught wasted."
+    - "Listen to them hum. Content, that lot."
+  rancher:
+    - "The herd's fat and healthy this season."
+    - "Cattle want minding dawn to dusk, no rest."
+    - "Mind the bull; he's a temper on him today."
+    - "Beef and leather and milk — a cow gives all."
+    - "Drive 'em to good grass and they'll thank you in beef."
+    - "Hard beasts to herd, but worth the trouble."
+  planter:
+    - "The cane grows tall in this wet ground."
+    - "Cut it low and clean; it grows back the stronger."
+    - "Mind the leaves — cane cuts as quick as a knife."
+    - "Sweet work, in its way. The mill's hungry for it."
+    - "Sun and water and a strong back, that's planting."
+    - "A field of cane in the breeze — fine sight, isn't it?"
+  farmer:
+    - "The crops are coming on well, thank the gods."
+    - "Plough, sow, reap — the seasons keep their own time."
+    - "Mind the furrows; you'll turn an ankle easy out here."
+    - "A good harvest feeds the whole town through winter."
+    - "Rain when we want it this year, for once."
+    - "Hard land, but it gives back what you put in."
+
+# Multi-person exchanges: each entry is one back-and-forth, its lines handed to
+# a scene's slots in order (line 0 = the opener, line 1 = the reply). Keyed like
+# `dialogue` — a `conversation` anchor (two diners at a table) draws one of
+# these so the pair actually talks to each other. Keep line 0 standalone, in
+# case the scene is ever reduced to a single person.
+exchanges:
+  conversation:
+    - - "You won't believe what I heard at the market."
+      - "Go on then — don't keep me waiting!"
+    - - "Did you finish the harvest before the rain?"
+      - "Just barely. Last cart came in soaked."
+    - - "They say the smith's taking on an apprentice."
+      - "Is that so? My nephew could use the work."
+    - - "Have you tried the new baker on the square?"
+      - "Twice this week. Don't tell my wife."
+    - - "Quiet day, for once."
+      - "Don't say that too loud — you'll jinx it."
+    - - "I heard wolves on the ridge last night."
+      - "Best keep the gate barred, then."
+    - - "The tax man's due round again, I hear."
+      - "Already? Where does the year go?"
+    - - "Your garden's coming on a treat this year."
+      - "It's all the rain. Can't take the credit."
+    - - "Did you see the lights over the hills?"
+      - "Aye. Spirits, my mother would've said."
+    - - "The price of salt's gone up again."
+      - "Robbery, that's what it is. Plain robbery."
+    - - "I'm telling you, I saw it with my own eyes."
+      - "You and your tales. Pull the other one."
+    - - "How's the little one? Walking yet?"
+      - "Running, more like. Can't catch her."
+    - - "Heard the old mill's to be rebuilt at last."
+      - "About time. It's stood ruined ten years."
+    - - "Cold's coming early this year, mark me."
+      - "Then I'd best lay in the firewood now."
+  # Stage performances, bucketed by cast size. The stage rolls 1–3 performers and
+  # staff_scene draws a `performing` entry with exactly that many lines (one per
+  # performer). Solos, duets, and trios live side by side here; every line is
+  # yelled out over the square, so each should stand on its own as a shout.
+  performing:
+    # — solo acts (1) —
+    - - "Gather round, good folk — a tale to chill your very blood!"
+    - - "Lend me your ears, and I'll lend you a song you'll never forget!"
+    - - "One night only! You'll be telling your grandchildren of this!"
+    - - "Behold! Wonders from lands beyond the farthest sea!"
+    - - "A copper for a song, a silver for a saga — your choice!"
+    - - "Sit you down and let an old fool make you laugh!"
+    # — duets (2) —
+    - - "Strike up the tune, my friend — let's give them a show!"
+      - "Aye! And I'll sing it sweet enough to still the birds!"
+    - - "I'll play the gallant knight, bold and true!"
+      - "And I the wicked dragon — flee, good people, flee!"
+    - - "Step closer for the ballad of the drowned sailor!"
+      - "And mind you weep, for it's a sorry end he met!"
+    - - "I'll ask the riddles — see if you can answer!"
+      - "And I'll juggle the apples while you think on it!"
+    - - "Now here's the tale of two foolish brothers!"
+      - "One wise, one daft — and I'll let you guess which I am!"
+    - - "A duel of song! I say the sun's the fairer!"
+      - "And I the moon — now let the crowd decide!"
+    # — trios (3) —
+    - - "A play in three parts, good people — settle in!"
+      - "I am the king, and I have lost my crown!"
+      - "And we the thieves who took it — catch us if you can!"
+    - - "Step up for the song of the three winds!"
+      - "I am the north wind, cold and cruel!"
+      - "And I the south — I'll thaw his frozen heart yet!"
+    - - "Hear now the legend of the three brave sisters!"
+      - "I am the eldest, who sailed to slay the beast!"
+      - "And we the younger two, who saved her in the end!"
+    - - "A ballad of the harvest, in three sweet voices!"
+      - "I'll sing the sowing, soft and low!"
+      - "And we the reaping — raise your cups and join us!"
+
+# Gate and tower guard fixture. `employment` is the job label baked onto each
+# guard and shown in the jobs summary; `looks` is the skin pool, rolled per guard
+# (mix villager and mob skins; repeat an entry to weight it, e.g.
+# [Armorer, Armorer, pillager] ≈ 2:1 villagers to pillagers). Each look is either
+# a villager Profession (PascalCase, e.g. Armorer) or a Mob (snake_case, e.g.
+# pillager, vindicator) spawned through the mob path. `looks` must be non-empty.
+guards:
+  employment: guard
+  looks: [Armorer, pillager]
+
+# Plaza fixtures: the vendor hawking wares behind a market stall, and a troupe
+# member up on a stage. Same shape as `guards` — an `employment` job label plus a
+# `looks` skin pool rolled per fixture (villager Professions and/or Mobs; a
+# wandering_trader vendor or a witch performer reads nicely). `looks` non-empty.
+vendors:
+  employment: vendor
+  looks: [Farmer, Butcher, Fletcher, wandering_trader]
+
+performers:
+  employment: performer
+  looks: [Cartographer, Cleric, witch]
+
+# Fallback worker staffing for buildings whose structure JSON declares no
+# `staffing` block of its own. Per-building staffing now lives on each building's
+# sidecar (e.g. data/structures/resource_buildings/woodcutter_hut.json); this
+# only covers the unstated ones. Same shape as a structure's `staffing`.
+default_staffing: { employment: laborer, looks: [Farmer], workers: 3 }

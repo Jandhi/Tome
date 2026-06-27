@@ -11,5 +11,38 @@
     11
   ],
   "y_offset": -1,
-  "palette": "resource_base"
+  "palette": "resource_base",
+  "staffing": {
+    "employment": "collier",
+    "looks": [
+      "Mason"
+    ],
+    "workers": 2
+  },
+  "anchors": [
+    {
+      "stand": [
+        1,
+        1,
+        4
+      ],
+      "look": [
+        4,
+        1,
+        5
+      ]
+    },
+    {
+      "stand": [
+        7,
+        1,
+        8
+      ],
+      "look": [
+        4,
+        1,
+        5
+      ]
+    }
+  ]
 }

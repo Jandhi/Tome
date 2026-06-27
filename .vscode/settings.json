@@ -1,4 +1,5 @@
 {
-    "rust-analyzer.cargo.features": "default",
-    "rust-analyzer.files.exclude": ["target", "data", "docs"]
+    "rust-analyzer.files.exclude": ["target", "data", "docs", ".claude"],
+    "rust-analyzer.files.excludeDirs": ["target", "data", "docs", ".claude"],
+    "rust-analyzer.linkedProjects": ["Cargo.toml"]
 }

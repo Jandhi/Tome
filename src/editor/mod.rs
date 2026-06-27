@@ -1,4 +1,4 @@
-mod tests;
+mod test;
 mod editor;
 mod world;
 

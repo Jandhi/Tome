@@ -1238,7 +1238,7 @@ async fn scatter_ships_offline() {
 
     // Every cell claimed for a ship must be water; the deepest keel we could place needs
     // at least this much water under the surface to float clear of the seabed.
-    let surface = editor.world().get_motion_blocking_height_at(Point2D::new(96, 96));
+    let surface = editor.world().get_motion_blocking_height_at(Point2D::new(96, 96)).expect("surface");
     let mut ship_cells = 0usize;
     for x in 0..256 {
         for z in 0..256 {
@@ -1246,7 +1246,7 @@ async fn scatter_ships_offline() {
             if editor.world().get_claim(c) == Some(BuildClaim::Ship) {
                 ship_cells += 1;
                 assert!(editor.world().is_water(c), "ship claim on non-water cell {c:?}");
-                let depth = surface - editor.world().get_ocean_floor_height_at(c);
+                let depth = surface - editor.world().get_ocean_floor_height_at(c).expect("seabed");
                 assert!(
                     depth >= keel_depth(14) + 1,
                     "ship footprint cell {c:?} too shallow (depth {depth}) — keel would touch bottom",

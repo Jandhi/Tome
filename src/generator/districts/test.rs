@@ -90,6 +90,75 @@ mod tests {
         editor.flush_buffer().await;
     }
 
+    /// Show off the parcel partition: paint every parcel cell in a wool colour
+    /// keyed to its parcel id, then raise the parcel's edge cells one block as a
+    /// wool ridge so boundaries stand up clearly above the painted ground.
+    /// Covers all parcel types (urban, rural, off-limits) — not just urban.
+    /// Needs a live Minecraft server.
+    /// Run with: `cargo test parcel_wool_borders -- --nocapture`.
+    #[tokio::test]
+    async fn parcel_wool_borders() {
+        init_logger();
+
+        let seed = Seed(12345);
+
+        let provider = GDMCHTTPProvider::new();
+        let build_area = provider.get_build_area().await.expect("Failed to get build area");
+        let height_map = provider.get_heightmap(
+            build_area.origin.x, build_area.origin.z,
+            build_area.size.x, build_area.size.z,
+            HeightMapType::WorldSurface,
+        ).await.expect("Failed to get heightmap");
+
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+
+        let _parcels = generate_parcels(seed, &mut editor).await;
+
+        // Snapshot the per-parcel fill cells and edge cells before borrowing the
+        // editor for block writes. Keys: ParcelID → (points_2d, edges).
+        let parcel_snapshots: Vec<(usize, HashSet<Point2D>, HashSet<Point3D>)> = editor
+            .world()
+            .parcels
+            .iter()
+            .map(|(id, p)| (id.0 as usize, p.data.points_2d.clone(), p.data.edges.clone()))
+            .collect();
+
+        let mut total_cells = 0usize;
+        let mut total_edge_cells = 0usize;
+
+        for (pid, fill_cells, edge_cells) in &parcel_snapshots {
+            let wool = get_block_for_id(*pid);
+
+            // Base fill: wool at the surface height for every cell in the parcel.
+            for p in fill_cells {
+                if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
+                    continue;
+                }
+                let h = height_map[p.x as usize][p.y as usize] - build_area.origin.y;
+                editor.place_block(&wool, Point3D::new(p.x, h, p.y)).await;
+                total_cells += 1;
+            }
+
+            // Ridge: one extra wool block directly above each edge cell, so the
+            // border stands a block proud of the parcel's painted floor.
+            for e in edge_cells {
+                if e.x < 0 || e.z < 0 || e.x >= build_area.size.x || e.z >= build_area.size.z {
+                    continue;
+                }
+                editor.place_block(&wool, Point3D::new(e.x, e.y + 1, e.z)).await;
+                total_edge_cells += 1;
+            }
+        }
+
+        println!(
+            "Painted {} parcels — {} fill cells, {} edge ridge blocks",
+            parcel_snapshots.len(), total_cells, total_edge_cells,
+        );
+
+        editor.flush_buffer().await;
+    }
+
     #[tokio::test]
     async fn district_test() {
         init_logger();
@@ -295,7 +364,7 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
         println!("Structures: {:?}", structures.keys());
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner, None).await;
 
         editor.flush_buffer().await;
     }
@@ -634,7 +703,7 @@ mod tests {
             if p.x < 0 || p.y < 0 || p.x >= build_area.size.x || p.y >= build_area.size.z {
                 continue;
             }
-            let h = editor.world().get_ocean_floor_height_at(*p);
+            let Some(h) = editor.world().get_ocean_floor_height_at(*p) else { continue; };
             editor.place_block(&alley_block, Point3D::new(p.x, h - 1, p.y)).await;
             editor.world_mut().claim(*p, BuildClaim::Path(PathType::Pavement));
         }
@@ -1066,7 +1135,7 @@ mod tests {
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Palisade).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Palisade, None).await;
 
     }
 
@@ -1094,7 +1163,7 @@ mod tests {
 
         let structures = Structure::load().expect("Failed to load structures");
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Standard).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::Standard, None).await;
 
     }
 
@@ -1123,7 +1192,7 @@ mod tests {
         let structures = Structure::load().expect("Failed to load structures");
         println!("Structures: {:?}", structures.keys());
 
-        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner).await;
+        build_wall(&editor.world().get_urban_points(), &mut editor, &mut rng2, &mut placer, &material, &structures, WallType::StandardWithInner, None).await;
 
     }
 
@@ -1138,7 +1207,41 @@ mod tests {
         crate::generator::settlement::generate_town(
             &mut editor,
             Seed(12345),
-            crate::generator::buildings_v2::Culture::Medieval,
+            Some(crate::generator::buildings_v2::Culture::Medieval),
         ).await;
+    }
+
+    /// Generate a full town (which now furnishes the open spaces itself) and
+    /// report the region-type split for a quick sanity check.
+    #[tokio::test]
+    async fn open_space_regions() {
+        use crate::generator::open_space::{detect_regions, RegionType};
+
+        init_logger();
+        let provider = GDMCHTTPProvider::new();
+        let world = World::new(&provider).await.expect("Failed to create world");
+        let mut editor = world.get_editor();
+        crate::generator::settlement::generate_town(
+            &mut editor,
+            Seed(12345),
+            Some(crate::generator::buildings_v2::Culture::Desert),
+        ).await;
+
+        let urban = editor.world().get_urban_points();
+        let regions = detect_regions(editor.world(), &urban);
+
+        let total_cells: usize = regions.iter().map(|r| r.area).sum();
+        let count = |t: RegionType| regions.iter().filter(|r| r.region_type() == t).count();
+        println!(
+            "Open-space regions: {} ({} cells) | plaza {} nook {} park {} yard {}",
+            regions.len(),
+            total_cells,
+            count(RegionType::Plaza),
+            count(RegionType::Nook),
+            count(RegionType::Park),
+            count(RegionType::Yard),
+        );
+
+        editor.flush_buffer().await;
     }
 }

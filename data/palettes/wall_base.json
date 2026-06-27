@@ -1,0 +1,7 @@
+{
+  "id" : "wall_base",
+
+  "primary_stone" : "stone_bricks",
+  "secondary_stone" : "cobblestone",
+  "primary_roof" : "oak_planks"
+}

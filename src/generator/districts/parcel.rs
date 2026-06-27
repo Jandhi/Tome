@@ -185,12 +185,13 @@ fn bubble_out(parcels : &mut HashMap<ParcelID, Parcel>, world : &mut World) { //
                 continue;
             }
 
+            let Some(neighbour_point) = world.add_non_tree_height(neighbour) else { continue; };
             visited.insert(neighbour);
             queue.push(neighbour);
             world.parcel_map[neighbour.x as usize][neighbour.y as usize] = Some(current_parcel);
             parcels.get_mut(&current_parcel)
                 .expect(&format!("No parcel found with id {}", current_parcel.0))
-                .add_point(world.add_non_tree_height(neighbour));
+                .add_point(neighbour_point);
         }
     }
 }
@@ -199,7 +200,8 @@ fn recenter_parcels(world : &mut World, parcels : &mut HashMap<ParcelID, Parcel>
     world.parcel_map = vec![vec![None; world.build_area.size.z as usize]; world.build_area.size.x as usize];
         
     for parcel in parcels.values_mut() {
-        parcel.data.origin = world.add_non_tree_height(parcel.average().drop_y());
+        let Some(origin) = world.add_non_tree_height(parcel.average().drop_y()) else { continue; };
+        parcel.data.origin = origin;
         parcel.data.points.clear();
         parcel.data.points_2d.clear();
         parcel.data.sum = Point3D::default();
@@ -237,7 +239,7 @@ fn spawn_parcels(seed : Seed, world : &mut World) -> Vec<Parcel> {
         while trials < SPAWN_PARCELS_RETRIES {
             trials += 1;
 
-            let trial_point = world.add_non_tree_height(rng.rand_point2d(rect.size) + rect.origin);//fix to use non tree height
+            let Some(trial_point) = world.add_non_tree_height(rng.rand_point2d(rect.size) + rect.origin) else { continue; };//fix to use non tree height
 
             if points.iter().all(|p| p.distance_squared(trial_point) > SPAWN_PARCELS_MIN_DISTANCE * SPAWN_PARCELS_MIN_DISTANCE) {
                 points.push(trial_point);

@@ -1,0 +1,8 @@
+{
+    "id" : "acacia_log",
+    "connections" : {},
+    "blocks" : {
+        "block" : "minecraft:acacia_log",
+        "shelf" : "minecraft:acacia_shelf"
+    }
+}

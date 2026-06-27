@@ -255,11 +255,11 @@ pub async fn build_ship(
     let world = ctx.editor.world();
     let on_water = world.is_water(anchor);
     let bottom_y = if on_water {
-        let surface = world.get_motion_blocking_height_at(anchor);
-        let seabed = world.get_ocean_floor_height_at(anchor);
+        let surface = world.get_motion_blocking_height_at(anchor).expect("ship anchor out of bounds");
+        let seabed = world.get_ocean_floor_height_at(anchor).expect("ship anchor out of bounds");
         (surface - keel.depth).max(seabed)
     } else {
-        world.get_height_at(anchor)
+        world.get_height_at(anchor).expect("ship anchor out of bounds")
     };
     let placement = Placement::new(Point3D::new(anchor.x, bottom_y, anchor.y), spec.heading);
 

@@ -23,8 +23,9 @@ What is culturally differentiated today:
 |---|---|---|---|
 | **Palette** (`palette_id`) | `medieval_spruce` | `desert_sandstone` | `japanese_dark_blackstone` |
 | **Roof styles** (`roof_styles`) | Gable: Slab, Stairs, Double | Flat only | Gable: Stairs, Double |
-| **Window fill** (`window_fill`) | Glass | Open (no glass) | Glass |
+| **Window fill** (`window_fill`) | Glass | Open (no glass) | Fence (wooden lattice) |
 | **Jetty chance** (`jetty_chance`) | 2/3 | 0 | 0 |
+| **Engawa chance** (`engawa_chance`) | 0 | 0 | 1/2 (raised decked veranda) |
 | **Square bias** (`square_bias`) | 0 | 40% (square rects → domed roofs) | 0 |
 | **Kitchen floor** (`floors/place.rs`) | Stone bricks | Glazed terracotta, 2×2 rotating | Stone bricks (fallback) |
 

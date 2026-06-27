@@ -2,7 +2,7 @@ use crate::{editor::Editor, geometry::{EAST, NORTH, SOUTH, UP, WEST}};
 
 pub async fn build_compass(editor: &Editor) {
     let midpoint = editor.world().world_rect_2d().size / 2;
-    let point = editor.world().add_height(midpoint);
+    let Some(point) = editor.world().add_height(midpoint) else { return; };
     let offset = UP * 30;
     let point = point + offset;
 

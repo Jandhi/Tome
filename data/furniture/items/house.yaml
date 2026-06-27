@@ -31,6 +31,10 @@ single_bed:
     - offset: [0, 1]
       constraint: blocked_reachable
       facing: toward_wall
+  # Standing at the foot of the bed (one past the foot block), facing it.
+  anchors:
+    - dialogue: resting
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 
 double_bed:
   unique: true
@@ -58,6 +62,10 @@ double_bed:
     - offset: [1, 1]
       constraint: blocked_reachable
       facing: toward_wall
+  # Standing at the foot of the bed, facing it.
+  anchors:
+    - dialogue: resting
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 
 canopy_bed:
   unique: true
@@ -252,4 +260,8 @@ bed_with_nightstand:
     - offset: [0, 1]
       constraint: blocked_reachable
       facing: toward_wall
+  # Standing at the foot of the bed, facing it.
+  anchors:
+    - dialogue: resting
+      slots: [ { offset: [0, 2], occupant: any_age } ]
 

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -69,6 +69,10 @@ impl Editor {
 
     pub fn set_buffer_size(&mut self, size: usize) {
         self.buffer_size = size;
+    }
+
+    pub fn buffer_size(&self) -> usize {
+        self.buffer_size
     }
 
     /// Controls whether buffered blocks are flushed with block updates on
@@ -292,6 +296,78 @@ impl Editor {
             author.to_string()
         };
         self.provider.give_player_book(pages, &title, &author).await
+    }
+
+    /// Generate a vanilla worldgen feature via the server's `place feature`
+    /// command — e.g. `place feature minecraft:fancy_oak X Y Z`.
+    ///
+    /// `point` is in build-area-local coordinates (the origin is added to reach
+    /// world space, matching [`place_block`](Self::place_block)). Unlike block
+    /// placements this goes straight to the server and **bypasses the block
+    /// buffer/cache**, so the placed blocks won't be visible to later
+    /// `get_block` reads.
+    pub async fn place_feature(&self, feature: &str, point: Point3D) -> anyhow::Result<()> {
+        let world = point + self.build_area.origin;
+        let command = format!("place feature {} {} {} {}", feature, world.x, world.y, world.z);
+        self.provider.command(vec![command]).await?;
+        Ok(())
+    }
+
+    /// Set a server gamerule, e.g. `set_gamerule("blockdrops", "false")`. Goes
+    /// straight to the server; a no-op in offline mode.
+    pub async fn set_gamerule(&self, rule: &str, value: &str) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        self.provider.command(vec![format!("gamerule {} {}", rule, value)]).await?;
+        Ok(())
+    }
+
+    /// Spawn an entity of type `id` (e.g. `"minecraft:villager"`) at build-area-
+    /// local `point`, with optional SNBT `data` (entity tags such as `NoAI`,
+    /// `CustomName`, `Rotation`, …).
+    ///
+    /// `point` is in build-area-local coordinates (the origin is added to reach
+    /// world space, matching [`place_block`](Self::place_block)). Like
+    /// [`place_feature`](Self::place_feature) this goes straight to the server and
+    /// **bypasses the block buffer/cache**; it is a no-op in offline mode.
+    pub async fn spawn_entity(&self, id: &str, point: Point3D, data: Option<&str>) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        let world = point + self.build_area.origin;
+        let entity = PositionedEntity {
+            x: Coordinate::Absolute(world.x),
+            y: Coordinate::Absolute(world.y),
+            z: Coordinate::Absolute(world.z),
+            id: id.to_string(),
+            data: data.map(|s| s.to_string()),
+        };
+        self.provider.put_entities(0, 0, 0, &vec![entity]).await
+    }
+
+    /// Like [`spawn_entity`] but raises the entity by a fractional `y_offset`
+    /// blocks (entity positions are doubles) — e.g. to stand an NPC on top of a
+    /// slab. The horizontal coordinates stay on the block grid.
+    pub async fn spawn_entity_offset(
+        &self,
+        id: &str,
+        point: Point3D,
+        y_offset: f32,
+        data: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        let world = point + self.build_area.origin;
+        let entity = PositionedEntity {
+            x: Coordinate::Absolute(world.x),
+            y: Coordinate::AbsoluteF(world.y as f64 + y_offset as f64),
+            z: Coordinate::Absolute(world.z),
+            id: id.to_string(),
+            data: data.map(|s| s.to_string()),
+        };
+        self.provider.put_entities(0, 0, 0, &vec![entity]).await
     }
 }
 

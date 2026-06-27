@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{data::{Loadable, load_yaml}, generator::{districts::{PaintPalette, PaintPaletteId, PaintPalettesFile}, resource_chain::ResourceRegistry, buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::FurnitureData, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
+use crate::{data::{Loadable, load_yaml}, generator::{districts::{PaintPalette, PaintPaletteId, PaintPalettesFile}, population::NpcData, resource_chain::ResourceRegistry, buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::FurnitureData, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
 
 #[derive(Debug)]
 pub struct LoadedData {
@@ -15,6 +15,7 @@ pub struct LoadedData {
     pub resource_registry : ResourceRegistry,
     pub furniture : FurnitureData,
     pub paint_palettes : HashMap<PaintPaletteId, PaintPalette>,
+    pub npc_data : NpcData,
 }
 
 impl LoadedData {
@@ -28,6 +29,9 @@ impl LoadedData {
             file.paint_palettes.into_iter().map(|(k, v)| (PaintPaletteId(k), v)).collect()
         };
 
+        let npc_data = NpcData::load()?;
+        npc_data.validate(&structures)?;
+
         Ok(Self {
             palettes: Palette::load()?,
             materials: Material::load()?,
@@ -40,6 +44,7 @@ impl LoadedData {
             resource_registry,
             furniture: FurnitureData::load()?,
             paint_palettes,
+            npc_data,
         })
     }
 }
@@ -67,5 +72,10 @@ mod tests {
         assert!(!data.furniture.rooms.is_empty(), "no room furniture lists loaded");
         assert!(!data.paint_palettes.is_empty(), "no paint palettes loaded");
         assert!(!data.resource_registry.production_painters.is_empty(), "no production painters loaded");
+        assert!(!data.npc_data.guards.looks.is_empty(), "no guard looks loaded");
+        assert!(!data.npc_data.default_staffing.looks.is_empty(), "no default staffing looks loaded");
+        // Inline staffing: resource buildings declare their own crew on the JSON.
+        let staffed = data.structures.values().filter(|s| s.staffing.is_some()).count();
+        assert!(staffed > 0, "no structures declare staffing");
     }
 }

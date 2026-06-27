@@ -10,7 +10,9 @@ use crate::{editor::Editor, geometry::{average_to_neighbours_5_away_multi, Point
 ///   the flattened target surface. Higher → flatter city, more earthworks.
 /// - `feather`: width in cells of the flatten→natural transition band, measured
 ///   from the urban boundary inward.
-/// - `skip_water`: forwarded to [`force_height`] (true leaves lakes alone).
+/// - `skip_water`: forwarded to [`force_height`]. `true` leaves lakes alone;
+///   `false` terraforms through them and drains all standing water/lava so the
+///   city is left with no liquid.
 pub async fn flatten_urban_area(
     editor: &mut Editor,
     urban: &HashSet<Point2D>,
@@ -43,7 +45,7 @@ pub async fn feathered_flatten(
     // Natural surface height at each region cell (skipping tree canopy).
     let natural: HashSet<Point3D> = region
         .iter()
-        .map(|p| editor.world().add_non_tree_height(*p))
+        .filter_map(|p| editor.world().add_non_tree_height(*p))
         .collect();
 
     // Smoothed target surface: repeated wide averaging flattens local relief
@@ -127,7 +129,82 @@ pub fn terraform_layers(surface: &Block) -> (Block, Block) {
     }
 }
 
+/// Drain every standing liquid (water *and* lava) out of `area`, back-filling
+/// each liquid column with solid ground so nothing can flow back in. Meant to run
+/// BEFORE the urban flatten: it leaves the whole city bounds dry, so the later
+/// terraform only has to grade solid ground.
+///
+/// For each cell we anchor on the OCEAN-FLOOR height — the height map that stops
+/// at the first fluid/air above the solid floor — and drill upward, replacing
+/// every liquid block with solid until we hit air. The floor's own surface block
+/// chooses the fill (sand→sandstone body, grass→dirt, …) via [`terraform_layers`]
+/// so the plug matches the surrounding geology. Each drained column's new dry
+/// surface is written back to the world (heights + ground block) so `is_water`
+/// and the height maps no longer report the removed liquid.
+pub async fn drain_liquids(editor: &mut Editor, area: &HashSet<Point2D>) {
+    // Same large-buffer rationale as `force_height`: draining touches many blocks
+    // per column over a wide area, so batch hard and restore the caller's size.
+    const TERRAFORM_BUFFER: usize = 4096;
+    let prev_buffer = editor.buffer_size();
+    editor.set_buffer_size(TERRAFORM_BUFFER);
+
+    let mut updated: HashMap<Point2D, (i32, Block)> = HashMap::new();
+    for &xz in area {
+        // The ocean-floor height is the first fluid/air cell above the solid
+        // floor: on a liquid cell it's the BOTTOM liquid block, on dry land it's
+        // just the first air (so the scan below finds no liquid and does nothing).
+        let Some(floor) = editor.world().get_ocean_floor_height_at(xz) else {
+            continue;
+        };
+
+        // The floor's top solid sits one below; sample it to match the fill to the
+        // surrounding ground, defaulting to dirt if the column isn't loaded.
+        let surface = editor
+            .world()
+            .get_block(Point3D::new(xz.x, floor - 1, xz.y))
+            .unwrap_or_else(|| Block::from_id("minecraft:dirt".into()));
+        let (fill, top) = terraform_layers(&surface);
+
+        // Drill up from the floor, replacing every liquid block with solid fill
+        // until we reach air. (Above the ocean floor, liquid is the only thing in
+        // the way.)
+        let mut y = floor;
+        let mut filled = false;
+        while editor
+            .world()
+            .get_block(Point3D::new(xz.x, y, xz.y))
+            .is_some_and(|b| b.id.is_liquid())
+        {
+            editor.place_block_forced(&fill, Point3D::new(xz.x, y, xz.y)).await;
+            filled = true;
+            y += 1;
+        }
+        if filled {
+            // Cap the plug in the floor's surface material and record the new dry
+            // surface (first air at `y`).
+            editor.place_block_forced(&top, Point3D::new(xz.x, y - 1, xz.y)).await;
+            updated.insert(xz, (y, top));
+        }
+    }
+
+    editor.flush_buffer().await;
+    editor.set_buffer_size(prev_buffer);
+
+    for (xz, (surface_air, block)) in updated {
+        editor.world_mut().set_drained_surface(xz, surface_air, block);
+    }
+}
+
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
+    // Terraforming writes many blocks per column over a wide area. The default
+    // 32-block buffer flushes an HTTP PUT every 32 placements, so the cost is
+    // dominated by round-trip latency × request count. Batch much larger here
+    // (one PUT per ~4096 blocks instead of per 32) to cut the request count by
+    // two orders of magnitude, then flush and restore the caller's buffer size.
+    const TERRAFORM_BUFFER: usize = 4096;
+    let prev_buffer = editor.buffer_size();
+    editor.set_buffer_size(TERRAFORM_BUFFER);
+
     // Only the points we actually terraform may be written back to the
     // heightmap. Asserting heights for skipped water cells would make the map
     // claim land that was never built — downstream consumers (e.g. the wall's
@@ -145,25 +222,22 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         if matches!(editor.world().get_claim(xz), Some(crate::generator::BuildClaim::Wall)) {
             continue;
         }
-        updated.insert(*point);
-
         // Heightmap convention (see World::new / blend_terrain): the surface
         // value is the first air block; the top solid sits at `value - 1`.
-        let terrain_y = editor.world().get_ocean_floor_height_at(xz);
-        let target_y = point.y;
-        if terrain_y == target_y {
+        let Some(terrain_y) = editor.world().get_ocean_floor_height_at(xz) else {
             continue;
-        }
+        };
+        let target_y = point.y;
 
         // Keep the terraformed cap in the natural surface material: grass stays
         // grass, sand stays sand, stone stays stone. Gravity surfaces (sand/
         // gravel) get a SOLID subsurface (sandstone/stone) so the cap has a base
         // and can't fall. Snow is re-laid on top.
         //
-        // Sample the real surface block at `terrain_y - 1` (the top solid),
-        // NOT `get_ground_block` — that reads `ground_block_map` at the
-        // first-air heightmap value, i.e. the block ABOVE the surface (air),
-        // which would mis-detect every surface and cap with air (a 1-deep hole).
+        // Sample the real surface block at `terrain_y - 1` (the top solid), NOT
+        // `get_ground_block` — that reads `ground_block_map` at the first-air
+        // heightmap value, i.e. the block ABOVE the surface (air), which would
+        // mis-detect every surface and cap with air (a 1-deep hole).
         let surface = editor
             .world()
             .get_block(point.with_y(terrain_y - 1))
@@ -171,41 +245,77 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
         let (fill, top) = terraform_layers(&surface);
         let is_snow = surface.id.as_str().contains("snow");
 
-        if target_y > terrain_y {
-            // Raise: subsurface fill from the old surface up to the new top.
-            for y in terrain_y..target_y {
-                editor.place_block_forced(&fill, point.with_y(y)).await;
+        let mut changed = terrain_y != target_y;
+        if terrain_y != target_y {
+            if target_y > terrain_y {
+                // Raise: subsurface fill from the old surface up to the new top.
+                for y in terrain_y..target_y {
+                    editor.place_block_forced(&fill, point.with_y(y)).await;
+                }
+            } else {
+                // Lower: clear down to the new surface.
+                for y in target_y..=terrain_y {
+                    editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+                }
             }
-        } else {
-            // Lower: clear down to the new surface.
-            for y in target_y..=terrain_y {
-                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+
+            // Cap with the surface material at the new top (target_y - 1),
+            // re-laying a snow layer above it if the original ground was snowy.
+            editor.place_block_forced(&top, point.with_y(target_y - 1)).await;
+            if is_snow {
+                editor.place_block_forced(&surface, point.with_y(target_y)).await;
             }
         }
 
-        // Cap with the surface material at the new top (target_y - 1), re-laying
-        // a snow layer above it if the original ground was snowy.
-        editor.place_block_forced(&top, point.with_y(target_y - 1)).await;
-        if is_snow {
-            editor.place_block_forced(&surface, point.with_y(target_y)).await;
-        }
-
-        // When we're terraforming through water (skip_water = false, e.g. the
-        // city flatten), clear any water still standing above the new surface so
-        // the settlement has no awkward leftover puddles. Scan up from the
-        // surface until the water stops.
+        // When we're terraforming through liquid (skip_water = false, e.g. the
+        // city flatten), REPLACE any standing water/lava in the column with solid
+        // ground rather than draining it to air. An air pocket just lets the
+        // neighbouring lake flow straight back in — only a solid block keeps the
+        // city dry. Fill the whole liquid stack (submerged below grade, and any
+        // standing above it), then re-cap and report the true new surface so the
+        // heightmap matches.
+        let mut surface_air = target_y;
         if !skip_water {
+            let is_liquid_at = |editor: &Editor, y: i32| {
+                editor
+                    .world()
+                    .get_block(point.with_y(y))
+                    .is_some_and(|b| b.id.is_liquid())
+            };
+
+            // Submerged liquid just below the graded surface → solid fill.
+            let mut y = target_y - 1;
+            while is_liquid_at(editor, y) {
+                editor.place_block_forced(&fill, point.with_y(y)).await;
+                changed = true;
+                y -= 1;
+            }
+            // Liquid at/above the graded surface → solid fill, tracking the top.
             let mut y = target_y;
-            while editor
-                .world()
-                .get_block(point.with_y(y))
-                .is_some_and(|b| b.id.is_water())
-            {
-                editor.place_block_forced(&"air".into(), point.with_y(y)).await;
+            while is_liquid_at(editor, y) {
+                editor.place_block_forced(&fill, point.with_y(y)).await;
+                changed = true;
                 y += 1;
             }
+            if y > target_y {
+                // Liquid rose above grade; cap the raised solid and lift the surface.
+                editor.place_block_forced(&top, point.with_y(y - 1)).await;
+                surface_air = y;
+            }
+        }
+
+        // Only the cells we actually touched may be written back to the
+        // heightmap; asserting heights for untouched (e.g. skipped) cells would
+        // make the map claim land that was never built.
+        if changed {
+            updated.insert(point.with_y(surface_air));
         }
     }
+
+    // With the large buffer, most placements above are still pending; flush
+    // them in as few requests as possible before restoring the caller's size.
+    editor.flush_buffer().await;
+    editor.set_buffer_size(prev_buffer);
 
     editor.world_mut().set_heights(&updated);
 }
@@ -222,9 +332,9 @@ pub async fn smooth_terrain(points: &HashSet<Point2D>, strength: f32, editor: &m
     let points_3d: HashSet<Point3D> = points
         .iter()
         .filter(|&&p| !editor.world().is_water(p))
-        .map(|&p| {
-            let y = editor.world().get_non_tree_height(p);
-            Point3D::new(p.x, y, p.y)
+        .filter_map(|&p| {
+            let y = editor.world().get_non_tree_height(p)?;
+            Some(Point3D::new(p.x, y, p.y))
         })
         .collect();
 

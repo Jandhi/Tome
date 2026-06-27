@@ -1,0 +1,59 @@
+# Names for open-space regions (open_space.rs / OpenSpaceNames).
+# A name is "<stem> <suffix>", de-duplicated within a town. Both plazas and parks
+# have a schema PER type (keyed by PlazaType::key / ParkType::key) so a space is
+# named for what it actually is.
+
+# Plaza type -> its own schema. Keys must match PlazaType::key():
+# market, fountain, well, monument, stage.
+plazas:
+  market:
+    stems: [Corn, Cloth, Fish, Guild, Merchant, Market, Cheap, Hay]
+    suffixes: [Market, Marketplace, Square, Cross, Row]
+    # Per-culture overrides (keyed by culture). Empty list = keep the default.
+    cultures:
+      desert:
+        stems: [Spice, Silk, Date, Camel, Caravan, Sultan, Grand, Amber, Saffron]
+        suffixes: [Souk, Bazaar, Market, Caravanserai]
+  fountain:
+    stems: [Fountain, Temple, Kings, Silver, Crystal, Old]
+    suffixes: [Square, Plaza, Court, Cross]
+  well:
+    stems: [Old, Draw, Stone, Spring, Maple, Cold]
+    suffixes: [Well, Square, Cross, Yard]
+  monument:
+    stems: [Victory, Kings, Mason, Saints, Memorial, Old]
+    suffixes: [Square, Plaza, Cross, Monument]
+  stage:
+    stems: [Players, Mummers, Minstrel, Festival, Guild, Maypole]
+    suffixes: [Stage, Square, Green, Court]
+
+# Park type -> its own schema. Keys must match ParkType::key():
+# wooded, flower, cemetery, pond, lawn, zen, fountain, hedge, cactus.
+parks:
+  wooded:
+    stems: [Oak, Elm, Birch, Hazel, Old, Green]
+    suffixes: [Wood, Woods, Park, Grove]
+  flower:
+    stems: [Rose, Lily, Tulip, Violet, Iris, Poppy]
+    suffixes: [Garden, Flower Garden, Beds, Bloom]
+  cemetery:
+    stems: [Willow, Old, Yew, Elm, Saints, Ash]
+    suffixes: [Cemetery, Graveyard, Rest, Yard]
+  pond:
+    stems: [Heron, Mirror, Willow, Duck, Reed, Mill]
+    suffixes: [Pond, Water Garden, Pool, Mere]
+  lawn:
+    stems: [Green, Kings, Old, Long, Sunny]
+    suffixes: [Green, Commons, Lawn, Field]
+  zen:
+    stems: [Crane, Lotus, Maple, Stone, Koi, Moss]
+    suffixes: [Zen Garden, Garden, Court, Retreat]
+  fountain:
+    stems: [Royal, Market, Old, Kings, Silver]
+    suffixes: [Fountain, Court, Wells, Spring]
+  hedge:
+    stems: [Maze, Knot, Box, Royal, Ivy]
+    suffixes: [Hedge Garden, Maze, Parterre, Garden]
+  cactus:
+    stems: [Cactus, Dune, Sun, Thorn, Agave, Spine]
+    suffixes: [Park, Garden, Yard, Court]

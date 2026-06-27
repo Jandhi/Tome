@@ -32,7 +32,9 @@ pub fn group_trees(cells: &HashSet<Point2D>, editor: &Editor) -> Vec<TreeGroup> 
         .iter()
         .copied()
         .filter(|&p| {
-            let base_y = world.get_non_tree_height(p);
+            let Some(base_y) = world.get_non_tree_height(p) else {
+                return false;
+            };
             editor.get_block(p.add_y(base_y)).id.is_log()
         })
         .collect();
@@ -70,7 +72,9 @@ pub fn group_trees(cells: &HashSet<Point2D>, editor: &Editor) -> Vec<TreeGroup> 
         if trunk_cells.contains(&p) {
             continue; // already owned by its trunk group
         }
-        let top_y = world.get_motion_blocking_height_at(p) - 1;
+        let Some(top_y) = world.get_motion_blocking_height_at(p).map(|h| h - 1) else {
+            continue; // out of bounds — not our cell
+        };
         if !editor.get_block(p.add_y(top_y)).id.is_tree() {
             continue; // not a canopy cell
         }
@@ -88,7 +92,10 @@ pub fn group_trees(cells: &HashSet<Point2D>, editor: &Editor) -> Vec<TreeGroup> 
 
 pub async fn log_stems(editor: &Editor, points: HashSet<Point2D>) {
     for point in points {
-        let height = editor.world().get_height_at(point) - 1; // checking ground
+        let Some(height) = editor.world().get_height_at(point) else {
+            continue;
+        };
+        let height = height - 1; // checking ground
         let mut block_id = editor.get_block(Point3D::new(point.x, height, point.y)).id;
 
         if !block_id.is_tree() {
@@ -129,7 +136,9 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
 
     // 1. Seed from every log in each input column (full-depth scan, no window).
     for &point in &points {
-        let top = editor.world().get_motion_blocking_height_at(point) - 1;
+        let Some(top) = editor.world().get_motion_blocking_height_at(point).map(|h| h - 1) else {
+            continue; // out of bounds — no column to scan
+        };
         for y in (top - MAX_SCAN_DEPTH..=top).rev() {
             let pos = Point3D::new(point.x, y, point.y);
             // `try_get_block`, not `get_block`: the deep scan can run past the world
@@ -170,7 +179,9 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
     //    dirt back to grass. No fixed window, so a log left low under an overhang
     //    is reached.
     for &point in &columns {
-        let top = editor.world().get_motion_blocking_height_at(point) - 1;
+        let Some(top) = editor.world().get_motion_blocking_height_at(point).map(|h| h - 1) else {
+            continue; // out of bounds — not our column
+        };
         if !editor.get_block(point.add_y(top)).id.is_tree() {
             continue; // column surface isn't a tree — leave it untouched
         }

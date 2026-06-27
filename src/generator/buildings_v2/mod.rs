@@ -1,24 +1,29 @@
 pub mod blueprint;
 pub mod cellar;
 pub mod door_ramp;
+pub mod engawa;
 pub mod exterior;
 pub mod floors;
 pub mod footprint;
 pub mod foundation;
 pub mod frame;
+pub mod climate;
 pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod style;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
 pub use self::walls::{TimberPattern, WindowFill};
 
 use crate::generator::materials::PaletteId;
+use crate::minecraft::Color;
 use footprint::SizeClass;
 use roof::RoofStyle;
 use roof::gable::GablePitch;
+use roof::hipped::HippedPitch;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuildingType {
@@ -43,6 +48,32 @@ impl Culture {
         }
     }
 
+    /// Curated, harmonious dye palette this culture's buildings draw their
+    /// accent colour from. The settlement's `ColorScheme` picks its two town
+    /// colours and the manor family colours out of this pool, so the whole town
+    /// reads as one coherent colour family. Every colour here must have a
+    /// matching `colors:` word entry for this culture in `settlement_names.yaml`
+    /// so a town named after its dominant colour can render it.
+    pub fn color_pool(&self) -> Vec<Color> {
+        match self {
+            // Heraldic + earthy: the classic medieval banner colours.
+            Culture::Medieval => vec![
+                Color::Red, Color::Blue, Color::Green,
+                Color::Yellow, Color::White, Color::Black, Color::Brown,
+            ],
+            // Vermilion / indigo / ink — the traditional Japanese register.
+            Culture::Japanese => vec![
+                Color::Red, Color::Blue, Color::White,
+                Color::Black, Color::Purple, Color::Yellow, Color::Green,
+            ],
+            // Sun-bleached earth tones for the desert.
+            Culture::Desert => vec![
+                Color::White, Color::Red, Color::Green,
+                Color::Yellow, Color::LightBlue, Color::Black,
+            ],
+        }
+    }
+
     /// Roof styles to pick from for this culture.
     pub fn roof_styles(&self) -> Vec<RoofStyle> {
         match self {
@@ -53,9 +84,36 @@ impl Culture {
             ],
             Culture::Desert => vec![RoofStyle::Flat],
             Culture::Japanese => vec![
-                RoofStyle::Gable(GablePitch::Stairs),
-                RoofStyle::Gable(GablePitch::Double),
+                RoofStyle::Hipped(HippedPitch::Slab),
+                RoofStyle::Hipped(HippedPitch::Stairs),
+                RoofStyle::Irimoya,
             ],
+        }
+    }
+
+    /// Roof styles to pick from for this culture *and size*, as a weighted bag —
+    /// entries repeat to encode probability, so a caller can pick one uniformly.
+    /// Only Japanese is size-sensitive today: the elaborate irimoya (hip-and-
+    /// gable) is reserved for grander buildings, so it weights toward Manor/Hall
+    /// while cottages stay humbly hipped. Other cultures ignore size.
+    pub fn roof_styles_for(&self, size_class: SizeClass) -> Vec<RoofStyle> {
+        use RoofStyle::{Hipped, Irimoya};
+        use HippedPitch::{Slab, Stairs};
+        match self {
+            Culture::Japanese => match size_class {
+                // Cottage: hipped only — the humblest roof.
+                SizeClass::Cottage => vec![Hipped(Slab), Hipped(Stairs)],
+                // House: ~5/6 hipped, ~1/6 irimoya.
+                SizeClass::House => vec![
+                    Hipped(Slab), Hipped(Stairs), Hipped(Slab),
+                    Hipped(Stairs), Hipped(Slab), Irimoya,
+                ],
+                // Hall: ~1/2 hipped, ~1/2 irimoya.
+                SizeClass::Hall => vec![Hipped(Slab), Hipped(Stairs), Irimoya, Irimoya],
+                // Manor: ~3/4 irimoya — the grand hip-and-gable roof.
+                SizeClass::Manor => vec![Hipped(Stairs), Irimoya, Irimoya, Irimoya],
+            },
+            _ => self.roof_styles(),
         }
     }
 
@@ -63,7 +121,25 @@ impl Culture {
     pub fn window_fill(&self) -> WindowFill {
         match self {
             Culture::Desert => WindowFill::Open,
-            _ => WindowFill::Glass,
+            Culture::Japanese => WindowFill::Fence,
+            Culture::Medieval => WindowFill::Glass,
+        }
+    }
+
+    /// Probability (num, denom) that a building of this culture and size is built
+    /// as an engawa: a raised veranda wrapping the building (see `engawa`). It's a
+    /// Japanese signature reserved for the grand buildings — every Manor gets one,
+    /// a minority of Halls do (teahouse/inn variety), and smaller homes never do.
+    /// Eligibility (the core rect staying large enough once inset) is enforced in
+    /// `engawa::plan_engawa`; this is just the cultural/size taste filter.
+    pub fn engawa_chance(&self, size_class: SizeClass) -> (u32, u32) {
+        match self {
+            Culture::Japanese => match size_class {
+                SizeClass::Manor => (1, 1), // always — the elite-home signature
+                SizeClass::Hall => (1, 3),  // some — teahouses, inns
+                SizeClass::House | SizeClass::Cottage => (0, 1),
+            },
+            Culture::Medieval | Culture::Desert => (0, 1),
         }
     }
 
@@ -108,6 +184,12 @@ pub struct BuildingContext {
     /// shape/floor/plot eligibility gates and silently no-ops when ineligible,
     /// so it's safe to set this true unconditionally for testing.
     pub jetty: bool,
+    /// Build as an engawa: inset the walled footprint by one on every open-air
+    /// side, raise it onto a wooden platform, deck the perimeter ring, and skirt
+    /// it with a pent roof. `plan_engawa` gates on the inset rects staying large
+    /// enough and silently no-ops when ineligible, so it's safe to set true to
+    /// request the style; only Japanese buildings honour it (see `build_house`).
+    pub engawa: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
@@ -125,6 +207,7 @@ impl BuildingContext {
             window_fill: culture.window_fill(),
             timber_pattern: None,
             jetty: false,
+            engawa: false,
             base_y_override: None,
         }
     }

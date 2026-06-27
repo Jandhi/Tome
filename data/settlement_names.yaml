@@ -1,0 +1,426 @@
+# Settlement-name vocabulary for generator/naming.rs (generate_settlement_name).
+#
+# The name is built from the FEATURES of the place — the most iconic building, a
+# civic landmark (market, cross, …), the land shape, and the biome — so it reads
+# as earned. Detection is CULTURE-NEUTRAL: each feature maps to an abstract
+# *concept* (water, hill, market, …). Each culture then translates the concept
+# into its OWN words and morphology, so a river town is "Brookford" (medieval),
+# "Kawamura" (japanese), or "Bir Wadi" (desert) — never an English stem glued to
+# a Japanese suffix.
+#
+# Composition per culture: a lead word is drawn from a weighted theme, then the
+# name is either `stem + suffix` ("Mill"+"ford" -> "Millford", "Yama"+"mura" ->
+# "Yamamura") or two words ("Bir Wadi"). Seeded by the town seed.
+
+# Default chance (%) of the two-word form; a culture may override it.
+two_word_pct: 35
+
+# Relative weight of each theme when picking the lead word. Building and civic
+# tie (a market is as defining as a mill); both beat the terrain, which beats the
+# plain biome flavour.
+weights:
+  building: 5
+  civic: 5
+  landform: 3
+  color: 3
+  biome: 2
+
+# Land-shape thresholds (blocks of ground relief across the footprint; share of
+# footprint-edge cells touching water).
+hilly_relief: 12
+flat_relief: 3
+water_share: 0.10
+
+# ── Feature -> concept maps (shared across cultures) ──────────────────────────
+
+# Urban structure type -> concept. The most common mapped type wins.
+buildings:
+  mill: mill
+  smithy: smith
+  bakery: baker
+  carpenter: carpenter
+  tannery: tanner
+  weaver: weaver
+  brewery: brewer
+  butcher: butcher
+  sawmill: sawyer
+  chandlery: chandler
+  scriptorium: scribe
+  farm: field
+  ranch: stock
+  mine: delve
+
+# Open-space landmark (plaza/park `.key()`) -> concept. Only strong, distinctive
+# features are listed; weak ones (stage, hedge, cactus, wooded, lawn, flower) are
+# omitted on purpose so they contribute no theme.
+civic:
+  market: market
+  well: well
+  monument: cross
+  cemetery: grave
+  fountain: spring
+  pond: pool
+  zen: garden
+
+# Landform kind -> concept.
+landforms:
+  hilly: hill
+  flat: flat
+  water: water
+
+# Biome-name substring -> concept. First matching rule wins; empty `contains` is
+# the fallback. A culture missing a biome concept falls back to its `green`.
+biomes:
+  - contains: [badlands]
+    concept: mesa
+  - contains: [cherry]
+    concept: blossom
+  - contains: [mushroom]
+    concept: spore
+  - contains: [mangrove, swamp]
+    concept: marsh
+  - contains: [jungle]
+    concept: vine
+  - contains: [desert]
+    concept: sand
+  - contains: [savanna]
+    concept: savanna
+  - contains: [snow, frozen, ice]
+    concept: frost
+  - contains: [taiga]
+    concept: pine
+  - contains: [birch]
+    concept: birch
+  - contains: [forest]
+    concept: wood
+  - contains: [peak, hill, slope, windswept, mountain]
+    concept: peak
+  - contains: [beach, shore, ocean, river, coast]
+    concept: shore
+  - contains: [meadow, plains, sunflower]
+    concept: meadow
+  - contains: []
+    concept: green
+
+# ── Per-culture vocabulary + morphology ───────────────────────────────────────
+# `suffixes` attach directly (lower-case) for the stem+suffix form; `fillers` are
+# capitalised second words for the two-word form; `concepts` translate each
+# concept into that culture's words. A concept a culture doesn't define simply
+# contributes no theme (except `biome`, which falls back to `green`). `medieval`
+# is the fallback culture.
+#
+# `glosses` maps every name word (and suffix) to its plain-English meaning. The
+# namer emits an English translation of the composed name as the welcome
+# SUBTITLE — "Bir al-Raml" → "Well of the Sand", "Kawamura" → "River Village".
+# Every concept word, filler, colour word, and suffix MUST appear here (enforced
+# by `every_name_word_has_a_gloss`). Medieval names are readable Old English
+# (Anglo-Saxon) forms — "Myln" (mill), "Ac" (oak), "Stan" (stone) — so the gloss
+# is the modern-English reading: "Mylnham" → "Mill Homestead".
+cultures:
+  medieval:
+    # Old-English suffixes: burh (fort), ford, tun (town), holm (isle), wic
+    # (farm), dæl (dale), beorg (barrow), mere (pool), stede (stead), feld
+    # (field), ham (homestead), worð (croft).
+    suffixes: [bury, ford, ton, holm, wick, dale, barrow, mere, stead, feld, ham, worth]
+    fillers: [Holh, Weard, Ende, Brycg, Cot]
+    # Colour words keyed by dye id → Old-English word; always lead ("Blacmere",
+    # "Reade Dun"). The namer renders the town's actual scheme colours, so these
+    # keys must cover Medieval's `Culture::color_pool`.
+    colors:
+      red: Reade
+      blue: Blue
+      green: Grene
+      yellow: Gold
+      white: Hwit
+      black: Blac
+      brown: Brun
+    concepts:
+      mill: [Myln]
+      smith: [Smith]
+      baker: [Becer]
+      carpenter: [Wright]
+      tanner: [Tanner]
+      weaver: [Webb]
+      brewer: [Breow]
+      butcher: [Shamble]
+      sawyer: [Sawyer]
+      chandler: [Candel]
+      scribe: [Writere]
+      field: [Acer]
+      stock: [Stoc]
+      delve: [Delf]
+      market: [Ceap, Chipping]
+      well: [Well, Wielle]
+      cross: [Rod, Cross]
+      grave: [Barrow, Hallow]
+      spring: [Spring, Funta]
+      pool: [Mere, Pool]
+      garden: [Orceard, Wyrt]
+      hill: [Dun, Hyll, Crag]
+      flat: [Feld, Grene, Plain]
+      water: [Broc, Mere, Ea]
+      mesa: [Clay, Stan]
+      blossom: [Blostm, Bloom]
+      spore: [Spore, Cap]
+      marsh: [Mersc, Fenn, Hreod]
+      vine: [Fearn, Vine]
+      sand: [Sand, Dust]
+      savanna: [Gold, Acacia]
+      frost: [Forst, Rime]
+      pine: [Pin, Fir]
+      birch: [Birce, Hasel]
+      wood: [Ac, Elm, Holt]
+      peak: [Crag, Beorg, Stan]
+      shore: [Tid, Cove, Sealt]
+      meadow: [Maedwe, Lea, Clofa]
+      green: [Grene, Lang, Stan, Broc]
+    # word/suffix → modern-English meaning (the subtitle).
+    glosses:
+      # suffixes
+      bury: Fort
+      ford: Ford
+      ton: Town
+      holm: Isle
+      wick: Farm
+      dale: Dale
+      barrow: Barrow
+      mere: Pool
+      stead: Farmstead
+      feld: Field
+      ham: Homestead
+      worth: Croft
+      # colours
+      Reade: Red
+      Blue: Blue
+      Grene: Green
+      Gold: Gold
+      Hwit: White
+      Blac: Black
+      Brun: Brown
+      # fillers
+      Holh: Hollow
+      Weard: Watch
+      Ende: End
+      Brycg: Bridge
+      Cot: Cottage
+      # concept words
+      Myln: Mill
+      Smith: Smith
+      Becer: Baker
+      Wright: Carpenter
+      Tanner: Tanner
+      Webb: Weaver
+      Breow: Brewer
+      Shamble: Butcher
+      Sawyer: Sawyer
+      Candel: Chandler
+      Writere: Scribe
+      Acer: Field
+      Stoc: Stock
+      Delf: Mine
+      Ceap: Market
+      Chipping: Market
+      Well: Well
+      Wielle: Well
+      Rod: Cross
+      Cross: Cross
+      Barrow: Barrow
+      Hallow: Grave
+      Spring: Spring
+      Funta: Spring
+      Mere: Pool
+      Pool: Pool
+      Orceard: Orchard
+      Wyrt: Garden
+      Dun: Hill
+      Hyll: Hill
+      Crag: Crag
+      Feld: Field
+      Grene: Green
+      Plain: Plain
+      Broc: Brook
+      Ea: River
+      Clay: Clay
+      Stan: Stone
+      Blostm: Blossom
+      Bloom: Bloom
+      Spore: Spore
+      Cap: Cap
+      Mersc: Marsh
+      Fenn: Fen
+      Hreod: Reed
+      Fearn: Fern
+      Vine: Vine
+      Sand: Sand
+      Dust: Dust
+      Acacia: Acacia
+      Forst: Frost
+      Rime: Rime
+      Pin: Pine
+      Fir: Fir
+      Birce: Birch
+      Hasel: Hazel
+      Ac: Oak
+      Elm: Elm
+      Holt: Wood
+      Beorg: Mount
+      Tid: Tide
+      Cove: Cove
+      Sealt: Salt
+      Maedwe: Meadow
+      Lea: Lea
+      Clofa: Clover
+      Lang: Long
+  japanese:
+    two_word_pct: 15
+    suffixes: [mura, machi, dani, gawa, hara, saki, sato]
+    fillers: [Sato, Mura, Hama]
+    colors:
+      red: Aka
+      blue: Ao
+      white: Shiro
+      black: Kuro
+      purple: Murasaki
+      yellow: Kin
+      green: Midori
+    concepts:
+      smith: [Kaji]
+      field: [Ta]
+      market: [Ichi, Ichiba]
+      well: [Ido]
+      cross: [Tsuji]
+      grave: [Tera]
+      spring: [Izumi]
+      pool: [Ike]
+      garden: [Niwa, Sono]
+      hill: [Yama, Oka, Take]
+      flat: [Hara, No]
+      water: [Kawa, Taki, Mizu]
+      blossom: [Sakura]
+      marsh: [Numa]
+      sand: [Suna]
+      frost: [Yuki, Shimo]
+      pine: [Matsu]
+      wood: [Mori, Hayashi]
+      peak: [Take, Mine]
+      shore: [Hama, Umi]
+      meadow: [No, Hara]
+      green: [Sato, Midori, Aoki]
+    glosses:
+      # suffixes
+      mura: Village
+      machi: Town
+      dani: Valley
+      gawa: River
+      hara: Plain
+      saki: Cape
+      sato: Hamlet
+      # colours
+      Aka: Red
+      Ao: Blue
+      Shiro: White
+      Kuro: Black
+      Murasaki: Purple
+      Kin: Gold
+      Midori: Green
+      # concept words + fillers
+      Kaji: Smith
+      Ta: Field
+      Ichi: Market
+      Ichiba: Market
+      Ido: Well
+      Tsuji: Crossroads
+      Tera: Temple
+      Izumi: Spring
+      Ike: Pond
+      Niwa: Garden
+      Sono: Garden
+      Yama: Mountain
+      Oka: Hill
+      Take: Peak
+      Hara: Plain
+      No: Field
+      Kawa: River
+      Taki: Waterfall
+      Mizu: Water
+      Sakura: Cherry Blossom
+      Numa: Marsh
+      Suna: Sand
+      Yuki: Snow
+      Shimo: Frost
+      Matsu: Pine
+      Mori: Forest
+      Hayashi: Woods
+      Mine: Peak
+      Hama: Beach
+      Umi: Sea
+      Aoki: Greenwood
+      Sato: Hamlet
+      Mura: Village
+  desert:
+    # Arabic-style: definite article + construct (iḍāfa), no compound suffixes.
+    # ~40% "Al-Wadi" / "Ar-Raml" (sun-letter assimilated), ~45% "Bir al-Raml"
+    # construct, ~15% bare "Bir Zeit". Leads are geographic feature words.
+    article:
+      prefix_pct: 40
+      construct_pct: 45
+    fillers: [Dar, Bab, Qasr]
+    # Arabic colour forms used in real toponyms (Al-Hamra, Az-Zarqa, Al-Bayda);
+    # take the article + sun-letter assimilation like any other lead. Keyed by
+    # dye id → word, covering Desert's `Culture::color_pool`.
+    colors:
+      white: Bayda
+      red: Hamra
+      green: Khadra
+      yellow: Safra
+      light_blue: Zarqa
+      black: Sawda
+    concepts:
+      smith: [Haddad]
+      market: [Souk]
+      well: [Bir]
+      cross: [Qasr]
+      grave: [Qubba]
+      spring: [Ain]
+      pool: [Birka]
+      garden: [Bustan]
+      hill: [Jebel, Tell]
+      flat: [Sahel, Hamada]
+      water: [Wadi, Ain]
+      sand: [Raml, Erg, Sahra]
+      mesa: [Hamada]
+      wood: [Nakhl]
+      peak: [Jebel, Ras]
+      shore: [Marsa]
+      meadow: [Bustan]
+      green: [Bustan, Dar, Wadi]
+    glosses:
+      # colours
+      Bayda: White
+      Hamra: Red
+      Khadra: Green
+      Safra: Yellow
+      Zarqa: Blue
+      Sawda: Black
+      # concept words + fillers
+      Haddad: Smith
+      Souk: Market
+      Bir: Well
+      Qasr: Castle
+      Qubba: Shrine
+      Ain: Spring
+      Birka: Pool
+      Bustan: Garden
+      Jebel: Mountain
+      Tell: Hill
+      Sahel: Plain
+      Hamada: Plateau
+      Wadi: River
+      Raml: Sand
+      Erg: Dunes
+      Sahra: Desert
+      Nakhl: Palms
+      Ras: Cape
+      Marsa: Harbour
+      Dar: House
+      Bab: Gate

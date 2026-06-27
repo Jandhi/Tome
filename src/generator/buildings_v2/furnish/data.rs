@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde_derive::Deserialize;
 
 use crate::data::{load_yaml, load_yaml_dir};
+use crate::generator::population::{Occupant, SceneKind, SlotRole};
 use super::{BlockLayer, CellConstraint, FacingMode};
 
 // ---------------------------------------------------------------------------
@@ -110,6 +111,12 @@ pub struct Furniture {
     pub blocks: Vec<FurnitureBlock>,
     #[serde(default)]
     pub constraints: Vec<FurnitureConstraint>,
+    /// NPC standing-spot scenes this item offers (a worker in front of a
+    /// furnace, two diners across a table, …). Offsets are in the same
+    /// `[along, away]` local frame as `constraints`, resolved against the
+    /// item's placed orientation. Empty for furniture nobody stands at.
+    #[serde(default)]
+    pub anchors: Vec<AnchorSpec>,
 }
 
 impl Default for Furniture {
@@ -122,8 +129,49 @@ impl Default for Furniture {
             weight: 1.0,
             blocks: Vec::new(),
             constraints: Vec::new(),
+            anchors: Vec::new(),
         }
     }
+}
+
+/// One NPC scene a furniture item offers. v1 emits these as solo or two-person
+/// scenes; the `kind` carries through to the population pass's scene weighting.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnchorSpec {
+    /// Scene type. Defaults to `solo`.
+    #[serde(default = "default_scene_kind")]
+    pub kind: SceneKind,
+    /// Default dialogue key for this scene's slots (e.g. `crafting`,
+    /// `conversation`), indexing a pool in `npcs.yaml`. A slot's own `dialogue`
+    /// overrides it. Keys are generic activities reusable across many items.
+    #[serde(default)]
+    pub dialogue: Option<String>,
+    pub slots: Vec<AnchorSlotSpec>,
+}
+
+/// One person's spot in an [`AnchorSpec`]. The NPC stands on `offset` (local
+/// `[along, away]`, resolved by the item's placed orientation) and faces the
+/// item's origin `[0, 0]`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AnchorSlotSpec {
+    pub offset: [i32; 2],
+    /// Role label (default `resident`). v1 doesn't bind professions, so this is
+    /// informational until the workplace pass.
+    #[serde(default = "default_role")]
+    pub role: SlotRole,
+    /// Which age of NPC may stand here (`adult_only` default, `any_age`,
+    /// `child_only`). Lets a furniture/scene author open a domestic slot to
+    /// children or reserve a play scene for them.
+    #[serde(default)]
+    pub occupant: Occupant,
+    /// If false, this slot drops out individually when its cell isn't usable;
+    /// if true (default), an unusable cell drops the whole scene.
+    #[serde(default = "default_true")]
+    pub required: bool,
+    /// Per-slot dialogue key, overriding the scene's `dialogue`. `None` inherits
+    /// the scene key.
+    #[serde(default)]
+    pub dialogue: Option<String>,
 }
 
 /// A block within a furniture piece.
@@ -258,3 +306,6 @@ pub struct FixedSlot {
 fn default_weight() -> f32 { 1.0 }
 fn default_chance() -> f32 { 1.0 }
 fn default_place() -> bool { true }
+fn default_true() -> bool { true }
+fn default_scene_kind() -> SceneKind { SceneKind::Solo }
+fn default_role() -> SlotRole { SlotRole::Resident }

@@ -6,6 +6,22 @@ use log::info;
 
 use crate::{data::to_snbt, editor::Editor, generator::{data::LoadedData, materials::{Palette, PaletteSwapResult, Placer}, nbts::{Rotation, Structure, meta::NBTMeta, nbt::NBTStructure, transform::Transform}}, geometry::{Cardinal, Point3D}, minecraft::{Block, BlockForm}};
 
+/// Read and decode an NBT structure file (plain or gzip-compressed). Shared by
+/// placement and by callers that only need the structure's metadata — e.g. its
+/// `size` to find the top of a tower for guard placement.
+pub fn load_nbt_structure(path: &str) -> anyhow::Result<NBTStructure> {
+    let nbt_data = std::fs::read(path)?;
+    match fastnbt::from_bytes::<NBTStructure>(&nbt_data) {
+        Result::Ok(s) => Ok(s),
+        Err(_) => {
+            let mut decoder = GzDecoder::new(nbt_data.as_slice());
+            let mut buf = vec![];
+            decoder.read_to_end(&mut buf)?;
+            Ok(fastnbt::from_bytes(&buf)?)
+        }
+    }
+}
+
 /// Convert a block's stored NBT compound into the SNBT string the editor
 /// sends to the server. Empty compounds carry no real data and are dropped.
 fn block_nbt_to_snbt(value : &fastnbt::Value) -> Option<String> {
@@ -43,20 +59,7 @@ pub async fn place_structure<'materials>(editor: &Editor, placer: Option<&mut Pl
 pub async fn place_nbt<'materials>(data: &NBTMeta, transform: Transform, editor: &Editor, placer: Option<&mut Placer<'materials>>, generator_data: Option<&LoadedData>, input_palette: Option<&Palette>, output_palette: Option<&Palette>, mirror_x: Option<i32>, mirror_z: Option<i32>) -> anyhow::Result<()> {
     info!("Placing NBT structure: {}", data.path);
 
-    let nbt_data = std::fs::read(data.path.clone())?;
-    
-    let structure : Result<NBTStructure, fastnbt::error::Error> = fastnbt::from_bytes(&nbt_data);
-
-    // Try to decode the structure directly, if it fails, try decompressing and decoding
-    let structure = match structure {
-        Result::Ok(s) => s,
-        Err(_) => {
-            let mut decoder = GzDecoder::new(nbt_data.as_slice());
-            let mut buf = vec![];
-            decoder.read_to_end(&mut buf)?;
-            fastnbt::from_bytes(&buf)?
-        }
-    };
+    let structure = load_nbt_structure(&data.path)?;
 
     // Beds are pasted without block updates: with updates on, the server runs the
     // placement side effect of a bed foot auto-spawning its head — duplicating the

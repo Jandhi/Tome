@@ -60,6 +60,12 @@ pub struct RoadNetwork {
     pub nodes: Vec<Point3D>,
     /// MST + shortcut edges over `nodes`.
     pub edges: Vec<RoadEdge>,
+    /// Per-cell road number for the realised pavement, computed geometrically
+    /// from the routed centrelines (split at true junctions — including A*
+    /// crossings — then merged by actual straightness). This, not `Path::road_id`,
+    /// is the source of truth for road identity in the map and street signs:
+    /// one number = one continuous physical road. Centreline cells only.
+    pub road_labels: HashMap<Point2D, u32>,
 }
 
 /// How much longer the tree path between two nodes must be than their
@@ -118,14 +124,14 @@ pub async fn build_road_network(
 ) -> RoadNetwork {
     let urban = editor.world().get_urban_points();
     if urban.is_empty() {
-        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new() };
+        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new(), road_labels: HashMap::new() };
     }
 
     // Destination nodes (town centre, industry, district centres, gates),
     // deduped and relocated off building footprints.
     let (nodes, kinds) = assemble_nodes(editor, include_town_center, anchor_nodes, blocked, &urban);
     if nodes.len() < 2 {
-        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new() };
+        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new(), road_labels: HashMap::new() };
     }
 
     // --- Edges: MST backbone + capped loop-closing shortcuts. ---
@@ -148,11 +154,7 @@ pub async fn build_road_network(
 
     // Distance-to-wall field: routes pay a ramping penalty near the wall so they
     // keep clear of it and only meet it at gates.
-    let wall_cells: HashSet<Point2D> = urban.iter()
-        .filter(|&&c| CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
-        .copied()
-        .collect();
-    let wall_dist = wall_distance(&wall_cells, arterial_params.wall_clearance);
+    let wall_dist = wall_distance_field(&urban, arterial_params.wall_clearance);
 
     let mut paths: Vec<Path> = Vec::new();
     // The abstract edge each successfully-routed path came from, parallel to
@@ -208,15 +210,27 @@ pub async fn build_road_network(
         }
     }
 
-    // Group segments into named roads (strokes), discard short stubs, and stamp
-    // the road id onto each path (logging what each road connects).
+    // Legacy topological grouping: still stamps a per-path road_id and logs what
+    // each road connects. Kept for the abstract-graph view; road identity for the
+    // map and signs now comes from the geometric pass below.
     name_roads(&mut paths, &path_edges, &nodes, &kinds);
+
+    // Geometric labelling: split the realised centrelines at true junctions
+    // (degree ≥ 3, catching A* crossings and merged corridors the node graph
+    // can't see) and merge through them by actual straightness, so one number is
+    // one continuous physical road.
+    let road_labels = crate::generator::paths::label_roads_geometric(&paths);
+    log::info!(
+        "geometric road labelling: {} centreline cells -> {} roads",
+        road_labels.len(),
+        road_labels.values().copied().collect::<std::collections::HashSet<_>>().len(),
+    );
 
     let edges = all_edges.iter().enumerate().map(|(ei, &(a, b))| RoadEdge {
         a, b, shortcut: ei >= mst_len, arterial: is_arterial[ei],
     }).collect();
 
-    RoadNetwork { paths, nodes, edges }
+    RoadNetwork { paths, nodes, edges, road_labels }
 }
 
 /// Assemble the network's destination nodes — town centre (optional), industry
@@ -235,8 +249,10 @@ fn assemble_nodes(
 
     if include_town_center {
         if let Some(c) = centroid_snapped(urban) {
-            nodes.push(editor.world().add_height(c));
-            kinds.push(NodeKind::TownCentre);
+            if let Some(p) = editor.world().add_height(c) {
+                nodes.push(p);
+                kinds.push(NodeKind::TownCentre);
+            }
         }
     }
     nodes.extend_from_slice(anchor_nodes);
@@ -246,14 +262,17 @@ fn assemble_nodes(
             continue;
         }
         if let Some(c) = centroid_snapped(&sd.data.points_2d) {
-            nodes.push(editor.world().add_height(c));
-            kinds.push(NodeKind::District);
+            if let Some(p) = editor.world().add_height(c) {
+                nodes.push(p);
+                kinds.push(NodeKind::District);
+            }
         }
     }
     // Gates use their exact centre so the road meets the threshold; paving lays
     // road surface across the gate/wall tiles without cutting into the wall.
     for (gate_point, _dir) in editor.world().gate_locations.clone() {
-        nodes.push(editor.world().add_height(gate_point.drop_y()));
+        let Some(p) = editor.world().add_height(gate_point.drop_y()) else { continue; };
+        nodes.push(p);
         kinds.push(NodeKind::Gate);
     }
 
@@ -262,7 +281,9 @@ fn assemble_nodes(
     for node in nodes.iter_mut() {
         if blocked.contains(&node.drop_y()) {
             if let Some(c) = nearest_unblocked(node.drop_y(), urban, blocked) {
-                *node = editor.world().add_height(c);
+                if let Some(p) = editor.world().add_height(c) {
+                    *node = p;
+                }
             }
         }
     }
@@ -545,13 +566,20 @@ pub fn find_blocks(
     blocks
 }
 
-/// Multi-source BFS distance (in cardinal steps) from the wall cells, out to
-/// `max_dist`. Wall cells are distance 0; cells farther than `max_dist` are
-/// omitted (callers treat "absent" as "far, no penalty").
-fn wall_distance(wall_cells: &HashSet<Point2D>, max_dist: i32) -> HashMap<Point2D, i32> {
+/// Distance-to-wall field for the urban perimeter: derives the wall cells (urban
+/// cells with at least one non-urban cardinal neighbour) and runs a multi-source
+/// BFS out to `max_dist`. Wall cells are distance 0; cells farther than `max_dist`
+/// are omitted (callers treat "absent" as "far, no penalty"). Shared by the urban
+/// and rural routers so both push their roads off the town wall.
+pub(super) fn wall_distance_field(urban: &HashSet<Point2D>, max_dist: i32) -> HashMap<Point2D, i32> {
+    let wall_cells: HashSet<Point2D> = urban.iter()
+        .filter(|&&c| CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
+        .copied()
+        .collect();
+
     let mut dist: HashMap<Point2D, i32> = HashMap::new();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
-    for &c in wall_cells {
+    for &c in &wall_cells {
         dist.insert(c, 0);
         queue.push_back(c);
     }

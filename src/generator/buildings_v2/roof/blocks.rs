@@ -10,7 +10,7 @@ use super::gable::GablePitch;
 use super::heightmap::RoofHeightmap;
 
 /// Direction of steepest ascent (toward the ridge). Used for stair facing.
-fn stair_facing(hm: &RoofHeightmap, x: i32, z: i32) -> Cardinal {
+pub(super) fn stair_facing(hm: &RoofHeightmap, x: i32, z: i32) -> Cardinal {
     let h = hm.get(x, z);
     let mut best_dir = Cardinal::North;
     let mut best_rise = f32::NEG_INFINITY;

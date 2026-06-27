@@ -127,6 +127,23 @@ fn test_bookshelf() -> Furniture {
 // interior_rect
 // ---------------------------------------------------------------------------
 
+/// Guards the `occupant: any_age` wiring end to end: the furniture YAML parses
+/// (the loader silently skips items it can't deserialize, so a bad `occupant`
+/// value would drop the bed rather than error), and at least one anchor slot —
+/// the beds we opened to children — comes through as `AnyAge`.
+#[test]
+fn any_age_occupant_parses_from_furniture_yaml() {
+    use crate::generator::population::Occupant;
+    let data = FurnitureData::load().expect("load furniture YAML");
+    let any_age = data
+        .items
+        .values()
+        .flat_map(|it| &it.anchors)
+        .flat_map(|a| &a.slots)
+        .any(|s| s.occupant == Occupant::AnyAge);
+    assert!(any_age, "expected at least one any_age anchor slot (beds) from furniture YAML");
+}
+
 #[test]
 fn interior_rect_normal() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 6));
@@ -1208,6 +1225,7 @@ async fn place_room_sizes_in_world() {
             // Drives PaletteSwap::SecondaryColor — accent color for patterned
             // carpets and any future two-tone items.
             secondary_color: Some(secondary),
+            banner_data: None,
             tags: None,
         }
     };
@@ -1217,7 +1235,7 @@ async fn place_room_sizes_in_world() {
     // internally) — keep everything below in local space.
     let base_x = 8i32;
     let base_z = 8i32;
-    let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z));
+    let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z)).expect("test cell in bounds");
     let floor_y = ground_local + 1;
 
     // (rect_size, interior-door, wall-door (opening), label, world offset, palette)
@@ -1379,6 +1397,7 @@ async fn place_feature_rooms_in_world() {
             materials: mats,
             primary_color: Some(primary),
             secondary_color: Some(secondary),
+            banner_data: None,
             tags: None,
         }
     };
@@ -1438,7 +1457,7 @@ async fn place_feature_rooms_in_world() {
     let build_size = editor.world().build_area.size;
     let base_x = ((build_size.x - layout_w) / 2).max(0);
     let base_z = ((build_size.z - layout_h) / 2).max(0);
-    let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z));
+    let ground_local = editor.world().get_height_at(Point2D::new(base_x, base_z)).expect("test cell in bounds");
     let floor_y = ground_local + 1;
 
     let floor_block = Block::from_id("minecraft:oak_planks".into());
@@ -2194,7 +2213,7 @@ async fn build_furniture_gallery() {
 
     let world_rect = editor.world().world_rect_2d();
     let center = world_rect.midpoint();
-    let ground_y = editor.world().get_height_at(center);
+    let ground_y = editor.world().get_height_at(center).expect("test cell in bounds");
     let floor_y = ground_y + LIFT;          // furniture stands here
     let surface_y = floor_y - 1;            // solid platform top
     let ceiling_y = floor_y + WALL_HEIGHT;  // solid ceiling here

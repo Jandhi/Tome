@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, i32};
 
 use strum::IntoEnumIterator;
 
-use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, chronicle::SettlementInfo, data::LoadedData, districts::{DistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
+use crate::{editor::Editor, generator::{BuildClaim, buildings::{BuildingData, Grid, build_floor, build_stairs, foundation::build_foundation, grid::DEFAULT_GRID_CELL_SIZE, roofs::build_roof, set::BuildingSetID, shape::BuildingShape, walls::build_walls}, data::LoadedData, districts::{DistrictID, replace_ground_smooth}, materials::{MaterialId, MaterialRole, Palette, PaletteId}, nbts::Rotation, style::{DistrictStyle, Style}, terrain::force_height}, geometry::{ Cardinal, Point2D, UP, average_to_neighbours_5_away, get_edge, get_ordered_edge, get_outer_and_inner_points, voronoi_fill_with_recenter}, minecraft::{Biome, BiomeStonetype, BiomeWoodtype, Block}, noise::RNG};
 
 use super::BuildingID;
 
@@ -35,7 +35,7 @@ pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (
     (city_blocks, off_limits)
 }
 
-pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>, settlement_info : &SettlementInfo) {
+pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>) {
     let mut outers : HashSet<Point2D> = HashSet::new();
     let mut inners : Vec<HashSet<Point2D>> = vec![];
     
@@ -128,7 +128,9 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     }
     
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
-    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect(), PavingType::from_biome(settlement_info.top_three_biomes[0].clone())).await;
+    let paving_biome = crate::generator::settlement::dominant_biome(editor.world())
+        .unwrap_or_else(Biome::unknown);
+    smooth_and_pave_road(editor, rng, &outers.difference(&urban_area_edge).cloned().collect(), PavingType::from_biome(paving_biome)).await;
 
     let sets = data.borrow().building_sets.iter().filter(|(_, set)| {
         set.style == style
@@ -156,9 +158,14 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
                 //     continue;
                 // }
 
-                let y = editor.world().get_height_at(height_point);
+                let Some(y) = editor.world().get_height_at(height_point) else {
+                    continue;
+                };
+                let Some(point_height) = editor.world().get_height_at(point) else {
+                    continue;
+                };
 
-                if y.abs_diff(editor.world().get_height_at(point)) > 3 {
+                if y.abs_diff(point_height) > 3 {
                     continue; // Skip if the height difference is too large, this is probably indicative of a bad spot to place
                 }
 
@@ -225,7 +232,7 @@ impl PavingType {
 }
 
 pub async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers : &HashSet<Point2D>, paving_type : PavingType) {
-    let mut points = outers.iter().map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
+    let mut points = outers.iter().filter_map(|p| editor.world().add_non_tree_height(*p)).collect::<HashSet<_>>();
     points = average_to_neighbours_5_away(&points).iter().map(|p| if p.y > 63 { *p } else { p.with_y(63) }).collect();
     force_height(editor, &points, true).await;
 

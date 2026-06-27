@@ -1,4 +1,4 @@
-use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::{generate_chronicle, SettlementInfo}, data::LoadedData, districts::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::generate_chronicle, data::LoadedData, districts::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
 
 
 pub mod geometry;
@@ -32,7 +32,6 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
     // === Parcels ===
     server.update_phase(visualizer::GenerationPhase::Parcels);
     generate_parcels(rng.next_i64().into(), &mut editor).await;
-    let mut info = SettlementInfo::new(editor.world());
     let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Parcels);
     server.update_snapshot(snap);
 
@@ -52,14 +51,13 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
 
     // === Buildings ===
     server.update_phase(visualizer::GenerationPhase::Buildings);
-    place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()], &info).await;
-    info = SettlementInfo::new(editor.world());
+    place_buildings(&mut editor, &mut rng.derive(), &data, Style::Medieval, vec![&"medieval_spruce".into()]).await;
     let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Buildings);
     server.update_snapshot(snap);
 
     // === Walls ===
     server.update_phase(visualizer::GenerationPhase::Walls);
-    build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade).await;
+    build_wall(urban_points, &mut editor, &mut rng.derive(), &mut placer, &material, &data.structures, WallType::Palisade, None).await;
     let snap = visualizer::snapshot::extract_full_snapshot(editor.world(), &visualizer::GenerationPhase::Walls);
     server.update_snapshot(snap);
 
@@ -69,7 +67,10 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
 
     // === Chronicle ===
     server.update_phase(visualizer::GenerationPhase::Chronicle);
-    if let Err(e) = generate_chronicle(&mut editor, &mut info).await {
+    let dossier = crate::generator::settlement::minimal_dossier(
+        &editor, crate::generator::buildings_v2::Culture::Medieval, &mut rng.derive(),
+    );
+    if let Err(e) = generate_chronicle(&mut editor, &dossier).await {
         server.log("warn", &format!("Chronicle generation failed: {e}"));
     }
 
@@ -79,15 +80,27 @@ async fn run_generation(server: &visualizer::VisualizerServer) {
     server.update_phase(visualizer::GenerationPhase::Done);
 }
 
+/// A fresh seed for an interactive run, taken from the wall clock. Generation is
+/// fully deterministic in the seed, so the value printed by [`run_generation_once`]
+/// reproduces the exact town (pass it to `generate_town` to rebuild it).
+fn random_seed() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(12345)
+}
+
 async fn run_generation_once() {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     let mut editor = world.get_editor();
-    crate::generator::settlement::generate_town(
-        &mut editor,
-        crate::noise::Seed(12345),
-        crate::generator::buildings_v2::Culture::Medieval,
-    ).await;
+    // Random per-run seed so each interactive run is a different town; printed so
+    // a good one can be reproduced. `generate_town` takes the seed as a parameter,
+    // so tests can still pin it to a fixed value for determinism.
+    let seed = crate::noise::Seed(random_seed());
+    println!("Generating town with seed {}", seed.0);
+    // None → auto-select the culture from the build area's climate.
+    crate::generator::settlement::generate_town(&mut editor, seed, None).await;
 }
 
 #[tokio::main]

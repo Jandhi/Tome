@@ -130,6 +130,32 @@ pub async fn paint_production_area_for(
     // ring prediction (see `border_ring_cells`).
     let border_cells = border_ring_cells(district, editor);
 
+    // How many worker posts this building wants — the gather painters record that
+    // many dynamic anchors at the features they create (a woodcutter by a stump, a
+    // miner by an outcrop), so the rural crew stands at its work rather than
+    // clustered at the hut door. Capped against any anchors already recorded
+    // (interior anchors on ranch/farm), so a building never overstaffs.
+    let worker_budget = data
+        .npc_data
+        .staffing_for(&structure_id.structure_type.0, &data.structures)
+        .workers;
+
+    // Centroid of this building's footprint (cells it claimed), used to keep mine
+    // workers near the building rather than off at a distant outcrop.
+    let building_centre = {
+        let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
+        for &p in &district.data.points_2d {
+            if let Some(BuildClaim::Structure(sid)) = editor.world().get_claim(p) {
+                if sid.id == structure_id.id {
+                    sx += p.x as i64;
+                    sz += p.y as i64;
+                    n += 1;
+                }
+            }
+        }
+        (n > 0).then(|| Point2D::new((sx / n) as i32, (sz / n) as i32))
+    };
+
     match painter {
         ProductionPainter::Palettes { palettes, border_palette, irrigation, flatten_strength } => {
             paint_palettes(
@@ -150,25 +176,91 @@ pub async fn paint_production_area_for(
             // Dispatch to the named painter function, handing it the params map.
             match function.as_str() {
                 "logging_production_painter" => {
-                    logging_production_painter(&params, &free_cells, &structure_id, editor, rng).await;
+                    logging_production_painter(&params, &free_cells, worker_budget, &structure_id, editor, rng).await;
                 }
                 "pasture_production_painter" => {
-                    pasture_production_painter(&params, &free_cells, &border_cells, &structure_id, data, editor, rng).await;
+                    pasture_production_painter(&params, &free_cells, &border_cells, worker_budget, &structure_id, data, editor, rng).await;
                 }
                 "sugarcane_production_painter" => {
-                    sugarcane_production_painter(&params, &free_cells, &border_cells, &structure_id, data, editor, rng).await;
+                    sugarcane_production_painter(&params, &free_cells, &border_cells, worker_budget, &structure_id, data, editor, rng).await;
                 }
                 "bee_area_production_painter" => {
-                    bee_area_production_painter(&params, &free_cells, &structure_id, data, editor, rng).await;
+                    bee_area_production_painter(&params, &free_cells, worker_budget, &structure_id, data, editor, rng).await;
                 }
                 "mine_production_painter" => {
-                    mine_production_painter(&params, &free_cells, resource, &structure_id, data, editor, rng).await;
+                    mine_production_painter(&params, &free_cells, resource, worker_budget, building_centre, &structure_id, data, editor, rng).await;
                 }
                 other => {
                     warn!("paint_production_area: unknown painter function '{}'", other);
                 }
             }
         }
+    }
+}
+
+/// A worker post on the ground cardinally adjacent to `feature`: an open,
+/// in-bounds, non-water cell beside it, at its surface height. `None` when the
+/// feature is boxed in (no open neighbour). Used by the gather painters to seat a
+/// worker beside the thing it tends.
+fn stand_beside_feature(feature: Point2D, editor: &Editor) -> Option<Point3D> {
+    for d in CARDINALS_2D {
+        let n = feature + d;
+        if !editor.world().is_in_bounds_2d(n) || editor.world().is_water(n) {
+            continue;
+        }
+        let open = matches!(
+            editor.world().get_claim(n),
+            None | Some(BuildClaim::None)
+                | Some(BuildClaim::Nature)
+                | Some(BuildClaim::ProductionArea(_))
+        );
+        if !open {
+            continue;
+        }
+        if let Some(y) = editor.world().get_ocean_floor_height_at(n) {
+            return Some(Point3D::new(n.x, y, n.y));
+        }
+    }
+    None
+}
+
+/// Record up to `budget` dynamic worker anchors standing beside `feature_cells`
+/// (each facing the feature) for this production building, appending to any
+/// anchors it already has and never exceeding `budget` total. The settlement
+/// worker pass then stands the crew at these spots (see
+/// `World::structure_anchors`). Features should already be passed in a spread,
+/// deterministic order; the first `budget` that yield an open neighbour are used.
+fn record_feature_anchors(
+    feature_cells: &[Point2D],
+    budget: usize,
+    structure_id: &crate::generator::nbts::StructureID,
+    editor: &mut Editor,
+) {
+    use crate::generator::population::yaw_toward;
+    if budget == 0 {
+        return;
+    }
+    let mut posts: Vec<(Point3D, f32)> = Vec::new();
+    for &feat in feature_cells {
+        if posts.len() >= budget {
+            break;
+        }
+        if let Some(feet) = stand_beside_feature(feat, editor) {
+            let look = Point3D::new(feat.x, feet.y, feat.y);
+            posts.push((feet, yaw_toward(feet, look)));
+        }
+    }
+    if posts.is_empty() {
+        return;
+    }
+    let entry = editor
+        .world_mut()
+        .structure_anchors
+        .entry(structure_id.id)
+        .or_default();
+    let remaining = budget.saturating_sub(entry.len());
+    for p in posts.into_iter().take(remaining) {
+        entry.push(p);
     }
 }
 
@@ -180,6 +272,7 @@ pub async fn paint_production_area_for(
 async fn logging_production_painter(
     params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
+    worker_budget: usize,
     structure_id: &crate::generator::nbts::StructureID,
     editor: &mut Editor,
     rng: &mut RNG,
@@ -209,13 +302,19 @@ async fn logging_production_painter(
     let mut to_log: HashSet<Point2D> = HashSet::new();
     let mut stumps: Vec<(Point3D, Block)> = Vec::with_capacity(selected.len());
     for tree in &selected {
-        let stump_y = editor.world().get_non_tree_height(tree.trunk);
+        let Some(stump_y) = editor.world().get_non_tree_height(tree.trunk) else {
+            continue;
+        };
         let stump_pos = tree.trunk.add_y(stump_y);
         stumps.push((stump_pos, editor.get_block(stump_pos)));
         to_log.extend(tree.cells.iter().copied());
     }
 
     log_trees(editor, to_log).await;
+
+    // Stand the woodcutters at fresh stumps: collect the stump cells before the
+    // placing loop consumes `stumps`, then seat a worker beside a spread of them.
+    let stump_cells: Vec<Point2D> = stumps.iter().map(|(p, _)| p.drop_y()).collect();
 
     for (pos, block) in stumps {
         editor.place_block(&block, pos).await;
@@ -225,6 +324,14 @@ async fn logging_production_painter(
     for &cell in free_cells {
         editor.world_mut().claim(cell, BuildClaim::ProductionArea(structure_id.clone()));
     }
+
+    // A woodcutter posted at a stump (a spread sample, so they don't bunch up).
+    let chosen: Vec<Point2D> = rng
+        .choose_many(&stump_cells, worker_budget.min(stump_cells.len()))
+        .into_iter()
+        .copied()
+        .collect();
+    record_feature_anchors(&chosen, worker_budget, structure_id, editor);
 }
 
 async fn paint_palettes(
@@ -448,6 +555,7 @@ async fn sugarcane_production_painter(
     params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
     border_cells: &HashSet<Point2D>,
+    worker_budget: usize,
     structure_id: &crate::generator::nbts::StructureID,
     data: &LoadedData,
     editor: &mut Editor,
@@ -491,7 +599,10 @@ async fn sugarcane_production_painter(
     // 1. Soil bed — every cell gets a cane-supportable solid surface, keeping the
     //    existing block where it already qualifies.
     for &c in &ordered {
-        let y = editor.world().get_non_tree_height(c) - 1;
+        let Some(ch) = editor.world().get_non_tree_height(c) else {
+            continue;
+        };
+        let y = ch - 1;
         let pos = Point3D::new(c.x, y, c.y);
         let current = editor.get_block(pos);
         if !can_support_sugar_cane(&current.id) {
@@ -514,7 +625,11 @@ async fn sugarcane_production_painter(
     loop {
         let mut demote: Vec<Point2D> = Vec::new();
         for &w in &water_set {
-            let wy = editor.world().get_non_tree_height(w) - 1;
+            let Some(wh) = editor.world().get_non_tree_height(w) else {
+                demote.push(w);
+                continue;
+            };
+            let wy = wh - 1;
             // Floor must be solid.
             if !is_solid_support(&editor.get_block(Point3D::new(w.x, wy - 1, w.y))) {
                 demote.push(w);
@@ -526,7 +641,8 @@ async fn sugarcane_production_painter(
                 if is_solid_support(&editor.get_block(Point3D::new(n.x, wy, n.y))) {
                     return true;
                 }
-                water_set.contains(&n) && editor.world().get_non_tree_height(n) - 1 == wy
+                water_set.contains(&n)
+                    && editor.world().get_non_tree_height(n).is_some_and(|nh| nh - 1 == wy)
             });
             if !boxed {
                 demote.push(w);
@@ -543,7 +659,10 @@ async fn sugarcane_production_painter(
     // 3. Place the validated (boxed) water.
     let water_block: Block = "water".into();
     for &w in &water_set {
-        let wy = editor.world().get_non_tree_height(w) - 1;
+        let Some(wh) = editor.world().get_non_tree_height(w) else {
+            continue;
+        };
+        let wy = wh - 1;
         editor.place_block_forced(&water_block, Point3D::new(w.x, wy, w.y)).await;
     }
     editor.flush_buffer().await;
@@ -555,15 +674,19 @@ async fn sugarcane_production_painter(
     let min_h = p.min_height.max(1) as usize;
     let max_h = p.max_height.max(min_h as u32) as usize;
 
+    let mut cane_cells: Vec<Point2D> = Vec::new();
     for &c in &ordered {
         if water_set.contains(&c) {
             continue;
         }
-        let cy = editor.world().get_non_tree_height(c); // base air cell of the column
+        let Some(cy) = editor.world().get_non_tree_height(c) else {
+            continue;
+        }; // base air cell of the column
         let support_y = cy - 1;
         let has_water = CARDINALS_2D.iter().any(|&d| {
             let n = c + d;
-            water_set.contains(&n) && editor.world().get_non_tree_height(n) - 1 == support_y
+            water_set.contains(&n)
+                && editor.world().get_non_tree_height(n).is_some_and(|nh| nh - 1 == support_y)
         });
         if !has_water {
             continue;
@@ -579,12 +702,21 @@ async fn sugarcane_production_painter(
             );
             editor.place_block(&cane, Point3D::new(c.x, cy + i as i32, c.y)).await;
         }
+        cane_cells.push(c);
     }
 
     // 5. Claim every free cell for this production area.
     for &cell in free_cells {
         editor.world_mut().claim(cell, BuildClaim::ProductionArea(structure_id.clone()));
     }
+
+    // A planter posted beside the cane (a spread sample), tending the crop.
+    let chosen: Vec<Point2D> = rng
+        .choose_many(&cane_cells, worker_budget.min(cane_cells.len()))
+        .into_iter()
+        .copied()
+        .collect();
+    record_feature_anchors(&chosen, worker_budget, structure_id, editor);
 }
 
 /// Builds beehive block-entity NBT filled with three bees, each given a random
@@ -636,7 +768,7 @@ fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], r
 /// directly above (the canopy roof) — hanging beneath a leaf is fine even without
 /// neighbouring leaves.
 fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)> {
-    let base_y = editor.world().get_non_tree_height(trunk);
+    let base_y = editor.world().get_non_tree_height(trunk)?;
 
     // Walk up the trunk's logs to find the top of the stem.
     let mut top_y = base_y;
@@ -690,6 +822,7 @@ fn make_beehive(
 async fn bee_area_production_painter(
     params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
+    worker_budget: usize,
     structure_id: &crate::generator::nbts::StructureID,
     data: &LoadedData,
     editor: &mut Editor,
@@ -718,11 +851,14 @@ async fn bee_area_production_painter(
     let prefixes = &reg.animal_name_prefixes;
     let suffixes = &reg.animal_name_suffixes;
 
+    // Trunks that actually got a hive — the beekeepers tend these.
+    let mut hive_trunks: Vec<Point2D> = Vec::new();
     for tree in &selected {
         if let Some((pos, facing)) = find_hive_spot(tree.trunk, editor) {
             let hive = make_beehive(facing, bee_names, prefixes, suffixes, rng);
             // Forced so it can take a leaf cell as well as an air pocket.
             editor.place_block_forced(&hive, pos).await;
+            hive_trunks.push(tree.trunk);
         }
     }
 
@@ -730,11 +866,22 @@ async fn bee_area_production_painter(
     for &cell in free_cells {
         editor.world_mut().claim(cell, BuildClaim::ProductionArea(structure_id.clone()));
     }
+
+    // A beekeeper posted at the foot of a hive tree (a spread sample).
+    let chosen: Vec<Point2D> = rng
+        .choose_many(&hive_trunks, worker_budget.min(hive_trunks.len()))
+        .into_iter()
+        .copied()
+        .collect();
+    record_feature_anchors(&chosen, worker_budget, structure_id, editor);
 }
 
 // --- Mine painter tunables (edit freely to change the look) ---
 /// Per-cell chance, in parts-per-1000, of seeding a rock outcrop.
 const MINE_BOULDER_CHANCE_PERMILLE: i32 = 15;
+/// Miners are only posted at outcrops within this many blocks of the mine
+/// building, so the crew stays by the mine instead of scattering across the dig.
+const MINE_WORKER_RADIUS: i32 = 20;
 /// Per-cell chance, in parts-per-1000, of an ore block poking through the surface.
 const MINE_TERRAIN_ORE_PERMILLE: i32 = 15;
 /// Percent of outcrops that carry ore.
@@ -769,7 +916,10 @@ fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
     let step = (ordered.len() / MINE_GEOLOGY_SAMPLES).max(1);
     for c in ordered.iter().step_by(step) {
-        let top = editor.world().get_non_tree_height(*c) - 1;
+        let Some(ch) = editor.world().get_non_tree_height(*c) else {
+            continue;
+        };
+        let top = ch - 1;
         for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
             // `try_get_block` (not `get_block`) so scanning below the world floor —
             // common for a mine near bedrock — returns None instead of panicking.
@@ -804,7 +954,10 @@ fn detect_outcrop_rock(center: Point2D, editor: &Editor) -> (String, bool) {
             if !editor.world().is_in_bounds_2d(cell) {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(cell) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(cell) else {
+                continue;
+            };
+            let top = ch - 1;
             for dy in 0..MINE_GEOLOGY_SCAN_DEPTH {
                 let Some(block) = editor.try_get_block(Point3D::new(cell.x, top - dy, cell.y)) else {
                     break;
@@ -884,7 +1037,10 @@ async fn place_outcrop(
             if !editor.world().is_in_bounds_2d(cell) {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(cell) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(cell) else {
+                continue;
+            };
+            let top = ch - 1;
             // Height tapers from the centre outward, plus a 0–1 block of jitter.
             let falloff = 1.0 - (dist2 as f32 / (r2 as f32 + 1.0)).sqrt();
             let taper = (falloff * MINE_BOULDER_MAX_HEIGHT as f32).round() as i32;
@@ -914,6 +1070,8 @@ async fn mine_production_painter(
     _params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
     resource: &str,
+    worker_budget: usize,
+    building_centre: Option<Point2D>,
     structure_id: &crate::generator::nbts::StructureID,
     data: &LoadedData,
     editor: &mut Editor,
@@ -938,6 +1096,8 @@ async fn mine_production_painter(
     let (_, area_deepslate) = detect_local_rock(&ordered, editor);
 
     let mut occupied: HashSet<Point2D> = HashSet::new();
+    // Centres of ore-bearing outcrops — the rock faces the miners work.
+    let mut ore_outcrops: Vec<Point2D> = Vec::new();
 
     // 1. Rock outcrops, a fraction of them ore-bearing. Each is built from the rock
     //    detected right under it, so boulders over granite/andesite/diorite blobs
@@ -957,6 +1117,9 @@ async fn mine_production_painter(
             .unwrap_or_else(|| rocks[0].0.clone());
         let ore_bearing =
             ore_id.is_some() && rng.rand_i32_range(0, 100) < MINE_ORE_BOULDER_PERCENT;
+        if ore_bearing {
+            ore_outcrops.push(c);
+        }
         place_outcrop(c, &rocks, &ore, ore_bearing, &mut occupied, structure_id, editor, rng).await;
     }
 
@@ -970,7 +1133,10 @@ async fn mine_production_painter(
             if rng.rand_i32_range(0, 1000) >= MINE_TERRAIN_ORE_PERMILLE {
                 continue;
             }
-            let top = editor.world().get_non_tree_height(c) - 1;
+            let Some(ch) = editor.world().get_non_tree_height(c) else {
+                continue;
+            };
+            let top = ch - 1;
             editor.place_block_forced(&seam_ore, Point3D::new(c.x, top, c.y)).await;
         }
     }
@@ -979,6 +1145,32 @@ async fn mine_production_painter(
     for &cell in free_cells {
         editor.world_mut().claim(cell, BuildClaim::ProductionArea(structure_id.clone()));
     }
+
+    // A miner posted at an ore-bearing outcrop near the mine. Falls back to any
+    // outcrop if none came up ore-bearing, so the crew still has a rock face.
+    let mut faces = if ore_outcrops.is_empty() {
+        occupied.into_iter().collect::<Vec<_>>()
+    } else {
+        ore_outcrops
+    };
+    // Keep the crew close to the mine: restrict to outcrops within MINE_WORKER_RADIUS
+    // of the building and take the nearest ones (rather than scattering miners across
+    // the whole dig). If none are that close, fall back to the outside-stand spread
+    // around the building by recording nothing here.
+    if let Some(centre) = building_centre {
+        let dist2 = |p: &Point2D| (p.x - centre.x).pow(2) + (p.y - centre.y).pow(2);
+        faces.retain(|p| dist2(p) <= MINE_WORKER_RADIUS * MINE_WORKER_RADIUS);
+        faces.sort_by_key(dist2);
+        faces.truncate(worker_budget);
+    } else {
+        let chosen: Vec<Point2D> = rng
+            .choose_many(&faces, worker_budget.min(faces.len()))
+            .into_iter()
+            .copied()
+            .collect();
+        faces = chosen;
+    }
+    record_feature_anchors(&faces, worker_budget, structure_id, editor);
 }
 
 /// Closes diagonal gaps in a fence ring. Minecraft fences only connect along
@@ -1132,6 +1324,7 @@ async fn pasture_production_painter(
     params: &serde_yaml::Value,
     free_cells: &HashSet<Point2D>,
     border_cells: &HashSet<Point2D>,
+    worker_budget: usize,
     structure_id: &crate::generator::nbts::StructureID,
     data: &LoadedData,
     editor: &mut Editor,
@@ -1200,7 +1393,9 @@ async fn pasture_production_painter(
     let (fence_block, gate_id) = resolve_fence_blocks(&p.palette, data, rng);
 
     for &cell in &fence_cells {
-        let y = editor.world().get_non_tree_height(cell);
+        let Some(y) = editor.world().get_non_tree_height(cell) else {
+            continue;
+        };
         let pos = Point3D::new(cell.x, y, cell.y);
         if gate_cells.contains(&cell) {
             // Face the gate toward an outward (non-pasture) neighbour.
@@ -1223,6 +1418,7 @@ async fn pasture_production_painter(
         .copied()
         .collect();
 
+    let mut herd_cells: Vec<Point2D> = Vec::new();
     if !interior.is_empty() {
         let lo = p.min_count.min(p.max_count) as i32;
         let hi = p.min_count.max(p.max_count) as i32;
@@ -1234,10 +1430,13 @@ async fn pasture_production_painter(
         let spots = rng.choose_many(&interior, count);
         let mut entities: Vec<(Point3D, String, Option<String>)> = Vec::with_capacity(spots.len());
         for &spot in spots {
-            let y = editor.world().get_non_tree_height(spot);
+            let Some(y) = editor.world().get_non_tree_height(spot) else {
+                continue;
+            };
             let pos = Point3D::new(spot.x, y, spot.y);
             let nbt = animal_name_nbt(&reg.animal_names, &reg.animal_name_prefixes, &reg.animal_name_suffixes, rng);
             entities.push((pos, p.animal.clone(), nbt));
+            herd_cells.push(spot);
         }
         editor.spawn_entities(&entities).await;
     }
@@ -1246,14 +1445,71 @@ async fn pasture_production_painter(
     for &cell in free_cells {
         editor.world_mut().claim(cell, BuildClaim::ProductionArea(structure_id.clone()));
     }
+
+    // A herder posted among the flock — beside an animal, out in the pasture (a
+    // spread sample). On the ranch this is a no-op, since its indoor anchors
+    // already fill the crew; the shepherd's hut has no interior anchors, so its
+    // crew lands here.
+    let chosen: Vec<Point2D> = rng
+        .choose_many(&herd_cells, worker_budget.min(herd_cells.len()))
+        .into_iter()
+        .copied()
+        .collect();
+    record_feature_anchors(&chosen, worker_budget, structure_id, editor);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::World;
+    use crate::generator::nbts::{StructureID, StructureType};
+    use crate::geometry::Rect3D;
 
     fn set(cells: &[(i32, i32)]) -> HashSet<Point2D> {
         cells.iter().map(|&(x, z)| Point2D::new(x, z)).collect()
+    }
+
+    /// A flat synthetic world (no server) so the dynamic-anchor helpers can be
+    /// exercised offline: open ground everywhere at `ground_y`.
+    fn flat_editor(ground_y: i32) -> Editor {
+        let build_area = Rect3D {
+            origin: Point3D::new(0, 0, 0),
+            size: Point3D::new(32, 256, 32),
+        };
+        World::synthetic(build_area, ground_y).get_offline_editor()
+    }
+
+    #[test]
+    fn feature_anchor_stands_beside_and_faces_feature() {
+        let ground_y = 64;
+        let mut editor = flat_editor(ground_y);
+        let id = StructureID { id: 7, structure_type: StructureType("woodcutter_hut".into()) };
+
+        // One feature (a stump) at (10,10). Budget 1 → one anchor beside it, facing it.
+        record_feature_anchors(&[Point2D::new(10, 10)], 1, &id, &mut editor);
+
+        let posts = editor.world().structure_anchors.get(&7).expect("anchor recorded");
+        assert_eq!(posts.len(), 1);
+        let (feet, _yaw) = posts[0];
+        // Feet are on the ground, in a cell cardinally adjacent to the feature.
+        assert_eq!(feet.y, ground_y);
+        let manhattan = (feet.x - 10).abs() + (feet.z - 10).abs();
+        assert_eq!(manhattan, 1, "worker should stand one cell from the stump");
+    }
+
+    #[test]
+    fn feature_anchors_respect_budget() {
+        let mut editor = flat_editor(64);
+        let id = StructureID { id: 1, structure_type: StructureType("iron_mine".into()) };
+        let feats: Vec<Point2D> = (0..10).map(|i| Point2D::new(i * 2, 5)).collect();
+
+        // Budget 2 caps the recorded posts at 2 even with ten features.
+        record_feature_anchors(&feats, 2, &id, &mut editor);
+        assert_eq!(editor.world().structure_anchors.get(&1).unwrap().len(), 2);
+
+        // A second call appends but never exceeds the budget total.
+        record_feature_anchors(&feats, 2, &id, &mut editor);
+        assert_eq!(editor.world().structure_anchors.get(&1).unwrap().len(), 2);
     }
 
     #[test]

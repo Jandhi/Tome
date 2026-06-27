@@ -23,6 +23,44 @@ mod tests {
         util::init_logger,
     };
 
+    /// Offline check that hand-authored worker anchors load from the JSON sidecar
+    /// and transform into world posts correctly. No server: pure data + geometry.
+    #[test]
+    fn worker_anchors_load_and_transform() {
+        use crate::generator::nbts::Structure;
+        use crate::generator::placement::anchor_world_posts;
+        use crate::geometry::Cardinal;
+        use crate::data::Loadable;
+
+        let structures = Structure::load().expect("load structures");
+        let smithy = structures
+            .get(&StructureType("smithy".into()))
+            .expect("smithy structure");
+        assert_eq!(smithy.anchors.len(), 3, "smithy should declare 3 anchors");
+        assert_eq!(smithy.facing, Cardinal::North, "test assumes default North facing");
+
+        // North placement = no rotation: world = local - origin + offset.
+        let offset = Point3D::new(100, 64, 100);
+        let posts = anchor_world_posts(smithy, offset, Cardinal::North);
+        assert_eq!(posts.len(), 3);
+
+        // First anchor: stand local (6,1,7), look local (6,1,6); origin (10,0,8).
+        let (stand, yaw) = posts[0];
+        assert_eq!(stand, Point3D::new(6 - 10 + 100, 1 + 64, 7 - 8 + 100));
+        // look is one cell north (−z) of stand, so the worker faces due north (±180°).
+        assert!((yaw.abs() - 180.0).abs() < 0.01, "expected ±180°, got {yaw}");
+
+        // A rotated placement must still keep stand and look one cell apart, and
+        // turn the facing by a quarter (no longer due north).
+        let rotated = anchor_world_posts(smithy, offset, Cardinal::East);
+        assert_eq!(rotated.len(), 3);
+        assert!(
+            (rotated[0].1 - 180.0).abs() > 1.0,
+            "facing should rotate away from 180° under an East placement, got {}",
+            rotated[0].1
+        );
+    }
+
     /// Change this to any resource building name to place that building in every rural
     /// super-parcel. Useful for quickly eyeballing a single building + its production
     /// area on a flat Minecraft world without changing the resource chain data.
@@ -192,7 +230,7 @@ mod tests {
         let mut placer = Placer::new(&materials, &mut rng);
         build_wall(
             &editor.world().get_urban_points(), &mut editor, &mut rng2,
-            &mut placer, &wall_material, &structures, WallType::Standard,
+            &mut placer, &wall_material, &structures, WallType::Standard, None,
         ).await;
         drop(placer);
 
@@ -273,7 +311,7 @@ mod tests {
         let anchor_nodes: Vec<Point3D> = footprint_by_id.values()
             .map(|cells| {
                 let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
-                editor.world().add_height(c)
+                editor.world().add_height(c).expect("test cell in bounds")
             })
             .collect();
         println!("Placed {} / {} industrial buildings; {} building nodes for the network", placed, want, anchor_nodes.len());
@@ -367,7 +405,7 @@ mod tests {
         let mut placer = Placer::new(&materials, &mut rng);
         build_wall(
             &urban, &mut editor, &mut wall_rng,
-            &mut placer, &wall_material, &structures, WallType::Standard,
+            &mut placer, &wall_material, &structures, WallType::Standard, None,
         ).await;
         drop(placer);
 
@@ -491,7 +529,7 @@ mod tests {
         let ind_nodes: Vec<Point3D> = ind_footprints.values()
             .map(|cells| {
                 let c = cells.iter().fold(Point2D::ZERO, |a, p| a + *p) / cells.len().max(1) as i32;
-                editor.world().add_height(c)
+                editor.world().add_height(c).expect("test cell in bounds")
             })
             .collect();
 
@@ -527,8 +565,8 @@ mod tests {
                 println!(
                     "  ({:>4},{:>4})  road_y={:>3}  ground_h={:>3}  ocean_h={:>3}",
                     xz.x, xz.y, p.y,
-                    editor.world().get_height_at(xz),
-                    editor.world().get_ocean_floor_height_at(xz),
+                    editor.world().get_height_at(xz).expect("test cell in bounds"),
+                    editor.world().get_ocean_floor_height_at(xz).expect("test cell in bounds"),
                 );
             }
         }
@@ -573,7 +611,7 @@ mod tests {
                     for dz in -WIN..=WIN {
                         let n = Point2D::new(c.x + dx, c.y + dz);
                         if !urban.contains(&n) { continue; }
-                        let h = editor.world().get_ocean_floor_height_at(n);
+                        let h = editor.world().get_ocean_floor_height_at(n).expect("test cell in bounds");
                         lo = lo.min(h);
                         hi = hi.max(h);
                     }
@@ -655,7 +693,7 @@ mod tests {
             }
         }
         for &c in &alley_band {
-            road_h.entry(c).or_insert_with(|| editor.world().add_height(c).y);
+            road_h.entry(c).or_insert_with(|| editor.world().add_height(c).expect("test cell in bounds").y);
         }
 
         // Frontage bands per tier (paved cells, matching the roads we'll build).
@@ -1016,7 +1054,7 @@ mod tests {
         let mut verge_total = 0usize;
         for (ti, cells) in tier_verge.iter().enumerate() {
             for c in cells {
-                let h = editor.world().get_ocean_floor_height_at(*c);
+                let h = editor.world().get_ocean_floor_height_at(*c).expect("test cell in bounds");
                 editor.place_block(&verge_blocks[ti], Point3D::new(c.x, h - 1, c.y)).await;
                 verge_total += 1;
             }
@@ -1047,7 +1085,7 @@ mod tests {
             "Alleys: {} corridor + {} connector cells -> {} total",
             alley_band.len(), connectors.len(), full_alleys.len(),
         );
-        let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c)).collect();
+        let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c).expect("test cell in bounds")).collect();
         let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
         build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
         for c in &full_alleys {
@@ -1096,99 +1134,14 @@ mod tests {
         // the named road network coloured per road (same 16-hue palette as the
         // in-world wool labels), with each road's id printed at its centroid.
         {
-            use std::fmt::Write as _;
-            const ROAD_SVG: [&str; 16] = [
-                "#e9ecec", "#f9801d", "#c74ebd", "#3ab3da", "#fed83d", "#80c71f",
-                "#f38baa", "#474f52", "#9d9d97", "#169c9c", "#8932b8", "#3c44aa",
-                "#835432", "#5e7c16", "#b02e26", "#1d1d21",
-            ];
-            // Bounds from the urban footprint, padded.
-            let (mut minx, mut minz, mut maxx, mut maxz) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-            for c in &urban {
-                minx = minx.min(c.x); maxx = maxx.max(c.x);
-                minz = minz.min(c.y); maxz = maxz.max(c.y);
-            }
-            let pad = 3;
-            minx -= pad; minz -= pad; maxx += pad; maxz += pad;
-            let (w, h) = (maxx - minx + 1, maxz - minz + 1);
-
-            let mut svg = String::new();
-            let _ = write!(svg,
-                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {w} {h}\" \
-                 width=\"{}\" height=\"{}\" shape-rendering=\"crispEdges\">\n",
-                w * 4, h * 4);
-            let _ = write!(svg, "<rect x=\"0\" y=\"0\" width=\"{w}\" height=\"{h}\" fill=\"#b9d68a\"/>\n");
-
-            // Base layer: water / footprints / wall / alleys (roads drawn on top).
-            for z in minz..=maxz {
-                for x in minx..=maxx {
-                    let c = P2::new(x, z);
-                    if !editor.world().is_in_bounds_2d(c) { continue; }
-                    let fill = if full_alleys.contains(&c) {
-                        "#b8b8b8"
-                    } else {
-                        match editor.world().get_claim(c) {
-                            Some(crate::generator::BuildClaim::Wall) => "#3a3a3a",
-                            Some(crate::generator::BuildClaim::Gate) => "#6a6a6a",
-                            Some(crate::generator::BuildClaim::Building(_)
-                                | crate::generator::BuildClaim::Structure(_)) => "#d9cfa3",
-                            // Pavement: named roads get recoloured on top; this
-                            // keeps discarded (unnamed) short roads visible as grey.
-                            Some(crate::generator::BuildClaim::Path(_)) => "#c4c4c4",
-                            _ if editor.world().is_water(c) => "#4a6fb0",
-                            _ => continue,
-                        }
-                    };
-                    let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                        x - minx, z - minz, fill);
-                }
-            }
-
-            // Road layer + per-road centroid for the id label.
-            let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
-            for (c, (_, _, rid, _)) in &label {
-                let _ = write!(svg, "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                    c.x - minx, c.y - minz, ROAD_SVG[*rid as usize % ROAD_SVG.len()]);
-                let e = centroid.entry(*rid).or_insert((0, 0, 0));
-                e.0 += (c.x - minx) as i64; e.1 += (c.y - minz) as i64; e.2 += 1;
-            }
-            for (rid, (sx, sz, n)) in &centroid {
-                if *n == 0 { continue; }
-                let _ = write!(svg,
-                    "<text x=\"{}\" y=\"{}\" font-size=\"7\" font-weight=\"bold\" fill=\"#000\" \
-                     stroke=\"#fff\" stroke-width=\"0.4\" paint-order=\"stroke\" text-anchor=\"middle\">{}</text>\n",
-                    sx / n, sz / n + 2, rid);
-            }
-
-            // Abstract graph overlay: the MST + shortcut edges drawn as straight
-            // thin lines between their nodes (the data structure, before A* curved
-            // it onto the terrain). Arterial edges thicker; shortcuts dashed.
-            let nx = |p: Point3D| p.x - minx;
-            let nz = |p: Point3D| p.z - minz;
-            for e in &road_network.edges {
-                let (pa, pb) = (road_network.nodes[e.a], road_network.nodes[e.b]);
-                let (sw, dash) = (
-                    if e.arterial { "1.2" } else { "0.6" },
-                    if e.shortcut { " stroke-dasharray=\"2,2\"" } else { "" },
-                );
-                let _ = write!(svg,
-                    "<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\" stroke=\"#111\" \
-                     stroke-width=\"{}\" stroke-opacity=\"0.85\"{}/>\n",
-                    nx(pa), nz(pa), nx(pb), nz(pb), sw, dash);
-            }
-            for (i, p) in road_network.nodes.iter().enumerate() {
-                let _ = write!(svg,
-                    "<circle cx=\"{}\" cy=\"{}\" r=\"1.6\" fill=\"#111\" stroke=\"#fff\" stroke-width=\"0.4\"/>\n",
-                    nx(*p), nz(*p));
-                let _ = write!(svg,
-                    "<text x=\"{}\" y=\"{}\" font-size=\"4\" fill=\"#fff\" text-anchor=\"middle\">{}</text>\n",
-                    nx(*p), nz(*p) + 1, i);
-            }
-            let _ = write!(svg, "</svg>\n");
-
+            // Shared renderer (also used by the live generate_town pipeline).
+            let svg = crate::generator::paths::render_town_map(
+                editor.world(), &urban, &all_paths, &road_network.road_labels,
+                &std::collections::HashMap::new(), &full_alleys, Some(&road_network), &[], &[],
+            );
             std::fs::create_dir_all("output").ok();
             match std::fs::write("output/town.svg", &svg) {
-                Ok(_) => println!("Wrote town map to output/town.svg ({}x{} cells)", w, h),
+                Ok(_) => println!("Wrote town map to output/town.svg"),
                 Err(e) => println!("Failed to write town.svg: {}", e),
             }
         }
@@ -1199,7 +1152,7 @@ mod tests {
         let city_rect = editor.world().world_rect_2d();
         let city_centre = (city_rect.origin + city_rect.max()) / 2;
         let cold = {
-            let n = editor.world().get_surface_biome_at(city_centre);
+            let n = editor.world().get_surface_biome_at(city_centre).expect("test cell in bounds");
             let n = n.name();
             n.contains("snowy") || n.contains("frozen") || n.contains("taiga")
         };
@@ -1503,7 +1456,7 @@ mod tests {
             &mut placer,
             &material,
             &data.structures,
-            WallType::StandardWithInner,
+            WallType::StandardWithInner, None,
         )
         .await;
 

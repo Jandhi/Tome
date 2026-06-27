@@ -428,6 +428,10 @@ pub const FURLED_CHANCE: i32 = 20;
 /// A water district below this many water cells gets no ships (too small to seat one).
 pub const MIN_WATER_CELLS: usize = 150;
 
+/// Chance (percent, 0–100) that a qualifying water district gets a ship at all. `100` =
+/// every water body is populated; lower leaves some empty for variety.
+pub const SHIP_CHANCE_PER_DISTRICT: i32 = 100;
+
 // ===========================================================================
 // Not-yet-centralized
 // ===========================================================================
