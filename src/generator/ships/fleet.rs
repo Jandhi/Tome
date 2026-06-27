@@ -40,10 +40,13 @@ fn size_cap_for_body(world: &World, district_id: usize) -> i32 {
     let Some(analysis) = world.district_analysis_data.get(&DistrictID(district_id)) else {
         return full;
     };
+    // Tie-break on biome name so the dominant pick is stable across runs — `biome_count`
+    // is a `HashMap`, and `max_by_key` would otherwise return an arbitrary one of equal
+    // maxima depending on (randomized) iteration order.
     let dominant = analysis
         .biome_count()
         .iter()
-        .max_by_key(|(_, &count)| count)
+        .max_by_key(|(biome, &count)| (count, biome.name()))
         .map(|(biome, _)| biome.name());
     match dominant {
         Some(name) if name.contains("ocean") => full,
@@ -98,8 +101,10 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
     let mut total = 0usize;
 
     for (id, water_cells) in &bodies {
-        // Candidate centres: water cells comfortably off the bank.
-        let centres: Vec<Point2D> = water_cells
+        // Candidate centres: water cells comfortably off the bank. Sorted so RNG-indexed
+        // sampling is reproducible — `points_2d` is a `HashSet`, whose iteration order
+        // varies per run, which would otherwise make placement non-deterministic.
+        let mut centres: Vec<Point2D> = water_cells
             .iter()
             .copied()
             .filter(|c| shore_at(&shore, *c) >= MIN_CENTRE_SHORE)
@@ -107,6 +112,7 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
         if centres.is_empty() {
             continue;
         }
+        centres.sort_by_key(|c| (c.x, c.y));
 
         // Size ceiling from the body's dominant biome: open ocean → full range, otherwise
         // (river / lake / other) capped to a modest hull.
