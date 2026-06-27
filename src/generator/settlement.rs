@@ -9,7 +9,7 @@ use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
 use crate::generator::placement::{resolve_rural_production, try_place_rural, PlacedRural};
 use crate::generator::resource_chain::paint_production_area_for;
-use crate::generator::terrain::{flatten_urban_area, force_height, log_trees};
+use crate::generator::terrain::{drain_liquids, flatten_urban_area, force_height, log_trees};
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
@@ -219,13 +219,15 @@ fn assemble_dossier(
     culture: crate::generator::buildings_v2::Culture,
     named: &crate::generator::naming::SettlementName,
     town_colors: &[Color],
+    civic_blazon: &str,
     road_names: &HashMap<u32, String>,
     road_labels: &HashMap<Point2D, u32>,
     place_labels: &[(Point2D, String)],
     manor_facts: &[ManorFact],
     house_count: usize,
+    rng: &mut RNG,
 ) -> crate::generator::chronicle::CityDossier {
-    use crate::generator::chronicle::{size_word, CityDossier, Landmark};
+    use crate::generator::chronicle::{size_word, CityDossier, DossierDistrict, Landmark};
     use crate::generator::BuildClaim;
 
     let centre = cells_centroid(&urban.iter().copied().collect::<Vec<_>>());
@@ -238,6 +240,36 @@ fn assemble_dossier(
         })
         .fold(0.0_f32, f32::max);
 
+    // ── Name the urban districts (the unit the chronicle is organised around) ──
+    // Each landmark is later stamped with the district it sits in, and the guide
+    // walks the districts one at a time. Manor/park positions feed family- and
+    // green-themed district names; trades are scanned from the world per district.
+    let manor_pts: Vec<(Point2D, String)> =
+        manor_facts.iter().map(|mf| (mf.pos, mf.surname.clone())).collect();
+    let park_pts: Vec<Point2D> = place_labels.iter().map(|(p, _)| *p).collect();
+    let district_names = crate::generator::districts::name_districts(
+        editor.world(), culture, centre, &manor_pts, &park_pts, rng,
+    );
+    // Name of the named district containing `p`, or "" if it has no urban district.
+    let district_for = |p: Point2D| -> String {
+        editor
+            .world()
+            .get_district_at(p)
+            .and_then(|id| district_names.get(&id))
+            .map(|d| d.name.clone())
+            .unwrap_or_default()
+    };
+    // World `(x, y, z)` to stand a player at `p` (local) — the chronicle turns each
+    // landmark into a `/tp` link. `get_height_at` is local (relative to origin.y) and
+    // points at the first air cell above the surface, i.e. where a player stands.
+    let origin = editor.world().origin();
+    let tp_for = |p: Point2D| -> Option<(i32, i32, i32)> {
+        editor
+            .world()
+            .get_height_at(p)
+            .map(|h| (p.x + origin.x, origin.y + h, p.y + origin.z))
+    };
+
     let mut landmarks: Vec<Landmark> = Vec::new();
 
     // ── Roads first (the `near` vocabulary) ──
@@ -249,11 +281,10 @@ fn assemble_dossier(
     rids.sort_unstable();
     for rid in rids {
         let Some(name) = road_names.get(&rid) else { continue };
-        let quarter = road_cells
-            .get(&rid)
-            .map(|cs| quarter_of(cells_centroid(cs), centre, radius))
-            .unwrap_or_default();
-        landmarks.push(Landmark { kind: "road".into(), name: name.clone(), quarter, near: vec![], notes: vec![] });
+        let cen = road_cells.get(&rid).map(|cs| cells_centroid(cs));
+        let quarter = cen.map(|c| quarter_of(c, centre, radius)).unwrap_or_default();
+        let district = cen.map(&district_for).unwrap_or_default();
+        landmarks.push(Landmark { kind: "road".into(), name: name.clone(), quarter, near: vec![], notes: vec![], district, tp: cen.and_then(&tp_for) });
     }
 
     // ── Industries: distinct workplace structure types, by location ──
@@ -281,6 +312,8 @@ fn assemble_dossier(
             quarter,
             near,
             notes: vec![],
+            district: district_for(cen),
+            tp: tp_for(cen),
         });
     }
 
@@ -301,6 +334,8 @@ fn assemble_dossier(
             quarter,
             near,
             notes,
+            district: district_for(mf.pos),
+            tp: tp_for(mf.pos),
         });
     }
 
@@ -308,7 +343,7 @@ fn assemble_dossier(
     for (pos, name) in place_labels {
         let quarter = quarter_of(*pos, centre, radius);
         let near = nearest_road(*pos, road_labels, road_names, 6).into_iter().collect();
-        landmarks.push(Landmark { kind: "park".into(), name: name.clone(), quarter, near, notes: vec![] });
+        landmarks.push(Landmark { kind: "park".into(), name: name.clone(), quarter, near, notes: vec![], district: district_for(*pos), tp: tp_for(*pos) });
     }
 
     // ── Gates (deduped by side) ──
@@ -323,6 +358,10 @@ fn assemble_dossier(
                 quarter: format!("on the {dir} edge"),
                 near: vec![],
                 notes: vec![],
+                // Gates sit on the wall, outside any urban district — the guide
+                // collects them under its trailing "around the edge" section.
+                district: String::new(),
+                tp: tp_for(gpos.drop_y()),
             });
         }
     }
@@ -336,14 +375,32 @@ fn assemble_dossier(
         }
     }
 
+    // The named districts with their quarter, ordered by quarter then name so the
+    // guide walks them in a stable, geographically-coherent sequence.
+    let mut districts: Vec<DossierDistrict> = district_names
+        .iter()
+        .map(|(id, dn)| {
+            let quarter = editor
+                .world()
+                .districts
+                .get(id)
+                .map(|d| quarter_of(cells_centroid(&d.data.points_2d.iter().copied().collect::<Vec<_>>()), centre, radius))
+                .unwrap_or_default();
+            DossierDistrict { name: dn.name.clone(), quarter }
+        })
+        .collect();
+    districts.sort_by(|a, b| a.quarter.cmp(&b.quarter).then_with(|| a.name.cmp(&b.name)));
+
     CityDossier {
         name: named.name.clone(),
         subtitle: named.subtitle.clone(),
         culture: culture_word(culture),
         town_colours,
+        civic_blazon: civic_blazon.to_string(),
         biomes: top_biomes(editor.world(), 3),
         size: size_word(house_count),
         walled: !editor.world().gate_locations.is_empty(),
+        districts,
         landmarks,
     }
 }
@@ -364,8 +421,8 @@ pub fn minimal_dossier(
     let no_roads: HashMap<u32, String> = HashMap::new();
     let no_labels: HashMap<Point2D, u32> = HashMap::new();
     assemble_dossier(
-        editor, &urban, culture, &named, &[], &no_roads, &no_labels, &[], &[],
-        editor.world().buildings.len(),
+        editor, &urban, culture, &named, &[], "", &no_roads, &no_labels, &[], &[],
+        editor.world().buildings.len(), rng,
     )
 }
 
@@ -376,6 +433,13 @@ pub async fn generate_town(
 ) {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
+
+    // Terraforming and block edits go through the HTTP interface with block updates
+    // on, which can spawn block-drop item entities (e.g. when a placed block replaces
+    // grass/flowers) that pile up and lag the world. Disable blockdrops for the run.
+    if let Err(e) = editor.set_gamerule("blockdrops", "false").await {
+        log::warn!("Failed to disable blockdrops gamerule: {e}");
+    }
 
     // Settlement culture: an explicit override (tests) wins; otherwise auto-select
     // from the build area's climate so the town fits its biome while the cultures
@@ -434,6 +498,11 @@ pub async fn generate_town(
     // aren't dropped into standing forest.
     log_trees(&*editor, urban.clone()).await;
     println!("Logged {} urban cells of trees", urban.len());
+    // Clear all standing water/lava from the city bounds BEFORE terraforming, so
+    // the flatten only grades solid ground (and `is_water` no longer makes it
+    // skip those cells).
+    drain_liquids(editor, &urban).await;
+    println!("Drained liquids from {} urban cells", urban.len());
     flatten_urban_area(editor, &urban, 16, 12, true).await;
 
     // Wall + gates — gates populate world.gate_locations, used by the network.
@@ -928,21 +997,48 @@ pub async fn generate_town(
         style_scheme.accent().name,
         local_wood.as_ref().map(|p| p.clone()),
     );
-    // Per-district twist: each city block keeps the town's dominant (60%) and
-    // accent (10%) but re-rolls its 30% secondary to a different everyday style,
-    // so a quarter reads as its own while the city stays one place (see
-    // `StyleScheme::district_variant`). Keyed off the seed per block index so it's
-    // deterministic and independent of the placement streams. `lot_block` (built
-    // during subdivision) maps each lot to its block, hence to its scheme.
-    let district_schemes: Vec<StyleScheme> = (0..blocks.len())
-        .map(|bi| {
-            let mut drng = RNG::from_seed_and_string(seed, &format!("district_style_{bi}"));
-            style_scheme.district_variant(culture, &mut drng)
+    // Per-district twist: each urban DISTRICT (one of the 3–5 `World.districts`
+    // blobs, the same unit the chronicle names) keeps the town's dominant (60%)
+    // and accent (10%) but re-rolls its 30% secondary to a different everyday
+    // style, so a district reads as its own place while the city stays one whole
+    // (see `StyleScheme::district_variant`). Each city block is mapped to the
+    // urban district its cells mostly fall in; `lot_block` then maps each lot to
+    // its block, hence to its district and scheme. Keyed off the seed per district
+    // id, so it's deterministic and independent of the placement streams.
+    use crate::generator::districts::DistrictID;
+    let block_district: Vec<Option<DistrictID>> = blocks
+        .iter()
+        .map(|block| {
+            let mut tally: HashMap<DistrictID, usize> = HashMap::new();
+            for &c in block {
+                if let Some(id) = editor.world().get_district_at(c) {
+                    let urban = editor
+                        .world()
+                        .districts
+                        .get(&id)
+                        .map_or(false, |d| d.data.parcel_type == ParcelType::Urban);
+                    if urban {
+                        *tally.entry(id).or_insert(0) += 1;
+                    }
+                }
+            }
+            tally.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
+        })
+        .collect();
+    let district_schemes: HashMap<DistrictID, StyleScheme> = block_district
+        .iter()
+        .flatten()
+        .copied()
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .map(|id| {
+            let mut drng = RNG::from_seed_and_string(seed, &format!("district_style_{}", id.0));
+            (id, style_scheme.district_variant(culture, &mut drng))
         })
         .collect();
     println!(
         "Per-district secondaries: {:?}",
-        district_schemes.iter().map(|s| s.secondary().name).collect::<Vec<_>>(),
+        district_schemes.iter().map(|(id, s)| (id.0, &s.secondary().name)).collect::<Vec<_>>(),
     );
     // Densest tier first; size pool per tier (houses on the main roads,
     // cottages on the back lanes).
@@ -1068,6 +1164,22 @@ pub async fn generate_town(
         "Town colours: dominant={:?}, second={:?}; manor family colours={:?}",
         color_scheme.town[0], color_scheme.town[1], color_scheme.manor,
     );
+    // Civic banner: mint the town's arms from its two colours and fly them, facing
+    // outward, on the wall towers and gates (built earlier). The blazon rides along
+    // to the chronicle so the book can name the arms.
+    let civic_centre = {
+        let n = urban.len().max(1) as i32;
+        urban.iter().fold(Point2D::ZERO, |a, &p| a + p) / n
+    };
+    let mut civic_rng = rng.derive();
+    let civic_blazon = crate::generator::civic_banner::place_civic_banners(
+        editor, civic_centre, color_scheme.town, &mut civic_rng,
+    )
+    .await
+    .unwrap_or_default();
+    if !civic_blazon.is_empty() {
+        println!("Civic banner: {civic_blazon}");
+    }
     // Per-manor name signs are planned during the building loop (geometry known
     // once the door is cut) and lettered after the population pass rolls each
     // family's surname. `sign_rng` keeps the designation draw off the placement
@@ -1207,7 +1319,13 @@ pub async fn generate_town(
                     // Pick this building's style from its *district's* scheme
                     // (60% town dominant / 30% district secondary / 10% town
                     // accent) and roll its palette, leaning on the local wood.
-                    let mut palette = district_schemes[lot_block[lot_idx]]
+                    // Falls back to the town scheme for the rare lot whose block
+                    // mapped to no urban district (footprint cells regularized
+                    // beyond raw district coverage).
+                    let scheme = block_district[lot_block[lot_idx]]
+                        .and_then(|id| district_schemes.get(&id))
+                        .unwrap_or(&style_scheme);
+                    let mut palette = scheme
                         .next_style(&mut style_rng)
                         .roll_palette(&mut style_rng, &data, local_wood.as_ref());
                     // Apply the town colour identity: a manor flies its unique
@@ -1916,10 +2034,11 @@ pub async fn generate_town(
         // biomes, roads, trades, families, greens, gates) and have the AI write a
         // guidebook, dropped into the player's inventory. Live-only — `give_player
         // _book` posts to the server; failures are non-fatal.
+        let mut chronicle_rng = RNG::from_seed_and_string(seed, "district_names");
         let dossier = assemble_dossier(
-            editor, &urban, culture, &named, &color_scheme.town,
+            editor, &urban, culture, &named, &color_scheme.town, &civic_blazon,
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
-            total_buildings,
+            total_buildings, &mut chronicle_rng,
         );
         if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
