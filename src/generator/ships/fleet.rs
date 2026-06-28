@@ -21,15 +21,11 @@ use crate::generator::materials::{Palette, PaletteId};
 use crate::geometry::{Cardinal, Point2D};
 use crate::noise::{Seed, RNG};
 
+use super::additions::bowsprit::bowsprit_reach;
+use super::hull::max_beam;
 use super::keel::keel_depth;
 use super::tuning::*;
 use super::{build_ship, HullShape, SailState, ShipCtx, ShipSpec};
-
-/// Max hull beam for a keel length — mirrors `hull::build_hull_model`
-/// (`max_beam = round(length / beam_ratio), min 3`) without building the hull.
-fn max_beam(length: i32) -> i32 {
-    ((length as f32) / DEFAULT_BEAM_RATIO).round().max(3.0) as i32
-}
 
 /// Largest keel length allowed for a water district, from its **dominant biome**: open
 /// ocean / deep-ocean bodies get the full [`SHIP_LENGTHS`] range, while rivers / lakes /
@@ -90,11 +86,19 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
     // land even where two adjacent water districts meet).
     let shore = shore_distance_field(editor.world(), size);
 
-    let palette = data
-        .palettes
-        .get(&PaletteId::from("ship_oak"))
-        .expect("ship_oak palette (data/palettes/ships/)")
-        .clone();
+    // The wood palettes a ship can be built from — one is rolled per ship for variety.
+    // The loader skips malformed/absent JSON *silently* (the load still succeeds), so a
+    // requested id can be missing: collect only the palettes that actually loaded, and bail
+    // gracefully if none did. This is the **last** pass in `generate_town`, so a panic here
+    // would throw away a fully-generated settlement (and skip its final flush).
+    let palettes: Vec<Palette> = SHIP_PALETTES
+        .iter()
+        .filter_map(|id| data.palettes.get(&PaletteId::from(*id)).cloned())
+        .collect();
+    if palettes.is_empty() {
+        log::warn!("no ship palettes loaded ({:?}); skipping ship placement", SHIP_PALETTES);
+        return 0;
+    }
 
     let mut rng = RNG::new(seed).derive();
     let mut placed_cells: HashSet<Point2D> = HashSet::new();
@@ -114,8 +118,9 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
         }
         centres.sort_by_key(|c| (c.x, c.y));
 
-        // Roll whether this district gets a ship at all (kept at 100% by default). Rolled
-        // unconditionally so the RNG stream stays stable as the chance is tuned.
+        // Roll whether this district gets a ship at all (SHIP_CHANCE_PER_DISTRICT, currently
+        // 50%). Districts with no eligible centre are already skipped above, so this only
+        // decides among placeable bodies.
         if !rng.percent(SHIP_CHANCE_PER_DISTRICT) {
             continue;
         }
@@ -126,7 +131,7 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
 
         // One ship per water district.
         let placed = place_one_ship(
-            editor, data, &palette, &mut rng, &centres, build_height, max_length, &mut placed_cells,
+            editor, data, &palettes, &mut rng, &centres, build_height, max_length, &mut placed_cells,
         )
         .await;
         if placed {
@@ -146,7 +151,7 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
 async fn place_one_ship(
     editor: &mut Editor,
     data: &LoadedData,
-    palette: &Palette,
+    palettes: &[Palette],
     rng: &mut RNG,
     centres: &[Point2D],
     build_height: i32,
@@ -168,6 +173,9 @@ async fn place_one_ship(
         let dir: Point2D = heading.into();
         let anchor = Point2D::new(centre.x - dir.x * (length / 2), centre.y - dir.y * (length / 2));
 
+        // Roll this ship's wood (only on a successful fit, so rejected attempts don't churn
+        // the stream). One palette per vessel.
+        let palette = &palettes[rng.rand_i32_range(0, palettes.len() as i32) as usize];
         let hull_shape = if rng.percent(50) { HullShape::Teardrop } else { HullShape::Oval };
         let sail_state = if rng.percent(FURLED_CHANCE) { SailState::Furled } else { SailState::Full };
         let spec = ShipSpec::new(heading, length)
@@ -224,7 +232,10 @@ fn try_fit(
                 continue;
             }
             let min_depth = keel_depth(length) + KEEL_CLEARANCE;
-            if let Some(footprint) = footprint_cells(world, centre, heading, length, min_depth, placed) {
+            let bow_reach = bowsprit_reach(length);
+            if let Some(footprint) =
+                footprint_cells(world, centre, heading, length, min_depth, bow_reach, placed)
+            {
                 return Some((heading, length, footprint));
             }
         }
@@ -233,38 +244,49 @@ fn try_fit(
 }
 
 /// The footprint cells of a hull `length` long centred on `centre`, heading `heading`, or
-/// `None` if any cell fails: out of bounds, not water, too shallow (`depth < min_depth` —
-/// keel would touch the seabed), already claimed, or overlapping a previously placed ship.
-/// The rect covers the hull (length × max-beam) plus [`HULL_MARGIN`] of clear water on
-/// every side.
+/// `None` if any cell fails. The rect covers the hull (length × max-beam) plus
+/// [`HULL_MARGIN`] of clear water on every side, **and** the bowsprit's forward overhang
+/// (`bow_reach` cells past the bow). Two predicates apply:
+/// - **hull cells** must be in-bounds, water, unclaimed, unoccupied, *and* deep enough that
+///   the keel clears the seabed (`depth ≥ min_depth`);
+/// - **bow-overhang cells** (the spar/jib hang at/above the surface) only need to be open
+///   water — in-bounds, water, unclaimed, unoccupied — with no depth requirement, so a
+///   bowsprit never embeds in the shore or pokes through another ship.
 fn footprint_cells(
     world: &World,
     centre: Point2D,
     heading: Cardinal,
     length: i32,
     min_depth: i32,
+    bow_reach: i32,
     placed: &HashSet<Point2D>,
 ) -> Option<Vec<Point2D>> {
     let dir: Point2D = heading.into();
     let perp: Point2D = heading.rotate_right().into();
     let half_len = length / 2 + HULL_MARGIN;
-    let half_w = max_beam(length) / 2 + HULL_MARGIN;
+    let half_w = max_beam(length, DEFAULT_BEAM_RATIO) / 2 + HULL_MARGIN;
 
-    let mut cells = Vec::with_capacity(((2 * half_len + 1) * (2 * half_w + 1)) as usize);
-    for a in -half_len..=half_len {
+    // The hull spans `a ∈ [-half_len, half_len]` (bow toward `+dir`); the bowsprit overhangs
+    // the bow by `bow_reach` more cells.
+    let bow_max = half_len + bow_reach;
+    let mut cells = Vec::with_capacity(((half_len + bow_max + 1) * (2 * half_w + 1)) as usize);
+    for a in -half_len..=bow_max {
+        let hull_cell = a <= half_len;
         for c in -half_w..=half_w {
             let cell = Point2D::new(centre.x + dir.x * a + perp.x * c, centre.y + dir.y * a + perp.y * c);
             if !world.is_in_bounds_2d(cell) || !world.is_water(cell) || placed.contains(&cell) {
                 return None;
             }
-            let (Some(surface), Some(seabed)) = (
-                world.get_motion_blocking_height_at(cell),
-                world.get_ocean_floor_height_at(cell),
-            ) else {
-                return None;
-            };
-            if surface - seabed < min_depth {
-                return None;
+            if hull_cell {
+                let (Some(surface), Some(seabed)) = (
+                    world.get_motion_blocking_height_at(cell),
+                    world.get_ocean_floor_height_at(cell),
+                ) else {
+                    return None;
+                };
+                if surface - seabed < min_depth {
+                    return None;
+                }
             }
             match world.get_claim(cell) {
                 Some(BuildClaim::None) | Some(BuildClaim::Nature) | None => {}

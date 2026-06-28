@@ -93,6 +93,13 @@ pub struct HullBevel {
 /// The shell is the **boundary of the 3D hull volume**: a cell inside the volume is
 /// kept if any of its sides/underside is exposed (so the flare ledges are sealed —
 /// no underside holes), while the **top is left open** (hollow, deck added later).
+/// Max hull beam for a keel length: `round(length / beam_ratio)`, floored at 3. The single
+/// source of this rule — the placement fit-solver ([`fleet`](super::fleet)) calls it too, so
+/// the reserved footprint can't drift from the hull the builder actually lays.
+pub fn max_beam(length: i32, beam_ratio: f32) -> i32 {
+    ((length as f32) / beam_ratio).round().max(3.0) as i32
+}
+
 pub fn build_hull_model(
     length: i32,
     depth: i32,
@@ -100,7 +107,7 @@ pub fn build_hull_model(
     shape: HullShape,
     keel_top: &[i32],
 ) -> HullModel {
-    let max_beam = ((length as f32) / beam_ratio).round().max(3.0) as i32;
+    let max_beam = max_beam(length, beam_ratio);
     let max_hw = max_beam / 2; // half-beam
 
     // Keel's crest Y at a station (`i32::MIN` = no keel there → no constraint).

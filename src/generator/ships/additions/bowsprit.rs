@@ -195,6 +195,21 @@ fn step_spar(x0: i32, y0: i32, x1: i32, rake: BowspritRake) -> (Vec<BowspritCell
     (cells, tip)
 }
 
+/// Maximum forward reach of the bowsprit **beyond the bow tip** (`bow_x = length - 1`),
+/// in local `+x` blocks: the prow's stem extension (`ext`) plus the longest spar (the
+/// `Straight` rake — `reach_factor == 1.0`, so this bounds every rake). Returns `0` for
+/// ships too small to carry a bowsprit (Small tier), so the placement fit-solver reserves
+/// forward open water only when a spar will actually be built. Mirrors the geometry baked
+/// into [`build_bowsprit_model`] — kept here so the reserved footprint can't drift from it.
+pub fn bowsprit_reach(length: i32) -> i32 {
+    if SizeTier::from_length(length) < SizeTier::Medium {
+        return 0;
+    }
+    let ext = (((length as f32) * 0.10).round() as i32).max(2);
+    let spar_reach = ((length as f32) * REACH_FRACTION).round().max(3.0) as i32; // reach_factor ≤ 1.0
+    ext + spar_reach
+}
+
 /// Build the bowsprit geometry for a chosen `rake` (Approach B: the prow **mimics the
 /// hull** — a flared nose tapering to a stem point and a keel point, decked + railed,
 /// solid for Small ships / a hollow shell for larger, with the spar projecting on).

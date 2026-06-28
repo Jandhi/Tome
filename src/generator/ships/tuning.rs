@@ -432,6 +432,11 @@ pub const MIN_WATER_CELLS: usize = 150;
 /// every water body is populated; lower leaves some empty for variety.
 pub const SHIP_CHANCE_PER_DISTRICT: i32 = 50;
 
+/// Ship wood palette ids (under `data/palettes/ships/`) the fleet pass rolls among — one
+/// per ship, for hull-colour variety. Ids missing from the loaded data are skipped, so
+/// trimming this list (or a palette file) degrades gracefully. Not yet style/culture-tied.
+pub const SHIP_PALETTES: &[&str] = &["ship_oak", "ship_dark", "ship_spruce"];
+
 // ===========================================================================
 // Not-yet-centralized
 // ===========================================================================

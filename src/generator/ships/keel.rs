@@ -38,7 +38,6 @@ use super::{Placement, ShipDir, ShipCtx};
 pub struct KeelCell {
     pub local: Point3D,
     pub form: BlockForm,
-    pub part: ShipPart,
     /// For stairs: the ship-local direction the stair faces.
     pub facing: Option<ShipDir>,
     /// `true` = top half (top slab, or upside-down/top-half stair); `false` = bottom.
@@ -114,14 +113,12 @@ pub fn build_keel_model(length: i32) -> KeelModel {
     let slab = |x: i32, y: i32| KeelCell {
         local: Point3D::new(x, y, 0),
         form: BlockForm::Slab,
-        part: ShipPart::Keel,
         facing: None,
         top_half: true, // top slab → recessed, tapered underside
     };
     let block = |x: i32, y: i32| KeelCell {
         local: Point3D::new(x, y, 0),
         form: BlockForm::Block,
-        part: ShipPart::Keel,
         facing: None,
         top_half: false,
     };
@@ -129,7 +126,6 @@ pub fn build_keel_model(length: i32) -> KeelModel {
     let rake_stair = |x: i32, y: i32, face: ShipDir| KeelCell {
         local: Point3D::new(x, y, 0),
         form: BlockForm::Stairs,
-        part: ShipPart::Keel,
         facing: Some(face),
         top_half: true,
     };
@@ -199,18 +195,20 @@ pub async fn place_keel(
     ship_palette: &ShipPalette,
     on_water: bool,
 ) {
+    // The whole keel is one material/role, so resolve the placer once and reuse it for
+    // every cell (mirrors `rudder.rs`) rather than rebuilding it — and deriving a fresh
+    // RNG — per block.
+    let role = ship_palette.role(ShipPart::Keel);
+    let material = ctx
+        .palette
+        .get_material(role)
+        .unwrap_or_else(|| panic!("ship palette role {role:?} missing from base palette"))
+        .clone();
+
+    let mut placer_rng = ctx.rng.derive();
+    let mut placer = MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut placer_rng), material);
+
     for cell in &model.cells {
-        let role = ship_palette.role(cell.part);
-        let material = ctx
-            .palette
-            .get_material(role)
-            .unwrap_or_else(|| panic!("ship palette role {role:?} missing from base palette"))
-            .clone();
-
-        let mut placer_rng = ctx.rng.derive();
-        let mut placer =
-            MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut placer_rng), material);
-
         let world = placement.to_world(cell.local);
         let state = cell_state(cell, placement, on_water);
         placer.place_block(ctx.editor, world, cell.form, state.as_ref(), None).await;
