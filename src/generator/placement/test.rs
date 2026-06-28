@@ -1344,6 +1344,7 @@ mod tests {
         let rural_wool: Block = "green_wool".into();
         let off_limits_wool: Block = "red_wool".into();
         let unknown_wool: Block = "black_wool".into();
+        let water_wool: Block = "light_blue_wool".into();
         let glass: Block = "glass".into();
         let bedrock: Block = "bedrock".into();
 
@@ -1372,6 +1373,7 @@ mod tests {
                     ParcelType::Rural => &rural_wool,
                     ParcelType::OffLimits => &off_limits_wool,
                     ParcelType::Unknown => &unknown_wool,
+                    ParcelType::Water => &water_wool,
                 };
 
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;
@@ -1546,6 +1548,7 @@ mod tests {
         let rural_wool: Block = "green_wool".into();
         let off_limits_wool: Block = "red_wool".into();
         let unknown_wool: Block = "black_wool".into();
+        let water_wool: Block = "light_blue_wool".into();
         let glass: Block = "glass".into();
         let bedrock: Block = "bedrock".into();
 
@@ -1573,6 +1576,7 @@ mod tests {
                     ParcelType::Rural => &rural_wool,
                     ParcelType::OffLimits => &off_limits_wool,
                     ParcelType::Unknown => &unknown_wool,
+                    ParcelType::Water => &water_wool,
                 };
 
                 let height = height_map[x as usize][z as usize] - build_area.origin.y;

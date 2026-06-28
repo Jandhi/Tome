@@ -240,6 +240,42 @@ impl World {
         }
     }
 
+    /// Like [`World::synthetic`] but represents an ocean: a flat seabed at
+    /// `floor_y` with water up to `water_y`. The ground block map is water and the
+    /// heightmaps reflect seabed (ground/ocean floor) vs. sea surface (motion
+    /// blocking). Used by the ship generator's offline tests so ships float on a
+    /// water flatworld. Note: offline reads only see freshly placed blocks, so the
+    /// water here is for live runs and future water-finding, not test readback.
+    pub fn synthetic_water(build_area: Rect3D, floor_y: i32, water_y: i32) -> Self {
+        let mut world = World::synthetic(build_area, floor_y);
+
+        let floor_local = floor_y - build_area.origin.y;
+        let water_local = water_y - build_area.origin.y;
+
+        for row in world.ground_block_map.iter_mut() {
+            for block in row.iter_mut() {
+                *block = Block::new("minecraft:water".into(), None, None);
+            }
+        }
+        for row in world.ground_height_map.iter_mut() {
+            for h in row.iter_mut() {
+                *h = floor_local;
+            }
+        }
+        for row in world.ocean_floor_height_map.iter_mut() {
+            for h in row.iter_mut() {
+                *h = floor_local;
+            }
+        }
+        for row in world.motion_blocking_height_map.iter_mut() {
+            for h in row.iter_mut() {
+                *h = water_local;
+            }
+        }
+
+        world
+    }
+
     /// Build an offline editor from a synthetic world. Skips all HTTP traffic —
     /// blocks are written to the editor's in-memory cache only. See
     /// `Editor::new_offline` for the editor-side behavior.

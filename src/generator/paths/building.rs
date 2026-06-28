@@ -29,7 +29,7 @@ enum PaveMode {
 
 fn pave_mode_for_claim(editor: &Editor, cell: Point2D) -> PaveMode {
     match editor.world().get_claim(cell) {
-        Some(BuildClaim::Building(_) | BuildClaim::Structure(_)) => PaveMode::Skip,
+        Some(BuildClaim::Building(_) | BuildClaim::Structure(_) | BuildClaim::Ship) => PaveMode::Skip,
         Some(BuildClaim::Wall) => PaveMode::SurfaceOnly,
         _ => PaveMode::Clear,
     }

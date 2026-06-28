@@ -15,5 +15,8 @@ pub enum BuildClaim {
     Building(BuildingID),
     Structure(StructureID),
     ProductionArea(StructureID),
+    /// Footprint of a placed ship (scattered on a water district). Reserves the
+    /// water cells so later passes (harbour, roads, bridges) and other ships skip them.
+    Ship,
     None,
 }

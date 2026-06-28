@@ -225,7 +225,9 @@ pub fn reconcile_districts_to_footprint(
     let mut flipped = 0usize;
 
     for district in districts.values_mut() {
-        if district.data.parcel_type == ParcelType::OffLimits {
+        // Water districts (and OffLimits/borders) are never re-voted Urban/Rural — a
+        // lake must keep its Water type so the ship pass can find it.
+        if matches!(district.data.parcel_type, ParcelType::OffLimits | ParcelType::Water) {
             continue;
         }
 

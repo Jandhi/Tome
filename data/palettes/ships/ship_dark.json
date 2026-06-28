@@ -1,0 +1,11 @@
+{
+  "id" : "ship_dark",
+
+  "primary_wood" : "dark_oak_planks",
+  "secondary_wood" : "spruce_planks",
+  "wood_pillar" : "dark_oak_log",
+  "ground_floor" : "dark_oak_planks",
+
+  "primary_color" : "brown",
+  "secondary_color" : "black"
+}

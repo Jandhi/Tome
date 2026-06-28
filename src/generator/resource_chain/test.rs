@@ -623,6 +623,7 @@ mod tests {
                         None => Block { id: "gray_wool".into(), data: None, state: None },
                     },
                     ParcelType::Unknown => Block { id: "bedrock".into(), data: None, state: None },
+                    ParcelType::Water => Block { id: "light_blue_wool".into(), data: None, state: None },
                 };
                 (*id, block)
             })

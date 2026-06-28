@@ -6,7 +6,7 @@ use super::{
     District,
     DistrictID,
     parcel::ParcelType,
-    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, URBAN_RELATIVE_TO_PRIME,
+    constants::{OFF_LIMITS_ROUGHNESS, OFF_LIMITS_GRADIENT, URBAN_WATER_LIMIT, WATER_DISTRICT_LIMIT, URBAN_RELATIVE_TO_PRIME,
         URBAN_SIZE_MIN, URBAN_SIZE_MAX, URBAN_GROWTH_CUTOFF, URBAN_GROWTH_CUTOFF_HIGH,
         URBAN_OPTION_SCORE_MAX, RURAL_OPTION_SCORE_MAX, CITY_GROWTH_ADJACENCY_WEIGHT},
     merge::{candidate_score_terms, parcel_similarity_score},
@@ -30,10 +30,14 @@ pub fn classify_parcels<'a>(parcels: & mut HashMap<ParcelID, Parcel>, parcel_ana
             continue
         }
         info!("Parcel {:?} has data {:?}", id, analysis_data);
-        if analysis_data.water_percentage() <= URBAN_WATER_LIMIT && parcel.data.parcel_type == ParcelType::Unknown {
-            options.push(*id);
-        } else if analysis_data.water_percentage() > URBAN_WATER_LIMIT && parcel.data.parcel_type == ParcelType::Unknown{
-            parcel.data.parcel_type = ParcelType::Rural;
+        if parcel.data.parcel_type == ParcelType::Unknown {
+            if analysis_data.water_percentage() > WATER_DISTRICT_LIMIT {
+                parcel.data.parcel_type = ParcelType::Water;
+            } else if analysis_data.water_percentage() <= URBAN_WATER_LIMIT {
+                options.push(*id);
+            } else {
+                parcel.data.parcel_type = ParcelType::Rural;
+            }
         }
     }
     info!("Options for prime urban parcel: {:?}", options);
@@ -91,7 +95,10 @@ pub fn classify_districts<'a>(districts: &mut HashMap<DistrictID, District>, par
         // the urban options when its merged water fraction is too high, regardless of
         // score. Falls through to Rural so it's also ineligible for city growth.
         let water = parcel_analysis_data.get(id).map(|a| a.water_percentage()).unwrap_or(0.0);
-        if water > URBAN_WATER_LIMIT {
+        if water > WATER_DISTRICT_LIMIT {
+            district.data.parcel_type = ParcelType::Water;
+            info!("District {:?} classified as Water due to water {:.2} > {} ({} blocks, {} parcels)", id, water, WATER_DISTRICT_LIMIT, blocks, n_parcels);
+        } else if water > URBAN_WATER_LIMIT {
             district.data.parcel_type = ParcelType::Rural;
             info!("District {:?} classified as Rural due to water {:.2} > {} ({} blocks, {} parcels)", id, water, URBAN_WATER_LIMIT, blocks, n_parcels);
         } else if score <= URBAN_OPTION_SCORE_MAX {
@@ -304,6 +311,7 @@ fn district_score(district: &District, parcels: &mut HashMap<ParcelID, Parcel>) 
             match parcel_type {
                 ParcelType::Urban => *count as f32 * 0.0,
                 ParcelType::Rural => *count as f32 * 1.0,
+                ParcelType::Water => *count as f32 * 2.0,
                 ParcelType::OffLimits => *count as f32 * 2.0,
                 _ => 2.0,
             }

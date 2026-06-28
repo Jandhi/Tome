@@ -8,6 +8,7 @@ pub const PARCEL_SIZE_UPPER_FACTOR : f32 = 1.5; // Interior merges may not push 
 pub const OFF_LIMITS_ROUGHNESS : f32 = 6.0;
 pub const OFF_LIMITS_GRADIENT : f32 = 1.0;
 pub const URBAN_WATER_LIMIT: f32 = 0.33; // Maximum water percentage for urban parcels
+pub const WATER_DISTRICT_LIMIT: f32 = 0.6; // Minimum merged water fraction for a district to classify as Water (well above URBAN_WATER_LIMIT so only genuinely watery districts split off; marshy/riverside stays Rural)
 pub const URBAN_SIZE_MIN: u32 = 3; // Minimum number of urban districts (city floor)
 pub const URBAN_SIZE_MAX: u32 = 5; // Maximum number of urban districts (city cap)
 pub const URBAN_GROWTH_CUTOFF: f32 = 0.10; // Candidate score needed to grow the city up to URBAN_SIZE_MIN
