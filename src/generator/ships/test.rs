@@ -1233,7 +1233,7 @@ async fn scatter_ships_offline() {
     let mut editor = world.get_offline_editor();
     let data = LoadedData::load().expect("data");
 
-    let n = scatter_ships(&mut editor, &data, Seed(7)).await;
+    let (n, _crew) = scatter_ships(&mut editor, &data, Seed(7)).await;
     assert!(n > 0, "expected ships scattered onto the water district");
 
     // Every cell claimed for a ship must be water; the deepest keel we could place needs
@@ -1256,6 +1256,70 @@ async fn scatter_ships_offline() {
     }
     assert!(ship_cells >= n, "expected at least one claimed footprint cell per ship");
     println!("scatter_ships_offline: placed {n} ships, {ship_cells} claimed footprint cells");
+}
+
+/// The ship-crew pass seats a captain (at the helm) plus tier-scaled sailors on an afloat
+/// ship's deck — every post a `Worker` on a distinct deck cell — and seats *no one* on a
+/// land hulk. Offline: pure geometry over a built `ShipOutput`, no server.
+#[tokio::test]
+async fn crew_scenes_offline() {
+    use std::collections::HashSet;
+
+    use crate::editor::World;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::population::SlotRole;
+    use crate::generator::ships::additions::SizeTier;
+    use crate::generator::ships::crew::crew_scenes;
+    use crate::generator::ships::{build_ship, ShipCtx, ShipSpec};
+    use crate::geometry::{Cardinal, Point2D, Point3D, Rect3D};
+    use crate::noise::RNG;
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let data = LoadedData::load().expect("data");
+    let palette = data
+        .palettes
+        .get(&PaletteId::from("ship_oak"))
+        .expect("ship_oak palette")
+        .clone();
+    let spec = ShipSpec::new(Cardinal::North, 36); // Large ship → captain + up to 4 sailors
+
+    // --- Afloat: a crew is seated. ---
+    let water = World::synthetic_water(build_area, 50, 64);
+    let mut editor = water.get_offline_editor();
+    let mut rng = RNG::new(7);
+    let mut ctx = ShipCtx::new(&mut editor, &data, &palette, &mut rng);
+    let ship = build_ship(&mut ctx, &spec, Point2D::new(128, 128)).await;
+    assert!(ship.on_water);
+    assert_eq!(ship.tier, SizeTier::Large);
+
+    let scenes = crew_scenes(&ship, &data.npc_data, &mut RNG::new(7));
+    let key = |s: &crate::generator::population::AnchorScene| s.slots[0].dialogue.clone();
+    let captains = scenes.iter().filter(|s| key(s).as_deref() == Some("captain")).count();
+    let sailors = scenes.iter().filter(|s| key(s).as_deref() == Some("sailor")).count();
+    assert_eq!(captains, 1, "exactly one captain at the helm");
+    assert!((1..=4).contains(&sailors), "1..=4 sailors for a Large ship, got {sailors}");
+
+    // Every post is a single-slot Worker on a distinct deck cell.
+    let mut cells: HashSet<(i32, i32)> = HashSet::new();
+    for s in &scenes {
+        assert_eq!(s.slots.len(), 1, "crew posts are solo scenes");
+        let slot = &s.slots[0];
+        assert_eq!(slot.role, SlotRole::Worker);
+        assert!(cells.insert((slot.pos.x, slot.pos.z)), "two crew share a cell at {:?}", slot.pos);
+    }
+
+    // --- A land hulk gets no crew. ---
+    let dry = World::synthetic(build_area, 64);
+    let mut dry_editor = dry.get_offline_editor();
+    let mut rng2 = RNG::new(7);
+    let mut ctx2 = ShipCtx::new(&mut dry_editor, &data, &palette, &mut rng2);
+    let hulk = build_ship(&mut ctx2, &spec, Point2D::new(128, 128)).await;
+    assert!(!hulk.on_water, "anchor over dry land should not be water");
+    assert!(
+        crew_scenes(&hulk, &data.npc_data, &mut RNG::new(7)).is_empty(),
+        "a grounded hulk is crewless",
+    );
 }
 
 /// Live build: places a row of keels of increasing length into the running
@@ -1425,9 +1489,11 @@ async fn scatter_ships_live() {
     use crate::editor::{Editor, World};
     use crate::generator::data::LoadedData;
     use crate::generator::districts::{generate_parcels, ParcelType};
+    use crate::generator::buildings_v2::Culture;
+    use crate::generator::population::{build_roster, populate_npcs, IdAllocator};
     use crate::generator::ships::fleet::scatter_ships;
     use crate::http_mod::GDMCHTTPProvider;
-    use crate::noise::Seed;
+    use crate::noise::{Seed, RNG};
     use crate::util::init_logger;
 
     init_logger();
@@ -1451,8 +1517,23 @@ async fn scatter_ships_live() {
         .count();
     println!("Found {water_districts} water district(s)");
 
-    let n = scatter_ships(&mut editor, &data, seed).await;
+    let (n, crew) = scatter_ships(&mut editor, &data, seed).await;
     println!("Scattered {n} ship(s) across {water_districts} water district(s)");
+
+    // Crew the ships: staff the captain/sailor anchor scenes from a roster, exactly as the
+    // settlement pipeline does, so the screenshot shows manned decks. Entities are a no-op
+    // offline, so this only does anything against the live server.
+    if !crew.is_empty() {
+        let mut id_alloc = IdAllocator::new();
+        let mut crew_rng = RNG::new(seed).derive();
+        let budget = crew.len();
+        let roster =
+            build_roster(budget, 0, Culture::Medieval, &data.npc_data, &mut id_alloc, &mut crew_rng);
+        let staffed = populate_npcs(&editor, crew, roster, budget, &data.npc_data, &mut crew_rng)
+            .await
+            .expect("crew staffing");
+        println!("Crewed ships with {staffed} sailor/captain NPCs");
+    }
 
     if water_districts == 0 {
         println!("(no water in the build area — set a build area over a lake/coast to place ships)");

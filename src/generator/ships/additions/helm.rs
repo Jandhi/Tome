@@ -43,6 +43,14 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
     }
     let base_y = state.top_y; // deck floor; fittings sit at +1 and up
 
+    // Record the helmsman's post: one cell aft of the wheel (at `hx - 1`), on the
+    // centreline at deck level, so the captain NPC stands behind the wheel facing the
+    // bow. Only when that cell is real deck; otherwise the ship-crew pass falls back to
+    // a stern deck cell.
+    if on_deck(hx - 2) {
+        state.helm_stand = Some(Point3D::new(hx - 2, base_y, 0));
+    }
+
     // The lectern reads toward the stern (the helmsman stands aft of it); the wheel hangs on the
     // **stern (rear) side** of the post. Derive directions from the heading (never hardcode).
     let stern = place.world_cardinal(ShipDir::Stern).to_string();

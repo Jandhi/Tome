@@ -513,6 +513,30 @@ small_talk:
 # items — `cooking` covers the furnace, smoker, and cauldron, etc. A slot with
 # no key (or a key missing here) falls back to `small_talk` above.
 dialogue:
+  # Deckhands working a ship's weather deck — hauling lines, stowing the hold,
+  # calling the wind. Keyed by the `sailors` fixture's employment label.
+  sailor:
+    - "Haul away, lads — put your backs into it!"
+    - "Wind's freshening. We'll make good time."
+    - "Mind the rigging — a loose line'll have your hand off."
+    - "Six months at sea and I still dream of dry land."
+    - "Tie it off proper, or you'll answer to the bosun."
+    - "Salt in your beard, salt in your bones, that's a sailor's lot."
+    - "Another barrel down the hold and we're done for the day."
+    - "She's a fine ship, this one. Rides the swell sweet."
+    - "Keep an eye to the weather — that sky's turning."
+    - "Heave! ...and again! ...she's coming round!"
+    - "Land's all well and good, but the deck's where I belong."
+  # The ship's master at the helm. Keyed by the `captains` fixture.
+  captain:
+    - "Steady as she goes. Hold this heading."
+    - "We sail on the morning tide. See the hold's stowed."
+    - "I've crossed worse waters than these, sailor."
+    - "A captain's first duty is to his ship; the second, to his crew."
+    - "Trim the sails and mind the glass — there's weather coming."
+    - "Every port has its price. We'll not linger here long."
+    - "Bring her about, gently now — she answers slow when she's laden."
+    - "Forty years before the mast, and the sea still keeps her secrets."
   cooking:
     - "Mind the fire — these coals run hot."
     - "Almost ready. Won't be long now."
@@ -1041,6 +1065,18 @@ vendors:
 performers:
   employment: performer
   looks: [Cartographer, Cleric, witch]
+
+# Ship crew fixtures — the deckhands and the master aboard a scattered ship.
+# Same shape as `guards`: an `employment` label (also the dialogue key) plus a
+# `looks` skin pool rolled per crew member. Sailors are a weathered, mixed lot
+# (Fisherman-heavy, the odd leatherworker or plain hand); the captain reads as a
+# navigator (Cartographer). `looks` must be non-empty.
+sailors:
+  employment: sailor
+  looks: [Fisherman, Fisherman, Fisherman, Leatherworker, None]
+captains:
+  employment: captain
+  looks: [Cartographer]
 
 # Fallback worker staffing for buildings whose structure JSON declares no
 # `staffing` block of its own. Per-building staffing now lives on each building's

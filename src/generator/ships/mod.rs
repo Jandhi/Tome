@@ -21,6 +21,7 @@ pub mod interior;
 pub mod blueprint;
 pub mod tuning;
 pub mod fleet;
+pub mod crew;
 
 #[cfg(test)]
 mod test;
@@ -223,6 +224,12 @@ pub struct ShipOutput {
     /// Local Y of the **topmost open weather deck** (what additions/masts build against —
     /// the raised additional deck if any, else the main deck). Sails clear this.
     pub weather_deck_y: i32,
+    /// Half-beam per station of the topmost weather deck (`length` entries) — the walkable
+    /// deck outline the ship-crew pass seats sailors within.
+    pub top_outline: Vec<i32>,
+    /// Local deck cell the captain stands on at the helm (`None` if no helm fit). See
+    /// [`additions::DeckState::helm_stand`].
+    pub helm_stand: Option<Point3D>,
     /// Stage-3 interior levels (hold / gun deck) — the spaces connections + furnishing build into.
     pub levels: levels::ShipLevels,
     /// Local `(x, floor_y, z)` cells of the companionway hatches + stairs/ladders — kept clear by
@@ -336,6 +343,8 @@ pub async fn build_ship(
     let railing = deck_state.railing;
     let masts = deck_state.masts;
     let weather_deck_y = deck_state.top_y;
+    let top_outline = deck_state.top_outline;
+    let helm_stand = deck_state.helm_stand;
 
     // Stage 3: enumerate the interior levels (hold / gun deck) from the finished hull + decks.
     let levels = levels::build_ship_levels(&hull, deck.deck_y, deck_state.top_y);
@@ -349,7 +358,7 @@ pub async fn build_ship(
     interior::furnish(ctx, &placement, &ship_palette, &levels, &hatch_cells, &mast_xs).await;
 
     ShipOutput {
-        placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, weather_deck_y, levels,
-        hatch_cells, on_water,
+        placement, keel, hull, rudder, deck, railing, bowsprit, masts, tier, weather_deck_y,
+        top_outline, helm_stand, levels, hatch_cells, on_water,
     }
 }

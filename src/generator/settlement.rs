@@ -2072,9 +2072,21 @@ pub async fn generate_town(
         }
     }
 
-    // Scatter free-floating ships onto the settlement's water districts.
-    let ships = crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
+    // Scatter free-floating ships onto the settlement's water districts, then crew the
+    // afloat ones (a captain at the helm + sailors on deck) from the town roster — the same
+    // fixture path as plaza vendors / industry workers. Live-only: staffing is a no-op offline.
+    let (ships, crew_scenes) =
+        crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
     println!("Placed {} ships across water districts", ships);
+    if !crew_scenes.is_empty() {
+        use crate::generator::population::{build_roster, populate_npcs};
+        let budget = crew_scenes.len();
+        let roster = build_roster(budget, 0, culture, &data.npc_data, &mut id_alloc, &mut rng.derive());
+        match populate_npcs(editor, crew_scenes, roster, budget, &data.npc_data, &mut rng).await {
+            Ok(staffed) => println!("Crewed ships with {} sailor/captain NPCs", staffed),
+            Err(e) => log::warn!("ship crew staffing failed: {e}"),
+        }
+    }
 
     editor.flush_buffer().await;
 }

@@ -128,6 +128,10 @@ pub struct AnchorSlot {
     /// Fractional blocks to raise the spawned NPC's feet — e.g. `0.5` to stand on
     /// a slab top (a tower battlement). `0.0` for normal full-block ground.
     pub y_offset: f32,
+    /// Honorific prefixed to the spawned NPC's name tag (e.g. `Captain`), or `None` for
+    /// the bare roster name. Set by fixtures that confer a rank; the roster still supplies
+    /// the first/sur name (so "Captain Osgith Oldridge").
+    pub title: Option<String>,
 }
 
 impl AnchorSlot {
@@ -145,6 +149,7 @@ impl AnchorSlot {
             dialogue: None,
             volume: DialogueVolume::Normal,
             y_offset: 0.0,
+            title: None,
         }
     }
 }
@@ -202,6 +207,7 @@ impl AnchorScene {
                 dialogue,
                 volume,
                 y_offset: 0.0,
+                title: None,
             }],
         }
     }
@@ -213,6 +219,18 @@ impl AnchorScene {
     /// matching pool exists in `npcs.yaml`, falling back to generic small talk
     /// otherwise. Name and look still come from the roster / the forced look.
     pub fn worker(pos: Point3D, facing: f32, look: NpcLook, employment: &str) -> Self {
+        Self::worker_titled(pos, facing, look, employment, None)
+    }
+
+    /// Like [`worker`](Self::worker), but prefixes `title` (e.g. `Captain`) onto the spawned
+    /// NPC's name tag. The roster still supplies the actual first/sur name.
+    pub fn worker_titled(
+        pos: Point3D,
+        facing: f32,
+        look: NpcLook,
+        employment: &str,
+        title: Option<String>,
+    ) -> Self {
         AnchorScene {
             kind: SceneKind::Solo,
             slots: vec![AnchorSlot {
@@ -225,6 +243,7 @@ impl AnchorScene {
                 dialogue: Some(employment.to_string()),
                 volume: DialogueVolume::Normal,
                 y_offset: 0.0,
+                title,
             }],
         }
     }
@@ -571,6 +590,12 @@ pub struct NpcData {
     /// Stage performer fixture — the skin pool and job label for a troupe member
     /// up on a plaza stage. `looks` must be non-empty.
     pub performers: Fixture,
+    /// Ship deckhand fixture — the skin pool and job label for the sailors
+    /// standing watch on a scattered ship's weather deck. `looks` non-empty.
+    pub sailors: Fixture,
+    /// Ship master fixture — the skin pool and job label for the captain at the
+    /// helm. `looks` must be non-empty.
+    pub captains: Fixture,
     /// Fallback worker [`Staffing`] for buildings whose structure JSON declares
     /// no `staffing` block of its own. Workplace staffing now lives on each
     /// building's structure sidecar; this only covers the unstated ones.
@@ -661,6 +686,12 @@ impl NpcData {
         }
         if self.performers.looks.is_empty() {
             anyhow::bail!("npcs.yaml: `performers.looks` must list at least one entry");
+        }
+        if self.sailors.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `sailors.looks` must list at least one entry");
+        }
+        if self.captains.looks.is_empty() {
+            anyhow::bail!("npcs.yaml: `captains.looks` must list at least one entry");
         }
         if self.default_staffing.looks.is_empty() {
             anyhow::bail!("npcs.yaml: `default_staffing.looks` must list at least one entry");
@@ -1880,7 +1911,11 @@ async fn staff_scene(
             .as_ref()
             .and_then(|lines| lines.get(i).cloned())
             .unwrap_or_else(|| data.line_aged(slot.dialogue.as_deref(), npc.is_child(), rng));
-        let display_name = npc.display_name();
+        // A slot may confer a rank ("Captain"); the roster still supplies the name.
+        let display_name = match &slot.title {
+            Some(title) => format!("{title} {}", npc.display_name()),
+            None => npc.display_name(),
+        };
         match look {
             NpcLook::Villager(profession) => {
                 spawn_villager_npc(

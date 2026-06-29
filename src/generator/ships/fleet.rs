@@ -18,10 +18,12 @@ use crate::generator::BuildClaim;
 use crate::generator::data::LoadedData;
 use crate::generator::districts::{DistrictID, ParcelType};
 use crate::generator::materials::{Palette, PaletteId};
+use crate::generator::population::AnchorScene;
 use crate::geometry::{Cardinal, Point2D};
 use crate::noise::{Seed, RNG};
 
 use super::additions::bowsprit::bowsprit_reach;
+use super::crew::crew_scenes;
 use super::hull::max_beam;
 use super::keel::keel_depth;
 use super::tuning::*;
@@ -52,9 +54,15 @@ fn size_cap_for_body(world: &World, district_id: usize) -> i32 {
 
 /// Scatter ships onto every sufficiently large Water district in the build area.
 ///
-/// Deterministic for a given `seed`, independent of the town RNG stream. Returns the
-/// number of ships placed.
-pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -> usize {
+/// Deterministic for a given `seed`, independent of the town RNG stream. Returns the number
+/// of ships placed **and** the crew [`AnchorScene`]s for the afloat ones (a captain at the
+/// helm + sailors on deck) — the caller staffs them with the town roster, like any other
+/// fixture. Crew looks/dialogue come from the `sailors` / `captains` fixtures in `npcs.yaml`.
+pub async fn scatter_ships(
+    editor: &mut Editor,
+    data: &LoadedData,
+    seed: Seed,
+) -> (usize, Vec<AnchorScene>) {
     // ── Plan inputs (owned, so no World borrow is held across build_ship) ──────
     let (size, build_height, bodies) = {
         let world = editor.world();
@@ -79,7 +87,7 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
     };
 
     if bodies.is_empty() {
-        return 0;
+        return (0, Vec::new());
     }
 
     // Distance-to-shore field over the whole build area (so a footprint never pokes over
@@ -97,12 +105,13 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
         .collect();
     if palettes.is_empty() {
         log::warn!("no ship palettes loaded ({:?}); skipping ship placement", SHIP_PALETTES);
-        return 0;
+        return (0, Vec::new());
     }
 
     let mut rng = RNG::new(seed).derive();
     let mut placed_cells: HashSet<Point2D> = HashSet::new();
     let mut total = 0usize;
+    let mut crew: Vec<AnchorScene> = Vec::new();
 
     for (id, water_cells) in &bodies {
         // Candidate centres: water cells comfortably off the bank. Sorted so RNG-indexed
@@ -131,7 +140,8 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
 
         // One ship per water district.
         let placed = place_one_ship(
-            editor, data, &palettes, &mut rng, &centres, build_height, max_length, &mut placed_cells,
+            editor, data, &palettes, &mut rng, &centres, build_height, max_length,
+            &mut placed_cells, &mut crew,
         )
         .await;
         if placed {
@@ -140,14 +150,19 @@ pub async fn scatter_ships(editor: &mut Editor, data: &LoadedData, seed: Seed) -
     }
 
     editor.flush_buffer().await;
-    log::info!("Scattered {} ships across {} water bodies", total, bodies.len());
-    total
+    log::info!(
+        "Scattered {} ships across {} water bodies ({} crew posts)",
+        total, bodies.len(), crew.len(),
+    );
+    (total, crew)
 }
 
 /// Try to seat a **single** ship somewhere in `centres`. Rejection-samples up to
 /// [`PLACE_ATTEMPTS`] centres; the first that admits a fitting ship is built via
-/// [`build_ship`] and its footprint claimed. Returns `true` on success, `false` if no
-/// attempt found room (the body is effectively full).
+/// [`build_ship`], its footprint claimed, and (for an afloat ship) its crew scenes pushed
+/// onto `crew`. Returns `true` on success, `false` if no attempt found room (the body is
+/// effectively full).
+#[allow(clippy::too_many_arguments)]
 async fn place_one_ship(
     editor: &mut Editor,
     data: &LoadedData,
@@ -157,6 +172,7 @@ async fn place_one_ship(
     build_height: i32,
     max_length: i32,
     placed: &mut HashSet<Point2D>,
+    crew: &mut Vec<AnchorScene>,
 ) -> bool {
     for _ in 0..PLACE_ATTEMPTS {
         let centre = centres[rng.rand_i32_range(0, centres.len() as i32) as usize];
@@ -184,7 +200,12 @@ async fn place_one_ship(
 
         let mut ship_rng = rng.derive();
         let mut ctx = ShipCtx::new(editor, data, palette, &mut ship_rng);
-        build_ship(&mut ctx, &spec, anchor).await;
+        let out = build_ship(&mut ctx, &spec, anchor).await;
+
+        // Crew NPC scenes (afloat ships only); the settlement layer staffs them. Looks and
+        // dialogue come from the ship-crew fixtures in `npcs.yaml`.
+        let mut crew_rng = rng.derive();
+        crew.extend(crew_scenes(&out, &data.npc_data, &mut crew_rng));
 
         for cell in &footprint {
             placed.insert(*cell);
