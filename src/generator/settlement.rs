@@ -4,7 +4,8 @@ use crate::data::Loadable;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::districts::{build_wall, generate_parcels, ParcelType, TowerSkin, WallType};
-use crate::generator::materials::{Material, MaterialId, Placer};
+use crate::generator::buildings_v2::style::local_wood_palette;
+use crate::generator::materials::{Material, MaterialId, MaterialRole, Placer};
 use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
 use crate::generator::placement::{resolve_rural_production, try_place_rural, PlacedRural};
@@ -432,6 +433,25 @@ pub fn minimal_dossier(
     )
 }
 
+/// The `PrimaryWood` material of the most common biome wood across the build
+/// area — the timber a palisade should be built from so it matches what grows
+/// locally (spruce in taiga, acacia in savanna, …). Tallies each cell's local
+/// wood palette, keeping only palettes that actually have a file and a wood role,
+/// and returns the modal one's primary wood. `None` when no biome in the area has
+/// a usable wood palette (e.g. all desert/badlands), so the caller can fall back.
+fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &LoadedData) -> Option<MaterialId> {
+    let mut counts: HashMap<MaterialId, usize> = HashMap::new();
+    for column in biome_map {
+        for biome in column {
+            let Some(palette) = local_wood_palette(biome.clone())
+                .and_then(|id| data.palettes.get(&id)) else { continue; };
+            let Some(wood) = palette.get_material(MaterialRole::PrimaryWood) else { continue; };
+            *counts.entry(wood.clone()).or_default() += 1;
+        }
+    }
+    counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
+}
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
@@ -532,17 +552,34 @@ pub async fn generate_town(
         }
     });
     let tower_skin = tower_palette.as_ref().map(|p| TowerSkin { data: &data, palette: p });
+    // City size = number of urban super-parcels. Small hamlets (≤3) get a cheap
+    // palisade; larger towns (4+) get the full standard-with-inner stone wall.
+    let n_urban = editor.world().districts.values()
+        .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
+        .count();
+    let wall_type = if n_urban <= 3 {
+        WallType::Palisade
+    } else {
+        WallType::StandardWithInner
+    };
+    // A palisade is a timber stockade (logs + fences), so it uses the local wood
+    // rather than the stone `wall_material` the standard wall takes: pick the most
+    // common biome wood across the build area, so a taiga town gets spruce, a
+    // savanna acacia, etc. Falls back to the stone wall material if no biome in the
+    // area has a wood palette (desert/badlands) or the palette lacks a wood role.
+    let palisade_material = (wall_type == WallType::Palisade)
+        .then(|| dominant_local_wood(editor.world().get_ground_biome_map(), &data))
+        .flatten();
+    let wall_material = palisade_material.as_ref().unwrap_or(&wall_material);
+    println!("City size {n_urban} urban super-parcels -> {wall_type:?} wall ({})", wall_material.as_str());
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
-        &mut placer, &wall_material, &structures, WallType::Standard, tower_skin.as_ref(),
+        &mut placer, wall_material, &structures, wall_type, tower_skin.as_ref(),
     ).await;
     drop(placer);
 
-    // DEBUG: how many urban super-parcels and gates did we actually get?
+    // DEBUG: how many gates did we actually get?
     {
-        let n_urban = editor.world().districts.values()
-            .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
-            .count();
         let n_total = editor.world().districts.len();
         println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
     }
