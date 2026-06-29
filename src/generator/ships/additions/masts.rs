@@ -120,6 +120,14 @@ pub struct MastModel {
     pub masts: Vec<Mast>,
 }
 
+impl MastModel {
+    /// The keel-stepped base `x` of every mast (the centreline columns). Used to keep deck
+    /// passes (furnishing clearance, crew placement) off the poles.
+    pub fn base_xs(&self) -> Vec<i32> {
+        self.masts.iter().map(|m| m.base_x).collect()
+    }
+}
+
 /// `(x-fraction of length, height-fraction of the main mast)` per mast, fore → aft. The
 /// mainmast (1.0) is the tallest; the fore/mizzen are shorter.
 fn layout(count: i32) -> &'static [(f32, f32)] {

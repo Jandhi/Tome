@@ -1300,6 +1300,10 @@ async fn crew_scenes_offline() {
     assert_eq!(captains, 1, "exactly one captain at the helm");
     assert!((1..=4).contains(&sailors), "1..=4 sailors for a Large ship, got {sailors}");
 
+    // The captain carries the data-driven rank from the `captains` fixture (npcs.yaml).
+    let captain = scenes.iter().find(|s| key(s).as_deref() == Some("captain")).unwrap();
+    assert_eq!(captain.slots[0].title.as_deref(), Some("Captain"), "captain title from fixture");
+
     // Every post is a single-slot Worker on a distinct deck cell.
     let mut cells: HashSet<(i32, i32)> = HashSet::new();
     for s in &scenes {
@@ -1490,7 +1494,8 @@ async fn scatter_ships_live() {
     use crate::generator::data::LoadedData;
     use crate::generator::districts::{generate_parcels, ParcelType};
     use crate::generator::buildings_v2::Culture;
-    use crate::generator::population::{build_roster, populate_npcs, IdAllocator};
+    use crate::generator::population::IdAllocator;
+    use crate::generator::ships::crew::staff_crew;
     use crate::generator::ships::fleet::scatter_ships;
     use crate::http_mod::GDMCHTTPProvider;
     use crate::noise::{Seed, RNG};
@@ -1526,10 +1531,7 @@ async fn scatter_ships_live() {
     if !crew.is_empty() {
         let mut id_alloc = IdAllocator::new();
         let mut crew_rng = RNG::new(seed).derive();
-        let budget = crew.len();
-        let roster =
-            build_roster(budget, 0, Culture::Medieval, &data.npc_data, &mut id_alloc, &mut crew_rng);
-        let staffed = populate_npcs(&editor, crew, roster, budget, &data.npc_data, &mut crew_rng)
+        let staffed = staff_crew(&editor, crew, Culture::Medieval, &data, &mut id_alloc, &mut crew_rng)
             .await
             .expect("crew staffing");
         println!("Crewed ships with {staffed} sailor/captain NPCs");

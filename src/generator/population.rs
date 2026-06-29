@@ -506,6 +506,11 @@ fn villager_biome_for(culture: Culture) -> VillagerBiome {
 pub struct Fixture {
     pub employment: String,
     pub looks: Vec<NpcLook>,
+    /// Honorific prefixed to the spawned NPC's name tag (e.g. `Captain`), or `None` for the
+    /// bare roster name. Lets a ranked fixture (the ship's captain) carry its title as data
+    /// rather than a hardcoded literal at the call site.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 

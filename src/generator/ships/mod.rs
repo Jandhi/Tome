@@ -351,10 +351,7 @@ pub async fn build_ship(
     let hatch_cells = deck_state.hatch_cells;
 
     // Stage 3: furnish the interior levels (reuses the buildings_v2 furnishing engine).
-    let mast_xs: Vec<i32> = masts
-        .as_ref()
-        .map(|m| m.masts.iter().map(|mm| mm.base_x).collect())
-        .unwrap_or_default();
+    let mast_xs: Vec<i32> = masts.as_ref().map(|m| m.base_xs()).unwrap_or_default();
     interior::furnish(ctx, &placement, &ship_palette, &levels, &hatch_cells, &mast_xs).await;
 
     ShipOutput {

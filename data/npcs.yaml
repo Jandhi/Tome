@@ -1076,6 +1076,7 @@ sailors:
   looks: [Fisherman, Fisherman, Fisherman, Leatherworker, None]
 captains:
   employment: captain
+  title: Captain
   looks: [Cartographer]
 
 # Fallback worker staffing for buildings whose structure JSON declares no

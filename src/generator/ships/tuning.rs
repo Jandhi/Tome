@@ -437,6 +437,15 @@ pub const SHIP_CHANCE_PER_DISTRICT: i32 = 50;
 /// trimming this list (or a palette file) degrades gracefully. Not yet style/culture-tied.
 pub const SHIP_PALETTES: &[&str] = &["ship_oak", "ship_dark", "ship_spruce"];
 
+/// Sailors (*beyond* the lone captain) seated on an afloat ship's weather deck, by size
+/// tier — capped at placement to the deck cells that actually fit. Small boats run a
+/// skeleton crew; a great ship is fully manned. (Crew *looks* and *dialogue* are data in
+/// `npcs.yaml`; these counts stay here so the whole crew dial is on the central surface.)
+pub const CREW_SAILORS_SMALL: usize = 1;
+pub const CREW_SAILORS_MEDIUM: usize = 2;
+pub const CREW_SAILORS_LARGE: usize = 4;
+pub const CREW_SAILORS_HUGE: usize = 6;
+
 // ===========================================================================
 // Not-yet-centralized
 // ===========================================================================

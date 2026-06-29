@@ -2079,10 +2079,11 @@ pub async fn generate_town(
         crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
     println!("Placed {} ships across water districts", ships);
     if !crew_scenes.is_empty() {
-        use crate::generator::population::{build_roster, populate_npcs};
-        let budget = crew_scenes.len();
-        let roster = build_roster(budget, 0, culture, &data.npc_data, &mut id_alloc, &mut rng.derive());
-        match populate_npcs(editor, crew_scenes, roster, budget, &data.npc_data, &mut rng).await {
+        match crate::generator::ships::crew::staff_crew(
+            editor, crew_scenes, culture, &data, &mut id_alloc, &mut rng,
+        )
+        .await
+        {
             Ok(staffed) => println!("Crewed ships with {} sailor/captain NPCs", staffed),
             Err(e) => log::warn!("ship crew staffing failed: {e}"),
         }
