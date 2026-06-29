@@ -60,6 +60,10 @@ pub struct DeckState {
     /// `(x, z)` footprint of the companionway hatches + stair/ladder cells (local), so the later
     /// furnish pass keeps them clear (reachable, no furniture).
     pub hatch_cells: Vec<Point3D>,
+    /// Local deck cell a helmsman stands on (aft of the wheel, on the centreline at `top_y`),
+    /// recorded by [`helm::build`] when the helm is placed — the captain NPC's post.
+    /// `None` when no helm fit (too small / no room aft of the mast).
+    pub helm_stand: Option<Point3D>,
 }
 
 impl DeckState {
@@ -75,6 +79,7 @@ impl DeckState {
             gun_ports: Vec::new(),
             gun_ports_trapdoors: false,
             hatch_cells: Vec::new(),
+            helm_stand: None,
         }
     }
 }

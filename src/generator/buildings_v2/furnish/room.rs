@@ -384,6 +384,7 @@ fn validate_anchor(
                 // only plaza fixtures yell.
                 volume: crate::generator::npc::DialogueVolume::Normal,
                 y_offset: 0.0,
+                title: None,
             });
         } else if slot.required {
             return None; // a required spot is taken/blocked → drop the scene
