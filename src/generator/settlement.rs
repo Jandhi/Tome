@@ -10,7 +10,7 @@ use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
 use crate::generator::placement::{resolve_rural_production, try_place_rural, PlacedRural};
 use crate::generator::resource_chain::paint_production_area_for;
-use crate::generator::terrain::{drain_liquids, flatten_urban_area, force_height, log_trees};
+use crate::generator::terrain::{clear_floating_logs, drain_liquids, flatten_urban_area, force_height, log_trees};
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
@@ -541,6 +541,10 @@ pub async fn generate_town(
         "Logged {} cells of trees ({} urban + {} apron)",
         logged_area.len(), urban.len(), logged_area.len() - urban.len(),
     );
+    // Sweep the just-cleared area for logs left floating by overhanging branches
+    // of trees rooted outside it.
+    let floated = clear_floating_logs(&*editor, &logged_area).await;
+    println!("Cleared {floated} floating log blocks");
     // Clear all standing water/lava from the city bounds BEFORE terraforming, so
     // the flatten only grades solid ground (and `is_water` no longer makes it
     // skip those cells).
