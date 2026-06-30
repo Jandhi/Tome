@@ -4,12 +4,13 @@ use crate::data::Loadable;
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::districts::{build_wall, generate_parcels, ParcelType, TowerSkin, WallType};
-use crate::generator::materials::{Material, MaterialId, Placer};
+use crate::generator::buildings_v2::style::local_wood_palette;
+use crate::generator::materials::{Material, MaterialId, MaterialRole, Placer};
 use crate::generator::nbts::Structure;
 use crate::generator::paths::{build_paths_merged, build_road_network, build_rural_road_network, find_blocks, Path, PathPriority, RuralBuilding};
 use crate::generator::placement::{resolve_rural_production, try_place_rural, PlacedRural};
 use crate::generator::resource_chain::paint_production_area_for;
-use crate::generator::terrain::{drain_liquids, flatten_urban_area, force_height, log_trees};
+use crate::generator::terrain::{clear_floating_logs, drain_liquids, flatten_urban_area, force_height, log_trees};
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
@@ -27,6 +28,11 @@ use crate::noise::{Seed, RNG};
 /// `max(1, round(beds * POPULATION_PER_BED))`, so a single-bed house houses ~2
 /// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
 const POPULATION_PER_BED: f32 = 1.5;
+
+/// Blocks beyond the urban footprint the tree-clear reaches, so gate approaches and
+/// rural-road on-ramps aren't left in standing forest. Widens only the *logged*
+/// area — drain/flatten stay on the urban footprint proper.
+const URBAN_LOG_APRON: u32 = 10;
 
 /// The settlement's colour identity. Picked once per town from the culture's
 /// curated [`Culture::color_pool`], it gives the town two recurring colours plus
@@ -432,6 +438,23 @@ pub fn minimal_dossier(
     )
 }
 
+/// The `PrimaryWood` of the most common biome wood across the build area — the
+/// timber a palisade matches to what grows locally (spruce in taiga, acacia in
+/// savanna, …). `None` when no biome has a usable wood palette (e.g. all desert/
+/// badlands), so the caller can fall back.
+fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &LoadedData) -> Option<MaterialId> {
+    let mut counts: HashMap<MaterialId, usize> = HashMap::new();
+    for column in biome_map {
+        for biome in column {
+            let Some(palette) = local_wood_palette(biome.clone())
+                .and_then(|id| data.palettes.get(&id)) else { continue; };
+            let Some(wood) = palette.get_material(MaterialRole::PrimaryWood) else { continue; };
+            *counts.entry(wood.clone()).or_default() += 1;
+        }
+    }
+    counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
+}
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
@@ -500,10 +523,24 @@ pub async fn generate_town(
 
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
-    // Log (clear) the urban area of trees so roads, buildings, and houses
-    // aren't dropped into standing forest.
-    log_trees(&*editor, urban.clone()).await;
-    println!("Logged {} urban cells of trees", urban.len());
+    // Clear the urban area (plus an `URBAN_LOG_APRON` apron outside the wall for
+    // gate approaches / rural on-ramps) of trees so roads and buildings aren't
+    // dropped into standing forest. Drain/flatten below stay on the urban footprint.
+    let mut logged_area = urban.clone();
+    logged_area.extend(
+        crate::geometry::get_surrounding_set(&urban, URBAN_LOG_APRON)
+            .into_iter()
+            .filter(|c| editor.world().is_in_bounds_2d(*c)),
+    );
+    log_trees(&*editor, logged_area.clone()).await;
+    println!(
+        "Logged {} cells of trees ({} urban + {} apron)",
+        logged_area.len(), urban.len(), logged_area.len() - urban.len(),
+    );
+    // Sweep the just-cleared area for logs left floating by overhanging branches
+    // of trees rooted outside it.
+    let floated = clear_floating_logs(&*editor, &logged_area).await;
+    println!("Cleared {floated} floating log blocks");
     // Clear all standing water/lava from the city bounds BEFORE terraforming, so
     // the flatten only grades solid ground (and `is_water` no longer makes it
     // skip those cells).
@@ -532,17 +569,32 @@ pub async fn generate_town(
         }
     });
     let tower_skin = tower_palette.as_ref().map(|p| TowerSkin { data: &data, palette: p });
+    // City size = number of urban super-parcels. Small hamlets (≤3) get a cheap
+    // palisade; larger towns (4+) get the full standard-with-inner stone wall.
+    let n_urban = editor.world().districts.values()
+        .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
+        .count();
+    let wall_type = if n_urban <= 3 {
+        WallType::Palisade
+    } else {
+        WallType::StandardWithInner
+    };
+    // A palisade is a timber stockade, so it uses the dominant local wood rather
+    // than the stone `wall_material` the standard wall takes. Falls back to the stone
+    // material if the area has no wood palette (desert/badlands).
+    let palisade_material = (wall_type == WallType::Palisade)
+        .then(|| dominant_local_wood(editor.world().get_ground_biome_map(), &data))
+        .flatten();
+    let wall_material = palisade_material.as_ref().unwrap_or(&wall_material);
+    println!("City size {n_urban} urban super-parcels -> {wall_type:?} wall ({})", wall_material.as_str());
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
-        &mut placer, &wall_material, &structures, WallType::Standard, tower_skin.as_ref(),
+        &mut placer, wall_material, &structures, wall_type, tower_skin.as_ref(),
     ).await;
     drop(placer);
 
-    // DEBUG: how many urban super-parcels and gates did we actually get?
+    // DEBUG: how many gates did we actually get?
     {
-        let n_urban = editor.world().districts.values()
-            .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
-            .count();
         let n_total = editor.world().districts.len();
         println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
     }
@@ -597,7 +649,7 @@ pub async fn generate_town(
         structure: p.structure.clone(),
         has_border_ring: p.has_border_ring,
     }).collect();
-    let rural_paths = build_rural_road_network(&*editor, &rural_buildings, rural_material, 1).await;
+    let rural_paths = build_rural_road_network(&*editor, &rural_buildings, rural_material, 4).await;
     if !rural_paths.is_empty() {
         // Flatten the routed corridor to the road heights (skipping building /
         // wall cells so a placed structure isn't re-graded), then meld the

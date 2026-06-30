@@ -25,7 +25,7 @@ use crate::generator::districts::{District, DistrictID};
 use crate::generator::materials::MaterialId;
 use crate::generator::nbts::StructureID;
 use crate::generator::resource_chain::border_ring_cells;
-use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
+use crate::geometry::{get_surrounding_set, Point2D, Point3D, ALL_8, CARDINALS_2D};
 
 use super::network::wall_distance_field;
 use super::path::{Path, PathPriority};
@@ -103,6 +103,11 @@ pub async fn build_rural_road_network(
     let urban = editor.world().get_urban_points();
     let mut blocked: HashSet<Point2D> = urban.clone();
     blocked.extend(&footprints);
+    // Block a ~half-step margin around each footprint: the router only tests
+    // `blocked` at lattice nodes `route_step` apart, so a building narrower than the
+    // step could be hopped over and routed straight through. Anchors are freed below.
+    let footprint_margin = (route_step as u32).div_ceil(2).max(1);
+    blocked.extend(get_surrounding_set(&footprints, footprint_margin));
     for g in &gates {
         blocked.remove(&g.drop_y());
     }
@@ -159,8 +164,9 @@ pub async fn build_rural_road_network(
                 paths.push(path);
             }
             None => log::warn!(
-                "rural road: building anchor {:?} failed to route to gate {:?}",
+                "rural road: building anchor {:?} failed to route to gate {:?} — {}",
                 anchor, gate.drop_y(),
+                diagnose_route_failure(editor, anchor, gate.drop_y(), &blocked, route_step),
             ),
         }
     }
@@ -256,6 +262,83 @@ fn well_inside(editor: &Editor, c: Point2D, m: i32) -> bool {
         && world.is_in_bounds_2d(c + Point2D::new(-m, 0))
         && world.is_in_bounds_2d(c + Point2D::new(0, m))
         && world.is_in_bounds_2d(c + Point2D::new(0, -m))
+}
+
+/// Cell cap for the failure-diagnosis flood — bounds a pathological case.
+const DIAGNOSE_FLOOD_CAP: usize = 80_000;
+
+/// Explain why a building→gate route came back empty. Floods the walkable graph out
+/// from the anchor the way the router moves (8-dir hops of `step`, in bounds, off
+/// `blocked`, slope ≤ `step`) and reports the reachable-component size, whether the
+/// gate is in it, and the closest approach. Gate outside the component → terrain/
+/// water disconnects them; gate inside → it's a router cost/limit, not connectivity.
+/// Approximate (ignores the router's height-carry); runs only on failure.
+fn diagnose_route_failure(
+    editor: &Editor,
+    anchor: Point2D,
+    gate: Point2D,
+    blocked: &HashSet<Point2D>,
+    step: i32,
+) -> String {
+    let world = editor.world();
+    if world.get_height_at(anchor).is_none() {
+        return "anchor cell has no surface height (outside the loaded heightmap)".to_string();
+    }
+    if world.get_height_at(gate).is_none() {
+        return "gate node has no surface height".to_string();
+    }
+    let step = step.max(1);
+
+    let mut visited: HashSet<Point2D> = HashSet::from([anchor]);
+    let mut queue: VecDeque<Point2D> = VecDeque::from([anchor]);
+    let mut nearest_sq = anchor.distance_squared(&gate);
+    let mut reached_gate = false;
+    let mut hit_water = false;
+    let mut capped = false;
+
+    'flood: while let Some(c) = queue.pop_front() {
+        // Within one hop counts as reached — the lattice rarely hits the gate exactly.
+        if (c.x - gate.x).abs() <= step && (c.y - gate.y).abs() <= step {
+            reached_gate = true;
+            break;
+        }
+        let Some(hc) = world.get_height_at(c) else { continue; };
+        for d in ALL_8 {
+            let n = c + d * step;
+            if visited.contains(&n) || !world.is_in_bounds_2d(n) || blocked.contains(&n) {
+                continue;
+            }
+            let Some(hn) = world.get_height_at(n) else { continue; };
+            if (hn - hc).abs() > step {
+                // Rejected by the ~1:1 slope limit; note if a water bank walls it in.
+                if world.is_water(n) {
+                    hit_water = true;
+                }
+                continue;
+            }
+            visited.insert(n);
+            nearest_sq = nearest_sq.min(n.distance_squared(&gate));
+            queue.push_back(n);
+            if visited.len() >= DIAGNOSE_FLOOD_CAP {
+                capped = true;
+                break 'flood;
+            }
+        }
+    }
+
+    if reached_gate {
+        return format!(
+            "gate IS reachable on the walkable graph ({} lattice cells) — failure is a router cost/limit, not connectivity",
+            visited.len(),
+        );
+    }
+    format!(
+        "anchor's walkable component is {} lattice cells and does NOT include the gate (closest approach {:.0} cells; walled in by {}{}). Disconnected under the step-{step} router's ~1:1 slope limit.",
+        visited.len(),
+        (nearest_sq as f64).sqrt(),
+        if hit_water { "water banks and steep terrain" } else { "steep terrain" },
+        if capped { "; flood hit its cell cap" } else { "" },
+    )
 }
 
 /// BFS out from `start` over dry, unblocked countryside until dry land first

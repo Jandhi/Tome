@@ -22,11 +22,18 @@ impl BlockID {
         self.0.strip_prefix("minecraft:").unwrap_or(&self.0)
     }
 
+    /// Ice — frozen water. A frozen lake/ocean reads as solid ground to the raw
+    /// heightmap, so [`is_water`](Self::is_water) counts it as water to keep roads,
+    /// buildings, and routers off frozen water bodies the same as open water.
+    pub fn is_ice(&self) -> bool {
+        matches!(self.name(), "ice" | "packed_ice" | "blue_ice" | "frosted_ice")
+    }
+
     pub fn is_water(&self) -> bool {
         matches!(
             self.name(),
             "water" | "flowing_water" | "bubble_column" | "kelp" | "kelp_plant"
-        )
+        ) || self.is_ice()
     }
 
     pub fn is_lava(&self) -> bool {
