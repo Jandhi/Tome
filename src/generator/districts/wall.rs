@@ -265,7 +265,7 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 
     //add gates
-    build_wall_gate(&wall_points_with_world_height, editor, rng, material_placer, true, true, None, None, structures, 10).await;
+    build_wall_gate(&wall_points_with_world_height, editor, rng, material_placer, material_id, true, true, None, None, structures, 10).await;
 
 }
 
@@ -359,7 +359,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
     //add towers
     build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
-    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, true, false, None, None, structures, 6).await
+    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, true, false, None, None, structures, 6).await
 
 }
 
@@ -519,7 +519,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
     //add towers
     build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
-    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, false, false, Some(&enhanced_wall_points), Some(&inner_wall_points), structures, 6).await
+    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, false, false, Some(&enhanced_wall_points), Some(&inner_wall_points), structures, 6).await
 
 }
 
