@@ -29,6 +29,12 @@ use crate::noise::{Seed, RNG};
 /// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
 const POPULATION_PER_BED: f32 = 1.5;
 
+/// How many blocks beyond the urban footprint (≈ outside the wall) the tree-clear
+/// (`log_trees`) reaches, so gate approaches and rural-road on-ramps aren't left
+/// in standing forest. Only widens the *logged* area — drain/flatten stay on the
+/// urban footprint proper.
+const URBAN_LOG_APRON: u32 = 10;
+
 /// The settlement's colour identity. Picked once per town from the culture's
 /// curated [`Culture::color_pool`], it gives the town two recurring colours plus
 /// a unique family colour per manor, so a street reads as a coherent palette
@@ -521,9 +527,20 @@ pub async fn generate_town(
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
     // Log (clear) the urban area of trees so roads, buildings, and houses
-    // aren't dropped into standing forest.
-    log_trees(&*editor, urban.clone()).await;
-    println!("Logged {} urban cells of trees", urban.len());
+    // aren't dropped into standing forest. Extend the cleared area by a 5-block
+    // apron outside the wall so the gate approaches and rural-road on-ramps are
+    // cleared too (the drain/flatten below stay on the urban footprint proper).
+    let mut logged_area = urban.clone();
+    logged_area.extend(
+        crate::geometry::get_surrounding_set(&urban, URBAN_LOG_APRON)
+            .into_iter()
+            .filter(|c| editor.world().is_in_bounds_2d(*c)),
+    );
+    log_trees(&*editor, logged_area.clone()).await;
+    println!(
+        "Logged {} cells of trees ({} urban + {} apron)",
+        logged_area.len(), urban.len(), logged_area.len() - urban.len(),
+    );
     // Clear all standing water/lava from the city bounds BEFORE terraforming, so
     // the flatten only grades solid ground (and `is_water` no longer makes it
     // skip those cells).
@@ -634,7 +651,7 @@ pub async fn generate_town(
         structure: p.structure.clone(),
         has_border_ring: p.has_border_ring,
     }).collect();
-    let rural_paths = build_rural_road_network(&*editor, &rural_buildings, rural_material, 1).await;
+    let rural_paths = build_rural_road_network(&*editor, &rural_buildings, rural_material, 4).await;
     if !rural_paths.is_empty() {
         // Flatten the routed corridor to the road heights (skipping building /
         // wall cells so a placed structure isn't re-graded), then meld the
