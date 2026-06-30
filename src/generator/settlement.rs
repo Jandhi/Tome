@@ -29,10 +29,9 @@ use crate::noise::{Seed, RNG};
 /// and a double bed (which sleeps two) ~3 — enough to read as lived-in.
 const POPULATION_PER_BED: f32 = 1.5;
 
-/// How many blocks beyond the urban footprint (≈ outside the wall) the tree-clear
-/// (`log_trees`) reaches, so gate approaches and rural-road on-ramps aren't left
-/// in standing forest. Only widens the *logged* area — drain/flatten stay on the
-/// urban footprint proper.
+/// Blocks beyond the urban footprint the tree-clear reaches, so gate approaches and
+/// rural-road on-ramps aren't left in standing forest. Widens only the *logged*
+/// area — drain/flatten stay on the urban footprint proper.
 const URBAN_LOG_APRON: u32 = 10;
 
 /// The settlement's colour identity. Picked once per town from the culture's
@@ -439,12 +438,10 @@ pub fn minimal_dossier(
     )
 }
 
-/// The `PrimaryWood` material of the most common biome wood across the build
-/// area — the timber a palisade should be built from so it matches what grows
-/// locally (spruce in taiga, acacia in savanna, …). Tallies each cell's local
-/// wood palette, keeping only palettes that actually have a file and a wood role,
-/// and returns the modal one's primary wood. `None` when no biome in the area has
-/// a usable wood palette (e.g. all desert/badlands), so the caller can fall back.
+/// The `PrimaryWood` of the most common biome wood across the build area — the
+/// timber a palisade matches to what grows locally (spruce in taiga, acacia in
+/// savanna, …). `None` when no biome has a usable wood palette (e.g. all desert/
+/// badlands), so the caller can fall back.
 fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &LoadedData) -> Option<MaterialId> {
     let mut counts: HashMap<MaterialId, usize> = HashMap::new();
     for column in biome_map {
@@ -526,11 +523,9 @@ pub async fn generate_town(
 
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
-    // Log (clear) the urban area of trees so roads, buildings, and houses
-    // aren't dropped into standing forest. Extend the cleared area by an
-    // `URBAN_LOG_APRON`-block apron outside the wall so the gate approaches and
-    // rural-road on-ramps are cleared too (the drain/flatten below stay on the
-    // urban footprint proper).
+    // Clear the urban area (plus an `URBAN_LOG_APRON` apron outside the wall for
+    // gate approaches / rural on-ramps) of trees so roads and buildings aren't
+    // dropped into standing forest. Drain/flatten below stay on the urban footprint.
     let mut logged_area = urban.clone();
     logged_area.extend(
         crate::geometry::get_surrounding_set(&urban, URBAN_LOG_APRON)
@@ -584,11 +579,9 @@ pub async fn generate_town(
     } else {
         WallType::StandardWithInner
     };
-    // A palisade is a timber stockade (logs + fences), so it uses the local wood
-    // rather than the stone `wall_material` the standard wall takes: pick the most
-    // common biome wood across the build area, so a taiga town gets spruce, a
-    // savanna acacia, etc. Falls back to the stone wall material if no biome in the
-    // area has a wood palette (desert/badlands) or the palette lacks a wood role.
+    // A palisade is a timber stockade, so it uses the dominant local wood rather
+    // than the stone `wall_material` the standard wall takes. Falls back to the stone
+    // material if the area has no wood palette (desert/badlands).
     let palisade_material = (wall_type == WallType::Palisade)
         .then(|| dominant_local_wood(editor.world().get_ground_biome_map(), &data))
         .flatten();

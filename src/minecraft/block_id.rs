@@ -23,10 +23,8 @@ impl BlockID {
     }
 
     /// Ice — frozen water. A frozen lake/ocean reads as solid ground to the raw
-    /// heightmap, so without counting it as water a road or building would be laid
-    /// straight across the ice as if it were land. Treated as water by
-    /// [`is_water`](Self::is_water) so the terraform drains it and routers steer
-    /// around frozen water bodies the same as open water.
+    /// heightmap, so [`is_water`](Self::is_water) counts it as water to keep roads,
+    /// buildings, and routers off frozen water bodies the same as open water.
     pub fn is_ice(&self) -> bool {
         matches!(self.name(), "ice" | "packed_ice" | "blue_ice" | "frosted_ice")
     }

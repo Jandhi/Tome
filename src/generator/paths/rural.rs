@@ -103,13 +103,9 @@ pub async fn build_rural_road_network(
     let urban = editor.world().get_urban_points();
     let mut blocked: HashSet<Point2D> = urban.clone();
     blocked.extend(&footprints);
-    // Expand the footprints by ~half a route step. The router only tests `blocked`
-    // at mod-`route_step` lattice nodes, so a building narrower than the step could
-    // otherwise be hopped clean over and have a road routed straight through it
-    // (see routing.rs). A margin of ceil(step/2) makes every footprint's blocked
-    // band wider than one hop, so any crossing hop lands inside it and is rejected.
-    // Anchors are freed below; a building still egresses via a full step-length hop
-    // that clears this margin.
+    // Block a ~half-step margin around each footprint: the router only tests
+    // `blocked` at lattice nodes `route_step` apart, so a building narrower than the
+    // step could be hopped over and routed straight through. Anchors are freed below.
     let footprint_margin = (route_step as u32).div_ceil(2).max(1);
     blocked.extend(get_surrounding_set(&footprints, footprint_margin));
     for g in &gates {
@@ -268,28 +264,15 @@ fn well_inside(editor: &Editor, c: Point2D, m: i32) -> bool {
         && world.is_in_bounds_2d(c + Point2D::new(0, -m))
 }
 
-/// How many cells the failure-diagnosis flood explores before giving up. Generous
-/// enough to characterise a normal anchor's whole reachable basin, bounded so a
-/// pathological case can't run unboundedly.
+/// Cell cap for the failure-diagnosis flood — bounds a pathological case.
 const DIAGNOSE_FLOOD_CAP: usize = 80_000;
 
-/// Explain why a building→gate route came back empty — the router's bare "failed
-/// to route" is otherwise opaque. Floods the *walkable* graph out from the anchor
-/// the way the router moves: in 8-directional hops of `step` cells, in bounds, off
-/// `blocked`, taking a hop only where the terrain rises/falls by ≤ `step` over it
-/// (the router's ~1:1 slope limit). Reports the reachable-component size, whether
-/// the gate is in it, and the closest the flood got to the gate.
-///
-/// - Gate **outside** the component → terrain/water genuinely disconnects the two
-///   under the slope limit (the common cause); the "closest approach" tells you
-///   whether the anchor is boxed in locally or the gate is the isolated end.
-/// - Gate **inside** the component → connectivity is fine; the failure is a router
-///   cost/limit issue, not the terrain.
-///
-/// Approximate: it floods over raw terrain adjacency and ignores the router's
-/// height-carry, but mirroring the actual `step` (rather than a fixed 1) keeps the
-/// model consistent with the router it diagnoses. Runs only on a failure, so the
-/// extra flood is off the hot path.
+/// Explain why a building→gate route came back empty. Floods the walkable graph out
+/// from the anchor the way the router moves (8-dir hops of `step`, in bounds, off
+/// `blocked`, slope ≤ `step`) and reports the reachable-component size, whether the
+/// gate is in it, and the closest approach. Gate outside the component → terrain/
+/// water disconnects them; gate inside → it's a router cost/limit, not connectivity.
+/// Approximate (ignores the router's height-carry); runs only on failure.
 fn diagnose_route_failure(
     editor: &Editor,
     anchor: Point2D,
@@ -314,8 +297,7 @@ fn diagnose_route_failure(
     let mut capped = false;
 
     'flood: while let Some(c) = queue.pop_front() {
-        // Within one hop of the gate counts as reached — the router lands on the
-        // gate from up to `step` cells out, and the lattice rarely hits it exactly.
+        // Within one hop counts as reached — the lattice rarely hits the gate exactly.
         if (c.x - gate.x).abs() <= step && (c.y - gate.y).abs() <= step {
             reached_gate = true;
             break;
@@ -328,8 +310,7 @@ fn diagnose_route_failure(
             }
             let Some(hn) = world.get_height_at(n) else { continue; };
             if (hn - hc).abs() > step {
-                // Rejected by the router's ~1:1 slope limit over the hop; note if a
-                // water bank is (part of) what walls the component in.
+                // Rejected by the ~1:1 slope limit; note if a water bank walls it in.
                 if world.is_water(n) {
                     hit_water = true;
                 }

@@ -214,20 +214,14 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
     }
 }
 
-/// Quick pass over `points` to fell **floating logs** — log blocks left
-/// unsupported once their tree was cleared. These come from branches of a tree
-/// rooted *outside* the cleared area that overhang into it: `log_trees` follows
-/// logs only `LOG_BRIDGE` cells out from a trunk it owns, so an overhanging limb
-/// (and the stub left when its leaves decay) can stay behind, hanging in the air.
-///
-/// Per column, scan upward from the surface and drop any log that has nothing but
-/// air between it and the ground. Tracking support bottom-up means felling one
-/// floating log exposes the one resting on it, so a whole stranded limb falls in
-/// a single pass. A log resting on solid ground/terrain is left untouched.
-/// Returns the number of blocks removed.
+/// Fell **floating logs** in `points` — logs left unsupported after their tree was
+/// cleared, e.g. a limb overhanging from a trunk just outside the cleared area that
+/// `log_trees` didn't reach. Per column, scan up from the surface and drop any log
+/// with only air between it and the ground; bottom-up tracking fells a whole
+/// stranded limb in one pass. Ground-supported logs are left untouched. Returns the
+/// number of blocks removed.
 pub async fn clear_floating_logs(editor: &Editor, points: &HashSet<Point2D>) -> usize {
-    /// How far above the surface to scan — comfortably covers a canopy overhanging
-    /// from a tree just outside the cleared area.
+    /// How far above the surface to scan — covers an overhanging canopy.
     const SCAN_HEIGHT: i32 = 32;
 
     let mut removed = 0;
@@ -235,8 +229,7 @@ pub async fn clear_floating_logs(editor: &Editor, points: &HashSet<Point2D>) -> 
         let Some(ground) = editor.world().get_height_at(point) else {
             continue; // out of bounds
         };
-        // Is the cell just below the scan's first row air? Seed from the surface
-        // block (one under `ground`, the first-air height).
+        // Seed from the surface block (one under `ground`, the first-air height).
         let mut below_is_air = editor
             .try_get_block(Point3D::new(point.x, ground - 1, point.y))
             .map_or(true, |b| b.id == "air".into());
@@ -244,8 +237,7 @@ pub async fn clear_floating_logs(editor: &Editor, points: &HashSet<Point2D>) -> 
             let pos = Point3D::new(point.x, y, point.y);
             let Some(block) = editor.try_get_block(pos) else { break; };
             below_is_air = if block.id.is_log() && below_is_air {
-                // Only air between this log and the ground — fell it. The now-empty
-                // cell leaves whatever log sat on top of it floating in turn.
+                // Only air below — fell it, leaving any log resting on top floating.
                 editor.place_block(&"air".into(), pos).await;
                 removed += 1;
                 true
