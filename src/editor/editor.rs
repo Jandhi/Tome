@@ -323,6 +323,16 @@ impl Editor {
         Ok(())
     }
 
+    /// Set the world difficulty, e.g. `set_difficulty("easy")`. Goes straight to
+    /// the server; a no-op in offline mode.
+    pub async fn set_difficulty(&self, difficulty: &str) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
+        self.provider.command(vec![format!("difficulty {}", difficulty)]).await?;
+        Ok(())
+    }
+
     /// Spawn an entity of type `id` (e.g. `"minecraft:villager"`) at build-area-
     /// local `point`, with optional SNBT `data` (entity tags such as `NoAI`,
     /// `CustomName`, `Rotation`, …).

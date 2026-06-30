@@ -470,6 +470,12 @@ pub async fn generate_town(
         log::warn!("Failed to disable blockdrops gamerule: {e}");
     }
 
+    // Generate on Easy so wandering hostile mobs don't grief the build or harass
+    // the player touring the finished town.
+    if let Err(e) = editor.set_difficulty("easy").await {
+        log::warn!("Failed to set difficulty to easy: {e}");
+    }
+
     // Settlement culture: an explicit override (tests) wins; otherwise auto-select
     // from the build area's climate so the town fits its biome while the cultures
     // stay roughly even across worlds (see `buildings_v2::climate`). The selection

@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use crate::editor::Editor;
-use crate::generator::materials::Placer;
+use crate::generator::materials::{MaterialId, Placer};
 use crate::generator::nbts::{place_structure, Structure, StructureType};
 use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardinal};
+use crate::minecraft::BlockForm;
 use crate::noise::RNG;
 use crate::generator::BuildClaim;
 use crate::generator::districts::WallType;
@@ -45,7 +46,8 @@ pub async fn build_wall_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
     _rng: &mut RNG,
-    _material_placer: &mut Placer<'_>,
+    material_placer: &mut Placer<'_>,
+    material_id: &MaterialId,
     is_thin: bool,
     is_palisade: bool,
     enhanced_wall_points: Option<&Vec<(Point3D, Vec<Cardinal>, WallType)>>,
@@ -53,7 +55,6 @@ pub async fn build_wall_gate(
     structures: & HashMap<StructureType, Structure>,
     gate_height: i32,
 ) {
-    let palisade_gate = structures.get(&"basic_palisade_gate".into()).expect("Structure not found");
     let thin_gate = structures.get(&"basic_thin_gate".into()).expect("Structure not found");
     let wide_gate = structures.get(&"basic_wide_gate".into()).expect("Structure not found");
 
@@ -114,7 +115,7 @@ pub async fn build_wall_gate(
     // Phase 3 — build (in loop order).
     for i in selected {
         if is_palisade {
-            place_palisade_gate(wall_points, editor, i, palisade_gate, gate_height).await;
+            place_palisade_gate(wall_points, editor, material_placer, material_id, i, gate_height).await;
         } else if is_thin {
             place_thin_gate(wall_points, editor, i, thin_gate, gate_height).await;
         } else {
@@ -328,11 +329,23 @@ fn loop_is_closed(wall_points: &Vec<Point3D>) -> bool {
     (first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1
 }
 
+/// A palisade gate is just an **opening** in the stockade — no gatehouse NBT. We
+/// carve the passage (logs + fence cleared over the span) and register it in
+/// [`World::gate_locations`], which is all the downstream passes need: the road
+/// network routes to it and the guard pass staffs it, same as any other gate.
+///
+/// The one thing the missing gatehouse took with it was the jamb the civic banners
+/// hang on, so the gate's two banners ended up floating. We restore just that: a
+/// single wood post block (palisade material) at each banner-mount cell, at banner
+/// height — the block the two opposite-facing banners attach to, sitting between
+/// them. Mount geometry mirrors `place_civic_banners` so the wood lands exactly
+/// behind each banner.
 async fn place_palisade_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
+    material_placer: &mut Placer<'_>,
+    material_id: &MaterialId,
     i: usize,
-    palisade_gate: &Structure,
     gate_height: i32,
 ) {
     let air = "air".into();
@@ -364,10 +377,30 @@ async fn place_palisade_gate(
             editor.place_block_forced(&air, neighbour.add_y(h)).await;
         }
     }
-    info!("Placing palisade gate at: {:?}", middle_point);
-    place_structure(editor, None, palisade_gate, middle_point, direction, None, None, false, false)
-        .await
-        .expect("Failed to place gate");
+    // Banner backing posts. `place_civic_banners` hangs a banner facing `facing`
+    // one cell out from the mount cell `opening + side*k` (`side =
+    // facing.rotate_right()`, `k = ±2`), at height `gate.y + 3`. Place the
+    // palisade-material block there so each banner mounts on wood instead of air;
+    // the same cell backs the opposite-facing banner too, so the post sits between
+    // the pair. The set dedups the two unique mount cells the four (facing, k) pairs
+    // collapse to.
+    let opening = middle_point.drop_y();
+    let banner_y = middle_point.y + 3;
+    let face = direction.rotate_right();
+    let mut posts: HashSet<Point2D> = HashSet::new();
+    for facing in [face, face.opposite()] {
+        let side: Point2D = facing.rotate_right().into();
+        for k in [2, -2] {
+            posts.insert(opening + side * k);
+        }
+    }
+    for post in posts {
+        material_placer
+            .place_block(editor, post.add_y(banner_y), material_id, BlockForm::Log, None, None)
+            .await;
+    }
+
+    info!("Registering palisade gate opening at: {:?}", middle_point);
     editor.world_mut().gate_locations.push((middle_point, direction));
 }
 
