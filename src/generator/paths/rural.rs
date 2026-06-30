@@ -25,7 +25,7 @@ use crate::generator::districts::{District, DistrictID};
 use crate::generator::materials::MaterialId;
 use crate::generator::nbts::StructureID;
 use crate::generator::resource_chain::border_ring_cells;
-use crate::geometry::{Point2D, Point3D, ALL_8, CARDINALS_2D};
+use crate::geometry::{get_surrounding_set, Point2D, Point3D, ALL_8, CARDINALS_2D};
 
 use super::network::wall_distance_field;
 use super::path::{Path, PathPriority};
@@ -103,6 +103,15 @@ pub async fn build_rural_road_network(
     let urban = editor.world().get_urban_points();
     let mut blocked: HashSet<Point2D> = urban.clone();
     blocked.extend(&footprints);
+    // Expand the footprints by ~half a route step. The router only tests `blocked`
+    // at mod-`route_step` lattice nodes, so a building narrower than the step could
+    // otherwise be hopped clean over and have a road routed straight through it
+    // (see routing.rs). A margin of ceil(step/2) makes every footprint's blocked
+    // band wider than one hop, so any crossing hop lands inside it and is rejected.
+    // Anchors are freed below; a building still egresses via a full step-length hop
+    // that clears this margin.
+    let footprint_margin = (route_step as u32).div_ceil(2).max(1);
+    blocked.extend(get_surrounding_set(&footprints, footprint_margin));
     for g in &gates {
         blocked.remove(&g.drop_y());
     }
@@ -161,7 +170,7 @@ pub async fn build_rural_road_network(
             None => log::warn!(
                 "rural road: building anchor {:?} failed to route to gate {:?} — {}",
                 anchor, gate.drop_y(),
-                diagnose_route_failure(editor, anchor, gate.drop_y(), &blocked),
+                diagnose_route_failure(editor, anchor, gate.drop_y(), &blocked, route_step),
             ),
         }
     }
@@ -266,25 +275,27 @@ const DIAGNOSE_FLOOD_CAP: usize = 80_000;
 
 /// Explain why a building→gate route came back empty — the router's bare "failed
 /// to route" is otherwise opaque. Floods the *walkable* graph out from the anchor
-/// (8-connected, in bounds, off `blocked`, stepping only where the surface rises
-/// or falls ≤1 per cell — the step-1 climb limit the router enforces) and reports
-/// the reachable-component size, whether the gate is in it, and the closest the
-/// flood got to the gate.
+/// the way the router moves: in 8-directional hops of `step` cells, in bounds, off
+/// `blocked`, taking a hop only where the terrain rises/falls by ≤ `step` over it
+/// (the router's ~1:1 slope limit). Reports the reachable-component size, whether
+/// the gate is in it, and the closest the flood got to the gate.
 ///
 /// - Gate **outside** the component → terrain/water genuinely disconnects the two
-///   under the ≤1/cell limit (the common cause); the "closest approach" tells you
+///   under the slope limit (the common cause); the "closest approach" tells you
 ///   whether the anchor is boxed in locally or the gate is the isolated end.
 /// - Gate **inside** the component → connectivity is fine; the failure is a router
 ///   cost/limit issue, not the terrain.
 ///
 /// Approximate: it floods over raw terrain adjacency and ignores the router's
-/// height-carry, but that captures the dominant constraint well enough to classify
-/// the failure. Runs only on a failure, so the extra flood is off the hot path.
+/// height-carry, but mirroring the actual `step` (rather than a fixed 1) keeps the
+/// model consistent with the router it diagnoses. Runs only on a failure, so the
+/// extra flood is off the hot path.
 fn diagnose_route_failure(
     editor: &Editor,
     anchor: Point2D,
     gate: Point2D,
     blocked: &HashSet<Point2D>,
+    step: i32,
 ) -> String {
     let world = editor.world();
     if world.get_height_at(anchor).is_none() {
@@ -293,6 +304,7 @@ fn diagnose_route_failure(
     if world.get_height_at(gate).is_none() {
         return "gate node has no surface height".to_string();
     }
+    let step = step.max(1);
 
     let mut visited: HashSet<Point2D> = HashSet::from([anchor]);
     let mut queue: VecDeque<Point2D> = VecDeque::from([anchor]);
@@ -302,20 +314,22 @@ fn diagnose_route_failure(
     let mut capped = false;
 
     'flood: while let Some(c) = queue.pop_front() {
-        if c == gate {
+        // Within one hop of the gate counts as reached — the router lands on the
+        // gate from up to `step` cells out, and the lattice rarely hits it exactly.
+        if (c.x - gate.x).abs() <= step && (c.y - gate.y).abs() <= step {
             reached_gate = true;
             break;
         }
         let Some(hc) = world.get_height_at(c) else { continue; };
         for d in ALL_8 {
-            let n = c + d;
+            let n = c + d * step;
             if visited.contains(&n) || !world.is_in_bounds_2d(n) || blocked.contains(&n) {
                 continue;
             }
             let Some(hn) = world.get_height_at(n) else { continue; };
-            if (hn - hc).abs() > 1 {
-                // The step-1 climb limit rejects this hop; note if a water bank is
-                // (part of) what walls the component in.
+            if (hn - hc).abs() > step {
+                // Rejected by the router's ~1:1 slope limit over the hop; note if a
+                // water bank is (part of) what walls the component in.
                 if world.is_water(n) {
                     hit_water = true;
                 }
@@ -333,12 +347,12 @@ fn diagnose_route_failure(
 
     if reached_gate {
         return format!(
-            "gate IS reachable on the walkable graph ({} cells) — failure is a router cost/limit, not connectivity",
+            "gate IS reachable on the walkable graph ({} lattice cells) — failure is a router cost/limit, not connectivity",
             visited.len(),
         );
     }
     format!(
-        "anchor's walkable component is {} cells and does NOT include the gate (closest approach {:.0} cells; walled in by {}{}). Disconnected under the step-1 ≤1/cell climb limit.",
+        "anchor's walkable component is {} lattice cells and does NOT include the gate (closest approach {:.0} cells; walled in by {}{}). Disconnected under the step-{step} router's ~1:1 slope limit.",
         visited.len(),
         (nearest_sq as f64).sqrt(),
         if hit_water { "water banks and steep terrain" } else { "steep terrain" },

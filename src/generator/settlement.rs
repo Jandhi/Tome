@@ -527,9 +527,10 @@ pub async fn generate_town(
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
     // Log (clear) the urban area of trees so roads, buildings, and houses
-    // aren't dropped into standing forest. Extend the cleared area by a 5-block
-    // apron outside the wall so the gate approaches and rural-road on-ramps are
-    // cleared too (the drain/flatten below stay on the urban footprint proper).
+    // aren't dropped into standing forest. Extend the cleared area by an
+    // `URBAN_LOG_APRON`-block apron outside the wall so the gate approaches and
+    // rural-road on-ramps are cleared too (the drain/flatten below stay on the
+    // urban footprint proper).
     let mut logged_area = urban.clone();
     logged_area.extend(
         crate::geometry::get_surrounding_set(&urban, URBAN_LOG_APRON)
