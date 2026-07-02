@@ -575,12 +575,14 @@ pub async fn generate_town(
         }
     });
     let tower_skin = tower_palette.as_ref().map(|p| TowerSkin { data: &data, palette: p });
-    // City size = number of urban super-parcels. Small hamlets (≤3) get a cheap
-    // palisade; larger towns (4+) get the full standard-with-inner stone wall.
+    // City size = number of urban super-parcels. Small hamlets (≤2) get a cheap
+    // palisade; larger towns (3+) get the full standard-with-inner stone wall.
+    // Threshold sits below URBAN_SIZE_MIN so any city that reaches the normal
+    // growth minimum earns a stone wall; only stunted growth yields a palisade.
     let n_urban = editor.world().districts.values()
         .filter(|sd| sd.data.parcel_type == crate::generator::districts::ParcelType::Urban)
         .count();
-    let wall_type = if n_urban <= 3 {
+    let wall_type = if n_urban <= 2 {
         WallType::Palisade
     } else {
         WallType::StandardWithInner
