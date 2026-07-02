@@ -40,14 +40,48 @@ const MAX_RESOURCE_WATER: f32 = 0.40;
 /// TEMPORARY (competition entry): hard caps on production variety, applied as a
 /// post-processing step over the normal resolver output. Flip to `false` to restore
 /// the full balancing system unchanged. While enabled:
-///   - each gather resource is assigned to at most `MAX_RURAL_PER_RESOURCE` districts
+///   - each gather resource is assigned to at most `max_rural_per_resource` districts
 ///     (so e.g. at most two apiaries / two woodcutters across the map), and
-///   - each city processing building appears at most `MAX_PROCESSING_PER_BUILDING`
+///   - each city processing building appears at most `max_processing_per_building`
 ///     times (one brewery, one chandlery, …), intermediate or finished alike.
-/// See `resolve_for_parcels` for the two gated blocks that enforce these.
+/// The caps scale with build-area size (see [`CompetitionCaps::for_build_area`]).
+/// See `resolve_for_parcels_seated` for the two gated blocks that enforce these.
 pub(crate) const COMPETITION_HARD_CAPS: bool = true;
 pub(crate) const MAX_RURAL_PER_RESOURCE: usize = 2;
 const MAX_PROCESSING_PER_BUILDING: u32 = 1;
+
+/// The competition hard caps, scaled to the build area so bigger maps allow more
+/// duplicates without collapsing variety on small ones.
+#[derive(Debug, Clone, Copy)]
+pub struct CompetitionCaps {
+    pub max_rural_per_resource: usize,
+    pub max_processing_per_building: u32,
+}
+
+impl Default for CompetitionCaps {
+    fn default() -> Self {
+        Self {
+            max_rural_per_resource: MAX_RURAL_PER_RESOURCE,
+            max_processing_per_building: MAX_PROCESSING_PER_BUILDING,
+        }
+    }
+}
+
+impl CompetitionCaps {
+    /// Caps for a build area of `size_x` × `size_z` blocks, keyed off the smaller
+    /// dimension: <400 → 2 rural / 1 urban (the original caps), ≥400 → 4 / 2,
+    /// ≥800 → 6 / 3.
+    pub fn for_build_area(size_x: i32, size_z: i32) -> Self {
+        let min_dim = size_x.min(size_z);
+        if min_dim >= 800 {
+            Self { max_rural_per_resource: 6, max_processing_per_building: 3 }
+        } else if min_dim >= 400 {
+            Self { max_rural_per_resource: 4, max_processing_per_building: 2 }
+        } else {
+            Self::default()
+        }
+    }
+}
 
 /// Score penalty per prior assignment a candidate already has *beyond the least-used
 /// option available to the same parcel*. Discourages over-representing one resource —
@@ -461,7 +495,7 @@ impl ResourceRegistry {
         parcel_analysis: &HashMap<DistrictID, ParcelAnalysis>,
         rng: &mut RNG,
     ) -> SettlementProductionResult {
-        self.resolve_for_parcels_seated(parcel_analysis, None, rng)
+        self.resolve_for_parcels_seated(parcel_analysis, None, CompetitionCaps::default(), rng)
     }
 
     /// As [`resolve_for_parcels`], but additionally honours a per-parcel
@@ -476,6 +510,7 @@ impl ResourceRegistry {
         &self,
         parcel_analysis: &HashMap<DistrictID, ParcelAnalysis>,
         seatable: Option<&HashMap<DistrictID, HashSet<String>>>,
+        caps: CompetitionCaps,
         rng: &mut RNG,
     ) -> SettlementProductionResult {
         // caps to prevent extreme overproduction of certain goods that would skew the settlement's production profile
@@ -627,7 +662,7 @@ impl ResourceRegistry {
         // (e.g. gather_bees → honey + beeswax) are scaled proportionally.
         let mut parcel_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, seatable, true, rng);
 
-        // Competition cap: keep at most MAX_RURAL_PER_RESOURCE districts per gather
+        // Competition cap: keep at most `caps.max_rural_per_resource` districts per gather
         // resource. Applied here, before supply/buildings/plan are derived, so the rest
         // of the pipeline stays consistent with the trimmed rural set. Deterministic:
         // for each over-represented resource we keep the lowest-ID districts and drop
@@ -640,11 +675,11 @@ impl ResourceRegistry {
                 by_resource.entry(a.primary_resource.clone()).or_default().push(*id);
             }
             for (resource, mut ids) in by_resource {
-                if ids.len() <= MAX_RURAL_PER_RESOURCE {
+                if ids.len() <= caps.max_rural_per_resource {
                     continue;
                 }
                 ids.sort_by_key(|id| id.0);
-                for drop_id in ids.into_iter().skip(MAX_RURAL_PER_RESOURCE) {
+                for drop_id in ids.into_iter().skip(caps.max_rural_per_resource) {
                     // Remove from the active plan, but retain it as a placement fallback
                     // for this resource rather than discarding it entirely.
                     if let Some(assignment) = parcel_assignments.remove(&drop_id) {
@@ -652,7 +687,7 @@ impl ResourceRegistry {
                     }
                     log::info!(
                         "[resource-chain]   competition cap: dropped {:?} (resource {}) — over {} per resource (kept as fallback)",
-                        drop_id, resource, MAX_RURAL_PER_RESOURCE,
+                        drop_id, resource, caps.max_rural_per_resource,
                     );
                 }
             }
@@ -705,13 +740,13 @@ impl ResourceRegistry {
         }
         let _ = resolved; // intermediate leftovers now come from forward execution, not the raw-cost projection
 
-        // Competition cap: at most MAX_PROCESSING_PER_BUILDING of each city processing
-        // building (intermediate or finished alike — each building type is its own key).
-        // Clamps the placement-driving counts only; the finished/leftover good totals
-        // above still reflect the full chain math, which is fine for reporting.
+        // Competition cap: at most `caps.max_processing_per_building` of each city
+        // processing building (intermediate or finished alike — each building type is
+        // its own key). Clamps the placement-driving counts only; the finished/leftover
+        // good totals above still reflect the full chain math, which is fine for reporting.
         if COMPETITION_HARD_CAPS {
             for count in processing_buildings.values_mut() {
-                *count = (*count).min(MAX_PROCESSING_PER_BUILDING);
+                *count = (*count).min(caps.max_processing_per_building);
             }
         }
 

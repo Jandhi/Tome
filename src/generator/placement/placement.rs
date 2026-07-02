@@ -11,7 +11,7 @@ use crate::{
         districts::{District, DistrictID, ParcelAnalysis},
         materials::{Palette, Placer},
         nbts::{Rotation, Structure, StructureID, StructureType, place_structure},
-        resource_chain::{ParcelResourceAssignment, SettlementProductionResult},
+        resource_chain::{CompetitionCaps, ParcelResourceAssignment, SettlementProductionResult},
         terrain::{force_height, log_trees},
     },
     geometry::{Cardinal, Point2D, Point3D, Rect2D},
@@ -460,7 +460,16 @@ pub fn resolve_rural_production(
         })
         .collect();
 
-    data.resource_registry.resolve_for_parcels_seated(rural_analysis, Some(&seatable), rng)
+    // Scale the competition hard caps to the build area: bigger maps allow more
+    // duplicate industries (rural 2/4/6, urban 1/2/3 at <400 / ≥400 / ≥800).
+    let ba = editor.world().build_area;
+    let caps = CompetitionCaps::for_build_area(ba.size.x, ba.size.z);
+    info!(
+        "[resource-chain] build area {}x{} -> caps: {} rural per resource, {} per processing building",
+        ba.size.x, ba.size.z, caps.max_rural_per_resource, caps.max_processing_per_building,
+    );
+
+    data.resource_registry.resolve_for_parcels_seated(rural_analysis, Some(&seatable), caps, rng)
 }
 
 /// Places a single processing/secondary building somewhere in the urban region.

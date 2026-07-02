@@ -254,14 +254,25 @@ pub fn build_instruction(d: &CityDossier) -> String {
          The ruling FAMILIES — the manor households listed under the districts — must each be \
          named somewhere in the guide, with the colours they fly; they are who holds the town, \
          and a visitor should know them.\n\n\
-         Use ONLY the facts above. You may add light colour — a smell, a sound, the feel of a \
-         place, what a traveller might do there — but invent NO new buildings, people, \
-         families, or places, and never contradict the facts. If something is not listed, the \
-         town does not have it. Do not name every street and trade; pick the ones worth a \
-         visitor's time and give them life. When you do name one of the places listed above, \
-         use its exact wording where it reads naturally — those names become clickable links in \
-         the finished book. It should read like a guidebook a traveller enjoys, not a list of \
-         facts.",
+         LOCAL LORE — the one place you may invent. Early in the guide, give the town's \
+         FOUNDING its own short section: how the place came to be, as the locals tell it. Spin \
+         the legend from the facts you have — the meaning of the name, the setting, the trades, \
+         and the ruling families, whose long-dead forebears may figure as founders. You may \
+         also weave in one or two other touches of lore where they fit naturally: a local \
+         custom or small festival tied to the town's colours or harvest, a wry note of rivalry \
+         or gossip between the families, or a local dish made from what the town harvests and \
+         produces. Keep each to a line or two, always in the voice of what locals say or do — \
+         folklore, not fact. Even here, no NEW named people, buildings, or places: legends may \
+         star forebears of the listed families or nameless founders, but no one living and \
+         nothing standing that is not in the facts.\n\n\
+         Beyond that lore licence, use ONLY the facts above. You may add light colour — a \
+         smell, a sound, the feel of a place, what a traveller might do there — but invent NO \
+         new buildings, people, families, or places, and never contradict the facts. If \
+         something is not listed, the town does not have it. Do not name every street and \
+         trade; pick the ones worth a visitor's time and give them life. When you do name one \
+         of the places listed above, use its exact wording where it reads naturally — those \
+         names become clickable links in the finished book. It should read like a guidebook a \
+         traveller enjoys, not a list of facts.",
     );
 
     s
@@ -632,6 +643,11 @@ mod tests {
         assert!(!s.contains("TRADES"), "facts should not be category-grouped:\n{s}");
         // Grounding rule present.
         assert!(s.contains("invent NO new buildings"), "{s}");
+        // Lore licence: a founding legend is asked for, framed as folklore with
+        // its own no-new-names guardrail.
+        assert!(s.contains("LOCAL LORE"), "lore licence missing:\n{s}");
+        assert!(s.contains("FOUNDING its own short section"), "founding legend missing:\n{s}");
+        assert!(s.contains("folklore, not fact"), "folklore framing missing:\n{s}");
     }
 
     /// Exercises the live LLM end of the chronicle (instruction → `write_book`)
