@@ -6,7 +6,7 @@ use crate::geometry::{Point2D, Point3D, is_straight_not_diagonal_point2d, Cardin
 use crate::minecraft::BlockForm;
 use crate::noise::RNG;
 use crate::generator::BuildClaim;
-use crate::generator::districts::WallType;
+use crate::generator::districts::{TowerSkin, WallType};
 use log::info;
 
 /// Wall points per desired gate. `N = max(1, ceil(loop_len / this))`.
@@ -54,6 +54,7 @@ pub async fn build_wall_gate(
     inner_wall_set: Option<&HashSet<Point3D>>,
     structures: & HashMap<StructureType, Structure>,
     gate_height: i32,
+    skin: Option<&TowerSkin<'_>>,
 ) {
     let thin_gate = structures.get(&"basic_thin_gate".into()).expect("Structure not found");
     let wide_gate = structures.get(&"basic_wide_gate".into()).expect("Structure not found");
@@ -117,11 +118,11 @@ pub async fn build_wall_gate(
         if is_palisade {
             place_palisade_gate(wall_points, editor, material_placer, material_id, i, gate_height).await;
         } else if is_thin {
-            place_thin_gate(wall_points, editor, i, thin_gate, gate_height).await;
+            place_thin_gate(wall_points, editor, material_placer, i, thin_gate, gate_height, skin).await;
         } else {
             let enhanced_points = enhanced_wall_points
                 .expect("Enhanced wall points should be provided for this wall type");
-            place_wide_gate(enhanced_points, editor, i, wide_gate, gate_height).await;
+            place_wide_gate(enhanced_points, editor, material_placer, i, wide_gate, gate_height, skin).await;
         }
     }
 }
@@ -407,9 +408,11 @@ async fn place_palisade_gate(
 async fn place_thin_gate(
     wall_points: &Vec<Point3D>,
     editor: &mut Editor,
+    material_placer: &mut Placer<'_>,
     i: usize,
     thin_gate: &Structure,
     gate_height: i32,
+    skin: Option<&TowerSkin<'_>>,
 ) {
     let air = "air".into();
     let point = wall_points[i];
@@ -442,7 +445,9 @@ async fn place_thin_gate(
     }
     let mirror_x = direction == Cardinal::North || direction == Cardinal::South;
     info!("Placing thin gate at: {:?}", middle_point);
-    place_structure(editor, None, thin_gate, middle_point, direction, None, None, mirror_x, false)
+    // Re-skin the gatehouse into the culture palette when a skin was given, same
+    // as the towers.
+    place_structure(editor, Some(material_placer), thin_gate, middle_point, direction, skin.map(|s| s.data), skin.map(|s| s.palette), mirror_x, false)
         .await
         .expect("Failed to place gate");
     editor.world_mut().gate_locations.push((middle_point, direction));
@@ -451,9 +456,11 @@ async fn place_thin_gate(
 async fn place_wide_gate(
     enhanced_points: &Vec<(Point3D, Vec<Cardinal>, WallType)>,
     editor: &mut Editor,
+    material_placer: &mut Placer<'_>,
     i: usize,
     wide_gate: &Structure,
     gate_height: i32,
+    skin: Option<&TowerSkin<'_>>,
 ) {
     let air = "air".into();
     // Candidacy guarantees a direction and inner-wall clearance.
@@ -472,14 +479,16 @@ async fn place_wide_gate(
     }
     let mirror_x = direction == Cardinal::North || direction == Cardinal::South;
     info!("Placing wide gate at: {:?}", middle_point);
+    // Re-skin the gatehouse into the culture palette when a skin was given, same
+    // as the towers.
     place_structure(
         editor,
-        None,
+        Some(material_placer),
         wide_gate,
         middle_point.add_y(height),
         direction.rotate_right(),
-        None,
-        None,
+        skin.map(|s| s.data),
+        skin.map(|s| s.palette),
         mirror_x,
         false,
     )

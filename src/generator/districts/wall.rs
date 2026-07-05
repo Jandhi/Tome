@@ -184,8 +184,9 @@ fn parapet_is_outer(cell: Point2D, region: &HashSet<Point2D>, ring: &HashSet<Poi
     })
 }
 
-/// The inputs needed to re-skin placed wall structures (towers) into a culture's
-/// look — e.g. swapping the stone-brick/oak tower NBT to smooth_sandstone/birch.
+/// The inputs needed to re-skin placed wall structures (towers and gatehouses)
+/// into a culture's look — e.g. swapping the stone-brick/oak tower NBT to
+/// smooth_sandstone/birch.
 /// Both the loaded generator data and the output palette are required for the
 /// swap, so they're bundled to keep them from desyncing; pass `None` to leave
 /// structures in their authored blocks.
@@ -265,7 +266,7 @@ pub async fn build_wall_palisade(wall_points: &Vec<Point2D>, editor: &mut Editor
 
 
     //add gates
-    build_wall_gate(&wall_points_with_world_height, editor, rng, material_placer, material_id, true, true, None, None, structures, 10).await;
+    build_wall_gate(&wall_points_with_world_height, editor, rng, material_placer, material_id, true, true, None, None, structures, 10, None).await;
 
 }
 
@@ -359,7 +360,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
     //add towers
     build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
-    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, true, false, None, None, structures, 6).await
+    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, true, false, None, None, structures, 6, skin).await
 
 }
 
@@ -519,7 +520,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
     //add towers
     build_wall_towers(&walkway_points, &walkway_heights, editor, material_placer, material_id, structures, rng, skin).await;
     //add gates
-    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, false, false, Some(&enhanced_wall_points), Some(&inner_wall_points), structures, 6).await
+    build_wall_gate(&wall_points_with_height, editor, rng, material_placer, material_id, false, false, Some(&enhanced_wall_points), Some(&inner_wall_points), structures, 6, skin).await
 
 }
 
