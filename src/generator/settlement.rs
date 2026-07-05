@@ -465,9 +465,12 @@ pub async fn generate_town(
 
     // Terraforming and block edits go through the HTTP interface with block updates
     // on, which can spawn block-drop item entities (e.g. when a placed block replaces
-    // grass/flowers) that pile up and lag the world. Disable blockdrops for the run.
-    if let Err(e) = editor.set_gamerule("blockdrops", "false").await {
-        log::warn!("Failed to disable blockdrops gamerule: {e}");
+    // grass/flowers) that pile up and lag the world. Disable block drops for the run.
+    // Gamerule names are snake_case on 1.21.11+ ("blockdrops"/"doTileDrops" are
+    // rejected — and the server reports that rejection with status 0, so it fails
+    // silently rather than through this Err branch).
+    if let Err(e) = editor.set_gamerule("block_drops", "false").await {
+        log::warn!("Failed to disable block_drops gamerule: {e}");
     }
 
     // Generate on Easy so wandering hostile mobs don't grief the build or harass

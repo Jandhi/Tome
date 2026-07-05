@@ -313,8 +313,10 @@ impl Editor {
         Ok(())
     }
 
-    /// Set a server gamerule, e.g. `set_gamerule("blockdrops", "false")`. Goes
-    /// straight to the server; a no-op in offline mode.
+    /// Set a server gamerule, e.g. `set_gamerule("block_drops", "false")`. Rule
+    /// names are snake_case on 1.21.11+; the server rejects unknown names with
+    /// status 0, so a typo fails silently rather than as an `Err`. Goes straight
+    /// to the server; a no-op in offline mode.
     pub async fn set_gamerule(&self, rule: &str, value: &str) -> anyhow::Result<()> {
         if self.offline {
             return Ok(());
