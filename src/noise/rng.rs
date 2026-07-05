@@ -194,14 +194,45 @@ const BIT_NOISE1 : i64 = 0x85297A4D;
 const BIT_NOISE2 : i64 = 0x68E31DA4;
 const BIT_NOISE3 : i64 = 0x1859C4E9;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression guard for the squirrel3 avalanche bug (`^= BIT_NOISE3` instead
+    /// of `*=`): with the broken mixing, the *first* draw from consecutive seeds
+    /// clustered in the low half of the range, so weighted picks (e.g. settlement
+    /// culture) almost always chose the first option regardless of the weights.
+    /// Keyed exactly like `generate_town`'s culture selection; asserts the first
+    /// draw across sequential seeds fills every decile of the range.
+    #[test]
+    fn first_draw_across_sequential_seeds_is_spread_out() {
+        const SEEDS: i64 = 1000;
+        let mut deciles = [0usize; 10];
+        for seed in 0..SEEDS {
+            let mut rng = RNG::from_seed_and_string(Seed(seed), "culture_select");
+            let u = rng.rand_i32(100000) as f64 / 100000.0;
+            deciles[((u * 10.0) as usize).min(9)] += 1;
+        }
+        let expected = SEEDS as usize / 10;
+        for (i, &count) in deciles.iter().enumerate() {
+            assert!(
+                count > expected / 2 && count < expected * 2,
+                "decile {i} has {count} of ~{expected} first draws — biased RNG: {deciles:?}"
+            );
+        }
+    }
+}
+
 fn squirrel3(seed : Seed, position : i64) -> i64 {
+    // Wrapping ops: the multiplies overflow by design (that's the bit mixing);
+    // plain `*`/`+` would panic in debug builds.
     let mut noise = position;
-    noise *= BIT_NOISE1;
-    noise += seed.0;
+    noise = noise.wrapping_mul(BIT_NOISE1);
+    noise = noise.wrapping_add(seed.0);
     noise ^= noise >> 8;
-    noise += BIT_NOISE2;
+    noise = noise.wrapping_add(BIT_NOISE2);
     noise ^= noise << 8;
-    noise ^= BIT_NOISE3; // Should be *=
+    noise = noise.wrapping_mul(BIT_NOISE3);
     noise ^= noise >> 8;
     noise
 }
