@@ -148,7 +148,6 @@ pub(super) async fn place_hipped_blocks(
             // become bottom slabs — the canonical slab-staircase pattern.
             let h_adj = h - 0.5;
             let y_floor = roof_y + h_adj.floor() as i32;
-            let frac = h_adj - h_adj.floor();
             let is_overhang = !group_rects.iter().any(|r| r.contains(p));
 
             if is_overhang {

@@ -29,6 +29,7 @@ mod tests {
         }
 
         #[derive(Debug, serde_derive::Deserialize, JsonSchema)]
+        #[allow(dead_code)]
         struct Town {
             name: String,
             town_type : TownType,

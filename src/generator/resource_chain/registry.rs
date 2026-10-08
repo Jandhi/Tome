@@ -160,8 +160,6 @@ pub struct ResourceRegistry {
     recipes: HashMap<String, RecipeDef>,
     /// resource_id -> all recipe_ids that produce it, sorted for determinism (charcoal before coal)
     produced_by: HashMap<String, Vec<String>>,
-    /// resource_id -> recipe_ids that consume it
-    consumed_by: HashMap<String, Vec<String>>,
     /// resource_id -> raw inputs required per 1 unit of output
     raw_cost: HashMap<String, HashMap<String, f32>>,
     /// biome id (e.g. "minecraft:forest") -> raw resource ids
@@ -224,7 +222,6 @@ impl ResourceRegistry {
         validate_recipe_references(&resources, &recipes)?;
 
         let produced_by: HashMap<String, Vec<String>> = build_produced_by(&recipes)?;
-        let consumed_by = build_consumed_by(&recipes);
 
         detect_cycles(&resources, &produced_by, &recipes)?;
 
@@ -234,7 +231,6 @@ impl ResourceRegistry {
             resources,
             recipes,
             produced_by,
-            consumed_by,
             raw_cost,
             biome_resources,
             production_painters: HashMap::new(),
@@ -1348,16 +1344,6 @@ fn build_produced_by(recipes: &HashMap<String, RecipeDef>) -> anyhow::Result<Has
         producers.sort();
     }
     Ok(produced_by)
-}
-
-fn build_consumed_by(recipes: &HashMap<String, RecipeDef>) -> HashMap<String, Vec<String>> {
-    let mut consumed_by: HashMap<String, Vec<String>> = HashMap::new();
-    for (recipe_id, recipe) in recipes {
-        for input_id in recipe.inputs.keys() {
-            consumed_by.entry(input_id.clone()).or_default().push(recipe_id.clone());
-        }
-    }
-    consumed_by
 }
 
 fn detect_cycles(

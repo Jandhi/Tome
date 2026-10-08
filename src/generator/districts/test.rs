@@ -506,7 +506,6 @@ mod tests {
             RoofStyle::Gable(GablePitch::Double),
         ];
         let frontage_pool = vec![SizeClass::House];
-        let interior_pool = vec![SizeClass::House];
 
         // Subdivide the INTERIOR of each urban super-parcel, alternating
         // between BSP (axis-aligned cuts) and voronoi (organic partitions) so
@@ -579,23 +578,6 @@ mod tests {
                     let lz = lz as usize;
                     if lx < plot.usable.len() && lz < plot.usable[0].len() {
                         plot.usable[lx][lz] = false;
-                    }
-                }
-            }
-        }
-        fn mark_footprint_used(plot: &mut crate::generator::buildings_v2::footprint::Plot, footprint: &Footprint, buffer: i32) {
-            let plot_min = plot.bounds.min();
-            for point in footprint.filled_points() {
-                for dx in -buffer..=buffer {
-                    for dz in -buffer..=buffer {
-                        let lx = point.x + dx - plot_min.x;
-                        let lz = point.y + dz - plot_min.y;
-                        if lx < 0 || lz < 0 { continue; }
-                        let lx = lx as usize;
-                        let lz = lz as usize;
-                        if lx < plot.usable.len() && lz < plot.usable[0].len() {
-                            plot.usable[lx][lz] = false;
-                        }
                     }
                 }
             }

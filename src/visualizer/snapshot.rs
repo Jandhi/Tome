@@ -163,6 +163,8 @@ pub fn extract_claims(world: &World) -> ClaimMapData {
                 BuildClaim::PathPlanned(_) => "path",
                 BuildClaim::Building(_) => "building",
                 BuildClaim::Structure(_) => "structure",
+                BuildClaim::ProductionArea(_) => "production_area",
+                BuildClaim::Ship => "ship",
             };
             claims.push(claim_str.to_string());
         }

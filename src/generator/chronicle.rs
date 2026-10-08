@@ -513,7 +513,7 @@ fn linkify(comp: &serde_json::Value, text: &str, l: &LandmarkLink) -> serde_json
     v
 }
 
-pub async fn give_player_book(
+async fn give_player_book(
     editor: &Editor,
     instruction: &str,
     links: &[LandmarkLink],

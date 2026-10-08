@@ -81,13 +81,9 @@ pub struct Candidate {
 
 #[derive(Debug, Clone, Copy)]
 pub struct CandidateScore {
-    pub flatness: f32,
     /// Footprint height range (max minus min natural ground), in blocks. Used as
-    /// the hard slope-reject metric; `flatness` (stddev) still feeds the score.
+    /// the hard slope-reject metric; the stddev-based flatness feeds `total`.
     pub slope: i32,
-    pub water_margin: i32,
-    pub edge_penalty: f32,
-    pub road_bonus: f32,
     pub total: f32,
 }
 
@@ -919,11 +915,7 @@ pub fn score_candidate(rect: &Rect2D, editor: &Editor) -> Option<CandidateScore>
         + ROAD_WEIGHT * road_bonus;
 
     Some(CandidateScore {
-        flatness,
         slope,
-        water_margin,
-        edge_penalty,
-        road_bonus,
         total,
     })
 }

@@ -333,7 +333,6 @@ fn try_stack_on_previous(
     let core = frame.rect_at(0, floor)?;
     let run = (frame.wall_height() + 1) as i32;
     let dir = prev.direction;
-    let sv: Point2D = dir.into();
     // Start the new flight at the previous flight's top step: its landing lands
     // one block above that step, and the steps continue past it. The two runs
     // then overlap only at that single handoff cell (a landing, which places no

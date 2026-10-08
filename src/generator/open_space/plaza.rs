@@ -102,6 +102,7 @@ pub async fn furnish_plaza(
 /// Like [`furnish_plaza`] but forces a specific [`PlazaType`] instead of rolling
 /// one — used by the test harness to lay out every type side by side. Falls back
 /// to a monument if the forced type can't fit the available centre.
+#[cfg(test)]
 pub(crate) async fn furnish_plaza_as(
     editor: &Editor,
     region: &Region,

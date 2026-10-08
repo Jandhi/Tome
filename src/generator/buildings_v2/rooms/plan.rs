@@ -13,8 +13,6 @@ use super::constraints::{ConstraintMap, PlacedFurniture};
 pub enum RoomRole {
     /// Contains an exterior door.
     Entry,
-    /// Largest non-entry room on ground floor.
-    Main,
     /// Remaining ground-floor rooms.
     Secondary,
     /// Any upper-floor room.

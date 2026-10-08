@@ -1,7 +1,6 @@
 use crate::editor::World;
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
-use crate::generator::buildings_v2::frame::Frame;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::PaletteId;
 use crate::geometry::{Point2D, Rect2D};
@@ -11,12 +10,6 @@ use crate::util::init_logger;
 use super::gable::{GablePitch, RidgeAxis, gable_heightmap};
 use super::RoofStyle;
 use super::heightmap::RoofHeightmap;
-
-fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
-    let vertices = outline_from_rects(&rects);
-    let footprint = Footprint::new(vertices, rects);
-    Frame::new(footprint, 64, floor_counts, 3)
-}
 
 /// Render a cross-section perpendicular to the ridge at a given ridge-axis position.
 /// Shows S=stair, T=top slab (ridge/half), #=fill, .=air

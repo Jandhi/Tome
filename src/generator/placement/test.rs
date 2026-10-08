@@ -80,7 +80,6 @@ mod tests {
         let mut rng = RNG::new(seed);
 
         let provider = GDMCHTTPProvider::new();
-        let build_area = provider.get_build_area().await.expect("Failed to get build area");
 
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
@@ -804,8 +803,6 @@ mod tests {
         // placed against the arterial claim the prime frontage and later tiers
         // can't overlap them. Size gradient: houses on roads, cottages on lanes.
         use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
-        use crate::generator::buildings_v2::roof::RoofStyle;
-        use crate::generator::buildings_v2::roof::gable::GablePitch;
         use crate::generator::buildings_v2::footprint::{Footprint, SizeClass};
         use crate::generator::city_houses::{
             frontage_from_roads, plot_from_block, rect_from_frontage,

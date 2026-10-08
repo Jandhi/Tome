@@ -1,4 +1,18 @@
-use crate::{data::Loadable, editor::World, generator::{buildings::place_buildings, chronicle::generate_chronicle, data::LoadedData, districts::{build_wall, generate_parcels, WallType}, materials::{Material, MaterialId, Placer}, style::Style, terrain::log_trees}, http_mod::GDMCHTTPProvider, noise::RNG, util::init_logger};
+use crate::{editor::World, http_mod::GDMCHTTPProvider, util::init_logger};
+#[cfg(feature = "visualizer")]
+use crate::{
+    data::Loadable,
+    generator::{
+        buildings::place_buildings,
+        chronicle::generate_chronicle,
+        data::LoadedData,
+        districts::{build_wall, generate_parcels, WallType},
+        materials::{Material, MaterialId, Placer},
+        style::Style,
+        terrain::log_trees,
+    },
+    noise::RNG,
+};
 
 
 pub mod geometry;

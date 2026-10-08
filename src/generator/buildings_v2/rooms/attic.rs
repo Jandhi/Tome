@@ -131,7 +131,6 @@ pub async fn place_attic_ladders(
         if accessible.contains(&rect_idx) { continue; }
 
         let attic_floor = room_plan.rooms[room_idx].floor;
-        let rect = room_plan.rooms[room_idx].rect;
         let interior = room_plan.rooms[room_idx].interior;
         if interior.size.x <= 0 || interior.size.y <= 0 { continue; }
 

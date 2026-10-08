@@ -1036,14 +1036,12 @@ pub async fn generate_town(
     // placed against the arterial claim the prime frontage and later tiers
     // can't overlap them. Size gradient: houses on roads, cottages on lanes.
     use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
-    use crate::generator::buildings_v2::roof::RoofStyle;
-    use crate::generator::buildings_v2::roof::gable::GablePitch;
-    use crate::generator::buildings_v2::footprint::{Footprint, SizeClass};
+    use crate::generator::buildings_v2::footprint::SizeClass;
     use crate::generator::city_houses::{
         frontage_from_roads, plot_from_block, rect_from_frontage,
         synthetic_plot_bounds, SIDE_BUFFER_CELLS,
     };
-    use crate::generator::materials::{Palette, PaletteId};
+    use crate::generator::materials::PaletteId;
     use crate::geometry::Point2D as P2;
 
     // Per-settlement style composition: pick a dominant/secondary/accent trio
@@ -1816,13 +1814,13 @@ pub async fn generate_town(
     // summary can report the full per-trade tally.
     let mut workplace_backfill: Vec<crate::generator::population::WorkerSlot> = Vec::new();
     let mut bound_worker_count = 0usize;
-    let mut workplace_count = 0usize;
+    let workplace_count: usize;
     let mut worker_by_job: HashMap<String, usize> = HashMap::new();
     // Resident headcount (sum of per-house bed budgets), captured from the
     // population block below so the chronicle can quote the town's size. This is
     // the deterministic target the crowd is sized to, computed regardless of the
     // live NPC placement (which is a no-op offline).
-    let mut population_count = 0usize;
+    let population_count: usize;
 
     // ---- Population: size the resident crowd to beds, scatter it town-wide ----
     // Each house's budget is max(1, beds); the town total is their sum.

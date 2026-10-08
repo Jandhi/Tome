@@ -2,7 +2,6 @@
 //! by size class and a per-building `RoomBudget`, assigns ground-floor roles,
 //! and resolves attic types once the roof/ladders are in place.
 
-use crate::geometry::Rect2D;
 use crate::noise::RNG;
 
 use super::super::footprint::SizeClass;
@@ -164,54 +163,6 @@ impl RoomBudget {
 
 fn is_bedroom_type(room_type: RoomType) -> bool {
     matches!(room_type, RoomType::Bedroom | RoomType::MultiBedroom | RoomType::MasterBedroom)
-}
-
-/// Assign roles to active rects on a given floor.
-pub(super) fn assign_roles(
-    rects: &[Rect2D],
-    active_indices: &[usize],
-    floor: u32,
-    entry_rect: Option<usize>,
-) -> Vec<(usize, RoomRole)> {
-    if floor > 0 {
-        return active_indices.iter().map(|&i| (i, RoomRole::Upper)).collect();
-    }
-
-    let mut assignments: Vec<(usize, RoomRole)> = Vec::new();
-    let mut entry_assigned = false;
-
-    // Entry goes to the rect containing the door
-    if let Some(entry_idx) = entry_rect {
-        if active_indices.contains(&entry_idx) {
-            assignments.push((entry_idx, RoomRole::Entry));
-            entry_assigned = true;
-        }
-    }
-
-    // Main goes to the largest remaining rect
-    let remaining: Vec<usize> = active_indices
-        .iter()
-        .filter(|&&i| !assignments.iter().any(|(ai, _)| *ai == i))
-        .copied()
-        .collect();
-
-    if let Some(&main_idx) = remaining.iter().max_by_key(|&&i| rects[i].area()) {
-        if !entry_assigned {
-            // No door found — treat the largest room as entry
-            assignments.push((main_idx, RoomRole::Entry));
-        } else {
-            assignments.push((main_idx, RoomRole::Main));
-        }
-    }
-
-    // Rest are secondary
-    for &i in active_indices {
-        if !assignments.iter().any(|(ai, _)| *ai == i) {
-            assignments.push((i, RoomRole::Secondary));
-        }
-    }
-
-    assignments
 }
 
 /// Assign types to attic rooms using the building's bedroom budget.
