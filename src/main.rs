@@ -105,13 +105,13 @@ fn random_seed() -> i64 {
         .unwrap_or(12345)
 }
 
-async fn run_generation_once(full: bool) {
+async fn run_generation_once(full: bool, seed_override: Option<i64>) {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     // Random per-run seed so each interactive run is a different town; printed so
     // a good one can be reproduced. `generate_town` takes the seed as a parameter,
     // so tests can still pin it to a fixed value for determinism.
-    let seed = crate::noise::Seed(random_seed());
+    let seed = crate::noise::Seed(seed_override.unwrap_or_else(random_seed));
     let run_dir = std::path::PathBuf::from("output/runs").join(seed.0.to_string());
     // Save the terrain before generating: generation mutates the World's
     // heightmaps, and the fixture must hold the server's untouched values.
@@ -262,6 +262,9 @@ async fn main() {
     let use_visualizer = args.iter().any(|arg| arg == "--visualize");
     // Opt-in extras for a live run: currently the AI-written chronicle book.
     let full = args.iter().any(|arg| arg == "--full");
+    // `--seed <n>` pins a live run's seed (default: wall clock) so a town can be
+    // rebuilt, or compared against its offline twin.
+    let seed_arg = arg_after("--seed", 1).map(|s| s.parse::<i64>().expect("--seed takes an integer"));
 
     #[cfg(feature = "visualizer")]
     if use_visualizer {
@@ -285,6 +288,6 @@ async fn main() {
     }
 
     if !use_visualizer {
-        run_generation_once(full).await;
+        run_generation_once(full, seed_arg).await;
     }
 }
