@@ -123,21 +123,34 @@ async fn run_generation_once(full: bool, seed_override: Option<i64>) {
     println!("Generating town with seed {}", seed.0);
     // None → auto-select the culture from the build area's climate.
     let options = crate::generator::settlement::TownOptions { chronicle: full };
-    crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
+    let mut report = crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
 
-    if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir) {
+    if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir, &mut report) {
         log::warn!("Failed to save/render town scene in {}: {e:#}", run_dir.display());
     }
 }
 
-/// Capture the generated town as `town.scene` in `dir` and render its views
-/// next to it.
-fn save_and_render_town(editor: &crate::editor::Editor, seed: i64, source: &str, dir: &std::path::Path) -> anyhow::Result<()> {
+/// Capture the generated town as `town.scene` in `dir`, write the run's
+/// `metrics.json` (the [`TownReport`](crate::generator::report::TownReport))
+/// beside it, and render its views next to them.
+fn save_and_render_town(
+    editor: &crate::editor::Editor,
+    seed: i64,
+    source: &str,
+    dir: &std::path::Path,
+    report: &mut crate::generator::report::TownReport,
+) -> anyhow::Result<()> {
+    let captured_at = chrono::Local::now().to_rfc3339();
+    report.source = source.into();
+    report.captured_at = captured_at.clone();
+    let metrics_path = dir.join("metrics.json");
+    report.save(&metrics_path)?;
+    println!("Saved metrics to {}", metrics_path.display());
     let mut scene = editor.capture_scene();
     let b = scene.bounds;
     scene.meta.insert("seed".into(), seed.to_string());
     scene.meta.insert("source".into(), source.into());
-    scene.meta.insert("captured_at".into(), chrono::Local::now().to_rfc3339());
+    scene.meta.insert("captured_at".into(), captured_at);
     scene.meta.insert(
         "build_area".into(),
         format!("origin {} {} {} size {} {} {}", b.origin.x, b.origin.y, b.origin.z, b.size.x, b.size.y, b.size.z),
@@ -167,11 +180,12 @@ async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Resu
     let mut editor = world.get_offline_editor();
     println!("Generating town offline with seed {}", seed.0);
     let t1 = std::time::Instant::now();
-    crate::generator::settlement::generate_town(&mut editor, seed, None).await;
+    let options = crate::generator::settlement::TownOptions::default();
+    let mut report = crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
     println!("Generated in {:.1?}", t1.elapsed());
     let dir = std::path::PathBuf::from("output/runs").join(format!("offline-{}", seed.0));
     let t2 = std::time::Instant::now();
-    save_and_render_town(&editor, seed.0, "offline", &dir)?;
+    save_and_render_town(&editor, seed.0, "offline", &dir, &mut report)?;
     println!("Saved and rendered in {:.1?}; total {:.1?}", t2.elapsed(), t0.elapsed());
     Ok(())
 }
@@ -188,6 +202,29 @@ fn render_saved_scene(scene_path: &str, out_dir: Option<&str>) -> anyhow::Result
         println!("Rendered {}", path.display());
     }
     println!("Render output in {}", out_dir.display());
+    Ok(())
+}
+
+/// `--compare <a.scene> <b.scene> [out_dir]`: block-level diff of two saved
+/// scenes. Prints a summary table and writes `diff.json` and `diff_top.png`
+/// into `out_dir` (default: the directory of A).
+fn compare_scenes(a_path: &str, b_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
+    let a_path = std::path::Path::new(a_path);
+    let a = crate::render::Scene::load(a_path)?;
+    let b = crate::render::Scene::load(b_path)?;
+    let out_dir = match out_dir {
+        Some(d) => std::path::PathBuf::from(d),
+        None => a_path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+    };
+    let diff = crate::render::diff::diff_scenes(&a, &b);
+    println!("A = {}\nB = {}", a_path.display(), b_path);
+    print!("{}", diff.table(10));
+    std::fs::create_dir_all(&out_dir)?;
+    let json_path = out_dir.join("diff.json");
+    diff.save(&json_path)?;
+    let png_path = out_dir.join("diff_top.png");
+    crate::render::diff::render_diff_top(&a, &b, 4)?.save_png(&png_path)?;
+    println!("\nWrote {} and {} (red = only in A, green = only in B, yellow = changed)", json_path.display(), png_path.display());
     Ok(())
 }
 
@@ -243,6 +280,17 @@ async fn main() {
         };
         if let Err(e) = render_saved_scene(scene_path, arg_after("--render", 2)) {
             eprintln!("Render failed: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--compare") {
+        let (Some(a), Some(b)) = (arg_after("--compare", 1), arg_after("--compare", 2)) else {
+            eprintln!("usage: --compare <a.scene> <b.scene> [out_dir]");
+            std::process::exit(2);
+        };
+        if let Err(e) = compare_scenes(a, b, arg_after("--compare", 3)) {
+            eprintln!("Compare failed: {e:#}");
             std::process::exit(1);
         }
         return;

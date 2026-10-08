@@ -14,6 +14,7 @@ use crate::generator::terrain::{clear_floating_logs, drain_liquids, flatten_urba
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
+use crate::generator::report::{sorted_counts, TownReport};
 
 /// Full town-generation pipeline: feathered urban flatten + tiered A* road
 /// network, then hierarchical house placement.
@@ -468,7 +469,7 @@ pub async fn generate_town(
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
 ) {
-    generate_town_with(editor, seed, culture, &TownOptions::default()).await
+    generate_town_with(editor, seed, culture, &TownOptions::default()).await;
 }
 
 pub async fn generate_town_with(
@@ -476,9 +477,16 @@ pub async fn generate_town_with(
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
     options: &TownOptions,
-) {
+) -> TownReport {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
+    let mut report = TownReport { seed: seed.0, ..Default::default() };
+    {
+        let b = editor.world().build_area;
+        report.build_area_origin = [b.origin.x, b.origin.y, b.origin.z];
+        report.build_area_size = [b.size.x, b.size.y, b.size.z];
+    }
+    let mut stage_t = std::time::Instant::now();
 
     // Terraforming and block edits go through the HTTP interface with block updates
     // on, which can spawn block-drop item entities (e.g. when a placed block replaces
@@ -509,6 +517,7 @@ pub async fn generate_town_with(
         println!("Auto-selected culture {c:?} from build-area climate");
         c
     });
+    report.culture = format!("{culture:?}");
 
     // Infrastructure materials follow the culture: a desert town gets sandstone
     // roads and walls, a Japanese town a blackstone wall (matching its palette-
@@ -546,6 +555,7 @@ pub async fn generate_town_with(
     // building placement would later drop. (Rural terrain is still natural here —
     // flatten/walls only touch urban.)
     let result = resolve_rural_production(&data, editor, &rural_analysis, &mut rng);
+    report.lap(&mut stage_t, "parcels");
 
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
@@ -573,6 +583,7 @@ pub async fn generate_town_with(
     drain_liquids(editor, &urban).await;
     println!("Drained liquids from {} urban cells", urban.len());
     flatten_urban_area(editor, &urban, 16, 12, true).await;
+    report.lap(&mut stage_t, "terraform");
 
     // Wall + gates — gates populate world.gate_locations, used by the network.
     let materials = Material::load().expect("Failed to load materials");
@@ -615,6 +626,9 @@ pub async fn generate_town_with(
         .flatten();
     let wall_material = palisade_material.as_ref().unwrap_or(&wall_material);
     println!("City size {n_urban} urban super-parcels -> {wall_type:?} wall ({})", wall_material.as_str());
+    report.urban_super_parcels = n_urban;
+    report.wall_type = format!("{wall_type:?}");
+    report.wall_material = wall_material.as_str().to_string();
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
         &mut placer, wall_material, &structures, wall_type, tower_skin.as_ref(),
@@ -625,7 +639,10 @@ pub async fn generate_town_with(
     {
         let n_total = editor.world().districts.len();
         println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
+        report.total_super_parcels = n_total;
+        report.gates = editor.world().gate_locations.len();
     }
+    report.lap(&mut stage_t, "wall");
 
     let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
@@ -716,6 +733,7 @@ pub async fn generate_town_with(
         }
     }
     println!("Rural roads: {} segments", rural_paths.len());
+    report.rural_road_segments = rural_paths.len();
 
     // A torii gate straddling each rural road, set a little way out from the
     // gate — the threshold into the countryside. Japanese-only; no-op otherwise.
@@ -730,6 +748,7 @@ pub async fn generate_town_with(
         let Some(district) = editor.world().districts.get(&p.district).cloned() else { continue };
         paint_production_area_for(&district, painter, &p.resource, &p.structure, &data, editor, &mut rng).await;
     }
+    report.lap(&mut stage_t, "rural");
 
 
     // ---- Industrial buildings FIRST ----
@@ -764,6 +783,8 @@ pub async fn generate_town_with(
         editor.world().structures.len() - n_before, ind_counts.values().sum::<u32>(),
     );
     let urban_industrial_count = editor.world().structures.len() - n_before;
+    report.industrial_placed = urban_industrial_count;
+    report.industrial_attempted = ind_counts.values().sum::<u32>() as usize;
 
     // ---- Rural buildings ----
     // The rural resource-chain pass above already placed each gathering/
@@ -779,6 +800,9 @@ pub async fn generate_town_with(
         "Placed {} rural buildings across {} rural parcels",
         rural_building_count, rural_parcel_count,
     );
+    report.rural_buildings = rural_building_count;
+    report.rural_parcels = rural_parcel_count;
+    report.lap(&mut stage_t, "industrial");
 
     // Footprints → a `blocked` barrier (footprint + margin) and one node per
     // building for the network to connect.
@@ -815,6 +839,14 @@ pub async fn generate_town_with(
     ).await;
     let paths = road_network.paths.clone();
     println!("Routed {} road segments", paths.len());
+    report.road_segments = paths.len();
+    {
+        let mut by_tier: HashMap<String, usize> = HashMap::default();
+        for path in &paths {
+            *by_tier.entry(format!("{:?}", path.priority())).or_insert(0) += 1;
+        }
+        report.road_segments_by_tier = sorted_counts(&by_tier);
+    }
 
     // DEBUG: Phase A merge check — how many of each path's cells coincide
     // with cells already laid by earlier paths? High overlap = routes are
@@ -1046,6 +1078,7 @@ pub async fn generate_town_with(
             editor.world_mut().claim(c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
         }
     }
+    report.lap(&mut stage_t, "roads");
 
     // ---- Phase 4: hierarchical house placement ----
     // Per lot, walk frontage densest-tier first: arterial → collector →
@@ -1283,6 +1316,7 @@ pub async fn generate_town_with(
     // Houses placed per SizeClass — used to size the wealth distribution
     // (Cottage/House = common, Hall = wealthy craftsman, Manor = elite).
     let mut size_counts: HashMap<String, usize> = HashMap::default();
+    let mut roof_counts: HashMap<String, usize> = HashMap::default();
     // Footprint rect-count distribution (1 = single-rect / no wings, 2 = one
     // wing, 3+ = multi-wing L/T/U shapes). Reads how often wings actually land.
     let mut rect_count_dist: HashMap<usize, usize> = HashMap::default();
@@ -1557,6 +1591,7 @@ pub async fn generate_town_with(
                             total_buildings += 1;
                             tier_placed[ti] += 1;
                             *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
+                            *roof_counts.entry(format!("{:?}", roof_style)).or_insert(0) += 1;
                             if size_class == SizeClass::Manor {
                                 manors_placed += 1;
                             }
@@ -1602,6 +1637,11 @@ pub async fn generate_town_with(
         }
     }
     println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
+    report.buildings_total = total_buildings;
+    report.lots = sub_blocks.len();
+    report.buildings_by_size = sorted_counts(&size_counts);
+    report.buildings_by_roof = sorted_counts(&roof_counts);
+    report.lap(&mut stage_t, "buildings");
     {
         let order = ["Cottage", "House", "Hall", "Manor"];
         let parts: Vec<String> = order
@@ -1667,6 +1707,7 @@ pub async fn generate_town_with(
     };
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
     println!("Placed {} street lamps", lamps.len());
+    report.street_lamps = lamps.len();
 
     // Name the roads (layered: landmark → gate/centre → generic) now that all
     // buildings have claimed their cells, then sign the intersections. Runs
@@ -1681,6 +1722,7 @@ pub async fn generate_town_with(
         editor, &all_paths, &road_network.road_labels, &road_names,
     ).await;
     println!("Placed {} street signs", signs.len());
+    report.street_signs = signs.len();
 
     // ---- Open spaces: furnish the leftover gaps between buildings and roads ----
     // Detect the empty pockets inside the wall and furnish each by type: plazas
@@ -1781,6 +1823,7 @@ pub async fn generate_town_with(
     // Count plaza employment for the jobs summary: a stall is any scene with a
     // `Worker` slot (market vendors), a stage is a `Performance` scene, and its
     // performer slots are the per-stage cast. Onlookers/browsers aren't jobs.
+    report.lap(&mut stage_t, "decoration");
     let (market_stall_count, stage_count, performer_slot_count) = {
         use crate::generator::population::{SceneKind, SlotRole};
         let stalls = plaza_scenes.iter()
@@ -1853,6 +1896,7 @@ pub async fn generate_town_with(
         };
         let budget: usize = town_anchors.iter().map(|h| h.population).sum();
         population_count = budget;
+        report.population = budget;
         let candidate_anchors: usize = town_anchors.iter().map(|h| h.scenes.len()).sum();
         println!(
             "Population target: {} residents across {} houses ({} candidate anchors)",
@@ -2085,7 +2129,14 @@ pub async fn generate_town_with(
         for (job, count) in &by_job {
             println!("  {:<14} {}", job, count);
         }
+        report.workers = industrial_job_slots;
+        report.guards = guard_count;
+        report.market_stalls = market_stall_count;
+        report.stages = stage_count;
+        report.performer_slots = performer_slot_count;
+        report.npcs_by_job = by_job;
     }
+    report.lap(&mut stage_t, "npcs");
 
     // Top-down town map (SVG) for inspection: footprints + named roads coloured
     // by id + the abstract MST/node overlay, with sign posts marked.
@@ -2119,6 +2170,8 @@ pub async fn generate_town_with(
             editor, &urban, &named.name, &named.subtitle,
         ).await;
         println!("Placed welcome-title sensor for \"{}\" ({})", named.name, named.subtitle);
+        report.settlement_name = named.name.clone();
+        report.settlement_subtitle = named.subtitle.clone();
 
         // Chronicle: digest the finished town into a dossier (name, colours,
         // biomes, roads, trades, families, greens, gates) and have the AI write a
@@ -2145,12 +2198,14 @@ pub async fn generate_town_with(
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
             total_buildings, population_count, &harvests, &produces, &mut chronicle_rng,
         );
+        report.districts = dossier.districts.iter().map(|d| format!("{} ({})", d.name, d.quarter)).collect();
         if !options.chronicle || editor.is_offline() {
             println!("Skipping the AI-written chronicle (live runs write it with --full)");
         } else if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
         }
     }
+    report.lap(&mut stage_t, "naming_chronicle");
 
     // Scatter free-floating ships onto the settlement's water districts, then crew the
     // afloat ones (a captain at the helm + sailors on deck) from the town roster — the same
@@ -2158,6 +2213,7 @@ pub async fn generate_town_with(
     let (ships, crew_scenes) =
         crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
     println!("Placed {} ships across water districts", ships);
+    report.ships = ships;
     if !crew_scenes.is_empty() {
         match crate::generator::ships::crew::staff_crew(
             editor, crew_scenes, culture, &data, &mut id_alloc, &mut rng,
@@ -2169,7 +2225,11 @@ pub async fn generate_town_with(
         }
     }
 
+    report.lap(&mut stage_t, "ships");
+
     editor.flush_buffer().await;
+    report.lap(&mut stage_t, "flush");
+    report
 }
 
 /// Scan the claim map for every placed workplace (urban shop or rural gather

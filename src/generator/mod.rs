@@ -14,6 +14,7 @@ pub mod placement;
 pub mod style;
 pub mod chronicle;
 pub mod settlement;
+pub mod report;
 pub mod open_space;
 pub mod naming;
 pub mod heraldry;

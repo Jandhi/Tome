@@ -15,11 +15,12 @@ cargo run -- --full                             # Same, plus the AI-written chro
 cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --release -- --offline`; ~5 s release vs ~95 s debug)
 cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --release -- --render`)
 cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
+cargo run -- --compare <a.scene> <b.scene> [out_dir]  # Block diff of two scenes: table + diff.json + diff_top.png (red only-A, green only-B, yellow changed) into out_dir (default: A's dir)
 ```
 
 ### Saved towns and renders
 
-Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `terrain.fixture.nbt.gz` (chunks + heightmaps, taken before generation), `town.scene` (terrain surface + every placed block, gzip text, palette-interned `id[state]` strings) and PNG renders (`top.png` hill-shaded top-down, `iso_se.png`/`iso_nw.png` isometric, `elev_{south,north,east,west}.png`, described in `index.txt`). Read the PNGs before asking for an in-game check. `src/render/` is the renderer (`render_all`, `render_views` with a region crop for one building); `Editor::capture_scene` builds the scene; `src/editor/fixture.rs` is the fixture.
+Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `terrain.fixture.nbt.gz` (chunks + heightmaps, taken before generation), `town.scene` (terrain surface + every placed block, gzip text, palette-interned `id[state]` strings) and PNG renders (`top.png` hill-shaded top-down, `iso_se.png`/`iso_nw.png` isometric, `elev_{south,north,east,west}.png`, described in `index.txt`), plus `metrics.json` (`TownReport` from `src/generator/report.rs`: counts per stage, NPC jobs, stage timings, returned by `generate_town_with`). Read the PNGs before asking for an in-game check. `src/render/` is the renderer (`render_all`, `render_views` with a region crop for one building); `Editor::capture_scene` builds the scene; `src/editor/fixture.rs` is the fixture.
 
 ### Determinism
 

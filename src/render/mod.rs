@@ -6,6 +6,7 @@
 //! Each call also writes an `index.txt` describing every image.
 
 pub mod colors;
+pub mod diff;
 pub mod elevation;
 pub mod grid;
 pub mod iso;
