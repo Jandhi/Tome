@@ -3,7 +3,7 @@
 //! with stair, door, and ceiling cells. Non-attic room types are assigned here;
 //! attic types are deferred until the roof and ladders are in place.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -195,7 +195,7 @@ pub async fn build_rooms(
         // Compute perimeter cells so interior walls don't overwrite exterior walls
         let outline = frame.outline_at_floor(floor);
         let n = outline.len();
-        let mut perimeter: HashSet<(i32, i32)> = HashSet::new();
+        let mut perimeter: HashSet<(i32, i32)> = HashSet::default();
         for i in 0..n {
             let start = outline[i];
             let end = outline[(i + 1) % n];
@@ -276,7 +276,7 @@ pub async fn build_rooms(
     // Cache per-floor stair-cell sets so a stairwell only affects the floor
     // it actually starts on. Using the global set here would incorrectly mark
     // attic-stair cells as Blocked on floor 0 (and vice versa).
-    let mut stair_cells_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::new();
+    let mut stair_cells_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::default();
     let stair_bottoms = &floor_plan.stair_bottoms;
     let stair_tops = &floor_plan.stair_tops;
 

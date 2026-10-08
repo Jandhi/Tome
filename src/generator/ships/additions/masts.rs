@@ -12,7 +12,7 @@
 //!
 //! Sails themselves are the next step; they hang off these.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
@@ -399,18 +399,18 @@ pub fn billow_field(
 pub fn spanker_billow(
     cells: &[Point3D],
     wind: f32,
-    spars: &std::collections::HashSet<(i32, i32)>,
+    spars: &crate::util::HashSet<(i32, i32)>,
 ) -> HashMap<(i32, i32), i32> {
-    let region: std::collections::HashSet<(i32, i32)> = cells.iter().map(|c| (c.x, c.y)).collect();
+    let region: crate::util::HashSet<(i32, i32)> = cells.iter().map(|c| (c.x, c.y)).collect();
     let foot_y = cells.iter().map(|c| c.y).min().unwrap_or(0); // lowest (corner) boom row
     let target = wind.round().max(0.0) as i32;
     let neighbours = |p: (i32, i32)| {
         [(p.0 - 1, p.1), (p.0 + 1, p.1), (p.0, p.1 - 1), (p.0, p.1 + 1)]
     };
     // The foot edge: the lowest region cell of each column (the arced boom edge).
-    let mut foot_cells: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
+    let mut foot_cells: crate::util::HashSet<(i32, i32)> = crate::util::HashSet::default();
     {
-        let mut min_y: HashMap<i32, i32> = HashMap::new();
+        let mut min_y: HashMap<i32, i32> = HashMap::default();
         for c in cells {
             let e = min_y.entry(c.x).or_insert(c.y);
             *e = (*e).min(c.y);
@@ -434,8 +434,8 @@ pub fn spanker_billow(
     };
 
     const FREE: i32 = 1 << 20; // an off-canvas, non-pinning neighbour imposes no ceiling
-    let mut anchors: std::collections::HashSet<(i32, i32)> = std::collections::HashSet::new();
-    let mut depth: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut anchors: crate::util::HashSet<(i32, i32)> = crate::util::HashSet::default();
+    let mut depth: HashMap<(i32, i32), i32> = HashMap::default();
     for c in cells {
         let p = (c.x, c.y);
         // Pinned to 0 if it is the gaff, or it touches a pinning edge (this also pins the two
@@ -761,10 +761,10 @@ fn point_in_poly(px: f32, py: f32, v: &[(f32, f32)]) -> bool {
 /// **inward** (toward the opposite corner `toward`) by `bulge` — i.e. the sliver to *carve off* the
 /// triangle so the edge becomes concave. The bite polygon (`p` → bezier → `q`, closed straight back
 /// to `p`) is always **simple** (the single bow can't cross its own chord), so the fill is robust.
-fn edge_bite(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> std::collections::HashSet<(i32, i32)> {
+fn edge_bite(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> crate::util::HashSet<(i32, i32)> {
     let samples = bezier_samples(p, q, toward, bulge);
     if samples.is_empty() {
-        return std::collections::HashSet::new();
+        return crate::util::HashSet::default();
     }
     let mut poly: Vec<(f32, f32)> = vec![(p.x as f32, p.y as f32)];
     poly.extend(samples);
@@ -777,7 +777,7 @@ fn edge_bite(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> std::collec
         poly.iter().map(|v| v.1).fold(f32::INFINITY, f32::min).floor() as i32,
         poly.iter().map(|v| v.1).fold(f32::NEG_INFINITY, f32::max).ceil() as i32,
     );
-    let mut out = std::collections::HashSet::new();
+    let mut out = crate::util::HashSet::default();
     for y in miny..=maxy {
         for x in minx..=maxx {
             if point_in_poly(x as f32 + 0.5, y as f32 + 0.5, &poly) {
@@ -795,7 +795,7 @@ fn edge_bite(p: Point3D, q: Point3D, toward: Point3D, bulge: f32) -> std::collec
 /// near the shared corner (an outline polygon would self-intersect there and leave holes). The
 /// straight luff and the three corners are kept so the pinned luff/anchor cells are always present.
 pub fn curved_sail_xy(a: Point3D, b: Point3D, c: Point3D, foot_bulge: f32, leech_bulge: f32) -> Vec<(i32, i32)> {
-    let mut cells: std::collections::HashSet<(i32, i32)> = triangle_xy(a, b, c).into_iter().collect();
+    let mut cells: crate::util::HashSet<(i32, i32)> = triangle_xy(a, b, c).into_iter().collect();
     let foot_bite = edge_bite(a, b, c, foot_bulge); // foot a→b bows toward c
     let leech_bite = edge_bite(a, c, b, leech_bulge); // leech a→c bows toward b
     cells.retain(|p| !foot_bite.contains(p) && !leech_bite.contains(p));
@@ -815,9 +815,9 @@ pub fn curved_sail_xy(a: Point3D, b: Point3D, c: Point3D, foot_bulge: f32, leech
 pub fn jib_billow(
     cells: &[(i32, i32)],
     wind: f32,
-    pinned: &std::collections::HashSet<(i32, i32)>,
+    pinned: &crate::util::HashSet<(i32, i32)>,
 ) -> HashMap<(i32, i32), i32> {
-    let region: std::collections::HashSet<(i32, i32)> = cells.iter().copied().collect();
+    let region: crate::util::HashSet<(i32, i32)> = cells.iter().copied().collect();
     let target = wind.round().max(0.0) as i32;
     let mut depth: HashMap<(i32, i32), i32> = cells
         .iter()
@@ -927,10 +927,10 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
     let mut spar_placer = MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut spar_rng), spar_mat);
     let place = dc.placement;
 
-    let axis_y = HashMap::from([("axis".to_string(), "y".to_string())]);
-    let bottom_slab = HashMap::from([("type".to_string(), "bottom".to_string())]);
-    let top_slab = HashMap::from([("type".to_string(), "top".to_string())]);
-    let fence_state: HashMap<String, String> = HashMap::new();
+    let axis_y = std::collections::HashMap::from([("axis".to_string(), "y".to_string())]);
+    let bottom_slab = std::collections::HashMap::from([("type".to_string(), "bottom".to_string())]);
+    let top_slab = std::collections::HashMap::from_iter([("type".to_string(), "top".to_string())]);
+    let fence_state: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     for mast in &model.masts {
         // Pole (vertical logs).
@@ -1066,7 +1066,7 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                 let half = if sc.top_half { "top" } else { "bottom" };
                 match sc.form {
                     BlockForm::Stairs => {
-                        let st = HashMap::from([
+                        let st = std::collections::HashMap::from([
                             ("facing".to_string(), place.world_cardinal(sc.facing.unwrap_or(ShipDir::Stern)).to_string()),
                             ("half".to_string(), half.to_string()),
                         ]);
@@ -1075,7 +1075,7 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                             .await;
                     }
                     _ => {
-                        let st = HashMap::from([("type".to_string(), half.to_string())]);
+                        let st = std::collections::HashMap::from([("type".to_string(), half.to_string())]);
                         spar_placer
                             .place_block(ctx.editor, place.to_world(sc.local), BlockForm::Slab, Some(&st), None)
                             .await;
@@ -1107,7 +1107,7 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                 let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))
                     .expect("SAIL_BLOCK should parse");
                 let side = spanker_side; // random per ship (see roll above)
-                let spars: std::collections::HashSet<(i32, i32)> = spanker
+                let spars: crate::util::HashSet<(i32, i32)> = spanker
                     .boom
                     .iter()
                     .chain(spanker.gaff.iter())
@@ -1165,7 +1165,7 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                 .collect();
             tops.sort_by_key(|p| p.x);
             // Never overwrite mast poles, finials, or flag cells.
-            let solid: std::collections::HashSet<(i32, i32)> = model
+            let solid: crate::util::HashSet<(i32, i32)> = model
                 .masts
                 .iter()
                 .flat_map(|m| {
@@ -1243,13 +1243,13 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
             }
         };
         // Don't lay canvas/rigging over the foremast pole or its yards.
-        let mut rig: std::collections::HashSet<(i32, i32)> =
+        let mut rig: crate::util::HashSet<(i32, i32)> =
             fore.cells.iter().map(|p| (p.x, p.y)).collect();
         for yd in &fore.yards {
             rig.insert((yd.x, yd.y));
         }
         // Spar top y per x — for the foot hangers (set sail) and the no-canvas stay's foot tie.
-        let mut spar_top: std::collections::HashMap<i32, i32> = std::collections::HashMap::new();
+        let mut spar_top: crate::util::HashMap<i32, i32> = crate::util::HashMap::default();
         for sc in &bowsprit.spar {
             let e = spar_top.entry(sc.local.x).or_insert(sc.local.y);
             *e = (*e).max(sc.local.y);
@@ -1268,8 +1268,8 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
             let leech_bulge = (edge_len(a, c_sail) * JIB_CURVE_FRAC).min(JIB_CURVE_MAX);
             let tri = curved_sail_xy(a, b, c_sail, foot_bulge, leech_bulge);
             if tri.len() >= 6 {
-                let foot: std::collections::HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
-                let luff: std::collections::HashSet<(i32, i32)> = line_xy(b, c_sail).into_iter().collect();
+                let foot: crate::util::HashSet<(i32, i32)> = line_xy(a, b).into_iter().collect();
+                let luff: crate::util::HashSet<(i32, i32)> = line_xy(b, c_sail).into_iter().collect();
                 // The foot attaches to the bowsprit at only `JIB_FOOT_HANGER_COUNT` columns — the
                 // two ends (tack at the tip, clew inboard). Those columns are the **anchors** (the
                 // canvas drops to the spar there with a hanger tie); the rest of the foot is left
@@ -1277,7 +1277,7 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                 let mut foot_xs: Vec<i32> = foot.iter().map(|&(x, _)| x).collect();
                 foot_xs.sort_unstable();
                 foot_xs.dedup();
-                let anchor_xs: std::collections::HashSet<i32> =
+                let anchor_xs: crate::util::HashSet<i32> =
                     if foot_xs.len() <= JIB_FOOT_HANGER_COUNT || JIB_FOOT_HANGER_COUNT < 2 {
                         foot_xs.iter().copied().collect()
                     } else {
@@ -1285,10 +1285,10 @@ pub async fn build(ctx: &mut ShipCtx<'_>, dc: &DeckContext<'_>, state: &mut Deck
                             .map(|i| foot_xs[i * (foot_xs.len() - 1) / (JIB_FOOT_HANGER_COUNT - 1)])
                             .collect()
                     };
-                let foot_anchor: std::collections::HashSet<(i32, i32)> =
+                let foot_anchor: crate::util::HashSet<(i32, i32)> =
                     foot.iter().copied().filter(|(x, _)| anchor_xs.contains(x)).collect();
                 // Pin the forestay (luff) + the two foot anchors; everything else billows free.
-                let pinned: std::collections::HashSet<(i32, i32)> =
+                let pinned: crate::util::HashSet<(i32, i32)> =
                     luff.union(&foot_anchor).copied().collect();
                 let depth = jib_billow(&tri, dc.wind * SAIL_JIB_WIND_FACTOR, &pinned);
                 let sail_block = string_to_block(&format!("minecraft:{SAIL_BLOCK}"))

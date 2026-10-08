@@ -6,7 +6,7 @@
 //! including the non-linear walls↔rooms back-edge, where windows can only be
 //! placed after room partitioning reveals which wall cells are interior.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
@@ -316,7 +316,7 @@ pub async fn build_house(
 /// the exterior side is `door_cell - facing`. Floor-aware so an upper-room cell
 /// directly above a ground-floor door is still eligible.
 fn door_keepout_cells(wall_segs: &WallSegments) -> HashSet<(i32, Point2D)> {
-    let mut out = HashSet::new();
+    let mut out = HashSet::default();
     for (seg, opening) in wall_segs.doors() {
         let seg_cells = segment_cells(seg);
         let inward: Point2D = seg.facing.into();

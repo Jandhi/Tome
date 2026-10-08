@@ -171,7 +171,7 @@ impl WallInfill {
                     wood_id,
                 );
 
-                let beams: std::collections::HashSet<usize> =
+                let beams: crate::util::HashSet<usize> =
                     beam_indices(cells.len()).into_iter().collect();
                 // Wood baseboard only on the ground floor; upper floors get beams
                 // over white with no timber sill.

@@ -25,7 +25,8 @@
 //! Requires `enable-command-block=true` in the server's `server.properties`,
 //! otherwise the placed blocks exist but never run.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::geometry::{Point2D, Point3D};

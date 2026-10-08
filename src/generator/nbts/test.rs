@@ -22,7 +22,8 @@ mod tests {
     /// `cargo test dump_nbt_floorplans -- --nocapture`.
     #[test]
     fn dump_nbt_floorplans() {
-        use std::collections::{BTreeMap, HashSet};
+        use std::collections::BTreeMap;
+        use crate::util::HashSet;
         use std::io::Read;
         use flate2::read::GzDecoder;
 
@@ -86,7 +87,7 @@ mod tests {
             let is_air = |n: &str| n == "air" || n == "cave_air" || n == "void_air" || n.ends_with("structure_void");
 
             // pos -> stripped id (last write wins; NBTs don't double-place a cell).
-            let mut at: std::collections::HashMap<(i32, i32, i32), String> = std::collections::HashMap::new();
+            let mut at: crate::util::HashMap<(i32, i32, i32), String> = crate::util::HashMap::default();
             for b in &s.blocks {
                 at.insert((b.pos[0], b.pos[1], b.pos[2]), short(b.state));
             }
@@ -143,7 +144,7 @@ mod tests {
             }
             let path = out_dir.join(format!("{name}.txt"));
             write(&path, out).expect("write floorplan");
-            let _ = HashSet::<i32>::new();
+            let _ = HashSet::<i32>::default();
             println!("wrote {}", path.display());
         }
     }
@@ -155,7 +156,7 @@ mod tests {
     /// sidecar. Run: `cargo test dump_anchor_candidates -- --nocapture`.
     #[test]
     fn dump_anchor_candidates() {
-        use std::collections::HashSet;
+        use crate::util::HashSet;
         use std::io::Read;
         use flate2::read::GzDecoder;
 
@@ -198,7 +199,7 @@ mod tests {
                 id.strip_prefix("minecraft:").unwrap_or(&id).to_string()
             };
             let is_air = |n: &str| n == "air" || n == "cave_air" || n == "void_air" || n.ends_with("structure_void");
-            let mut at: std::collections::HashMap<(i32, i32, i32), String> = std::collections::HashMap::new();
+            let mut at: crate::util::HashMap<(i32, i32, i32), String> = crate::util::HashMap::default();
             for b in &s.blocks {
                 at.insert((b.pos[0], b.pos[1], b.pos[2]), short(b.state));
             }
@@ -208,7 +209,7 @@ mod tests {
             };
 
             println!("\n===== {name} =====");
-            let mut used: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut used: HashSet<(i32, i32, i32)> = HashSet::default();
             let mut stations: Vec<(String, (i32, i32, i32))> = s.blocks.iter()
                 .filter(|b| b.pos[1] >= 1 && b.pos[1] <= 2)
                 .filter_map(|b| {
@@ -257,7 +258,7 @@ mod tests {
     /// headroom above. Run: `cargo test propose_industrial_anchors -- --nocapture`.
     #[test]
     fn propose_industrial_anchors() {
-        use std::collections::HashSet;
+        use crate::util::HashSet;
         use std::io::Read;
         use flate2::read::GzDecoder;
 
@@ -301,7 +302,7 @@ mod tests {
                     && !solid.contains(&(p.0, p.1 + 1, p.2)) // headroom
             };
             println!("\n===== {name} =====");
-            let mut used: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut used: HashSet<(i32, i32, i32)> = HashSet::default();
             for b in &s.blocks {
                 if b.pos[1] != 1 { continue; } // ground floor only
                 let n = short(b);

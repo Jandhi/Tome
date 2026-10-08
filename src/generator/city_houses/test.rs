@@ -1,7 +1,7 @@
 //! Integration tests for the city_houses frontage pass. These run offline
 //! against a synthetic world — no Minecraft server required.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::World;
 use crate::generator::BuildClaim;
@@ -122,7 +122,7 @@ async fn frontage_pass_places_non_overlapping_houses() {
     .await;
 
     // No two houses share a footprint cell.
-    let mut seen: HashSet<Point2D> = HashSet::new();
+    let mut seen: HashSet<Point2D> = HashSet::default();
     for h in &houses {
         for p in h.footprint.filled_points() {
             assert!(seen.insert(p), "Cell {:?} placed twice", p);
@@ -179,7 +179,7 @@ async fn settlement_with_city_houses() {
     // Pave + claim roads on the outer ring of each block, minus the urban-area
     // edge (avoid paving the outside-of-town border).
     let urban_area_edge = get_edge(&editor.world().get_urban_points());
-    let mut outers: HashSet<Point2D> = HashSet::new();
+    let mut outers: HashSet<Point2D> = HashSet::default();
     for block in &city_blocks {
         let (outer, _inner) = crate::geometry::get_outer_and_inner_points(block, 3);
         outers.extend(outer);

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialId, Placer};
 use crate::generator::nbts::{place_structure, Structure, StructureType};
@@ -388,7 +388,7 @@ async fn place_palisade_gate(
     let opening = middle_point.drop_y();
     let banner_y = middle_point.y + 3;
     let face = direction.rotate_right();
-    let mut posts: HashSet<Point2D> = HashSet::new();
+    let mut posts: HashSet<Point2D> = HashSet::default();
     for facing in [face, face.opposite()] {
         let side: Point2D = facing.rotate_right().into();
         for k in [2, -2] {
@@ -536,7 +536,7 @@ mod tests {
         let world = World::synthetic(build_area, 64);
         let mut editor = world.get_offline_editor();
 
-        let mut heights = HashSet::new();
+        let mut heights = HashSet::default();
         for (x, &h) in terrain.iter().enumerate() {
             heights.insert(Point3D::new(x as i32, h, 1));
         }
@@ -623,7 +623,7 @@ mod tests {
         let editor = editor_with_terrain(&[64; 60]); // flat ground everywhere
         let wall = wall_along_x(&tops);
 
-        let cands = gate_candidates(&wall, &editor, None, &HashSet::new(), false);
+        let cands = gate_candidates(&wall, &editor, None, &HashSet::default(), false);
         assert!(!cands.is_empty());
         let best = cands
             .iter()
@@ -645,7 +645,7 @@ mod tests {
         let editor = editor_with_terrain(&[64; 40]);
         let wall = wall_along_x(&tops);
 
-        let mut cands = gate_candidates(&wall, &editor, None, &HashSet::new(), false);
+        let mut cands = gate_candidates(&wall, &editor, None, &HashSet::default(), false);
         assert!(!cands.is_empty(), "barely-valid spots must still be candidates");
         let sel = select_gates(&mut cands, wall.len(), false);
         assert!(!sel.is_empty(), "a gate must still be placed when only weak spots exist");
@@ -670,7 +670,7 @@ mod tests {
             })
             .collect();
 
-        let cands = gate_candidates(&wall, &editor, Some(&enhanced), &HashSet::new(), false);
+        let cands = gate_candidates(&wall, &editor, Some(&enhanced), &HashSet::default(), false);
         // No candidate's 7-run may overlap indices 8..12.
         for c in &cands {
             let overlaps = (c.index..c.index + GATE_SIZE as usize).any(|a| (8..12).contains(&a));

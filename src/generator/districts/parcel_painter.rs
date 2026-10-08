@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 
 use log::info;
@@ -82,7 +82,7 @@ pub async fn replace_ground_smooth(
                 height += offset;
             }
 
-            let mut y_in_dir: HashMap<Point2D, i32> = HashMap::new();
+            let mut y_in_dir: HashMap<Point2D, i32> = HashMap::default();
             let mut block = Block::new(Default::default(), None, None);
 
             for direction in CARDINALS_2D {
@@ -102,7 +102,7 @@ pub async fn replace_ground_smooth(
                 if neighbor_height == height + 1 && opposite_height == height - 1 {
                     //place stair
                     block = block_list[*rng.choose_weighted(block_dict.get(&1).unwrap()) as usize].clone();
-                    block.state = Some(HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
+                    block.state = Some(std::collections::HashMap::from([("facing".to_string(), cardinal_to_str(&direction).unwrap())]));
                     info!("Placing {:?} stair at {:?} facing {:?}\n",block, point, direction);
                     break;
                 }

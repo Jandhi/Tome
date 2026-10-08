@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use anyhow::Ok;
 use log::{error, info, warn};
@@ -45,10 +45,10 @@ impl Editor {
             block_buffer: RefCell::new(Vec::new()),
             buffer_size: 32,
             block_updates: RefCell::new(true),
-            block_cache: RefCell::new(HashMap::new()),
+            block_cache: RefCell::new(HashMap::default()),
             world,
-            materials: HashMap::new(),
-            block_form_cache: RefCell::new(HashMap::new()),
+            materials: HashMap::default(),
+            block_form_cache: RefCell::new(HashMap::default()),
             offline: false,
         };
         editor.load_data().expect("Failed to load materials");

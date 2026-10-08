@@ -7,7 +7,9 @@
 //! two triangular gable-end pediments at the gable insets with wall material,
 //! closing the ends of the ridge so it reads as a gable perched on a hip.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use std::collections::HashMap;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;

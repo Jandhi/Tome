@@ -2,7 +2,9 @@
 //! clearance, and the three placement strategies (wall-anchored, freestanding,
 //! ceiling) that produce a `PlacementResult` for a single furniture item.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::HashSet;
 
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
 use crate::minecraft::Block;
@@ -54,7 +56,7 @@ const NEIGHBORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
 /// Flood fill from `start` through walkable cells in the constraint map.
 pub(super) fn flood_fill(start: (i32, i32), constraints: &ConstraintMap) -> HashSet<(i32, i32)> {
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     if !constraints.is_walkable(start) { return visited; }
     let mut queue = VecDeque::new();
     visited.insert(start);

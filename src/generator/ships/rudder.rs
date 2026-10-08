@@ -106,7 +106,7 @@ pub async fn place_rudder(
 
     for &cell in &model.fences {
         let submerged = on_water && cell.y < model.waterline_y;
-        let state = submerged.then(|| HashMap::from([("waterlogged".to_string(), "true".to_string())]));
+        let state = submerged.then(|| HashMap::from_iter([("waterlogged".to_string(), "true".to_string())]));
         placer
             .place_block(ctx.editor, placement.to_world(cell), BlockForm::Fence, state.as_ref(), None)
             .await;
@@ -120,7 +120,7 @@ fn blade_state(cell: &RudderCell, placement: &Placement, submerged: bool) -> Opt
         return None;
     }
     let facing = placement.world_cardinal(cell.facing.unwrap_or(ShipDir::Bow));
-    let mut state = HashMap::from([
+    let mut state = HashMap::from_iter([
         ("facing".to_string(), facing.to_string()),
         ("half".to_string(), if cell.top_half { "top" } else { "bottom" }.to_string()),
     ]);

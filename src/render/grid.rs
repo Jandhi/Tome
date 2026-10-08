@@ -2,7 +2,7 @@
 //! every view. All views read the grid, never the scene's hash map, so lookups
 //! are plain array indexing.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use resvg::tiny_skia::Pixmap;
 
@@ -40,7 +40,7 @@ impl VoxelGrid {
         }
 
         let mut materials: Vec<Rgba> = vec![[0, 0, 0, 0]];
-        let mut by_color: HashMap<Rgba, u16> = HashMap::new();
+        let mut by_color: HashMap<Rgba, u16> = HashMap::default();
         let palette_mat: Vec<u16> = scene
             .palette
             .iter()

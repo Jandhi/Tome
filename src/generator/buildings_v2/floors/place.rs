@@ -2,7 +2,7 @@
 //! openings and exterior walls), ceilings, and stair blocks, re-carves attic
 //! stair headroom after the roof goes on, and paints custom room floors.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -21,7 +21,7 @@ use super::stairs::{place_stair_blocks, select_stairwells};
 fn perimeter_cells(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
     let outline = frame.outline_at_floor(floor);
     let n = outline.len();
-    let mut cells = HashSet::new();
+    let mut cells = HashSet::default();
     for i in 0..n {
         let start = outline[i];
         let end = outline[(i + 1) % n];
@@ -49,7 +49,7 @@ pub async fn place_floors(
 
     // Stairwell openings per Y level — cells to skip when laying floor slabs.
     // A stairwell on floor N needs an opening in the slab of floor N+1.
-    let mut openings: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut openings: HashSet<(i32, i32, i32)> = HashSet::default();
     for sw in &stairwells {
         let slab_y = frame.floor_y(sw.floor + 1) - 1;
         for pos in &sw.positions {
@@ -132,7 +132,7 @@ async fn place_ceilings(ctx: &mut BuildCtx<'_>, frame: &Frame) {
     );
 
     let ground_perimeter = perimeter_cells(frame, 0);
-    let mut placed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut placed: HashSet<(i32, i32, i32)> = HashSet::default();
 
     for i in 0..frame.rect_count() {
         let y = frame.roof_y(i) - 2;

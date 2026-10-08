@@ -22,7 +22,7 @@
 //! Everything is drawn from the town's seeded RNG, so a given seed always yields
 //! the same name. Vocabulary + tuning live in `data/settlement_names.yaml`.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use serde_derive::Deserialize;
 
@@ -457,7 +457,7 @@ fn dominant_building(
     urban: &HashSet<Point2D>,
     buildings: &HashMap<String, String>,
 ) -> Option<String> {
-    let mut tally: HashMap<&str, usize> = HashMap::new();
+    let mut tally: HashMap<&str, usize> = HashMap::default();
     for &c in urban {
         match world.get_claim(c) {
             Some(BuildClaim::Structure(s)) | Some(BuildClaim::ProductionArea(s)) => {

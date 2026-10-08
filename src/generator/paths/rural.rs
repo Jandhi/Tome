@@ -17,7 +17,9 @@
 //! painters. Realise the returned paths with
 //! [`build_paths_merged`](super::build_paths_merged).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::BuildClaim;
@@ -68,8 +70,8 @@ pub async fn build_rural_road_network(
     // and the gate it heads for. Footprints accumulate into the blocked set, and
     // predicted border rings into the router's on-road discount field.
     let mut jobs: Vec<(Point2D, Point3D)> = Vec::new();
-    let mut footprints: HashSet<Point2D> = HashSet::new();
-    let mut ring_cells: HashSet<Point2D> = HashSet::new();
+    let mut footprints: HashSet<Point2D> = HashSet::default();
+    let mut ring_cells: HashSet<Point2D> = HashSet::default();
 
     for &i in &order {
         let b = &buildings[i];
@@ -129,8 +131,8 @@ pub async fn build_rural_road_network(
     let mut paths: Vec<Path> = Vec::new();
     // Cells of roads laid so far (a route may end on these to merge), plus their
     // heights so the merge snaps flush.
-    let mut network_cells: HashSet<Point2D> = HashSet::new();
-    let mut road_height: HashMap<Point2D, i32> = HashMap::new();
+    let mut network_cells: HashSet<Point2D> = HashSet::default();
+    let mut road_height: HashMap<Point2D, i32> = HashMap::default();
 
     for (anchor, gate) in jobs {
         let Some(start) = editor.world().add_height(anchor) else { continue; };
@@ -289,7 +291,7 @@ fn diagnose_route_failure(
     }
     let step = step.max(1);
 
-    let mut visited: HashSet<Point2D> = HashSet::from([anchor]);
+    let mut visited: HashSet<Point2D> = HashSet::from_iter([anchor]);
     let mut queue: VecDeque<Point2D> = VecDeque::from([anchor]);
     let mut nearest_sq = anchor.distance_squared(&gate);
     let mut reached_gate = false;
@@ -348,8 +350,8 @@ fn diagnose_route_failure(
 /// guaranteed land-to-land. `None` if the gate is fenced in by water before any
 /// edge is touched (a gate facing open sea gets no spur).
 fn bfs_to_dry_edge(editor: &Editor, start: Point2D, blocked: &HashSet<Point2D>) -> Option<Vec<Point2D>> {
-    let mut visited: HashSet<Point2D> = HashSet::from([start]);
-    let mut parent: HashMap<Point2D, Point2D> = HashMap::new();
+    let mut visited: HashSet<Point2D> = HashSet::from_iter([start]);
+    let mut parent: HashMap<Point2D, Point2D> = HashMap::default();
     let mut queue: VecDeque<Point2D> = VecDeque::from([start]);
     while let Some(c) = queue.pop_front() {
         // On the margin ring (≥ EDGE_MARGIN from all sides, but not one deeper)
@@ -441,7 +443,7 @@ fn door_approach(editor: &Editor, footprint: &HashSet<Point2D>, target: Point2D)
 
 /// Cells just outside the footprint (cardinal neighbours not in it).
 fn perimeter_outside(footprint: &HashSet<Point2D>) -> Vec<Point2D> {
-    let mut out: HashSet<Point2D> = HashSet::new();
+    let mut out: HashSet<Point2D> = HashSet::default();
     for &c in footprint {
         for d in CARDINALS_2D {
             let n = c + d;

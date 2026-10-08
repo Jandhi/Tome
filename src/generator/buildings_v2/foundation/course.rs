@@ -1,7 +1,7 @@
 //! Foundation course: analyze the terrain under a footprint, choose a base Y,
 //! cut/fill columns to it, clear snow, and lay the foundation stone course.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::{Editor, World};
 use crate::generator::buildings_v2::footprint::Footprint;
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn choose_base_y_gentle_slope() {
-        let mut heights = HashMap::new();
+        let mut heights = HashMap::default();
         for i in 0..5 {
             heights.insert(Point2D::new(i, 0), 64 + i);
         }
@@ -292,7 +292,7 @@ mod tests {
 
     #[test]
     fn choose_base_y_uses_median_for_small_slope() {
-        let mut heights = HashMap::new();
+        let mut heights = HashMap::default();
         heights.insert(Point2D::new(0, 0), 60);
         heights.insert(Point2D::new(1, 0), 62);
         heights.insert(Point2D::new(2, 0), 63);
@@ -302,7 +302,7 @@ mod tests {
 
     #[test]
     fn classify_columns_mixed() {
-        let mut heights = HashMap::new();
+        let mut heights = HashMap::default();
         heights.insert(Point2D::new(0, 0), 60); // below base
         heights.insert(Point2D::new(1, 0), 64); // at base
         heights.insert(Point2D::new(2, 0), 67); // above base

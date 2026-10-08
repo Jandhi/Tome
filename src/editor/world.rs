@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use anyhow::Ok;
 use fastnbt::LongArray;
@@ -158,8 +158,8 @@ impl World {
         let mut world = World {
             build_area,
             trimmed_y_range: None,
-            parcels: HashMap::new(),
-            districts: HashMap::new(),
+            parcels: HashMap::default(),
+            districts: HashMap::default(),
             parcel_map,
             district_map,
             buildings: Vec::new(),
@@ -167,7 +167,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
-            structure_anchors: HashMap::new(),
+            structure_anchors: HashMap::default(),
             urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
@@ -176,8 +176,8 @@ impl World {
             chunks,
             ground_biome_map,
             ground_block_map,
-            parcel_analysis_data: HashMap::new(),
-            district_analysis_data: HashMap::new(),
+            parcel_analysis_data: HashMap::default(),
+            district_analysis_data: HashMap::default(),
         };
 
         let y_offset = build_area.origin.y;
@@ -259,10 +259,10 @@ impl World {
         World {
             build_area,
             trimmed_y_range: None,
-            parcels: HashMap::new(),
-            parcel_analysis_data: HashMap::new(),
-            districts: HashMap::new(),
-            district_analysis_data: HashMap::new(),
+            parcels: HashMap::default(),
+            parcel_analysis_data: HashMap::default(),
+            districts: HashMap::default(),
+            district_analysis_data: HashMap::default(),
             parcel_map,
             district_map,
             buildings: Vec::new(),
@@ -270,7 +270,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
-            structure_anchors: HashMap::new(),
+            structure_anchors: HashMap::default(),
             urban_footprint: None,
             ground_height_map,
             ground_block_map,
@@ -278,7 +278,7 @@ impl World {
             ground_biome_map,
             motion_blocking_height_map,
             build_claim_map,
-            chunks: HashMap::new(),
+            chunks: HashMap::default(),
         }
     }
 

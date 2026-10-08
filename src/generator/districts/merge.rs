@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use log::info;
 
@@ -46,7 +46,7 @@ pub async fn merge_down(districts : &mut HashMap<DistrictID, District>, parcels 
 
     // Parcels we've given up on (genuinely isolated below-L pockets). Permanently skipped so the
     // loop always makes progress and terminates.
-    let mut ignore : HashSet<DistrictID> = HashSet::new();
+    let mut ignore : HashSet<DistrictID> = HashSet::default();
 
     // Keep merging while any non-ignored parcel is below the floor. Every merge removes a below-L
     // child and only ever grows the parent, so the below-L set shrinks monotonically.

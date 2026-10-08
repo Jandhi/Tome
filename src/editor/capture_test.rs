@@ -1,6 +1,6 @@
 //! Offline tests for `Editor::capture_scene` and `TerrainFixture`.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use fastnbt::LongArray;
 
@@ -24,7 +24,7 @@ async fn capture_scene_layers_placed_blocks_over_terrain() {
     // Local coords: synthetic ground height is 64, so the surface block is at y 63.
     let stairs: Block = Block::new(
         "minecraft:oak_stairs".into(),
-        Some(HashMap::from([("half".to_string(), "bottom".to_string()), ("facing".to_string(), "north".to_string())])),
+        Some(std::collections::HashMap::from([("half".to_string(), "bottom".to_string()), ("facing".to_string(), "north".to_string())])),
         None,
     );
     editor.place_block(&"stone".into(), Point3D::new(2, 64, 2)).await;
@@ -77,7 +77,7 @@ fn terrain_fixture_round_trips() {
 
     let direct = World::from_parts(
         area,
-        HashMap::new(),
+        HashMap::default(),
         fixture.ground_map.clone(),
         fixture.ocean_map.clone(),
         fixture.motion_blocking_map.clone(),
@@ -152,4 +152,41 @@ fn terrain_fixture_round_trips_chunk_data() {
     assert_eq!(world.get_block(Point3D::new(0, 0, 0)).map(|b| b.id), Some("minecraft:stone".into()));
     assert_eq!(world.get_block(Point3D::new(1, 0, 0)).map(|b| b.id), Some("minecraft:air".into()));
     assert_eq!(world.get_ground_block(Point2D::new(0, 0)).map(|b| b.id.as_str()), Some("minecraft:stone"));
+}
+
+/// Same fixture + same seed must give the same town, block for block. Guards
+/// against per-process nondeterminism (e.g. `RandomState` hash iteration order
+/// leaking into RNG draws). Slow (two full towns), hence `#[ignore]`:
+///
+/// ```text
+/// TOME_FIXTURE=output/runs/<seed>/terrain.fixture.nbt.gz cargo test offline_town_is_deterministic -- --ignored --nocapture
+/// ```
+///
+/// std `RandomState` re-keys every new map, so a stray std map feeding the RNG
+/// shows up here even within one process.
+#[tokio::test]
+#[ignore]
+async fn offline_town_is_deterministic() {
+    let Ok(path) = std::env::var("TOME_FIXTURE") else {
+        eprintln!("offline_town_is_deterministic: TOME_FIXTURE not set, skipping");
+        return;
+    };
+    // generate_town ends with the AI chronicle (a written book, no blocks),
+    // which reads OPENAI_KEY from .env like main does.
+    dotenv::dotenv().ok();
+    let seed = crate::noise::Seed(1791494029742476500);
+
+    let mut towns = Vec::new();
+    for _ in 0..2 {
+        let fixture = TerrainFixture::load(&path).expect("load fixture");
+        let mut editor = World::from_fixture(fixture).get_offline_editor();
+        crate::generator::settlement::generate_town(&mut editor, seed, None).await;
+        let scene = editor.capture_scene();
+        let blocks: HashMap<Point3D, String> = scene.iter().map(|(p, s)| (p, s.to_string())).collect();
+        towns.push(blocks);
+    }
+    let (a, b) = (&towns[0], &towns[1]);
+    let diff = a.iter().filter(|(p, s)| b.get(p) != Some(s)).count()
+        + b.keys().filter(|p| !a.contains_key(p)).count();
+    assert_eq!(diff, 0, "towns differ in {diff} cells ({} vs {} blocks)", a.len(), b.len());
 }

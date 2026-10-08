@@ -1,4 +1,5 @@
-use std::{collections::HashSet, hash::Hash};
+use std::hash::Hash;
+use crate::util::HashSet;
 
 use crate::noise::RNG;
 
@@ -17,7 +18,7 @@ pub fn voronoi_with_points<TNode, TDist>(points : &HashSet<TNode>, distance_func
           TDist : PartialOrd + Copy + Ord
 {
     let mut sections : Vec<HashSet<TNode>> = start_points.iter().map(|_| {
-        HashSet::new()
+        HashSet::default()
     }).collect();
 
     for point in points {
@@ -42,7 +43,7 @@ pub fn voronoi_fill_with_points<TNode>(points : &HashSet<TNode>, neighbour_func 
     where TNode : Eq + Clone + Hash
 {
     let mut sections : Vec<HashSet<TNode>> = start_points.iter().map(|node| {
-        let mut section = HashSet::new();
+        let mut section = HashSet::default();
         section.insert(node.clone());
         section
     }).collect();

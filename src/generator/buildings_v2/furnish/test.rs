@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 use crate::geometry::{Cardinal, Point2D, Rect2D};
 use crate::noise::RNG;
 use crate::generator::buildings_v2::RoomType;
 use crate::generator::buildings_v2::rooms::{CellState, ConstraintMap, Room, RoomRole};
-use std::collections::HashSet;
+use crate::util::HashSet;
 use super::{CellConstraint, FacingMode, BlockLayer};
 use super::placement::{
     interior_rect, wall_slots, flood_fill, check_connectivity,
@@ -643,7 +643,7 @@ fn loaded_shelves_place_4_blocks_on_wall() {
     assert_eq!(result.new_blocked.len(), 2, "two wall cells are claimed");
 
     // Exactly 2 unique (x,z) cells, each used by blocks at y=64 and y=65.
-    use std::collections::HashSet;
+    use crate::util::HashSet;
     let cells: HashSet<_> = result.blocks.iter().map(|b| b.cell).collect();
     assert_eq!(cells.len(), 2);
     for cell in &cells {
@@ -804,7 +804,7 @@ fn fill_ratio_empty_map() {
 
 #[test]
 fn resolve_furniture_from_data() {
-    let mut items: HashMap<String, Furniture> = HashMap::new();
+    let mut items: HashMap<String, Furniture> = HashMap::default();
     items.insert("bed".into(), Furniture {
         unique: true,
         blocks: vec![FurnitureBlock {
@@ -830,14 +830,14 @@ fn resolve_furniture_from_data() {
         ..Default::default()
     });
 
-    let mut rooms: HashMap<String, RoomFurnitureList> = HashMap::new();
+    let mut rooms: HashMap<String, RoomFurnitureList> = HashMap::default();
     rooms.insert("bedroom".into(), RoomFurnitureList {
         required: vec!["bed".into()],
         optional: vec!["lantern".into()],
         fill_threshold: None,
     });
 
-    let data = FurnitureData { items, rooms, loot: HashMap::new() };
+    let data = FurnitureData { items, rooms, loot: HashMap::default() };
     let room_list = data.rooms.get("bedroom").unwrap();
     assert_eq!(room_list.required.len(), 1);
     assert_eq!(room_list.required[0], "bed");
@@ -849,19 +849,19 @@ fn resolve_furniture_from_data() {
 
 #[test]
 fn resolve_missing_room_returns_none() {
-    let data = FurnitureData { items: HashMap::new(), rooms: HashMap::new(), loot: HashMap::new() };
+    let data = FurnitureData { items: HashMap::default(), rooms: HashMap::default(), loot: HashMap::default() };
     assert!(data.rooms.get("nonexistent").is_none());
 }
 
 #[test]
 fn resolve_skips_unknown_items() {
-    let mut rooms: HashMap<String, RoomFurnitureList> = HashMap::new();
+    let mut rooms: HashMap<String, RoomFurnitureList> = HashMap::default();
     rooms.insert("test".into(), RoomFurnitureList {
         required: vec!["nonexistent_item".into()],
         optional: vec![],
         fill_threshold: None,
     });
-    let data = FurnitureData { items: HashMap::new(), rooms, loot: HashMap::new() };
+    let data = FurnitureData { items: HashMap::default(), rooms, loot: HashMap::default() };
     let room_list = data.rooms.get("test").unwrap();
     assert!(data.items.get(&room_list.required[0]).is_none());
 }
@@ -971,7 +971,7 @@ impl DiagramRoom {
         Self {
             room_rect, interior, cm, slots, open_cells,
             wall_doors: wall_doors.to_vec(),
-            labels: HashMap::new(),
+            labels: HashMap::default(),
         }
     }
 
@@ -1215,7 +1215,7 @@ async fn place_room_sizes_in_world() {
     // bed / banner / etc via PaletteSwap::Color.
     let make_palette = |id: &str, primary_wood: &str, secondary_wood: &str,
                         primary: Color, secondary: Color| -> Palette {
-        let mut mats = HashMap::new();
+        let mut mats = HashMap::default();
         mats.insert(MaterialRole::PrimaryWood, MaterialId::from(primary_wood));
         mats.insert(MaterialRole::SecondaryWood, MaterialId::from(secondary_wood));
         Palette {
@@ -1389,7 +1389,7 @@ async fn place_feature_rooms_in_world() {
 
     let make_palette = |id: &str, primary_wood: &str, secondary_wood: &str,
                         primary: Color, secondary: Color| -> Palette {
-        let mut mats = HashMap::new();
+        let mut mats = HashMap::default();
         mats.insert(MaterialRole::PrimaryWood, MaterialId::from(primary_wood));
         mats.insert(MaterialRole::SecondaryWood, MaterialId::from(secondary_wood));
         Palette {
@@ -1523,7 +1523,7 @@ async fn place_feature_rooms_in_world() {
                         (_, true, _, _) => "west",
                         _ => "south",
                     };
-                    let door_state_lower = HashMap::from([
+                    let door_state_lower = std::collections::HashMap::from([
                         ("facing".to_string(), dir_in.to_string()),
                         ("half".to_string(), "lower".to_string()),
                         ("hinge".to_string(), "left".to_string()),
@@ -1533,7 +1533,7 @@ async fn place_feature_rooms_in_world() {
                     let mut door_lower = Block::from_id("minecraft:oak_door".into());
                     door_lower.state = Some(door_state_lower);
                     editor.place_block_forced(&door_lower, Point3D::new(wx, floor_y, wz)).await;
-                    let door_state_upper = HashMap::from([
+                    let door_state_upper = std::collections::HashMap::from([
                         ("facing".to_string(), dir_in.to_string()),
                         ("half".to_string(), "upper".to_string()),
                         ("hinge".to_string(), "left".to_string()),
@@ -1567,7 +1567,7 @@ async fn place_feature_rooms_in_world() {
                             // Physical stair block rising one step per index.
                             let step_y = floor_y + (i as i32 - 1);
                             let mut stair = Block::from_id(stair_id_str.as_str().into());
-                            stair.state = Some(HashMap::from([
+                            stair.state = Some(std::collections::HashMap::from([
                                 ("facing".to_string(), facing.to_string()),
                             ]));
                             editor.place_block(&stair, Point3D::new(wp.0, step_y, wp.1)).await;
@@ -1615,7 +1615,7 @@ async fn place_feature_rooms_in_world() {
                         // Solid floor below the deepest step so the pit is enclosed.
                         editor.place_block(&stone, Point3D::new(wp.0, step_y - 1, wp.1)).await;
                         let mut stair = Block::from_id(stair_id_str.as_str().into());
-                        stair.state = Some(HashMap::from([
+                        stair.state = Some(std::collections::HashMap::from([
                             ("facing".to_string(), facing.to_string()),
                         ]));
                         editor.place_block(&stair, Point3D::new(wp.0, step_y, wp.1)).await;
@@ -1637,7 +1637,7 @@ async fn place_feature_rooms_in_world() {
                     }
                     editor.place_block(&stone, Point3D::new(wp.0, extra_step_y - 1, wp.1)).await;
                     let mut extra_stair = Block::from_id(stair_id_str.as_str().into());
-                    extra_stair.state = Some(HashMap::from([
+                    extra_stair.state = Some(std::collections::HashMap::from([
                         ("facing".to_string(), facing.to_string()),
                     ]));
                     editor.place_block(&extra_stair, Point3D::new(wp.0, extra_step_y, wp.1)).await;
@@ -1658,7 +1658,7 @@ async fn place_feature_rooms_in_world() {
                     // Ladder climbs the full wall height.
                     for dy in 0..(WALL_HEIGHT as i32) {
                         let mut ladder = Block::from_id("minecraft:ladder".into());
-                        ladder.state = Some(HashMap::from([
+                        ladder.state = Some(std::collections::HashMap::from([
                             ("facing".to_string(), facing.to_string()),
                         ]));
                         editor.place_block_forced(&ladder, Point3D::new(ix, floor_y + dy, iz)).await;
@@ -1925,7 +1925,7 @@ fn diagram_room_features() {
 
         let mut rng = RNG::new(SEED);
         let room_area = r.interior.area();
-        let mut placed_tags: HashSet<String> = HashSet::new();
+        let mut placed_tags: HashSet<String> = HashSet::default();
         let mut placed = Vec::new();
 
         for entry in &room_list.required {
@@ -1983,7 +1983,7 @@ fn diagram_5x5_bedrooms() {
             let mut r = DiagramRoom::new(room_rect.clone(), &[*idoor], &[*wdoor], seed);
             let mut rng = RNG::new(seed);
             let room_area = r.interior.area();
-            let mut placed_tags: HashSet<String> = HashSet::new();
+            let mut placed_tags: HashSet<String> = HashSet::default();
 
             for entry in &room_list.required {
                 let candidates = resolve_candidates(entry, &data.items, room_area, false, &placed_tags, &mut rng);
@@ -2169,7 +2169,7 @@ fn gallery_sign(line1: &str, line2: &str) -> crate::minecraft::Block {
     );
     crate::minecraft::Block::new(
         "minecraft:oak_sign".into(),
-        Some(HashMap::from([("rotation".to_string(), "0".to_string())])),
+        Some(std::collections::HashMap::from([("rotation".to_string(), "0".to_string())])),
         Some(nbt),
     )
 }

@@ -1,7 +1,7 @@
 //! Block-level transforms: wall-relative offset/facing resolution, block-string
 //! parsing, rotation, and palette substitution applied to furniture blocks.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette};
 use crate::geometry::{Cardinal, Point2D};

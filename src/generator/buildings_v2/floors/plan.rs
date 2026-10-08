@@ -2,7 +2,7 @@
 //! `FloorPlan` that records stair footprints, landings, tops, and head-clearance
 //! cells for the rooms/furnish passes.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::geometry::{Cardinal, Point2D};
 

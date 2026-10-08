@@ -2,7 +2,9 @@
 //! per-type furnishers (nook, plaza, …). All placement is in world coordinates;
 //! `h` is the first air cell above the surface (surface block sits at `h - 1`).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::{Editor, World};
 use crate::generator::terrain::{generate_tree_feature, Tree};
@@ -47,7 +49,7 @@ pub(super) fn is_path(claim: Option<&BuildClaim>) -> bool {
 /// the perimeter), via a multi-source BFS inward. Shared by the open-space
 /// furnishers to taper edge effects (e.g. the flatten lerp).
 pub(super) fn edge_depth(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
-    let mut depth: HashMap<Point2D, i32> = HashMap::new();
+    let mut depth: HashMap<Point2D, i32> = HashMap::default();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
     for &c in cells {
         if CARDINALS_2D.iter().any(|d| !cells.contains(&(c + *d))) {

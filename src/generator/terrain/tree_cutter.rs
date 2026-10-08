@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::{
     editor::Editor, geometry::{Point2D, Point3D, ALL_8}
@@ -40,13 +40,13 @@ pub fn group_trees(cells: &HashSet<Point2D>, editor: &Editor) -> Vec<TreeGroup> 
         .collect();
 
     // 2. Merge adjacent trunk columns into trunk groups (8-connected flood fill).
-    let mut visited: HashSet<Point2D> = HashSet::new();
+    let mut visited: HashSet<Point2D> = HashSet::default();
     let mut trees: Vec<TreeGroup> = Vec::new();
     for &start in &trunk_cells {
         if !visited.insert(start) {
             continue;
         }
-        let mut group: HashSet<Point2D> = HashSet::new();
+        let mut group: HashSet<Point2D> = HashSet::default();
         let mut stack = vec![start];
         while let Some(p) = stack.pop() {
             group.insert(p);
@@ -131,7 +131,7 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
     const LOG_BRIDGE: i32 = 1;
 
     let mut columns: HashSet<Point2D> = points.clone();
-    let mut visited_logs: HashSet<Point3D> = HashSet::new();
+    let mut visited_logs: HashSet<Point3D> = HashSet::default();
     let mut stack: Vec<Point3D> = Vec::new();
 
     // 1. Seed from every log in each input column (full-depth scan, no window).

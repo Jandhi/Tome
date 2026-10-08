@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use log::warn;
 use serde::Deserialize;
@@ -299,7 +299,7 @@ async fn logging_production_painter(
 
     // Capture one stump (the trunk's base log) per selected tree before felling,
     // and gather every column to clear.
-    let mut to_log: HashSet<Point2D> = HashSet::new();
+    let mut to_log: HashSet<Point2D> = HashSet::default();
     let mut stumps: Vec<(Point3D, Block)> = Vec::with_capacity(selected.len());
     for tree in &selected {
         let Some(stump_y) = editor.world().get_non_tree_height(tree.trunk) else {
@@ -356,8 +356,8 @@ async fn paint_palettes(
     let (irrigation_cells, field_cells) = if irrigation {
         let axis_x = rng.rand_i32(2) == 0; // true = X axis, false = Z axis
         let offset = rng.rand_i32(5);
-        let mut irr: HashSet<Point2D> = HashSet::new();
-        let mut field: HashSet<Point2D> = HashSet::new();
+        let mut irr: HashSet<Point2D> = HashSet::default();
+        let mut field: HashSet<Point2D> = HashSet::default();
         for &p in free_cells {
             let coord = if axis_x { p.x } else { p.y };
             if coord.rem_euclid(5) == offset {
@@ -368,12 +368,12 @@ async fn paint_palettes(
         }
         (irr, field)
     } else {
-        (HashSet::new(), free_cells.clone())
+        (HashSet::default(), free_cells.clone())
     };
 
     // Place water channels.
     if !irrigation_cells.is_empty() {
-        let water_dict: HashMap<usize, f32> = HashMap::from([(0, 1.0)]);
+        let water_dict: HashMap<usize, f32> = HashMap::from_iter([(0, 1.0)]);
         let water_list: Vec<Block> = vec!["water".into()];
         replace_ground(
             &irrigation_cells,
@@ -670,7 +670,7 @@ async fn sugarcane_production_painter(
     // 4. Cane columns on non-water cells that have a same-level water neighbour,
     //    at varied heights (mostly 2–3 tall) with a random age on the top block.
     let height_weights: HashMap<usize, f32> =
-        HashMap::from([(1usize, 0.15f32), (2, 0.45), (3, 0.40)]);
+        HashMap::from_iter([(1usize, 0.15f32), (2, 0.45), (3, 0.40)]);
     let min_h = p.min_height.max(1) as usize;
     let max_h = p.max_height.max(min_h as u32) as usize;
 
@@ -697,7 +697,7 @@ async fn sugarcane_production_painter(
             let age = if i == height - 1 { rng.rand_i32_range(0, 16) } else { 0 };
             let cane = Block::new(
                 "minecraft:sugar_cane".into(),
-                Some(HashMap::from([("age".to_string(), age.to_string())])),
+                Some(std::collections::HashMap::from([("age".to_string(), age.to_string())])),
                 None,
             );
             editor.place_block(&cane, Point3D::new(c.x, cy + i as i32, c.y)).await;
@@ -804,7 +804,7 @@ fn make_beehive(
     suffixes: &[String],
     rng: &mut RNG,
 ) -> Block {
-    let state = HashMap::from([
+    let state = std::collections::HashMap::from([
         ("facing".to_string(), cardinal_to_str(&facing).unwrap_or_else(|| "north".to_string())),
         ("honey_level".to_string(), rng.rand_i32_range(0, 6).to_string()),
     ]);
@@ -913,7 +913,7 @@ fn natural_rock_id(id: &BlockID) -> Option<&'static str> {
 /// is why per-outcrop detection (`detect_outcrop_rock`) drives the boulder palettes,
 /// so granite/andesite/diorite blobs still surface where they're actually exposed.
 fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
-    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    let mut counts: HashMap<&'static str, usize> = HashMap::default();
     let step = (ordered.len() / MINE_GEOLOGY_SAMPLES).max(1);
     for c in ordered.iter().step_by(step) {
         let Some(ch) = editor.world().get_non_tree_height(*c) else {
@@ -946,7 +946,7 @@ fn detect_local_rock(ordered: &[Point2D], editor: &Editor) -> (String, bool) {
 /// variant, so small pockets of stone variants surface where they actually occur
 /// instead of being drowned out by the area-wide stone majority.
 fn detect_outcrop_rock(center: Point2D, editor: &Editor) -> (String, bool) {
-    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    let mut counts: HashMap<&'static str, usize> = HashMap::default();
     let r = MINE_BOULDER_MAX_RADIUS;
     for dx in -r..=r {
         for dz in -r..=r {
@@ -1095,7 +1095,7 @@ async fn mine_production_painter(
     // Area-wide rock, used only as the deepslate signal for the surface seams below.
     let (_, area_deepslate) = detect_local_rock(&ordered, editor);
 
-    let mut occupied: HashSet<Point2D> = HashSet::new();
+    let mut occupied: HashSet<Point2D> = HashSet::default();
     // Centres of ore-bearing outcrops — the rock faces the miners work.
     let mut ore_outcrops: Vec<Point2D> = Vec::new();
 
@@ -1403,7 +1403,7 @@ async fn pasture_production_painter(
                 .iter()
                 .find(|&&d| !free_cells.contains(&(cell + d)))
                 .and_then(cardinal_to_str)
-                .map(|f| HashMap::from([("facing".to_string(), f)]));
+                .map(|f| std::collections::HashMap::from([("facing".to_string(), f)]));
             editor.place_block(&Block::new(gate_id.clone(), state, None), pos).await;
         } else {
             editor.place_block(&fence_block, pos).await;
@@ -1581,7 +1581,7 @@ mod tests {
     /// blob survives intact.
     #[test]
     fn smooth_drops_thin_tendril_keeps_blob() {
-        let mut region: HashSet<Point2D> = HashSet::new();
+        let mut region: HashSet<Point2D> = HashSet::default();
         for x in 0..3 {
             for z in 0..3 {
                 region.insert(Point2D::new(x, z));

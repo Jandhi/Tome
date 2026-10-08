@@ -17,7 +17,7 @@
 //! `data/districts_names.yaml`; everything is seeded so a district's name is stable
 //! for a given town seed.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use serde_derive::Deserialize;
 
@@ -110,7 +110,7 @@ pub fn name_districts(
         Ok(c) => c,
         Err(e) => {
             log::warn!("districts_names.yaml failed to load ({e}); districts left unnamed");
-            return HashMap::new();
+            return HashMap::default();
         }
     };
     let cul = match cfg
@@ -121,7 +121,7 @@ pub fn name_districts(
         Some(c) => c,
         None => {
             log::warn!("districts_names.yaml: no vocabulary for culture or 'medieval' fallback");
-            return HashMap::new();
+            return HashMap::default();
         }
     };
 
@@ -144,8 +144,8 @@ pub fn name_districts(
         .map(|&c| dist(c, centre))
         .fold(0.0_f32, f32::max);
 
-    let mut out: HashMap<DistrictID, DistrictName> = HashMap::new();
-    let mut used: HashSet<String> = HashSet::new();
+    let mut out: HashMap<DistrictID, DistrictName> = HashMap::default();
+    let mut used: HashSet<String> = HashSet::default();
     for id in ids {
         let Some(district) = world.districts.get(&id) else { continue };
         let cells = &district.data.points_2d;
@@ -266,7 +266,7 @@ fn dominant_trade(
     cells: &HashSet<Point2D>,
     trades: &HashMap<String, String>,
 ) -> Option<String> {
-    let mut tally: HashMap<&str, usize> = HashMap::new();
+    let mut tally: HashMap<&str, usize> = HashMap::default();
     for &c in cells {
         if let Some(BuildClaim::Structure(s)) | Some(BuildClaim::ProductionArea(s)) = world.get_claim(c)
         {

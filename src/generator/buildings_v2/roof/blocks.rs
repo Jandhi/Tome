@@ -76,8 +76,8 @@ pub async fn place_roof_blocks(
         material_id,
     );
 
-    let slab_state = HashMap::from([("type".to_string(), "bottom".to_string())]);
-    let top_slab_state = HashMap::from([("type".to_string(), "top".to_string())]);
+    let slab_state = std::collections::HashMap::from([("type".to_string(), "bottom".to_string())]);
+    let top_slab_state = HashMap::from_iter([("type".to_string(), "top".to_string())]);
 
     for x in hm.min_x()..=hm.max_x() {
         for z in hm.min_z()..=hm.max_z() {
@@ -143,7 +143,7 @@ pub async fn place_roof_blocks(
                     // Double pitch: upside-down stair below the block
                     if matches!(pitch, GablePitch::Double) {
                         let facing = stair_facing(hm, x, z);
-                        let inv_state = HashMap::from([
+                        let inv_state = std::collections::HashMap::from([
                             ("facing".to_string(), facing.to_string()),
                             ("half".to_string(), "top".to_string()),
                         ]);
@@ -197,7 +197,7 @@ pub async fn place_roof_blocks(
                 }
             } else {
                 let facing = stair_facing(hm, x, z);
-                let stair_state = HashMap::from([
+                let stair_state = std::collections::HashMap::from([
                     ("facing".to_string(), facing.to_string()),
                 ]);
                 placer.place_block(
@@ -235,7 +235,7 @@ pub async fn place_roof_blocks(
                 // Overhang brackets — pitch-dependent
                 if is_overhang && h >= 0.0 {
                     let opposite = -facing;
-                    let inv_state = HashMap::from([
+                    let inv_state = std::collections::HashMap::from([
                         ("facing".to_string(), opposite.to_string()),
                         ("half".to_string(), "top".to_string()),
                     ]);

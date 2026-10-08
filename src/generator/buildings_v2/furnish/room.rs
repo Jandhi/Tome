@@ -2,7 +2,7 @@
 //! places required then optional furniture (packing fill-threshold rooms), and
 //! walks every room in a building.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::materials::{Material, MaterialId, Palette};
@@ -214,7 +214,7 @@ pub(crate) async fn furnish_interior(
     shuffle(&mut open_cells, rng);
 
     let room_area = interior.area();
-    let mut placed_tags: HashSet<String> = HashSet::new();
+    let mut placed_tags: HashSet<String> = HashSet::default();
 
     for entry in &room_list.required {
         let candidates = resolve_candidates(entry, items, room_area, is_attic, &placed_tags, rng);
@@ -316,7 +316,7 @@ pub async fn furnish_rooms(
     // Validate furniture anchor candidates against the finished layout. One
     // `claimed` set spans every floor of the building (keyed in 3D, so a column
     // shared by stacked rooms doesn't false-collide).
-    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::default();
     let mut scenes: Vec<AnchorScene> = Vec::new();
     for room in &room_plan.rooms {
         let floor_y = frame.floor_y(room.floor);

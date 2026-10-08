@@ -9,7 +9,7 @@
 //! Shared by the placement test and the live `generate_town` pipeline so there's
 //! a single town-map renderer.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::editor::World;
@@ -108,14 +108,14 @@ pub fn render_town_map(
     // Road layer: paint each path's full paved width with the geometric road
     // number of its underlying centreline cell, so a colour = one continuous
     // physical road. Centroids (from centreline cells only) anchor the labels.
-    let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
+    let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::default(); // rid -> (sumx, sumz, count)
     for path in paths {
         let widen = path.width().saturating_sub(1);
         for p in path.points() {
             let centre = p.drop_y();
             let Some(&rid) = road_labels.get(&centre) else { continue };
             // The centreline cell plus its paved shoulder, all this road's colour.
-            let mut swath = get_surrounding_set(&HashSet::from([centre]), widen);
+            let mut swath = get_surrounding_set(&HashSet::from_iter([centre]), widen);
             swath.insert(centre);
             for c in swath {
                 let _ = write!(

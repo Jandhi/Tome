@@ -1,4 +1,5 @@
-use std::{collections::HashMap, hash::{DefaultHasher, Hash, Hasher}};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use crate::util::HashMap;
 
 use crate::geometry::{Point2D, Point3D};
 

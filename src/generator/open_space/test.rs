@@ -134,7 +134,7 @@ async fn plaza_types_gallery() {
 fn desert_market_names_use_souk_bazaar() {
     let names = OpenSpaceNames::load().expect("load open_space_names.yaml");
     let mut rng = RNG::new(Seed(7));
-    let mut used = std::collections::HashSet::new();
+    let mut used = crate::util::HashSet::default();
     let desert_suffixes = ["Souk", "Bazaar", "Market", "Caravanserai"];
     let mut saw_souk_or_bazaar = false;
     for _ in 0..20 {
@@ -156,7 +156,7 @@ fn desert_market_names_use_souk_bazaar() {
 fn medieval_market_names_have_no_souk() {
     let names = OpenSpaceNames::load().expect("load open_space_names.yaml");
     let mut rng = RNG::new(Seed(7));
-    let mut used = std::collections::HashSet::new();
+    let mut used = crate::util::HashSet::default();
     for _ in 0..20 {
         let name = names
             .name_plaza(PlazaType::Market, Culture::Medieval, &mut rng, &mut used)

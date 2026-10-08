@@ -1,4 +1,5 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash};
+use std::hash::Hash;
+use crate::util::{HashMap, HashSet};
 
 use log::info;
 
@@ -103,8 +104,8 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     info!("Creating districts...");
     // TODO: super parcels
     let mut district_id_counter = 0;
-    let mut districts : HashMap<DistrictID, District> = HashMap::new();
-    let mut parcel_analysis_data : HashMap<ParcelID, ParcelAnalysis> = HashMap::new();
+    let mut districts : HashMap<DistrictID, District> = HashMap::default();
+    let mut parcel_analysis_data : HashMap<ParcelID, ParcelAnalysis> = HashMap::default();
 
     for parcel in parcels.values() {
         info!("Analyzing parcel {}", parcel.id.0);
@@ -121,7 +122,7 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     }
 
     // Get Parcel Analysis Data
-    let mut district_analysis_data : HashMap<DistrictID, ParcelAnalysis> = HashMap::new();
+    let mut district_analysis_data : HashMap<DistrictID, ParcelAnalysis> = HashMap::default();
     for parcel in districts.values() {
         info!("Analyzing parcel {}", parcel.id().0);
         district_analysis_data.insert(parcel.id(), analyze_parcel(parcel.data(), editor).await);

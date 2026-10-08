@@ -5,7 +5,7 @@ use crate::geometry::CARDINALS_2D;
 use crate::geometry::DOWN;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use super::data::HasParcelData;
 use super::ParcelData;
@@ -32,7 +32,7 @@ impl ParcelAnalysis {
             roughness: 0.0,
             water_percentage: 0.0,
             forested_percentage: 0.0,
-            surface_block_count: HashMap::new(),
+            surface_block_count: HashMap::default(),
             biome_count,
             gradient: 0.0,
         }
@@ -89,8 +89,8 @@ pub async fn analyze_parcel<'a, TID : 'a>(area: &ParcelData<TID>, editor: &Edito
     let mut neighbour_height_sum = 0.0;
     let mut root_mean_square_height = 0.0;
 
-    let mut biome_count: HashMap<Biome, u32> = HashMap::new();
-    let mut surface_block_count: HashMap<BlockID, u32> = HashMap::new();
+    let mut biome_count: HashMap<Biome, u32> = HashMap::default();
+    let mut surface_block_count: HashMap<BlockID, u32> = HashMap::default();
 
 
     for point in area.points() {

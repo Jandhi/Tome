@@ -3,7 +3,7 @@
 //! stays swappable (see `docs/plans/ship-builder.md`, "palette-driven blocks").
 //! Granularity is per component — the keel is a single part, not subdivided.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::generator::materials::MaterialRole;
 
@@ -44,7 +44,7 @@ impl ShipPalette {
 
     /// Default mapping onto a wood ship palette (e.g. `ship_oak`).
     pub fn ship_oak_default() -> Self {
-        Self::new(HashMap::from([
+        Self::new(HashMap::from_iter([
             (ShipPart::Keel, MaterialRole::PrimaryWood),
             (ShipPart::Hull, MaterialRole::PrimaryWood),
             (ShipPart::Rudder, MaterialRole::PrimaryWood),

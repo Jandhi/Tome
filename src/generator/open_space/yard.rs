@@ -3,7 +3,7 @@
 //! tilled crop patch with a watering hole), fence the open/wild sides to
 //! enclose it, and scatter farm props (hay, barrels, composters) on the rest.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::geometry::{Point2D, CARDINALS_2D};
@@ -55,7 +55,7 @@ pub async fn furnish_yard(editor: &Editor, region: &Region, rng: &mut RNG, theme
         }
     }
 
-    let mut used: HashSet<Point2D> = HashSet::new();
+    let mut used: HashSet<Point2D> = HashSet::default();
 
     // Kitchen-garden patch on the interior: tilled rows around one watering
     // hole. Farmland + water are forced so they show through the grass surface.

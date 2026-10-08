@@ -1,4 +1,5 @@
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
+use crate::util::{HashMap, HashSet};
 
 use lerp::num_traits::clamp;
 
@@ -258,9 +259,9 @@ pub async fn route_path_with(
     let start_state = State { cell: start_cell, y: new_start.y, dir: None };
 
     let mut open: BinaryHeap<HeapEntry> = BinaryHeap::new();
-    let mut g_score: HashMap<State, u64> = HashMap::new();
-    let mut came_from: HashMap<State, State> = HashMap::new();
-    let mut closed: HashSet<State> = HashSet::new();
+    let mut g_score: HashMap<State, u64> = HashMap::default();
+    let mut came_from: HashMap<State, State> = HashMap::default();
+    let mut closed: HashSet<State> = HashSet::default();
 
     g_score.insert(start_state, 0);
     open.push(HeapEntry { f: heuristic(new_start), g: 0, state: start_state });

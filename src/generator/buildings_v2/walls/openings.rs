@@ -3,7 +3,8 @@
 //! `place_openings`, which renders the planned openings as actual door, glass,
 //! trapdoor, fence, and arch blocks.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};

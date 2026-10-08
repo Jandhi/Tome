@@ -9,7 +9,8 @@
 //! no-op for every other culture, so the caller can ring every settlement
 //! unconditionally.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::buildings_v2::Culture;
@@ -49,7 +50,7 @@ pub async fn place_rural_torii(editor: &Editor, paths: &[Path], culture: Culture
     }
 
     let mut placed = 0usize;
-    let mut used_gates: HashSet<Point2D> = HashSet::new();
+    let mut used_gates: HashSet<Point2D> = HashSet::default();
 
     for path in paths {
         let pts = path.points();

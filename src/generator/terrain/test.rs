@@ -1,8 +1,8 @@
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-    use std::collections::HashMap;
+    use crate::util::HashSet;
+    use crate::util::HashMap;
     use log::info;
     
 
@@ -80,7 +80,7 @@ mod tests {
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = Editor::new(build_area, world);
 
-        let mut palette: HashMap<String, HashMap<String, f32>> = HashMap::new();
+        let mut palette: HashMap<String, HashMap<String, f32>> = HashMap::default();
 
         let wood: HashMap<String, f32> = [
             ("minecraft:birch_wood".to_string(), 5.0),
@@ -185,7 +185,7 @@ mod tests {
         println!("Build area: {:?}", build_area);
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
-        let mut points = HashSet::new();
+        let mut points = HashSet::default();
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {

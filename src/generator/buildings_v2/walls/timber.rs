@@ -3,7 +3,7 @@
 //! skeleton. Also holds the `TimberPattern` taste roll and the panel/stud
 //! geometry it depends on.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -134,12 +134,12 @@ impl TimberPattern {
 
 /// Returns the log axis state for a wall's facing direction.
 /// The beam runs along the edge (perpendicular to facing).
-fn axis_state(facing: Cardinal) -> HashMap<String, String> {
+fn axis_state(facing: Cardinal) -> std::collections::HashMap<String, String> {
     let axis = match facing {
         Cardinal::East | Cardinal::West => "z",
         Cardinal::North | Cardinal::South => "x",
     };
-    HashMap::from([("axis".to_string(), axis.to_string())])
+    std::collections::HashMap::from_iter([("axis".to_string(), axis.to_string())])
 }
 
 /// Place the timber frame: vertical corner posts and horizontal crossbeams
@@ -196,14 +196,14 @@ pub async fn place_frame(
     // lowest sets where the post starts (jettied upper corners hover above the
     // ground floor and must not drop logs into the overhang air below); the
     // highest sets where it ends.
-    let mut corner_floor_range: HashMap<(i32, i32), (u32, u32)> = HashMap::new();
+    let mut corner_floor_range: HashMap<(i32, i32), (u32, u32)> = HashMap::default();
 
     for seg in &wall_segs.segments {
         let cells = segment_cells(seg);
         let beam_axis = axis_state(seg.facing);
         let beam_state = if supports_axis { Some(&beam_axis) } else { None };
-        let y_axis_state: HashMap<String, String> =
-            HashMap::from([("axis".to_string(), "y".to_string())]);
+        let y_axis_state: std::collections::HashMap<String, String> =
+            std::collections::HashMap::from_iter([("axis".to_string(), "y".to_string())]);
         let stud_state = if supports_axis { Some(&y_axis_state) } else { None };
         let floor_y = seg.base_y;
         let ceiling_y = seg.base_y + seg.height as i32;
@@ -453,8 +453,8 @@ pub async fn place_frame(
     }
 
     // Vertical corner posts (placed last to override crossbeams at intersections)
-    let y_axis: HashMap<String, String> =
-        HashMap::from([("axis".to_string(), "y".to_string())]);
+    let y_axis: std::collections::HashMap<String, String> =
+        std::collections::HashMap::from_iter([("axis".to_string(), "y".to_string())]);
     let post_state = if supports_axis { Some(&y_axis) } else { None };
 
     for (&(vx, vz), &(min_floor, max_floor)) in &corner_floor_range {

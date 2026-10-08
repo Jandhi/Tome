@@ -11,7 +11,9 @@
 //! Geometry reused unchanged: [`build_ship`] does all the hull/rig/interior work; this
 //! module only chooses *where*, *which way*, and *how big*.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::HashSet;
 
 use crate::editor::{Editor, World};
 use crate::generator::BuildClaim;
@@ -109,7 +111,7 @@ pub async fn scatter_ships(
     }
 
     let mut rng = RNG::new(seed).derive();
-    let mut placed_cells: HashSet<Point2D> = HashSet::new();
+    let mut placed_cells: HashSet<Point2D> = HashSet::default();
     let mut total = 0usize;
     let mut crew: Vec<AnchorScene> = Vec::new();
 

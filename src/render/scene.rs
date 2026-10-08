@@ -19,7 +19,9 @@
 //! <x> <y> <z> <palette index> (m lines)
 //! ```
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use crate::util::HashMap;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::Path;
 
@@ -45,7 +47,7 @@ pub struct Scene {
 
 impl Scene {
     pub fn new(bounds: Rect3D) -> Self {
-        Scene { bounds, palette: Vec::new(), blocks: HashMap::new(), meta: BTreeMap::new(), index: HashMap::new() }
+        Scene { bounds, palette: Vec::new(), blocks: HashMap::default(), meta: BTreeMap::new(), index: HashMap::default() }
     }
 
     /// Intern a block string and record it at `p` (absolute coords), replacing

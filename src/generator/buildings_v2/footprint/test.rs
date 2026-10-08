@@ -377,11 +377,11 @@ mod minecraft_tests {
                 areas.iter().min().unwrap_or(&0), areas.iter().max().unwrap_or(&0));
 
             // Build lookup sets
-            let mut cell_owner: std::collections::HashMap<Point2D, usize> = std::collections::HashMap::new();
-            let mut edge_set: std::collections::HashSet<Point2D> = std::collections::HashSet::new();
+            let mut cell_owner: crate::util::HashMap<Point2D, usize> = crate::util::HashMap::default();
+            let mut edge_set: crate::util::HashSet<Point2D> = crate::util::HashSet::default();
 
             for (idx, footprint) in footprints.iter().enumerate() {
-                let filled: std::collections::HashSet<Point2D> = footprint.filled_points().into_iter().collect();
+                let filled: crate::util::HashSet<Point2D> = footprint.filled_points().into_iter().collect();
                 for &p in &filled {
                     cell_owner.insert(p, idx);
                 }

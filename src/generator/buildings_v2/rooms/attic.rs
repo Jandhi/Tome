@@ -2,7 +2,7 @@
 //! via gable doorways / shared boundaries) and drops a corner ladder into any
 //! that don't, marking the ladder column reachable on both floors.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::geometry::{Point2D, Point3D, Rect2D};
@@ -47,7 +47,7 @@ pub async fn place_attic_ladders(
     // Which rect indices have stair access to the attic floor?
     // A stairwell reaches floor F+1, so if sw.floor == attic_floor - 1
     // and the stair top position is within the rect, that rect has access.
-    let mut has_stair_access: HashSet<usize> = HashSet::new();
+    let mut has_stair_access: HashSet<usize> = HashSet::default();
     for &(_, rect_idx) in &attic_rooms {
         let attic_floor = room_plan.rooms.iter()
             .find(|r| r.role == RoomRole::Attic && r.rect_index == rect_idx)
@@ -64,7 +64,7 @@ pub async fn place_attic_ladders(
     }
 
     // Build connectivity graph between attic rects via gable doorways and interior doors
-    let mut connected: HashMap<usize, HashSet<usize>> = HashMap::new();
+    let mut connected: HashMap<usize, HashSet<usize>> = HashMap::default();
 
     // Gable doorways: find which attic rects each doorway touches
     for &door_cell in gable_doorways {

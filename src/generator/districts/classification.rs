@@ -14,7 +14,7 @@ use super::{
 };
 
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use log::info;
 
 pub fn classify_parcels<'a>(parcels: & mut HashMap<ParcelID, Parcel>, parcel_analysis_data: &HashMap<ParcelID, ParcelAnalysis>){
@@ -183,7 +183,7 @@ fn try_grow_city(
     parcel_analysis_data: &HashMap<DistrictID, ParcelAnalysis>,
 ) -> Option<Vec<DistrictID>> {
     let mut urban: Vec<DistrictID> = vec![prime];
-    let mut urban_set: HashSet<DistrictID> = HashSet::from([prime]);
+    let mut urban_set: HashSet<DistrictID> = HashSet::from_iter([prime]);
 
     while (urban.len() as u32) < URBAN_SIZE_MAX {
         // Gather candidate neighbours of the current (tentative) urban set that are still unclassified.

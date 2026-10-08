@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::geometry::{Point2D, Point3D};
 
@@ -23,12 +23,12 @@ impl<TID> ParcelData<TID> {
         ParcelData {
             origin: Point3D::default(),
             is_border: false,
-            points: HashSet::new(),
-            points_2d: HashSet::new(),
-            edges: HashSet::new(),
+            points: HashSet::default(),
+            points_2d: HashSet::default(),
+            edges: HashSet::default(),
             sum: Point3D::default(),
             parcel_type: ParcelType::Unknown,
-            parcel_adjacency: HashMap::new(),
+            parcel_adjacency: HashMap::default(),
             adjacencies_count: 0,
         }
     }
@@ -37,12 +37,12 @@ impl<TID> ParcelData<TID> {
         let mut data = ParcelData {
             origin,
             is_border: false,
-            points: HashSet::new(),
-            points_2d: HashSet::new(),
-            edges: HashSet::new(),
+            points: HashSet::default(),
+            points_2d: HashSet::default(),
+            edges: HashSet::default(),
             sum: origin,
             parcel_type: ParcelType::Unknown,
-            parcel_adjacency: HashMap::new(),
+            parcel_adjacency: HashMap::default(),
             adjacencies_count: 0,
         };
 

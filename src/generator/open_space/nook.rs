@@ -4,7 +4,7 @@
 //! the surrounding buildings facing inward, planters tucked into the corners,
 //! and a lantern so it isn't dark at night.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::geometry::{Point2D, CARDINALS_2D};
@@ -66,7 +66,7 @@ pub async fn furnish_nook(editor: &Editor, region: &Region, rng: &mut RNG, theme
         (rng.rand_i32_range(2, 4) as usize, 3)
     };
 
-    let mut used: HashSet<Point2D> = HashSet::new();
+    let mut used: HashSet<Point2D> = HashSet::default();
 
     // Centrepiece: a biome-appropriate small tree nearest the centroid.
     if area >= TREE_MIN_AREA {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 use crate::geometry::{Cardinal, Point2D, Rect2D};
 use crate::noise::RNG;
 use super::{SizeClass, maximal_rect::find_largest_rect, Plot};
@@ -410,7 +410,7 @@ fn generate_wings(
     }
 
     let mut wings = Vec::new();
-    let mut occupied: HashMap<Side, Vec<Span>> = HashMap::new();
+    let mut occupied: HashMap<Side, Vec<Span>> = HashMap::default();
     let mut current_area = core.area();
 
     let num_wings = rng.rand_i32_range(size_class.min_wings().max(1), size_class.max_wings() + 1);
@@ -649,7 +649,7 @@ fn generate_wings_skipping_side(
         return vec![];
     }
     let mut wings = Vec::new();
-    let mut occupied: HashMap<Side, Vec<Span>> = HashMap::new();
+    let mut occupied: HashMap<Side, Vec<Span>> = HashMap::default();
     let mut current_area = core.area();
     let num_wings =
         rng.rand_i32_range(size_class.min_wings().max(1), size_class.max_wings() + 1);

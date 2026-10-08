@@ -1,6 +1,6 @@
 ﻿#[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use crate::util::{HashMap, HashSet};
     use crate::{data::Loadable, editor::World, generator::districts::{WallType, build_wall, HasParcelData, parcel::{self, generate_parcels}, parcel_painter::{replace_ground, replace_ground_smooth}}, geometry::{Point2D, Point3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::Block, noise::{RNG, Seed}, util::init_logger};
     use crate::generator::materials::{Placer, Material, MaterialId};
     use crate::generator::nbts::Structure;
@@ -470,7 +470,7 @@ mod tests {
 
         // Take a 2-cell-thick ring at the edge of each urban super-parcel as
         // the perimeter road. The interior cells are what we actually subdivide.
-        let mut perimeter_roads: HashSet<Point2D> = HashSet::new();
+        let mut perimeter_roads: HashSet<Point2D> = HashSet::default();
         let mut interior_blocks: Vec<HashSet<Point2D>> = Vec::new();
         for sd_cells in &urban_blocks {
             let (outer, inner) = crate::geometry::get_outer_and_inner_points(sd_cells, 2);
@@ -511,7 +511,7 @@ mod tests {
         // between BSP (axis-aligned cuts) and voronoi (organic partitions) so
         // adjacent parcels visually compare the two patterns.
         let mut all_sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
-        let mut all_alleys: HashSet<Point2D> = HashSet::new();
+        let mut all_alleys: HashSet<Point2D> = HashSet::default();
         for (i, inner) in interior_blocks.iter().enumerate() {
             let (sub_blocks, alleys) = if i % 2 == 0 {
                 println!("Super-parcel {}: BSP partition", i);
@@ -913,7 +913,7 @@ mod tests {
             (4, 1.0),  // Gravel
         ].into_iter().collect();
 
-        let mut road_points = HashSet::new();
+        let mut road_points = HashSet::default();
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {
@@ -959,7 +959,7 @@ mod tests {
             "stone_slab".into(), "cobblestone_slab".into(), "stone_brick_slab".into(), "andesite_slab".into(),
         ];
 
-        let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
+        let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::default();
 
         let block_dict = [
             (0, 3.0),  // Stone
@@ -987,7 +987,7 @@ mod tests {
         blocks_dict.insert(2, slab_dict);
 
 
-        let mut road_points = HashSet::new();
+        let mut road_points = HashSet::default();
 
         for x in 0..build_area.size.x {
             for z in 0..build_area.size.z {

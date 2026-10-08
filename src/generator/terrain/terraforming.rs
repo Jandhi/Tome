@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use crate::util::{HashMap, HashSet};
 
 use crate::{editor::Editor, geometry::{average_to_neighbours_5_away_multi, Point2D, Point3D, CARDINALS_2D}, minecraft::Block};
 
@@ -59,7 +60,7 @@ pub async fn feathered_flatten(
     let dist = boundary_distance(region);
     let feather = feather.max(1);
 
-    let mut targets: HashSet<Point3D> = HashSet::new();
+    let mut targets: HashSet<Point3D> = HashSet::default();
     for &p in region {
         let natural_y = natural_by_xz[&p];
         let smoothed_y = *smoothed_by_xz.get(&p).unwrap_or(&natural_y);
@@ -77,7 +78,7 @@ pub async fn feathered_flatten(
 /// the nearest cell *not* in `cells`. Boundary cells (those with an outside
 /// cardinal neighbour) get distance 0.
 fn boundary_distance(cells: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
-    let mut dist: HashMap<Point2D, i32> = HashMap::new();
+    let mut dist: HashMap<Point2D, i32> = HashMap::default();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
 
     for &p in cells {
@@ -148,7 +149,7 @@ pub async fn drain_liquids(editor: &mut Editor, area: &HashSet<Point2D>) {
     let prev_buffer = editor.buffer_size();
     editor.set_buffer_size(TERRAFORM_BUFFER);
 
-    let mut updated: HashMap<Point2D, (i32, Block)> = HashMap::new();
+    let mut updated: HashMap<Point2D, (i32, Block)> = HashMap::default();
     for &xz in area {
         // The ocean-floor height is the first fluid/air cell above the solid
         // floor: on a liquid cell it's the BOTTOM liquid block, on dry land it's
@@ -209,7 +210,7 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
     // heightmap. Asserting heights for skipped water cells would make the map
     // claim land that was never built — downstream consumers (e.g. the wall's
     // ground fill) would then float above the real water surface.
-    let mut updated: HashSet<Point3D> = HashSet::new();
+    let mut updated: HashSet<Point3D> = HashSet::default();
     for point in points {
         let xz = point.drop_y();
         if editor.world().is_water(xz) && skip_water {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::geometry::{Point3D, Rect2D, X_PLUS_2D, Y_PLUS_2D};
 

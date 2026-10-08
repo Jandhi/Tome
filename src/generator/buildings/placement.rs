@@ -1,4 +1,5 @@
-use std::{cell::RefCell, collections::{HashMap, HashSet}, i32};
+use std::{cell::RefCell, i32};
+use crate::util::{HashMap, HashSet};
 
 use strum::IntoEnumIterator;
 
@@ -36,7 +37,7 @@ pub fn get_city_blocks_and_off_limits(editor : &mut Editor, rng : &mut RNG) -> (
 }
 
 pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &LoadedData, style : Style, core_palettes : Vec<&PaletteId>) {
-    let mut outers : HashSet<Point2D> = HashSet::new();
+    let mut outers : HashSet<Point2D> = HashSet::default();
     let mut inners : Vec<HashSet<Point2D>> = vec![];
     
     let (city_blocks, off_limits) = get_city_blocks_and_off_limits(editor, rng);
@@ -50,7 +51,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
         let (outer, inner) = get_outer_and_inner_points(&block, 3);
         outers.extend(outer);
         
-        block_districts.push(inner.iter().fold(HashMap::new(), |mut acc : HashMap::<DistrictID, usize>, point| {
+        block_districts.push(inner.iter().fold(HashMap::default(), |mut acc : HashMap::<DistrictID, usize>, point| {
             let district = editor.world().get_district_at(*point);
             
             if let Some(parcel) = district {
@@ -85,7 +86,7 @@ pub async fn place_buildings(editor : &mut Editor, rng : &mut RNG, data : &Loade
     
     
 
-    let mut district_styles : HashMap<DistrictID, DistrictStyle> = HashMap::new();
+    let mut district_styles : HashMap<DistrictID, DistrictStyle> = HashMap::default();
     for district_id in block_districts.iter() {
         if district_styles.contains_key(&*district_id) {
             continue; // Already have a style for this district
@@ -254,7 +255,7 @@ pub async fn smooth_and_pave_road(editor : &mut Editor, rng : &mut RNG, outers :
         ],
     };
 
-    let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::new();
+    let mut blocks_dict: HashMap<usize, HashMap<usize, f32>> = HashMap::default();
 
     let block_dict = [
         (0, 3.0),  // Stone

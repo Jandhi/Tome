@@ -285,8 +285,8 @@ mod tests {
                 .expect("failed to load world for area");
 
             let biome_map = world.get_ground_biome_map();
-            let mut biome_counts: std::collections::HashMap<&str, usize> =
-                std::collections::HashMap::new();
+            let mut biome_counts: crate::util::HashMap<&str, usize> =
+                crate::util::HashMap::default();
             let (mut med, mut jap, mut des) = (0.0f64, 0.0f64, 0.0f64);
             let mut cells = 0usize;
             for column in biome_map {

@@ -77,8 +77,8 @@ pub(super) async fn place_flat_roof(
     // flat rect walls off (parapets) against a dome at the *same* height — but a
     // *taller* dome already has its own wall, so the flat rect leaves that edge
     // open and butts against the wall instead.
-    let mut point_roof_y: std::collections::HashMap<Point2D, i32> = std::collections::HashMap::new();
-    let mut dome_cells: std::collections::HashSet<Point2D> = std::collections::HashSet::new();
+    let mut point_roof_y: crate::util::HashMap<Point2D, i32> = crate::util::HashMap::default();
+    let mut dome_cells: crate::util::HashSet<Point2D> = crate::util::HashSet::default();
     for i in 0..rects.len() {
         let ry = frame.roof_y(i);
         let is_dome = is_dome_eligible(&rects[i]);
@@ -138,7 +138,7 @@ pub(super) async fn place_flat_roof(
     }
 
     // Build a set for fast corner detection
-    let parapet_set: std::collections::HashSet<Point2D> =
+    let parapet_set: crate::util::HashSet<Point2D> =
         parapet_cells.iter().map(|(p, _)| *p).collect();
 
     // A parapet cell is a corner if it has parapet neighbors on two
@@ -265,7 +265,7 @@ pub async fn place_roof_ladder(
 
     // Cells to avoid: stair blocks on the top floor + stair air above
     let stair_cells = floor_plan.stair_cells_on_floor(top_floor);
-    let stair_avoid: std::collections::HashSet<(i32, i32)> = stair_cells.iter().copied()
+    let stair_avoid: crate::util::HashSet<(i32, i32)> = stair_cells.iter().copied()
         .chain(floor_plan.stair_air_above.iter()
             .filter(|(f, _, _)| *f == top_floor)
             .map(|(_, x, z)| (*x, *z)))
@@ -280,9 +280,9 @@ pub async fn place_roof_ladder(
     // Parapet cells: cells on the edge of this rect at this roof level.
     // Use the top-floor filled set (which accounts for jettied extents) rather
     // than the ground footprint, since the parapet sits at the top-floor level.
-    let footprint_set: std::collections::HashSet<Point2D> =
+    let footprint_set: crate::util::HashSet<Point2D> =
         frame.filled_points_at_floor(top_floor).into_iter().collect();
-    let parapet_set: std::collections::HashSet<Point2D> = tallest_rect.iter()
+    let parapet_set: crate::util::HashSet<Point2D> = tallest_rect.iter()
         .filter(|p| {
             [Point2D::new(p.x-1,p.y), Point2D::new(p.x+1,p.y),
              Point2D::new(p.x,p.y-1), Point2D::new(p.x,p.y+1),
@@ -295,7 +295,7 @@ pub async fn place_roof_ladder(
     // Candidates: interior cells adjacent to a parapet wall, not on stairs.
     // Ladder faces toward the wall (inward-facing, back against the wall).
     // Returns (ladder_pos, wall_pos, facing).
-    let interior_set: std::collections::HashSet<Point2D> = tallest_rect.iter()
+    let interior_set: crate::util::HashSet<Point2D> = tallest_rect.iter()
         .filter(|p| !parapet_set.contains(p))
         .collect();
     let mut candidates: Vec<(Point2D, Point2D, &str)> = interior_set.iter()

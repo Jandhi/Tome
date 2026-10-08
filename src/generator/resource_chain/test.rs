@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use crate::util::{HashMap, HashSet};
     use std::env;
 
     use crate::minecraft::{Biome, Block};
@@ -353,7 +353,7 @@ mod tests {
             (0, vec!["wheat".into()]),
             (1, vec!["iron_ore".into(), "coal".into()]),
             (2, vec!["wood".into(), "feathers".into()]),
-        ].into();
+        ].into_iter().collect();
 
         let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
@@ -379,7 +379,7 @@ mod tests {
         let options: HashMap<u32, Vec<String>> = [
             (0, vec!["wood".into(), "iron_ore".into()]),
             (1, vec!["wood".into(), "iron_ore".into()]),
-        ].into();
+        ].into_iter().collect();
 
         let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
@@ -398,7 +398,7 @@ mod tests {
         let options: HashMap<u32, Vec<String>> = [
             (0, vec!["gold_ore".into()]),
             (1, vec!["wood".into()]),
-        ].into();
+        ].into_iter().collect();
 
         let assignments = registry.assign_parcel_resources(&options, &mut rng);
 
@@ -426,14 +426,14 @@ mod tests {
                 .map(|i| (
                     DistrictID(i),
                     crate::generator::districts::ParcelAnalysis::from_biome_count(
-                        [(Biome::from("minecraft:plains"), 100)].into(),
+                        [(Biome::from("minecraft:plains"), 100)].into_iter().collect(),
                     ),
                 ))
                 .collect();
 
             let result = registry.resolve_for_parcels(&parcels, &mut rng);
 
-            let mut counts: HashMap<String, u32> = HashMap::new();
+            let mut counts: HashMap<String, u32> = HashMap::default();
             for a in result.parcel_assignments.values() {
                 *counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
             }
@@ -889,13 +889,13 @@ mod tests {
         // ====== Edit parcels here ======
         // `from_biome_count` takes biome → block count; biomes at ≥30% count as major.
         let parcel_analysis: HashMap<DistrictID, ParcelAnalysis> = [
-            (DistrictID(0), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),    80), (Biome::from("minecraft:plains"), 20)].into())),
-            (DistrictID(1), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),   100)].into())),
-            (DistrictID(2), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
-            (DistrictID(3), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:mountains"), 90), (Biome::from("minecraft:plains"), 10)].into())),
-            (DistrictID(4), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:river"),    100)].into())),
-            (DistrictID(5), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into())),
-        ].into();
+            (DistrictID(0), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),    80), (Biome::from("minecraft:plains"), 20)].into_iter().collect())),
+            (DistrictID(1), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:forest"),   100)].into_iter().collect())),
+            (DistrictID(2), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into_iter().collect())),
+            (DistrictID(3), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:mountains"), 90), (Biome::from("minecraft:plains"), 10)].into_iter().collect())),
+            (DistrictID(4), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:river"),    100)].into_iter().collect())),
+            (DistrictID(5), ParcelAnalysis::from_biome_count([(Biome::from("minecraft:plains"),   100)].into_iter().collect())),
+        ].into_iter().collect();
         // =================================
 
         let result = registry.resolve_for_parcels(&parcel_analysis, &mut rng);
@@ -1001,8 +1001,8 @@ mod tests {
         // produces FLOORED integer output — anything below 1 unit of an intermediate is
         // lost and can't flow to the next building. Matches `resolve_for_parcels`.
         let mut goods_produced: Vec<(String, u32)> = Vec::new();
-        let mut total_buildings: HashMap<String, u32> = HashMap::new();
-        let mut intermediate_pool: HashMap<String, u32> = HashMap::new();
+        let mut total_buildings: HashMap<String, u32> = HashMap::default();
+        let mut intermediate_pool: HashMap<String, u32> = HashMap::default();
         for chain in &plan.chains {
             let cost = match registry.raw_cost(&chain.finished_good) {
                 Some(c) => c.clone(),

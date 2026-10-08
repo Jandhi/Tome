@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::{data::{Loadable, load_yaml}, generator::{districts::{PaintPalette, PaintPaletteId, PaintPalettesFile}, population::NpcData, resource_chain::ResourceRegistry, buildings::{roofs::{RoofComponent, RoofSet, RoofSetId}, walls::{WallComponent, WallSet, WallSetId}, BuildingSet, BuildingSetID}, buildings_v2::furnish::data::FurnitureData, materials::{Material, MaterialId, Palette, PaletteId}, nbts::{Structure, StructureType}}};
 

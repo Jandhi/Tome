@@ -2,7 +2,7 @@
 //! `World` — the planner takes a closure for terrain heights, so we can feed
 //! synthetic height functions and assert step-by-step.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::geometry::{Cardinal, Point2D, Rect2D};
 use crate::generator::buildings_v2::footprint::Footprint;

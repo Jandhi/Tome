@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+use crate::util::{HashMap, HashSet};
 
 use crate::{
     geometry::{voronoi_fill_with_recenter, Point2D, CARDINALS_2D},
@@ -29,7 +30,7 @@ pub fn reserve_road_ribbon(
     depth: i32,
 ) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
     // Multi-source BFS inward from every cell fronting a main road.
-    let mut ribbon: HashSet<Point2D> = HashSet::new();
+    let mut ribbon: HashSet<Point2D> = HashSet::default();
     let mut frontier: VecDeque<(Point2D, i32)> = VecDeque::new();
     for &cell in block {
         let fronts_road = CARDINALS_2D.iter().any(|&d| {
@@ -73,7 +74,7 @@ pub fn carve_ribbon_connectors(
     alleys: &HashSet<Point2D>,
     main_roads: &HashSet<Point2D>,
 ) -> HashSet<Point2D> {
-    let mut connectors = HashSet::new();
+    let mut connectors = HashSet::default();
     for &a in alleys {
         for dir in CARDINALS_2D {
             let out = a + dir;
@@ -136,7 +137,7 @@ pub fn connect_alleys_to_roads(
     order.sort_by_key(|&i| comp_key(&components[i]));
 
     let mut connected: HashSet<Point2D> = network.clone();
-    let mut carved: HashSet<Point2D> = HashSet::new();
+    let mut carved: HashSet<Point2D> = HashSet::default();
     for &i in &order {
         let comp = &components[i];
         let touching = comp.iter().any(|c| {
@@ -158,7 +159,7 @@ pub fn connect_alleys_to_roads(
 /// Multi-source BFS distance (cardinal steps) from `network` outward through
 /// `open`. Open cells cardinally adjacent to the network are distance 1.
 fn network_distances(open: &HashSet<Point2D>, network: &HashSet<Point2D>) -> HashMap<Point2D, i32> {
-    let mut dist: HashMap<Point2D, i32> = HashMap::new();
+    let mut dist: HashMap<Point2D, i32> = HashMap::default();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
     for &c in open {
         if CARDINALS_2D.iter().any(|&d| network.contains(&(c + d))) {
@@ -188,7 +189,7 @@ fn bfs_to_connected(
     open: &HashSet<Point2D>,
     connected: &HashSet<Point2D>,
 ) -> Option<Vec<Point2D>> {
-    let mut parent: HashMap<Point2D, Point2D> = HashMap::new();
+    let mut parent: HashMap<Point2D, Point2D> = HashMap::default();
     let mut seen: HashSet<Point2D> = comp.clone();
     let mut queue: VecDeque<Point2D> = comp.iter().copied().collect();
     while let Some(c) = queue.pop_front() {
@@ -230,7 +231,7 @@ pub fn subdivide_block(
     rng: &mut RNG,
     max_dim: i32,
 ) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
-    let mut alleys = HashSet::new();
+    let mut alleys = HashSet::default();
     let mut sub_blocks = Vec::new();
     recurse(cells.clone(), rng, max_dim, &mut alleys, &mut sub_blocks);
     (sub_blocks, alleys)
@@ -287,8 +288,8 @@ fn recurse(
         rng.rand_i32_range(min_cut, max_cut + 1)
     };
 
-    let mut side_a = HashSet::new();
-    let mut side_b = HashSet::new();
+    let mut side_a = HashSet::default();
+    let mut side_b = HashSet::default();
     for p in cells {
         let v = if cut_along_x { p.x } else { p.y };
         if v == cut || v == cut + 1 {
@@ -333,7 +334,7 @@ pub fn voronoi_subdivide_block(
     sections: usize,
 ) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
     if cells.is_empty() || sections == 0 {
-        return (Vec::new(), HashSet::new());
+        return (Vec::new(), HashSet::default());
     }
 
     let raw_sections = voronoi_fill_with_recenter(
@@ -352,14 +353,14 @@ pub fn voronoi_subdivide_block(
         3,
     );
 
-    let mut cell_to_section: HashMap<Point2D, usize> = HashMap::new();
+    let mut cell_to_section: HashMap<Point2D, usize> = HashMap::default();
     for (idx, section) in raw_sections.iter().enumerate() {
         for p in section {
             cell_to_section.insert(*p, idx);
         }
     }
 
-    let mut alleys = HashSet::new();
+    let mut alleys = HashSet::default();
     for (&p, &my_idx) in &cell_to_section {
         for d in CARDINALS_2D {
             if let Some(&their_idx) = cell_to_section.get(&(p + d)) {
@@ -383,7 +384,7 @@ fn connected_components(cells: &HashSet<Point2D>) -> Vec<HashSet<Point2D>> {
     let mut remaining = cells.clone();
     let mut comps = Vec::new();
     while let Some(&seed) = remaining.iter().next() {
-        let mut comp = HashSet::new();
+        let mut comp = HashSet::default();
         let mut stack = vec![seed];
         while let Some(p) = stack.pop() {
             if !remaining.remove(&p) {
@@ -430,7 +431,7 @@ mod tests {
     #[test]
     fn ribbon_empty_when_no_road_touches() {
         let block = rect_block(0, 9, 0, 9);
-        let road: HashSet<Point2D> = HashSet::new();
+        let road: HashSet<Point2D> = HashSet::default();
 
         let (lots, interior) = reserve_road_ribbon(&block, &road, 5);
 

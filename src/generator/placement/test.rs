@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use crate::util::{HashMap, HashSet};
 
     use crate::{
         editor::World,
@@ -175,7 +175,7 @@ mod tests {
     /// resolved processing-building count is printed for reference.
     #[tokio::test]
     async fn urban_industrial_follows_roads() {
-        use std::collections::HashSet;
+        use crate::util::HashSet;
 
         use crate::data::Loadable;
         use crate::generator::BuildClaim;
@@ -292,7 +292,7 @@ mod tests {
         // *inside* the building, so `build_road_network` relocates each node to the
         // nearest clear cell before routing. ---
         const BLOCK_MARGIN: i32 = 2;
-        let mut footprint_by_id: HashMap<u32, Vec<Point2D>> = HashMap::new();
+        let mut footprint_by_id: HashMap<u32, Vec<Point2D>> = HashMap::default();
         for &p in &urban {
             if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
                 footprint_by_id.entry(id.id).or_default().push(p);
@@ -337,7 +337,7 @@ mod tests {
         let corridor_pts: HashSet<Point3D> = paths.iter().flat_map(|p| p.points().iter().copied()).collect();
         force_height(&mut editor, &corridor_pts, false).await;
         build_paths_merged(&editor, &data, &paths, &mut rng).await;
-        let mut claimed_road: HashSet<Point2D> = HashSet::new();
+        let mut claimed_road: HashSet<Point2D> = HashSet::default();
         for path in &paths {
             for c in paved(path) {
                 if !structure_cells.contains(&c) {
@@ -511,7 +511,7 @@ mod tests {
         // Footprints → a `blocked` barrier (footprint + margin) and one node per
         // building for the network to connect.
         const IND_MARGIN: i32 = 2;
-        let mut ind_footprints: HashMap<u32, Vec<Point2D>> = HashMap::new();
+        let mut ind_footprints: HashMap<u32, Vec<Point2D>> = HashMap::default();
         for &p in &urban {
             if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
                 ind_footprints.entry(id.id).or_default().push(p);
@@ -547,7 +547,7 @@ mod tests {
         // with cells already laid by earlier paths? High overlap = routes are
         // merging onto the network instead of crossing it blindly.
         {
-            let mut seen: HashSet<Point2D> = HashSet::new();
+            let mut seen: HashSet<Point2D> = HashSet::default();
             for path in &paths {
                 let cells: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
                 let shared = cells.iter().filter(|c| seen.contains(c)).count();
@@ -585,7 +585,7 @@ mod tests {
             .filter(|&&c| crate::geometry::CARDINALS_2D.iter().any(|&d| !urban.contains(&(c + d))))
             .copied()
             .collect();
-        let mut barriers: HashSet<Point2D> = HashSet::new();
+        let mut barriers: HashSet<Point2D> = HashSet::default();
         for path in &paths {
             barriers.extend(paved(path));
         }
@@ -628,7 +628,7 @@ mod tests {
         // All main-road (arterial + collector) paved cells, used to peel a
         // frontage ribbon off each block before subdividing its interior.
         let main_road_cells: HashSet<Point2D> = {
-            let mut s = HashSet::new();
+            let mut s = HashSet::default();
             for path in &paths {
                 s.extend(paved(path));
             }
@@ -646,9 +646,9 @@ mod tests {
         // at the slice's interior extreme reaches `rise + depth` into the band).
         const RIBBON_DEPTH: i32 = 14;
         let mut sub_blocks: Vec<HashSet<Point2D>> = Vec::new();
-        let mut alley_band: HashSet<Point2D> = HashSet::new();
+        let mut alley_band: HashSet<Point2D> = HashSet::default();
         let mut ribbon_parcel_count = 0usize;
-        let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
+        let mut ribbon_cells: HashSet<Point2D> = HashSet::default(); // DEBUG: all reserved ribbon cells
         for block in &blocks {
             let (ribbon_parcels, interior) =
                 crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
@@ -678,7 +678,7 @@ mod tests {
         // Road-height lookup: main-road paved band (centreline + width ring, min y
         // on overlap) for road-fronting houses, plus the alley corridor cells at
         // ground height for alley-fronting houses.
-        let mut road_h: HashMap<Point2D, i32> = HashMap::new();
+        let mut road_h: HashMap<Point2D, i32> = HashMap::default();
         for path in &all_paths {
             let w = path.width() as i32;
             for pt in path.points() {
@@ -697,7 +697,7 @@ mod tests {
 
         // Frontage bands per tier (paved cells, matching the roads we'll build).
         let band = |prio: PathPriority| -> HashSet<Point2D> {
-            let mut s = HashSet::new();
+            let mut s = HashSet::default();
             for path in paths.iter().filter(|p| p.priority() == prio) {
                 s.extend(paved(path));
             }
@@ -753,14 +753,14 @@ mod tests {
         // Approximate per-road footprint, so on a shared trunk the bigger road
         // wins the cells (the main avenue keeps its colour; a smaller road only
         // shows where it diverges) instead of two colours weaving.
-        let mut rid_size: HashMap<u32, usize> = HashMap::new();
+        let mut rid_size: HashMap<u32, usize> = HashMap::default();
         for path in &all_paths {
             if let Some(rid) = path.road_id() {
                 let span = (2 * (path.width() as usize - 1) + 1).pow(2);
                 *rid_size.entry(rid).or_insert(0) += path.points().len() * span;
             }
         }
-        let mut label: HashMap<P2, (u8, usize, u32, i32)> = HashMap::new(); // cell -> (tier, road_size, road_id, y)
+        let mut label: HashMap<P2, (u8, usize, u32, i32)> = HashMap::default(); // cell -> (tier, road_size, road_id, y)
         for path in &all_paths {
             let Some(rid) = path.road_id() else { continue; };
             let key = (prio_rank(path.priority()), *rid_size.get(&rid).unwrap_or(&0));
@@ -788,7 +788,7 @@ mod tests {
                 "brown_wool", "green_wool", "red_wool", "black_wool",
             ];
             const LABEL_HEIGHT: i32 = 22; // debug tier markers sit at +20.
-            let mut named_roads: HashSet<u32> = HashSet::new();
+            let mut named_roads: HashSet<u32> = HashSet::default();
             for (c, (_, _, rid, y)) in &label {
                 named_roads.insert(*rid);
                 let wool: Block = WOOL_COLORS[*rid as usize % WOOL_COLORS.len()].into();
@@ -1134,7 +1134,7 @@ mod tests {
             // Shared renderer (also used by the live generate_town pipeline).
             let svg = crate::generator::paths::render_town_map(
                 editor.world(), &urban, &all_paths, &road_network.road_labels,
-                &std::collections::HashMap::new(), &full_alleys, Some(&road_network), &[], &[],
+                &crate::util::HashMap::default(), &full_alleys, Some(&road_network), &[], &[],
             );
             std::fs::create_dir_all("output").ok();
             match std::fs::write("output/town.svg", &svg) {

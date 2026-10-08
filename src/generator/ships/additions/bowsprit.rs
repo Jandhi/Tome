@@ -432,12 +432,12 @@ fn cell_state(cell: &BowspritCell, placement: &Placement) -> Option<HashMap<Stri
     match cell.form {
         BlockForm::Stairs => {
             let dir = cell.facing.unwrap_or(RAKE_STAIR_FACE);
-            Some(HashMap::from([
+            Some(HashMap::from_iter([
                 ("facing".to_string(), placement.world_cardinal(dir).to_string()),
                 ("half".to_string(), half.to_string()),
             ]))
         }
-        BlockForm::Slab => Some(HashMap::from([("type".to_string(), half.to_string())])),
+        BlockForm::Slab => Some(HashMap::from_iter([("type".to_string(), half.to_string())])),
         _ => None,
     }
 }
