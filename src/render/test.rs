@@ -161,6 +161,111 @@ mod tests {
         assert!(render_all(&zero, &out).unwrap().is_empty());
     }
 
+    /// 12×12 scene: a 3×3 plank house (y 0..=1) with a bottom-slab roof at
+    /// y 2, and an east-west oak fence line at z 2 ending in a stone block.
+    fn shapes_scene() -> Scene {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(12, 8, 12) });
+        for x in 6..=8 {
+            for z in 6..=8 {
+                if x != 7 || z != 7 {
+                    for y in 0..=1 {
+                        s.insert(Point3D::new(x, y, z), "minecraft:oak_planks");
+                    }
+                }
+                s.insert(Point3D::new(x, 2, z), "minecraft:oak_slab[type=bottom,waterlogged=false]");
+            }
+        }
+        for x in 0..=3 {
+            let (w, e) = (x > 0, true);
+            s.insert(
+                Point3D::new(x, 0, 2),
+                &format!("minecraft:oak_fence[east={e},north=false,south=false,waterlogged=false,west={w}]"),
+            );
+        }
+        s.insert(Point3D::new(4, 0, 2), "minecraft:stone");
+        s
+    }
+
+    fn rgba(pm: &resvg::tiny_skia::Pixmap, x: u32, y: u32) -> [u8; 4] {
+        let c = pm.pixel(x, y).expect("pixel in range").demultiply();
+        [c.red(), c.green(), c.blue(), c.alpha()]
+    }
+
+    #[test]
+    fn bottom_slab_iso_leaves_upper_half_open() {
+        let g = VoxelGrid::from_scene(&shapes_scene(), None).unwrap();
+        assert_eq!(g.ny, 3);
+        let tw = 16;
+        let pm = render_iso(&g, IsoCamera::SouthEast, tw as u32).unwrap();
+        // Anchor of the front eave slab (8, 2, 8): SE camera, u = x, v = z.
+        let (th, bh, margin) = (tw / 2, tw / 2, tw);
+        let (u, y, v) = (8, 2, 8);
+        let ax = (u - v) * tw / 2 + g.nz * tw / 2 + margin;
+        let ay = (u + v) * th / 2 - y * bh + (g.ny - 1) * bh + margin;
+        // Sample the +u (east) side a quarter tile right of the front edge: a
+        // full cube would show its shaded side in both the upper and lower half.
+        let upper = rgba(&pm, (ax + tw / 4) as u32, (ay + 3 * th / 4 + bh / 4) as u32);
+        let lower = rgba(&pm, (ax + tw / 4) as u32, (ay + 3 * th / 4 + 3 * bh / 4) as u32);
+        let slab = block_color("minecraft:oak_slab");
+        let side = crate::render::grid::shade(slab, 0.8);
+        assert_eq!(lower, side, "lower half is the slab's east side");
+        assert_ne!(upper, side, "upper half must not be drawn as a side face");
+        // What shows there is what lies behind: the slab's own (unshaded) top.
+        assert_eq!(upper, slab, "upper half shows the slab top behind it");
+    }
+
+    #[test]
+    fn fence_column_covers_less_than_a_block_in_elevation() {
+        let g = VoxelGrid::from_scene(&shapes_scene(), None).unwrap();
+        let px = 16u32;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        // Seen from the south: block column x sits at pixel column (x + 1) * px,
+        // block row y at ((ny - 1 - y) + 1) * px.
+        let filled = |bx: i32, by: i32| {
+            let (x0, y0) = ((bx as u32 + 1) * px, ((g.ny - 1 - by) as u32 + 1) * px);
+            let mut n = 0;
+            for y in y0..y0 + px {
+                for x in x0..x0 + px {
+                    if rgba(&pm, x, y) != crate::render::grid::BACKGROUND {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let (fence, stone) = (filled(1, 0), filled(4, 0));
+        assert_eq!(stone, px * px, "a full block fills its square");
+        assert!(fence > 0, "the fence is visible");
+        assert!(fence < stone * 3 / 4, "fence {fence} px vs block {stone} px");
+        // The slab roof covers only the lower half of its row.
+        let roof = filled(7, 2);
+        assert_eq!(roof, px * px / 2, "bottom slab fills half its square");
+    }
+
+    /// Render a crop of a saved scene for manual inspection:
+    /// `TOME_SCENE=<path.scene> TOME_REGION="x y z sx sy sz" TOME_RENDER_OUT=<dir> cargo test render_saved_region -- --ignored`
+    #[test]
+    #[ignore]
+    fn render_saved_region() {
+        let (Ok(path), Ok(region), Ok(out)) =
+            (std::env::var("TOME_SCENE"), std::env::var("TOME_REGION"), std::env::var("TOME_RENDER_OUT"))
+        else {
+            println!("set TOME_SCENE, TOME_REGION and TOME_RENDER_OUT");
+            return;
+        };
+        let n: Vec<i32> = region.split_whitespace().map(|v| v.parse().expect("region int")).collect();
+        assert_eq!(n.len(), 6, "TOME_REGION needs 6 ints");
+        let scene = Scene::load(&path).expect("load scene");
+        let opts = RenderOptions {
+            px: 16,
+            iso_tile: 24,
+            region: Some(Rect3D { origin: Point3D::new(n[0], n[1], n[2]), size: Point3D::new(n[3], n[4], n[5]) }),
+        };
+        for p in render_views(&scene, &opts, Path::new(&out), "crop_").expect("render") {
+            println!("Rendered {}", p.display());
+        }
+    }
+
     /// ~300k blocks over 200×200×40; prints per-view timings.
     #[test]
     fn render_timing_large_scene() {

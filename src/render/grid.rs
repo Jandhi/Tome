@@ -8,6 +8,7 @@ use resvg::tiny_skia::Pixmap;
 
 use super::colors;
 use super::scene::Scene;
+use super::shape::{self, Box16, Shape};
 use crate::geometry::{Point3D, Rect3D};
 
 pub type Rgba = [u8; 4];
@@ -16,8 +17,8 @@ pub type Rgba = [u8; 4];
 pub const BACKGROUND: Rgba = [236, 240, 244, 255];
 
 /// A dense box of material indices in local coordinates `0..nx`, `0..ny`,
-/// `0..nz`. Index 0 is empty; others index `materials` (deduplicated by colour,
-/// so `water[level=0]` and `water[level=3]` share one material).
+/// `0..nz`. Index 0 is empty; others index `materials` (deduplicated by colour
+/// and [`Shape`], so `water[level=0]` and `water[level=3]` share one material).
 pub struct VoxelGrid {
     /// Absolute world coordinate of local cell (0, 0, 0).
     pub origin: Point3D,
@@ -27,6 +28,9 @@ pub struct VoxelGrid {
     /// Column-major: `(x * nz + z) * ny + y`, so a column is contiguous.
     cells: Vec<u16>,
     materials: Vec<Rgba>,
+    shapes: Vec<Shape>,
+    /// `shapes[m].boxes()`, cached.
+    boxes: Vec<Vec<Box16>>,
 }
 
 impl VoxelGrid {
@@ -40,21 +44,43 @@ impl VoxelGrid {
         }
 
         let mut materials: Vec<Rgba> = vec![[0, 0, 0, 0]];
-        let mut by_color: HashMap<Rgba, u16> = HashMap::default();
+        let mut shapes: Vec<Shape> = vec![Shape::Full];
+        let mut by_color: HashMap<(Rgba, Shape), u16> = HashMap::default();
+        let mut intern = |c: Rgba, shape: Shape| -> u16 {
+            *by_color.entry((c, shape)).or_insert_with(|| {
+                materials.push(c);
+                shapes.push(shape);
+                (materials.len() - 1) as u16
+            })
+        };
+        let palette_color: Vec<Rgba> =
+            scene.palette.iter().map(|s| colors::block_color(Scene::strip_state(s))).collect();
         let palette_mat: Vec<u16> = scene
             .palette
             .iter()
-            .map(|s| {
-                let c = colors::block_color(Scene::strip_state(s));
-                if c[3] == 0 {
-                    return 0;
-                }
-                *by_color.entry(c).or_insert_with(|| {
-                    materials.push(c);
-                    (materials.len() - 1) as u16
-                })
-            })
+            .zip(&palette_color)
+            .map(|(s, &c)| if c[3] == 0 { 0 } else { intern(c, Shape::from_block(s)) })
             .collect();
+        // Stateless fences / walls / panes link to their neighbours per cell.
+        let needs_links: Vec<bool> = scene.palette.iter().map(|s| shape::needs_connections(s)).collect();
+        let links_to = |q: Point3D| {
+            scene.blocks.get(&q).is_some_and(|&i| {
+                let s = &scene.palette[i as usize];
+                palette_color[i as usize][3] != 0 && (shape::connects(s) || Shape::from_block(s).is_full())
+            })
+        };
+        let mut cell_mat = |p: &Point3D, i: u32| -> u16 {
+            let m = palette_mat[i as usize];
+            if m == 0 || !needs_links[i as usize] {
+                return m;
+            }
+            let sides = [(0, -1, shape::N), (1, 0, shape::E), (0, 1, shape::S), (-1, 0, shape::W)]
+                .iter()
+                .filter(|&&(dx, dz, _)| links_to(Point3D::new(p.x + dx, p.y, p.z + dz)))
+                .fold(0, |acc, &(_, _, bit)| acc | bit);
+            let s = &scene.palette[i as usize];
+            intern(palette_color[i as usize], shape::with_connections(s, sides))
+        };
 
         let visible = |p: &Point3D, i: u32| crop.contains(*p) && palette_mat[i as usize] != 0;
         let (mut y_min, mut y_max) = (i32::MAX, i32::MIN);
@@ -70,15 +96,15 @@ impl VoxelGrid {
 
         let (nx, ny, nz) = (crop.size.x, y_max - y_min + 1, crop.size.z);
         let origin = Point3D::new(crop.origin.x, y_min, crop.origin.z);
-        let mut grid =
-            VoxelGrid { origin, nx, ny, nz, cells: vec![0; (nx as usize) * (ny as usize) * (nz as usize)], materials };
+        let mut cells = vec![0; (nx as usize) * (ny as usize) * (nz as usize)];
         for (p, &i) in &scene.blocks {
             if visible(p, i) {
-                let idx = grid.index(p.x - origin.x, p.y - origin.y, p.z - origin.z);
-                grid.cells[idx] = palette_mat[i as usize];
+                let (x, y, z) = (p.x - origin.x, p.y - origin.y, p.z - origin.z);
+                cells[((x * nz + z) * ny + y) as usize] = cell_mat(p, i);
             }
         }
-        Some(grid)
+        let boxes = shapes.iter().map(|s| s.boxes()).collect();
+        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, shapes, boxes })
     }
 
     fn index(&self, x: i32, y: i32, z: i32) -> usize {
@@ -99,6 +125,32 @@ impl VoxelGrid {
 
     pub fn is_opaque(&self, m: u16) -> bool {
         m != 0 && self.materials[m as usize][3] == 255
+    }
+
+    /// Number of materials, including the empty material 0.
+    pub fn material_count(&self) -> usize {
+        self.materials.len()
+    }
+
+    pub fn shape(&self, m: u16) -> Shape {
+        self.shapes[m as usize]
+    }
+
+    /// The material's shape as boxes in sixteenths (world orientation).
+    pub fn boxes(&self, m: u16) -> &[Box16] {
+        &self.boxes[m as usize]
+    }
+
+    /// `true` when material `m` fills its whole cell.
+    pub fn is_full(&self, m: u16) -> bool {
+        m != 0 && self.shapes[m as usize].is_full()
+    }
+
+    /// Whether neighbour `n` hides the face of `m` that touches it: a full
+    /// opaque cube hides anything; a translucent neighbour of the same
+    /// material hides the shared face (no inner faces in water or glass).
+    pub fn hides(&self, n: u16, m: u16) -> bool {
+        n != 0 && ((self.is_full(n) && self.is_opaque(n)) || (n == m && (self.is_full(m) || !self.is_opaque(m))))
     }
 }
 

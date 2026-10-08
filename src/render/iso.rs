@@ -5,15 +5,19 @@
 //! `screen_x = (u - v) * tile_w / 2`, `screen_y = (u + v) * tile_h / 2 - y * block_h`
 //! with `tile_h = block_h = tile_w / 2`. Blocks are painted back to front
 //! ((u + v) ascending, then y ascending). Only the three camera-facing faces
-//! (top, +u, +v) are drawn, and a face is skipped when its neighbour is opaque
-//! or the same material (so water and glass don't show internal faces).
+//! (top, +u, +v) of each of a block's shape boxes are drawn, and a face on the
+//! cell boundary is skipped when its neighbour is a full opaque cube or the
+//! same translucent material (so water and glass don't show internal faces).
+//! Partial shapes (slabs, stairs, posts, panes) never hide their neighbours.
 //!
-//! Each face shape is rasterised once with tiny_skia into a pixel mask, then
-//! stamped per block, which keeps 500k-block scenes fast.
+//! Each shape's faces are rasterised once per camera with tiny_skia into a
+//! tagged pixel mask, then stamped per block, which keeps 500k-block scenes
+//! fast.
 
 use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 
 use super::grid::{blend, canvas, shade, VoxelGrid};
+use super::shape::{Box16, Shape};
 
 /// Which corner the camera looks from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,50 +55,107 @@ impl IsoCamera {
         };
         (nu, nv, map)
     }
-}
 
-/// Pixel offsets of each face relative to the block's anchor (the projected
-/// top-back corner).
-struct FaceMasks {
-    top: Vec<(i32, i32)>,
-    right: Vec<(i32, i32)>,
-    left: Vec<(i32, i32)>,
-}
-
-fn face_masks(tw: i32) -> anyhow::Result<FaceMasks> {
-    let (hw, th, bh) = (tw as f32 / 2.0, tw as f32 / 2.0, tw as f32 / 2.0);
-    let w = tw as f32;
-    let polys: [[(f32, f32); 4]; 3] = [
-        [(hw, 0.0), (w, th / 2.0), (hw, th), (0.0, th / 2.0)],
-        [(w, th / 2.0), (hw, th), (hw, th + bh), (w, th / 2.0 + bh)],
-        [(0.0, th / 2.0), (hw, th), (hw, th + bh), (0.0, th / 2.0 + bh)],
-    ];
-    let mut out: Vec<Vec<(i32, i32)>> = Vec::new();
-    for poly in polys {
-        let mut pm = Pixmap::new(tw as u32, (th + bh) as u32).ok_or_else(|| anyhow::anyhow!("bad tile size"))?;
-        let mut pb = PathBuilder::new();
-        pb.move_to(poly[0].0, poly[0].1);
-        for &(x, y) in &poly[1..] {
-            pb.line_to(x, y);
+    /// Rotate a world-oriented box into this camera's frame: `(u0, u1, v0, v1)`
+    /// in sixteenths, consistent with [`frame`](Self::frame).
+    fn box_uv(self, b: &Box16) -> (u8, u8, u8, u8) {
+        let (x0, x1, z0, z1) = (b[0], b[3], b[2], b[5]);
+        match self {
+            IsoCamera::SouthEast => (x0, x1, z0, z1),
+            IsoCamera::NorthWest => (16 - x1, 16 - x0, 16 - z1, 16 - z0),
+            IsoCamera::NorthEast => (16 - z1, 16 - z0, x0, x1),
+            IsoCamera::SouthWest => (z0, z1, 16 - x1, 16 - x0),
         }
-        pb.close();
-        let path = pb.finish().ok_or_else(|| anyhow::anyhow!("bad face path"))?;
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(255, 255, 255, 255);
-        paint.anti_alias = false;
-        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
-        let mut mask = Vec::new();
-        for (i, p) in pm.pixels().iter().enumerate() {
-            if p.alpha() > 0 {
-                mask.push((i as i32 % tw - tw / 2, i as i32 / tw));
+    }
+}
+
+/// Face of a box as seen by the camera (index into the per-block colours).
+const TOP: u8 = 0;
+const RIGHT: u8 = 1; // +u
+const LEFT: u8 = 2; // +v
+/// Flag on a mask pixel: the face lies on the cell boundary, so a neighbour
+/// can hide it.
+const BOUNDARY: u8 = 4;
+
+/// Pixel offsets of a shape's visible faces relative to the block's anchor
+/// (the projected top-back corner of the cell), each tagged with its face
+/// (`TOP` / `RIGHT` / `LEFT`, plus `BOUNDARY`). Boxes are painted back to front
+/// within the cell, so every pixel belongs to the face visible there.
+type ShapeMask = Vec<(i32, i32, u8)>;
+
+/// A box in the camera frame, sixteenths: `(u0, u1, v0, v1, y0, y1)`.
+type UvBox = (u8, u8, u8, u8, u8, u8);
+
+/// Back-to-front order for the non-overlapping boxes of one cell. A box lying
+/// wholly on the low side of another along u, v or y can't occlude it (the
+/// camera looks from +u, +v, +y), so it is painted first.
+fn paint_order(mut boxes: Vec<UvBox>) -> Vec<UvBox> {
+    let behind = |a: &UvBox, b: &UvBox| a.1 <= b.0 || a.3 <= b.2 || a.5 <= b.4;
+    let must_precede = |a: &UvBox, b: &UvBox| behind(a, b) && !behind(b, a);
+    let mut out = Vec::with_capacity(boxes.len());
+    while !boxes.is_empty() {
+        let next = (0..boxes.len())
+            .find(|&i| (0..boxes.len()).all(|j| j == i || !must_precede(&boxes[j], &boxes[i])))
+            .unwrap_or(0);
+        out.push(boxes.remove(next));
+    }
+    out
+}
+
+fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask> {
+    let (th, bh) = (tw / 2, tw / 2);
+    let (pw, ph) = (tw, th + bh);
+    // Cell point (u, v, y) in sixteenths -> local pixmap coords (anchor at x = tw/2).
+    let proj = |u: u8, v: u8, y: u8| -> (f32, f32) {
+        let (u, v, y) = (u as f32 / 16.0, v as f32 / 16.0, y as f32 / 16.0);
+        ((u - v) * tw as f32 / 2.0 + tw as f32 / 2.0, (u + v) * th as f32 / 2.0 + (1.0 - y) * bh as f32)
+    };
+
+    let boxes: Vec<UvBox> = shape
+        .boxes()
+        .iter()
+        .map(|b| {
+            let (u0, u1, v0, v1) = cam.box_uv(b);
+            (u0, u1, v0, v1, b[1], b[4])
+        })
+        .collect();
+
+    let mut label: Vec<Option<u8>> = vec![None; (pw * ph) as usize];
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(255, 255, 255, 255);
+    paint.anti_alias = false;
+    for (u0, u1, v0, v1, y0, y1) in paint_order(boxes) {
+        let faces: [([(u8, u8, u8); 4], u8, bool); 3] = [
+            ([(u0, v0, y1), (u1, v0, y1), (u1, v1, y1), (u0, v1, y1)], TOP, y1 == 16),
+            ([(u1, v0, y1), (u1, v1, y1), (u1, v1, y0), (u1, v0, y0)], RIGHT, u1 == 16),
+            ([(u0, v1, y1), (u1, v1, y1), (u1, v1, y0), (u0, v1, y0)], LEFT, v1 == 16),
+        ];
+        for (quad, face, boundary) in faces {
+            let mut pb = PathBuilder::new();
+            let (x, y) = proj(quad[0].0, quad[0].1, quad[0].2);
+            pb.move_to(x, y);
+            for &(u, v, yy) in &quad[1..] {
+                let (x, y) = proj(u, v, yy);
+                pb.line_to(x, y);
+            }
+            pb.close();
+            // Degenerate (zero-area) faces have no path: nothing to draw.
+            let Some(path) = pb.finish() else { continue };
+            let mut pm = Pixmap::new(pw as u32, ph as u32).ok_or_else(|| anyhow::anyhow!("bad tile size"))?;
+            pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+            let tag = face | if boundary { BOUNDARY } else { 0 };
+            for (i, p) in pm.pixels().iter().enumerate() {
+                if p.alpha() > 0 {
+                    label[i] = Some(tag);
+                }
             }
         }
-        out.push(mask);
     }
-    let left = out.pop().unwrap_or_default();
-    let right = out.pop().unwrap_or_default();
-    let top = out.pop().unwrap_or_default();
-    Ok(FaceMasks { top, right, left })
+    Ok(label
+        .iter()
+        .enumerate()
+        .filter_map(|(i, t)| t.map(|t| (i as i32 % pw - tw / 2, i as i32 / pw, t)))
+        .collect())
 }
 
 /// Snap a requested tile width to a multiple of 4 (so every projected anchor
@@ -116,11 +177,27 @@ pub fn image_size(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> (usize, usize) 
 pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<Pixmap> {
     let tw = tile_width(tile_w);
     let (th, bh) = (tw / 2, tw / 2);
-    let masks = face_masks(tw)?;
     let (w, h) = image_size(g, cam, tile_w);
     let mut pm = canvas(w, h)?;
     let (iw, ih) = (w as i32, h as i32);
     let data = pm.data_mut();
+
+    // One mask per distinct shape, shared by every material with that shape.
+    let mut shapes: Vec<Shape> = Vec::new();
+    let mut masks: Vec<ShapeMask> = Vec::new();
+    let mut mat_mask: Vec<usize> = Vec::with_capacity(g.material_count());
+    for m in 0..g.material_count() {
+        let shape = g.shape(m as u16);
+        let i = match shapes.iter().position(|&s| s == shape) {
+            Some(i) => i,
+            None => {
+                shapes.push(shape);
+                masks.push(shape_mask(shape, cam, tw)?);
+                shapes.len() - 1
+            }
+        };
+        mat_mask.push(i);
+    }
 
     let (nu, nv, map) = cam.frame(g);
     let at = |u: i32, y: i32, v: i32| {
@@ -134,15 +211,6 @@ pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<
     let off_x = nv * tw / 2 + margin;
     let off_y = (g.ny - 1) * bh + margin;
 
-    let mut stamp = |mask: &[(i32, i32)], ax: i32, ay: i32, c: [u8; 4]| {
-        for &(dx, dy) in mask {
-            let (px, py) = (ax + dx, ay + dy);
-            if px >= 0 && py >= 0 && px < iw && py < ih {
-                blend(data, ((py * iw + px) * 4) as usize, c);
-            }
-        }
-    };
-
     for s in 0..(nu + nv - 1) {
         for y in 0..g.ny {
             for u in (s - (nv - 1)).max(0)..=s.min(nu - 1) {
@@ -151,22 +219,26 @@ pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<
                 if m == 0 {
                     continue;
                 }
-                let hides = |n: u16| n != 0 && (n == m || g.is_opaque(n));
-                let (top, right, left) = (!hides(at(u, y + 1, v)), !hides(at(u + 1, y, v)), !hides(at(u, y, v + 1)));
-                if !(top || right || left) {
+                // hidden[face]: that boundary face is covered by its neighbour.
+                let hidden = [g.hides(at(u, y + 1, v), m), g.hides(at(u + 1, y, v), m), g.hides(at(u, y, v + 1), m)];
+                // Every view ray into the cell leaves through its top, +u or +v
+                // side, so with all three covered nothing of this block shows.
+                if hidden.iter().all(|&h| h) {
                     continue;
                 }
                 let c = g.color(m);
+                let colors = [column_alpha(c, &at, u, y, v, m), shade(c, 0.8), shade(c, 0.64)];
                 let ax = (u - v) * tw / 2 + off_x;
                 let ay = (u + v) * th / 2 - y * bh + off_y;
-                if top {
-                    stamp(&masks.top, ax, ay, column_alpha(c, &at, u, y, v, m));
-                }
-                if right {
-                    stamp(&masks.right, ax, ay, shade(c, 0.8));
-                }
-                if left {
-                    stamp(&masks.left, ax, ay, shade(c, 0.64));
+                for &(dx, dy, tag) in &masks[mat_mask[m as usize]] {
+                    let face = (tag & 3) as usize;
+                    if tag & BOUNDARY != 0 && hidden[face] {
+                        continue;
+                    }
+                    let (px, py) = (ax + dx, ay + dy);
+                    if px >= 0 && py >= 0 && px < iw && py < ih {
+                        blend(data, ((py * iw + px) * 4) as usize, colors[face]);
+                    }
                 }
             }
         }

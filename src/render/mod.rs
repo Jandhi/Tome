@@ -10,6 +10,7 @@ pub mod elevation;
 pub mod grid;
 pub mod iso;
 pub mod scene;
+pub mod shape;
 pub mod topdown;
 
 #[cfg(test)]

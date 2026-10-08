@@ -319,11 +319,15 @@ impl Editor {
             }
 
             // Fill down to the lowest neighbouring ground so slopes and cliffs
-            // render as solid faces instead of floating tiles.
+            // render as solid faces instead of floating tiles, but at most
+            // MAX_FILL_DEPTH below this column's own top so cave mouths and
+            // ravines don't hang long columns below the terrain.
+            const MAX_FILL_DEPTH: i32 = 8;
             let low = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .iter()
                 .filter_map(|&(dx, dz)| solid_top(Point2D::new(x + dx, z + dz)))
-                .fold(top, i32::min);
+                .fold(top, i32::min)
+                .max(top - MAX_FILL_DEPTH);
             let filler = solid_at(at(top - 1)).unwrap_or_else(|| surface.clone());
             for y in low - 1..top - 1 {
                 put(at(y), &solid_at(at(y)).unwrap_or_else(|| filler.clone()));
