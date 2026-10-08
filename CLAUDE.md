@@ -12,8 +12,8 @@ cargo test build_furnished_houses_offline       # Dry-run pipeline — no server
 cargo test pipeline_invariants_property_test    # 240 buildings × invariant checks
 cargo run                                       # Live server: generate, then save fixture + scene and render to output/runs/<seed>/
 cargo run -- --full                             # Same, plus the AI-written chronicle book (OpenAI call; off by default)
-cargo run -- --offline <fixture> [seed]         # No server: build a town from a saved terrain fixture -> output/runs/offline-<seed>/ (~95 s debug)
-cargo run -- --render <scene> [out_dir]         # Re-render a saved town.scene, no server
+cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --release -- --offline`; ~5 s release vs ~95 s debug)
+cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --release -- --render`)
 cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
 ```
 
@@ -23,7 +23,7 @@ Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `
 
 ### Determinism
 
-Generation is deterministic in the seed only because generator code imports `crate::util::{HashMap, HashSet}` (fixed hasher, `src/util/stable_hash.rs`). Never use `std::collections::{HashMap, HashSet}` in generator/editor/geometry code (`Block.state` is the exception and stays std). Construct with `default()` / `from_iter` / `with_capacity_and_hasher`. Regression check: `TOME_FIXTURE=<fixture> cargo test offline_town_is_deterministic -- --ignored`.
+Generation is deterministic in the seed only because generator code imports `crate::util::{HashMap, HashSet}` (fixed hasher, `src/util/stable_hash.rs`). Never use `std::collections::{HashMap, HashSet}` in generator/editor/geometry code (`Block.state` is the exception and stays std). Construct with `default()` / `from_iter` / `with_capacity_and_hasher`. Regression check: `TOME_FIXTURE=<fixture> cargo test --release offline_town_is_deterministic -- --ignored`.
 
 ### Offline / dry-run mode
 

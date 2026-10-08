@@ -1,0 +1,4 @@
+[alias]
+# Offline town loop: release is ~20x faster than debug (4.5 s vs 97 s for a 256x256 town).
+offline = "run --release -- --offline"
+render = "run --release -- --render"
