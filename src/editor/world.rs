@@ -81,6 +81,10 @@ pub struct World {
     motion_blocking_height_map : Vec<Vec<i32>>,
     build_claim_map : Vec<Vec<BuildClaim>>,
     pub chunks: HashMap<Point2D, Chunk>,
+    /// Absolute Y band a terrain fixture kept chunk sections for. Outside it
+    /// `get_block` synthesises air above and stone below instead of `None`,
+    /// so a fixture world reads like the live one. `None` for live/synthetic.
+    pub trimmed_y_range: Option<(i32, i32)>,
 }
 
 impl World {
@@ -153,6 +157,7 @@ impl World {
 
         let mut world = World {
             build_area,
+            trimmed_y_range: None,
             parcels: HashMap::new(),
             districts: HashMap::new(),
             parcel_map,
@@ -205,7 +210,9 @@ impl World {
     /// `get_block` returns `None` outside the fixture's `kept_y_range`.
     pub fn from_fixture(fixture: TerrainFixture) -> World {
         let chunks = fixture.chunks.into_iter().map(|c| (Point2D::new(c.x_pos, c.z_pos), c)).collect();
-        World::from_parts(fixture.build_area, chunks, fixture.ground_map, fixture.ocean_map, fixture.motion_blocking_map)
+        let mut world = World::from_parts(fixture.build_area, chunks, fixture.ground_map, fixture.ocean_map, fixture.motion_blocking_map);
+        world.trimmed_y_range = Some(fixture.kept_y_range);
+        world
     }
 
     /// Snapshot the raw terrain inputs (chunks + absolute heightmaps) so this
@@ -251,6 +258,7 @@ impl World {
 
         World {
             build_area,
+            trimmed_y_range: None,
             parcels: HashMap::new(),
             parcel_analysis_data: HashMap::new(),
             districts: HashMap::new(),
@@ -471,8 +479,17 @@ impl World {
         let chunk = self.chunks.get(&chunk_coordinates.drop_y())?;
         //info!("Found chunk: {:?}", chunk);
 
-        let section = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y)?;
-        //info!("Found section: {:?}", section);
+        let Some(section) = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y) else {
+            // Fixture worlds drop sections far from the surface: stand in for them.
+            let (lo, hi) = self.trimmed_y_range?;
+            return if point.y > hi {
+                Some(Block::from("minecraft:air"))
+            } else if point.y < lo {
+                Some(Block::from("minecraft:stone"))
+            } else {
+                None
+            };
+        };
 
         let block_states = section.block_states.as_ref()?;
 

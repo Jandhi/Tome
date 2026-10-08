@@ -124,18 +124,18 @@ async fn run_generation_once() {
     // None → auto-select the culture from the build area's climate.
     crate::generator::settlement::generate_town(&mut editor, seed, None).await;
 
-    if let Err(e) = save_and_render_town(&editor, seed.0, &run_dir) {
+    if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir) {
         log::warn!("Failed to save/render town scene in {}: {e:#}", run_dir.display());
     }
 }
 
 /// Capture the generated town as `town.scene` in `dir` and render its views
 /// next to it.
-fn save_and_render_town(editor: &crate::editor::Editor, seed: i64, dir: &std::path::Path) -> anyhow::Result<()> {
+fn save_and_render_town(editor: &crate::editor::Editor, seed: i64, source: &str, dir: &std::path::Path) -> anyhow::Result<()> {
     let mut scene = editor.capture_scene();
     let b = scene.bounds;
     scene.meta.insert("seed".into(), seed.to_string());
-    scene.meta.insert("source".into(), "live".into());
+    scene.meta.insert("source".into(), source.into());
     scene.meta.insert("captured_at".into(), chrono::Local::now().to_rfc3339());
     scene.meta.insert(
         "build_area".into(),
@@ -148,6 +148,30 @@ fn save_and_render_town(editor: &crate::editor::Editor, seed: i64, dir: &std::pa
         println!("Rendered {}", path.display());
     }
     println!("Run output in {}", dir.display());
+    Ok(())
+}
+
+/// `--offline <fixture> [seed]`: build a town from a saved terrain fixture with
+/// no server at all, then save and render it exactly like a live run, under
+/// `output/runs/offline-<seed>/`.
+async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Result<()> {
+    let t0 = std::time::Instant::now();
+    let fixture = crate::editor::fixture::TerrainFixture::load(fixture_path)?;
+    let world = World::from_fixture(fixture);
+    println!("Loaded fixture {fixture_path} in {:.1?}", t0.elapsed());
+    let seed = match seed_arg {
+        Some(s) => crate::noise::Seed(s.parse()?),
+        None => crate::noise::Seed(random_seed()),
+    };
+    let mut editor = world.get_offline_editor();
+    println!("Generating town offline with seed {}", seed.0);
+    let t1 = std::time::Instant::now();
+    crate::generator::settlement::generate_town(&mut editor, seed, None).await;
+    println!("Generated in {:.1?}", t1.elapsed());
+    let dir = std::path::PathBuf::from("output/runs").join(format!("offline-{}", seed.0));
+    let t2 = std::time::Instant::now();
+    save_and_render_town(&editor, seed.0, "offline", &dir)?;
+    println!("Saved and rendered in {:.1?}; total {:.1?}", t2.elapsed(), t0.elapsed());
     Ok(())
 }
 
@@ -200,6 +224,17 @@ async fn main() {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
+    if args.iter().any(|a| a == "--offline") {
+        let Some(fixture_path) = arg_after("--offline", 1) else {
+            eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");
+            std::process::exit(2);
+        };
+        if let Err(e) = run_offline(fixture_path, arg_after("--offline", 2)).await {
+            eprintln!("Offline run failed: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--render") {
         let Some(scene_path) = arg_after("--render", 1) else {
             eprintln!("usage: --render <path.scene> [out_dir]");

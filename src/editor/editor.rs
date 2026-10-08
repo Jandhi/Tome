@@ -354,6 +354,10 @@ impl Editor {
     }
 
     pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
+        if self.offline {
+            log::debug!("offline editor: skipping give_player_book {title:?}");
+            return Ok(CommandResponse::default());
+        }
         let title = if title.chars().count() > 32 {
             title.chars().take(32).collect::<String>()
         } else {
@@ -376,6 +380,9 @@ impl Editor {
     /// buffer/cache**, so the placed blocks won't be visible to later
     /// `get_block` reads.
     pub async fn place_feature(&self, feature: &str, point: Point3D) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
         let world = point + self.build_area.origin;
         let command = format!("place feature {} {} {} {}", feature, world.x, world.y, world.z);
         self.provider.command(vec![command]).await?;
