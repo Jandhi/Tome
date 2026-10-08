@@ -105,7 +105,7 @@ fn random_seed() -> i64 {
         .unwrap_or(12345)
 }
 
-async fn run_generation_once() {
+async fn run_generation_once(full: bool) {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     // Random per-run seed so each interactive run is a different town; printed so
@@ -122,7 +122,8 @@ async fn run_generation_once() {
     let mut editor = world.get_editor();
     println!("Generating town with seed {}", seed.0);
     // None → auto-select the culture from the build area's climate.
-    crate::generator::settlement::generate_town(&mut editor, seed, None).await;
+    let options = crate::generator::settlement::TownOptions { chronicle: full };
+    crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
 
     if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir) {
         log::warn!("Failed to save/render town scene in {}: {e:#}", run_dir.display());
@@ -259,6 +260,8 @@ async fn main() {
     }
 
     let use_visualizer = args.iter().any(|arg| arg == "--visualize");
+    // Opt-in extras for a live run: currently the AI-written chronicle book.
+    let full = args.iter().any(|arg| arg == "--full");
 
     #[cfg(feature = "visualizer")]
     if use_visualizer {
@@ -282,6 +285,6 @@ async fn main() {
     }
 
     if !use_visualizer {
-        run_generation_once().await;
+        run_generation_once(full).await;
     }
 }

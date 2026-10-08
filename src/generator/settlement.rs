@@ -455,10 +455,27 @@ fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &Loaded
     counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
 }
 
+/// Per-run switches that are not part of the town itself.
+#[derive(Debug, Clone, Default)]
+pub struct TownOptions {
+    /// Ask OpenAI to write the chronicle book at the end (live runs only; it
+    /// costs an API call). Off by default; `cargo run -- --full` turns it on.
+    pub chronicle: bool,
+}
+
 pub async fn generate_town(
     editor: &mut Editor,
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
+) {
+    generate_town_with(editor, seed, culture, &TownOptions::default()).await
+}
+
+pub async fn generate_town_with(
+    editor: &mut Editor,
+    seed: Seed,
+    culture: Option<crate::generator::buildings_v2::Culture>,
+    options: &TownOptions,
 ) {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
@@ -2128,8 +2145,8 @@ pub async fn generate_town(
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
             total_buildings, population_count, &harvests, &produces, &mut chronicle_rng,
         );
-        if editor.is_offline() {
-            println!("Offline run: skipping the AI-written chronicle (no OpenAI call)");
+        if !options.chronicle || editor.is_offline() {
+            println!("Skipping the AI-written chronicle (live runs write it with --full)");
         } else if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
         }

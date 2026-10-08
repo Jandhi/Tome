@@ -10,8 +10,20 @@ cargo check
 cargo test                                      # Most tests need a live Minecraft server
 cargo test build_furnished_houses_offline       # Dry-run pipeline — no server needed
 cargo test pipeline_invariants_property_test    # 240 buildings × invariant checks
-cargo run                                       # Needs live server
+cargo run                                       # Live server: generate, then save fixture + scene and render to output/runs/<seed>/
+cargo run -- --full                             # Same, plus the AI-written chronicle book (OpenAI call; off by default)
+cargo run -- --offline <fixture> [seed]         # No server: build a town from a saved terrain fixture -> output/runs/offline-<seed>/ (~95 s debug)
+cargo run -- --render <scene> [out_dir]         # Re-render a saved town.scene, no server
+cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
 ```
+
+### Saved towns and renders
+
+Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `terrain.fixture.nbt.gz` (chunks + heightmaps, taken before generation), `town.scene` (terrain surface + every placed block, gzip text, palette-interned `id[state]` strings) and PNG renders (`top.png` hill-shaded top-down, `iso_se.png`/`iso_nw.png` isometric, `elev_{south,north,east,west}.png`, described in `index.txt`). Read the PNGs before asking for an in-game check. `src/render/` is the renderer (`render_all`, `render_views` with a region crop for one building); `Editor::capture_scene` builds the scene; `src/editor/fixture.rs` is the fixture.
+
+### Determinism
+
+Generation is deterministic in the seed only because generator code imports `crate::util::{HashMap, HashSet}` (fixed hasher, `src/util/stable_hash.rs`). Never use `std::collections::{HashMap, HashSet}` in generator/editor/geometry code (`Block.state` is the exception and stays std). Construct with `default()` / `from_iter` / `with_capacity_and_hasher`. Regression check: `TOME_FIXTURE=<fixture> cargo test offline_town_is_deterministic -- --ignored`.
 
 ### Offline / dry-run mode
 
