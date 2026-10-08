@@ -2128,7 +2128,9 @@ pub async fn generate_town(
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
             total_buildings, population_count, &harvests, &produces, &mut chronicle_rng,
         );
-        if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
+        if editor.is_offline() {
+            println!("Offline run: skipping the AI-written chronicle (no OpenAI call)");
+        } else if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
         }
     }
