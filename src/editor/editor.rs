@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point2D, Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -276,6 +276,75 @@ impl Editor {
         }
     }
 
+    /// Every block this run placed, in build-area LOCAL coords, including air
+    /// (cleared terrain). Order is unspecified.
+    pub fn placed_blocks(&self) -> Vec<(Point3D, Block)> {
+        self.block_cache.borrow().iter().map(|(p, b)| (*p, b.clone())).collect()
+    }
+
+    /// Snapshot the town as a [`Scene`](crate::render::Scene) in absolute coords:
+    /// a terrain layer derived from the World's heightmaps and chunks, then every
+    /// placed block (air included) on top. Sets no meta; callers do.
+    pub fn capture_scene(&self) -> crate::render::Scene {
+        let origin = self.build_area.origin;
+        let world = self.world();
+        let mut scene = crate::render::Scene::new(self.build_area);
+        let mut put = |local: Point3D, block: &Block| scene.insert(local + origin, &block_string(block));
+        // Real block from the chunks, ignoring air (missing data or a column the
+        // generator since raised); callers fall back to a stand-in block.
+        let solid_at = |p: Point3D| world.get_block(p).filter(|b| !b.id.is_air());
+
+        // Top of the solid ground per column (local Y of the first cell above it):
+        // the seabed for water columns, the surface otherwise.
+        let solid_top = |c: Point2D| -> Option<i32> {
+            if world.is_water(c) { world.get_ocean_floor_height_at(c) } else { world.get_height_at(c) }
+        };
+
+        for c in world.iter_points_2d() {
+            let (Some(ground), Some(surface), Some(top)) = (world.get_height_at(c), world.get_ground_block(c), solid_top(c)) else {
+                continue;
+            };
+            let (x, z) = (c.x, c.y);
+            let at = |y: i32| Point3D::new(x, y, z);
+
+            if surface.id.is_water() {
+                // Water (or ice/kelp) from the seabed up to the surface block.
+                for y in top..ground - 1 {
+                    put(at(y), &solid_at(at(y)).unwrap_or_else(|| "minecraft:water".into()));
+                }
+                put(at(ground - 1), surface);
+                put(at(top - 1), &solid_at(at(top - 1)).unwrap_or_else(|| "minecraft:sand".into()));
+            } else {
+                put(at(ground - 1), surface);
+            }
+
+            // Fill down to the lowest neighbouring ground so slopes and cliffs
+            // render as solid faces instead of floating tiles.
+            let low = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter_map(|&(dx, dz)| solid_top(Point2D::new(x + dx, z + dz)))
+                .fold(top, i32::min);
+            let filler = solid_at(at(top - 1)).unwrap_or_else(|| surface.clone());
+            for y in low - 1..top - 1 {
+                put(at(y), &solid_at(at(y)).unwrap_or_else(|| filler.clone()));
+            }
+
+            // Trees and tall plants above the no-plants surface.
+            if let Some(mb) = world.get_motion_blocking_height_at(c) {
+                for y in ground..mb {
+                    if let Some(b) = solid_at(at(y)) {
+                        put(at(y), &b);
+                    }
+                }
+            }
+        }
+
+        for (p, b) in self.block_cache.borrow().iter() {
+            put(*p, b);
+        }
+        scene
+    }
+
     pub fn world(&self) -> &World {
         &self.world
     }
@@ -389,4 +458,19 @@ impl Drop for Editor {
             error!("Editor was dropped with non-empty block buffer!");
         }
     }
+}
+/// `minecraft:id[k=v,...]` with sorted state keys (deterministic output);
+/// bare ids get the `minecraft:` namespace.
+fn block_string(block: &Block) -> String {
+    let id = block.id.as_str();
+    let mut out = if id.contains(':') { id.to_string() } else { format!("minecraft:{id}") };
+    if let Some(state) = block.state.as_ref().filter(|s| !s.is_empty()) {
+        let mut kv: Vec<_> = state.iter().collect();
+        kv.sort();
+        let parts: Vec<String> = kv.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        out.push('[');
+        out.push_str(&parts.join(","));
+        out.push(']');
+    }
+    out
 }

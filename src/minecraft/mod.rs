@@ -1,6 +1,6 @@
 mod block;
 mod biomes;
-mod chunk;
+pub mod chunk;
 mod block_entity;
 mod form;
 mod color;

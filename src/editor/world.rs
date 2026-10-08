@@ -6,7 +6,7 @@ use log::info;
 
 use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
 
-use super::Editor;
+use super::{fixture::TerrainFixture, Editor};
 
 const CHUNK_SIZE : i32 = 16;
 
@@ -92,11 +92,6 @@ impl World {
             build_area.size.x,
             build_area.size.z,
         );
-        let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
-
-        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
-        let district_map = vec![vec![None; size_z_usize]; size_x_usize];
-
         let chunk_rect = Rect3D {
             origin: point_to_chunk_coordinates(build_area.origin),
             size: point_to_chunk_coordinates(build_area.max()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
@@ -131,7 +126,23 @@ impl World {
             .get_heightmap(origin_x, origin_z, size_x, size_z, HeightMapType::MotionBlocking)
             .await?;
 
-        let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
+        Ok(World::from_parts(build_area, chunks, ground_map, ocean_map, motion_blocking_map))
+    }
+
+    /// Assemble a World from raw server data: the chunks plus the three
+    /// heightmaps exactly as the GDMC server returns them (absolute Y, indexed
+    /// `[x][z]`). Derives the local-Y heightmaps, `ground_block_map` and
+    /// `ground_biome_map`. Shared by [`World::new`] and [`World::from_fixture`].
+    pub fn from_parts(
+        build_area: Rect3D,
+        chunks: HashMap<Point2D, Chunk>,
+        ground_map: Vec<Vec<i32>>,
+        ocean_map: Vec<Vec<i32>>,
+        motion_blocking_map: Vec<Vec<i32>>,
+    ) -> World {
+        let (size_x_usize, size_z_usize) = (build_area.size.x as usize, build_area.size.z as usize);
+        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
+        let district_map = vec![vec![None; size_z_usize]; size_x_usize];
 
         let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
@@ -187,7 +198,30 @@ impl World {
             }
         }
 
-        Ok(world)
+        world
+    }
+
+    /// Rebuild a World from a saved [`TerrainFixture`] without any HTTP traffic.
+    /// `get_block` returns `None` outside the fixture's `kept_y_range`.
+    pub fn from_fixture(fixture: TerrainFixture) -> World {
+        let chunks = fixture.chunks.into_iter().map(|c| (Point2D::new(c.x_pos, c.z_pos), c)).collect();
+        World::from_parts(fixture.build_area, chunks, fixture.ground_map, fixture.ocean_map, fixture.motion_blocking_map)
+    }
+
+    /// Snapshot the raw terrain inputs (chunks + absolute heightmaps) so this
+    /// World can be rebuilt offline with [`World::from_fixture`]. Take it
+    /// before generation: the heightmaps are mutated as the town is built.
+    /// Chunk sections outside the terrain band are dropped (see `TerrainFixture`).
+    pub fn to_fixture(&self) -> TerrainFixture {
+        let y = self.build_area.origin.y;
+        let abs = |m: &Vec<Vec<i32>>| m.iter().map(|col| col.iter().map(|h| h + y).collect()).collect();
+        TerrainFixture::new(
+            self.build_area,
+            self.chunks.values().cloned().collect(),
+            abs(&self.ground_height_map),
+            abs(&self.ocean_floor_height_map),
+            abs(&self.motion_blocking_height_map),
+        )
     }
 
     pub fn get_editor(self) -> Editor {
