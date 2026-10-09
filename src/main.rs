@@ -201,7 +201,37 @@ fn render_saved_scene(scene_path: &str, out_dir: Option<&str>) -> anyhow::Result
     for path in crate::render::render_all(&scene, &out_dir)? {
         println!("Rendered {}", path.display());
     }
+    write_viewer(&scene, &out_dir.join("viewer.html"))?;
     println!("Render output in {}", out_dir.display());
+    Ok(())
+}
+
+/// `--view <path.scene> [out.html]`: write the interactive first-person viewer
+/// page for a saved scene (default: `viewer.html` beside the scene). Open the
+/// file in a browser; no server needed.
+fn view_saved_scene(scene_path: &str, out: Option<&str>) -> anyhow::Result<()> {
+    let scene_path = std::path::Path::new(scene_path);
+    let scene = crate::render::Scene::load(scene_path)?;
+    let out = match out {
+        Some(p) => std::path::PathBuf::from(p),
+        None => scene_path.with_file_name("viewer.html"),
+    };
+    write_viewer(&scene, &out)
+}
+
+fn write_viewer(scene: &crate::render::Scene, out: &std::path::Path) -> anyhow::Result<()> {
+    let t = std::time::Instant::now();
+    let s = crate::render::viewer::write_viewer_html(scene, None, out)?;
+    println!(
+        "Viewer: {} faces ({} merged full-block, {} partial), {:.1} MB buffer, {:.1} MB html in {:.1?} -> {}",
+        s.faces,
+        s.merged_faces,
+        s.partial_faces,
+        s.buffer_bytes as f64 / 1e6,
+        s.html_bytes as f64 / 1e6,
+        t.elapsed(),
+        out.display()
+    );
     Ok(())
 }
 
@@ -328,6 +358,17 @@ async fn main() {
         };
         if let Err(e) = render_saved_scene(scene_path, arg_after("--render", 2)) {
             eprintln!("Render failed: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args.iter().any(|a| a == "--view") {
+        let Some(scene_path) = arg_after("--view", 1) else {
+            eprintln!("usage: --view <path.scene> [out.html]");
+            std::process::exit(2);
+        };
+        if let Err(e) = view_saved_scene(scene_path, arg_after("--view", 2)) {
+            eprintln!("Viewer export failed: {e:#}");
             std::process::exit(1);
         }
         return;

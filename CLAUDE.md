@@ -13,7 +13,8 @@ cargo test pipeline_invariants_property_test    # 240 buildings × invariant che
 cargo run                                       # Live server: generate, then save fixture + scene and render to output/runs/<seed>/
 cargo run -- --full                             # Same, plus the AI-written chronicle book (OpenAI call; off by default)
 cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --profile fast -- --offline`: release speed, ~5 s incremental rebuilds)
-cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --profile fast -- --render`)
+cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --profile fast -- --render`); also writes viewer.html
+cargo view <scene> [out.html]                   # First-person 3D viewer of a saved scene as one self-contained HTML file (default viewer.html beside the scene); open it in Chrome, click to look, WASD/Space/Shift to fly, F walk, P screenshot; HUD shows /tp coords
 cargo run --profile fast -- --houses [--culture medieval|desert|japanese] [--seed N] [--count N] [--size cottage|house|hall|manor|mixed] [--rects "x,z,w,h;..."] [--jetty] [--px N]   # No server: houses on a flat world, per-house crops + ASCII plans + houses.json -> output/houses/<culture>-<seed>/ ; --rects pins the footprint (plot-relative, core first) so one shape can be checked under every roof style
 cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
 cargo run -- --compare <a.scene> <b.scene> [out_dir]  # Block diff of two scenes: table + diff.json + diff_top.png (red only-A, green only-B, yellow changed) into out_dir (default: A's dir)
