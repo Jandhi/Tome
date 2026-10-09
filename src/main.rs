@@ -190,20 +190,54 @@ async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Resu
     Ok(())
 }
 
-/// `--render <path.scene> [out_dir]`: re-render a saved scene, no server needed.
-fn render_saved_scene(scene_path: &str, out_dir: Option<&str>) -> anyhow::Result<()> {
+/// `--render <path.scene> [out_dir] [--light <mode>]`: re-render a saved
+/// scene, no server needed. `--light` computes the town's light map and
+/// reports its timing and levels; the flat views themselves stay unlit.
+fn render_saved_scene(scene_path: &str, out_dir: Option<&str>, lighting: Option<crate::render::light::Lighting>) -> anyhow::Result<()> {
     let scene_path = std::path::Path::new(scene_path);
     let scene = crate::render::Scene::load(scene_path)?;
     let out_dir = match out_dir {
         Some(d) => std::path::PathBuf::from(d),
         None => scene_path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
     };
+    if let Some(lighting) = lighting {
+        report_light_map(&scene, lighting);
+    }
     for path in crate::render::render_all(&scene, &out_dir)? {
         println!("Rendered {}", path.display());
     }
     write_viewer(&scene, &out_dir.join("viewer.html"))?;
     println!("Render output in {}", out_dir.display());
     Ok(())
+}
+
+/// Compute the whole scene's light map and print how long it took and how
+/// its light is distributed (nothing is written: the flat views are not lit yet).
+fn report_light_map(scene: &crate::render::Scene, lighting: crate::render::light::Lighting) {
+    use crate::render::light::LightMap;
+    let t = std::time::Instant::now();
+    let Some(g) = crate::render::grid::VoxelGrid::from_scene(scene, None) else {
+        println!("Light map: nothing visible in the scene");
+        return;
+    };
+    let grid_time = t.elapsed();
+    let t = std::time::Instant::now();
+    let map = LightMap::new(&g);
+    let map_time = t.elapsed();
+    let (sky, block) = map.histogram();
+    let open: usize = sky.iter().sum();
+    let pct = |n: usize| if open == 0 { 0.0 } else { 100.0 * n as f64 / open as f64 };
+    let lit_by_blocks: usize = block[1..].iter().sum();
+    let mean = |levels: &[usize; 16]| {
+        if open == 0 { 0.0 } else { levels.iter().enumerate().map(|(l, &n)| l * n).sum::<usize>() as f64 / open as f64 }
+    };
+    println!(
+        "Light map ({}, daylight {:.2}): {}x{}x{} = {} cells (grid {:.1?}, light {:.1?}); {} emitters; \
+         of {} non-solid cells {:.1}% have full sky light, {:.1}% are in deep shade (sky <= 4), \
+         {:.1}% get any block light; mean sky {:.1}, mean block {:.1}",
+        lighting.tag(), lighting.daylight, g.nx, g.ny, g.nz, map.len(), grid_time, map_time, map.emitters,
+        open, pct(sky[15]), pct(sky[..=4].iter().sum()), pct(lit_by_blocks), mean(&sky), mean(&block),
+    );
 }
 
 /// `--view <path.scene> [out.html]`: write the interactive first-person viewer
@@ -283,10 +317,11 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
 }
 
 /// `--houses [--culture c] [--seed n] [--count n] [--size s] [--rects "x,z,w,h;..."] [--jetty] [--knee-wall] [--tall-top]
-/// [--variants] [--live] [--px n]`: build individual houses and render each one,
+/// [--variants] [--live] [--px n] [--light day|night|dusk|<0..1>]`: build individual houses and render each one,
 /// under `output/houses/[live-]<culture>-<seed>[...]/`. Offline on a blank flat
 /// world by default; `--live` builds into the server's build area. `--variants`
-/// builds one row per upper-storey variant (base, knee, tall, both).
+/// builds one row per upper-storey variant (base, knee, tall, both). `--light`
+/// lights the room views with sky light and lamps (the directory gains `-day`, `-night`, ...).
 async fn run_houses(args: &[String]) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
@@ -318,6 +353,7 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         live: args.iter().any(|a| a == "--live"),
         px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
         rects: arg_after("--rects", 1).map(parse_rects).transpose()?,
+        lighting: arg_after("--light", 1).map(crate::render::light::Lighting::parse).transpose()?,
     };
     run_showcase(&opts).await?;
     Ok(())
@@ -353,10 +389,19 @@ async fn main() {
     }
     if args.iter().any(|a| a == "--render") {
         let Some(scene_path) = arg_after("--render", 1) else {
-            eprintln!("usage: --render <path.scene> [out_dir]");
+            eprintln!("usage: --render <path.scene> [out_dir] [--light day|night|dusk|<0..1>]");
             std::process::exit(2);
         };
-        if let Err(e) = render_saved_scene(scene_path, arg_after("--render", 2)) {
+        // The optional out_dir must not be the --light flag itself.
+        let out_dir = arg_after("--render", 2).filter(|d| !d.starts_with("--"));
+        let lighting = match arg_after("--light", 1).map(crate::render::light::Lighting::parse).transpose() {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
+        if let Err(e) = render_saved_scene(scene_path, out_dir, lighting) {
             eprintln!("Render failed: {e:#}");
             std::process::exit(1);
         }

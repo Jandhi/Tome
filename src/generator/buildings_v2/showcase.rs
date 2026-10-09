@@ -4,10 +4,12 @@
 //! generator can be judged visually inside and out. Offline by default, on a
 //! blank flat grass world (no server); `--live` builds into the server's build
 //! area instead. `--variants` builds every house once per upper-storey
-//! variant, one row per variant; `--rects` pins the footprint.
+//! variant, one row per variant; `--rects` pins the footprint; `--light`
+//! lights the room views (sky and lamps; the flat views stay unlit).
 //! Entry point: `cargo run --profile fast -- --houses [options]`.
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use crate::editor::{Editor, World};
 use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
@@ -23,7 +25,8 @@ use crate::noise::RNG;
 use crate::render::elevation::{render_elevation, ElevationSide};
 use crate::render::grid::VoxelGrid;
 use crate::render::iso::{render_iso, IsoCamera};
-use crate::render::perspective::{contact_sheet, render_perspective, PerspectiveCamera};
+use crate::render::light::{LightMap, Lighting};
+use crate::render::perspective::{contact_sheet, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
 use crate::render::topdown::render_topdown;
 use crate::render::{render_views, RenderOptions};
 
@@ -122,6 +125,11 @@ pub struct ShowcaseOptions {
     /// Size class and roof style still cycle, so `--count 3` on a medieval
     /// culture shows the same footprint under all three gable pitches.
     pub rects: Option<Vec<Rect2D>>,
+    /// Light the room views (sky light through windows, lanterns and candles,
+    /// dark cellars) under this daylight; the output directory gains the
+    /// lighting's tag. `None` renders them unlit. The exterior views are
+    /// unlit either way.
+    pub lighting: Option<Lighting>,
 }
 
 /// Parse a `--rects` spec: `x,z,w,h;x,z,w,h;...`, one rect per `;`, core first.
@@ -303,6 +311,9 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     if opts.rects.is_some() {
         dir_name.push_str("-rects");
     }
+    if let Some(l) = &opts.lighting {
+        dir_name.push_str(&format!("-{}", l.tag()));
+    }
     let out_dir = PathBuf::from("output/houses").join(dir_name);
     std::fs::create_dir_all(&out_dir)?;
 
@@ -416,6 +427,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     };
     render_views(&scene, &RenderOptions { px: 4, iso_tile: contact_tile, region: contact_region }, &out_dir, "")?;
 
+    // Light-map cost over every house's interior grid, reported at the end.
+    let (mut light_time, mut light_grids, mut light_cells) = (Duration::ZERO, 0usize, 0usize);
     let mut records = Vec::new();
     for b in &built {
         let (i, house, tag) = (b.i, &b.house, b.variant.tag());
@@ -466,6 +479,15 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         let interior_lo_y = if house.has_cellar { house.frame.floor_y(CELLAR_FLOOR) + origin.y - 2 } else { region.min().y };
         let interior_region = Rect3D::from_points(Point3D::new(region.min().x, interior_lo_y, region.min().z), region.max());
         let Some(gi) = VoxelGrid::from_scene(&scene, Some(interior_region)) else { continue };
+        let light_map = opts.lighting.map(|_| {
+            let t = Instant::now();
+            let map = LightMap::new(&gi);
+            light_time += t.elapsed();
+            light_grids += 1;
+            light_cells += map.len();
+            map
+        });
+        let room_opts = PerspectiveOptions { lighting: light_map.as_ref().zip(opts.lighting) };
         // A player can stand in build-area-local `cell` on walkable level
         // `floor_y` (absolute) when nothing fills the feet cell and the head
         // cell is clear; `roomy` also wants the cell above the head clear, so
@@ -510,7 +532,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         if !views.is_empty() {
             let mut tiles = Vec::new();
             for (name, info, cam) in &views {
-                let pm = render_perspective(&gi, cam, ROOM_W, ROOM_H)?;
+                let pm = render_perspective_with(&gi, cam, ROOM_W, ROOM_H, &room_opts)?;
                 pm.save_png(out_dir.join(name))?;
                 tiles.push(pm);
                 rooms_json.push(info.clone());
@@ -551,7 +573,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         }));
     }
 
-    let summary = serde_json::json!({
+    let mut summary = serde_json::json!({
         "culture": format!("{:?}", opts.culture),
         "seed": opts.seed,
         "live": opts.live,
@@ -561,6 +583,13 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         "built": built.len(),
         "houses": records,
     });
+    if let Some(l) = &opts.lighting {
+        summary["lighting"] = serde_json::json!({ "daylight": l.daylight, "smooth": l.smooth, "tag": l.tag() });
+        println!(
+            "room views lit ({}, daylight {:.2}): light maps for {light_grids} grids, {light_cells} cells, in {:.1?} total",
+            l.tag(), l.daylight, light_time,
+        );
+    }
     std::fs::write(out_dir.join("houses.json"), serde_json::to_string_pretty(&summary)?)?;
     println!(
         "{} of {} houses built on a {grid_w}x{grid_d} grid; output in {}",

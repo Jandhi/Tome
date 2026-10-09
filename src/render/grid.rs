@@ -10,6 +10,7 @@ use resvg::tiny_skia::Pixmap;
 
 use super::assets::{self, BlockGeometry};
 use super::colors;
+use super::light::{self, LightProps};
 use super::scene::Scene;
 use super::shape::{self, Box16, Shape};
 use crate::geometry::{Point3D, Rect3D};
@@ -46,6 +47,8 @@ pub struct VoxelGrid {
     boxes: Vec<Vec<Box16>>,
     /// Textured model per material, when the assets have one.
     geometry: Vec<Option<Arc<BlockGeometry>>>,
+    /// What each material does to light (see [`light`]).
+    light: Vec<LightProps>,
 }
 
 impl VoxelGrid {
@@ -63,9 +66,10 @@ impl VoxelGrid {
         let mut side_colors: Vec<Rgba> = vec![[0, 0, 0, 0]];
         let mut shapes: Vec<Shape> = vec![Shape::Full];
         let mut geometry: Vec<Option<Arc<BlockGeometry>>> = vec![None];
-        // Key: colours, shape and the model's identity (models are cached per
-        // block string, so the pointer is stable). 0 = no model.
-        let mut by_key: HashMap<(Rgba, Rgba, Shape, usize), u16> = HashMap::default();
+        let mut lights: Vec<LightProps> = vec![LightProps::default()];
+        // Key: colours, shape, the model's identity (models are cached per
+        // block string, so the pointer is stable; 0 = no model) and light.
+        let mut by_key: HashMap<(Rgba, Rgba, Shape, usize, LightProps), u16> = HashMap::default();
         // Intern a full block string. The hand-written colour decides whether
         // the block shows at all and how translucent it is; the jar's model,
         // when it has one, supplies the faces and the colours. A block the
@@ -90,12 +94,14 @@ impl VoxelGrid {
             if top[3] == 0 {
                 return 0;
             }
-            let key = (top, side, shape, geo.as_ref().map_or(0, |g| Arc::as_ptr(g) as usize));
+            let lp = light::light_props(block);
+            let key = (top, side, shape, geo.as_ref().map_or(0, |g| Arc::as_ptr(g) as usize), lp);
             *by_key.entry(key).or_insert_with(|| {
                 materials.push(top);
                 side_colors.push(side);
                 shapes.push(shape);
                 geometry.push(geo);
+                lights.push(lp);
                 (materials.len() - 1) as u16
             })
         };
@@ -155,11 +161,17 @@ impl VoxelGrid {
             }
         }
         let boxes = shapes.iter().map(|s| s.boxes()).collect();
-        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, side_colors, shapes, boxes, geometry })
+        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, side_colors, shapes, boxes, geometry, light: lights })
     }
 
-    fn index(&self, x: i32, y: i32, z: i32) -> usize {
+    /// Index of local `(x, y, z)` in [`cells`](Self::cells); no bounds check.
+    pub fn index(&self, x: i32, y: i32, z: i32) -> usize {
         ((x * self.nz + z) * self.ny + y) as usize
+    }
+
+    /// Every cell's material in [`index`](Self::index) order (`y` fastest).
+    pub fn cells(&self) -> &[u16] {
+        &self.cells
     }
 
     /// Material at local `(x, y, z)`; 0 (empty) outside the grid.
@@ -184,6 +196,11 @@ impl VoxelGrid {
     /// The block model behind material `m`, when Minecraft's assets supplied one.
     pub fn geometry(&self, m: u16) -> Option<&BlockGeometry> {
         self.geometry[m as usize].as_deref()
+    }
+
+    /// What material `m` does to light: emission, filtering, transparency.
+    pub fn light_props(&self, m: u16) -> LightProps {
+        self.light[m as usize]
     }
 
     /// `true` when any material carries a textured model.

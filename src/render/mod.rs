@@ -11,6 +11,7 @@ pub mod diff;
 pub mod elevation;
 pub mod grid;
 pub mod iso;
+pub mod light;
 pub mod perspective;
 pub mod scene;
 pub mod shape;
