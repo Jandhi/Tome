@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::editor::{Editor, World};
+use crate::util::HashSet;
 use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footprint, Plot, SizeClass};
@@ -623,45 +624,79 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         // the walls, doors and furniture of that floor show as placed. One
         // image per level (cellar, floors, attic) and a sheet of them all.
         let mut cutaways = Vec::new();
-        // Per level: its name, walkable y, and the rects it occupies (`None`
-        // keeps everything, so the ground floor shows its surroundings; upper
-        // levels keep only their own rooms and walls, or the roofs of lower
-        // wings would cover the side rooms).
-        let mut levels: Vec<(String, i32, Option<Vec<Rect2D>>)> = Vec::new();
+        // Per level: its name and the slices it is made of, each a rect
+        // (build-area local) with the absolute y band to keep: from the floor
+        // slab up to the storey's top air row, so the ceiling and everything
+        // above are cut off. The roof's own blocks are left out everywhere.
+        // The ground floor keeps its whole surroundings (`None`); upper levels
+        // keep only their own rooms plus one cell of wall, or lower wings'
+        // ceilings would cover the side rooms. Attic rooms over lower wings
+        // sit at their own height, so each attic room is its own slice.
+        let wall_rows = house.frame.wall_height() as i32;
+        let band = |floor_y: i32, rows: i32| (floor_y - 1 + origin.y, floor_y + rows - 1 + origin.y);
+        let mut levels: Vec<(String, Option<Vec<(Rect2D, i32, i32)>>, i32)> = Vec::new();
         if house.has_cellar {
-            levels.push(("cellar".to_string(), house.frame.floor_y(CELLAR_FLOOR), Some(vec![house.footprint.rects()[0]])));
+            let (lo, hi) = band(house.frame.floor_y(CELLAR_FLOOR), wall_rows);
+            levels.push(("cellar".to_string(), Some(vec![(house.footprint.rects()[0], lo, hi)]), 1));
         }
         for f in house.frame.floors() {
-            let rects: Vec<Rect2D> = house.frame.active_rects(f).iter().filter_map(|&i| house.frame.rect_at(i, f)).collect();
-            levels.push((format!("floor{f}"), house.frame.floor_y(f), (f > 0).then_some(rects)));
+            let (lo, hi) = band(house.frame.floor_y(f), wall_rows);
+            let slices: Vec<(Rect2D, i32, i32)> =
+                house.frame.active_rects(f).iter().filter_map(|&i| house.frame.rect_at(i, f)).map(|r| (r, lo, hi)).collect();
+            levels.push((format!("floor{f}"), (f > 0).then_some(slices), 1));
         }
         if house.has_attic {
-            // The roof is the attic's wall, so keep only the usable interior
-            // or the eaves hide most of it.
-            let rects: Vec<Rect2D> = house.room_plan.rooms.iter().filter(|r| r.role == RoomRole::Attic).map(|r| r.interior).collect();
-            levels.push(("attic".to_string(), house.frame.floor_y(house.frame.max_floors()), Some(rects)));
+            let slices: Vec<(Rect2D, i32, i32)> = house
+                .room_plan
+                .rooms
+                .iter()
+                .filter(|r| r.role == RoomRole::Attic)
+                .map(|r| {
+                    let (lo, hi) = band(house.frame.floor_y(r.floor), wall_rows);
+                    (r.rect, lo, hi)
+                })
+                .collect();
+            levels.push(("attic".to_string(), Some(slices), 1));
         }
-        for (level, floor_y, mask) in &levels {
-            // From the floor slab up to the top air row of the storey: the
-            // ceiling slab (and everything above) is cut off.
-            let rows = if level == "attic" { 2 } else { house.frame.wall_height() as i32 };
-            let (lo_y, hi_y) = (floor_y - 1 + origin.y, floor_y + rows - 1 + origin.y);
+        for (level, slices, margin) in &levels {
+            let (lo_y, hi_y) = match slices {
+                None => band(house.frame.floor_y(0), wall_rows),
+                Some(sl) => (sl.iter().map(|s| s.1).min().unwrap_or(0), sl.iter().map(|s| s.2).max().unwrap_or(0)),
+            };
+            if slices.as_ref().is_some_and(|sl| sl.is_empty()) {
+                continue;
+            }
             let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
+            let roof: HashSet<Point3D> = house.roof_cells.iter().map(|p| *p + origin).collect();
             let masked;
-            let source = match mask {
-                None => &scene,
-                Some(rects) => {
-                    let margin = if level == "attic" { 0 } else { 1 };
+            let source = match slices {
+                None if roof.is_empty() => &scene,
+                None => {
+                    let mut sub = Scene::new(scene.bounds);
+                    for (p, &i) in &scene.blocks {
+                        if cut.contains(*p) && !roof.contains(p) {
+                            sub.insert(*p, &scene.palette[i as usize]);
+                        }
+                    }
+                    masked = sub;
+                    &masked
+                }
+                Some(sl) => {
                     let inside = |p: &Point3D| {
                         let local = Point2D::new(p.x - origin.x, p.z - origin.z);
-                        rects.iter().any(|r| {
-                            let (lo, hi) = (r.min(), r.max());
-                            local.x >= lo.x - margin && local.x <= hi.x + margin && local.y >= lo.y - margin && local.y <= hi.y + margin
+                        sl.iter().any(|(r, lo, hi)| {
+                            let (a, b) = (r.min(), r.max());
+                            p.y >= *lo
+                                && p.y <= *hi
+                                && local.x >= a.x - margin
+                                && local.x <= b.x + margin
+                                && local.y >= a.y - margin
+                                && local.y <= b.y + margin
                         })
                     };
                     let mut sub = Scene::new(scene.bounds);
                     for (p, &i) in &scene.blocks {
-                        if cut.contains(*p) && inside(p) {
+                        if inside(p) && !roof.contains(p) {
                             sub.insert(*p, &scene.palette[i as usize]);
                         }
                     }

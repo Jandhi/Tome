@@ -27,6 +27,9 @@ pub struct Editor {
     /// Defaults to true; toggle via `set_block_updates` around a structure paste.
     block_updates: RefCell<bool>,
     block_cache: RefCell<HashMap<Point3D, Block>>,
+    /// While `Some`, every placement's build-area-local cell is appended
+    /// (see `start_recording` / `stop_recording`).
+    recording: RefCell<Option<Vec<Point3D>>>,
     world: World,
     materials: HashMap<MaterialId, Material>,
     block_form_cache: RefCell<HashMap<BlockID, BlockForm>>,
@@ -38,6 +41,23 @@ pub struct Editor {
 }
 
 impl Editor {
+    /// Start collecting the build-area-local cell of every placement until
+    /// `stop_recording`; nested starts restart the list.
+    pub fn start_recording(&self) {
+        *self.recording.borrow_mut() = Some(Vec::new());
+    }
+
+    /// The cells placed since `start_recording` (empty if not recording).
+    pub fn stop_recording(&self) -> Vec<Point3D> {
+        self.recording.borrow_mut().take().unwrap_or_default()
+    }
+
+    fn record(&self, point: Point3D) {
+        if let Some(log) = self.recording.borrow_mut().as_mut() {
+            log.push(point);
+        }
+    }
+
     pub fn new(build_area: Rect3D, world: World) -> Self {
         let mut editor = Self {
             build_area,
@@ -46,6 +66,7 @@ impl Editor {
             buffer_size: 32,
             block_updates: RefCell::new(true),
             block_cache: RefCell::new(HashMap::default()),
+            recording: RefCell::new(None),
             world,
             materials: HashMap::default(),
             block_form_cache: RefCell::new(HashMap::default()),
@@ -134,6 +155,7 @@ impl Editor {
         }
 
         self.block_cache.borrow_mut().insert(point, block.clone());
+        self.record(point);
         self.block_buffer.borrow_mut().push(
             PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into())
         );
@@ -174,6 +196,7 @@ impl Editor {
         }
 
         self.block_cache.borrow_mut().insert(point, block.clone());
+        self.record(point);
 
         if self.offline {
             return;

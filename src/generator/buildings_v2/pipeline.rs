@@ -12,7 +12,7 @@ use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::Palette;
 use crate::generator::population::AnchorScene;
-use crate::geometry::{Point2D, Rect2D};
+use crate::geometry::{Point2D, Point3D, Rect2D};
 use crate::noise::RNG;
 
 use super::cellar;
@@ -77,6 +77,9 @@ pub struct HouseOutput {
     pub door_entrances: Vec<Point2D>,
     pub has_attic: bool,
     pub has_cellar: bool,
+    /// Every build-area-local cell the roof stage placed (surface, fill,
+    /// gable walls, chimney), so a cutaway can leave the roof out.
+    pub roof_cells: Vec<Point3D>,
     /// Cellar descending-stair cells (position 0 is the cellar landing), if a
     /// cellar was built. Surfaced for blueprint/debug inspection.
     pub cellar_stair: Option<Vec<Point2D>>,
@@ -185,7 +188,9 @@ pub async fn build_house(
         TimberPattern::pick(size_class, max_seg_len, &mut timber_rng)
     });
     place_frame(ctx, &frame, &timber_pattern).await;
+    ctx.editor.start_recording();
     let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
+    let roof_cells = ctx.editor.stop_recording();
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
     }
@@ -309,6 +314,7 @@ pub async fn build_house(
         door_entrances,
         has_attic,
         has_cellar,
+        roof_cells,
         cellar_stair,
         roof_style,
         size_class,
