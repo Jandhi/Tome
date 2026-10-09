@@ -429,4 +429,81 @@ mod tests {
         let sheet = contact_sheet(&tiles, 3, 2).unwrap();
         assert_eq!((sheet.width(), sheet.height()), (3 * 10 + 4 * 2, 2 * 6 + 3 * 2));
     }
+
+    // ---- viewer textures (jd/viewer-textures): textured export of the HTML viewer ----
+
+    /// 2x2 grass, a stair, a poppy, glass and a chest: every export path at once.
+    fn viewer_texture_scene() -> Scene {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(8, 8, 8) });
+        for (x, z) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
+            s.insert(Point3D::new(x, 61, z), "minecraft:grass_block[snowy=false]");
+        }
+        s.insert(Point3D::new(4, 61, 1), "minecraft:oak_stairs[facing=east,half=bottom,shape=straight]");
+        s.insert(Point3D::new(1, 62, 1), "minecraft:poppy");
+        s.insert(Point3D::new(4, 61, 4), "minecraft:glass");
+        s.insert(Point3D::new(6, 61, 6), "minecraft:chest[facing=north]");
+        s
+    }
+
+    #[test]
+    fn viewer_exports_textured_faces_when_a_jar_is_present() {
+        use crate::render::assets::assets;
+        use crate::render::viewer::{export, RECORD_BYTES, ROTATED_RECORD_BYTES};
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let g = VoxelGrid::from_scene(&viewer_texture_scene(), None).unwrap();
+        let e = export(&g).unwrap();
+        let t = e.textured.expect("models give a textured buffer");
+        assert_eq!(t.faces.len(), t.a_count * RECORD_BYTES + t.r_count * ROTATED_RECORD_BYTES);
+        assert_eq!(e.stats.faces, e.flat.len() / RECORD_BYTES + t.a_count + t.r_count);
+        // The chest has no element model: it stays on the flat path with its hand colour.
+        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "chest faces");
+        // The poppy's cross model is two rotated quads.
+        assert_eq!(t.r_count, 2, "rotated faces");
+        assert_eq!(e.stats.rotated_faces, 2);
+        // The 2x2 grass top merges into one 32x32 tiled quad: the grid's y range
+        // starts at the grass, so its top is the plane y = 16, at x = z = 16.
+        let a_recs: Vec<[i16; 5]> = t.faces[..t.a_count * RECORD_BYTES]
+            .chunks(RECORD_BYTES)
+            .map(|r| {
+                let v = |i: usize| i16::from_le_bytes([r[i * 2], r[i * 2 + 1]]);
+                [v(0), v(1), v(2), v(3), v(4)]
+            })
+            .collect();
+        let dirs: Vec<u8> = t.faces[..t.a_count * RECORD_BYTES].chunks(RECORD_BYTES).map(|r| r[10]).collect();
+        let grass_top = a_recs.iter().zip(&dirs).filter(|(r, &d)| d == 2 && r[1] == 16 && r[3] == 32).map(|(r, _)| *r).collect::<Vec<_>>();
+        assert_eq!(grass_top, vec![[16, 16, 16, 32, 32]], "merged grass top");
+        // Grass sides bake the tinted overlay onto dirt: one face per exposed side, no coincident pair.
+        let west_sides = a_recs.iter().zip(&dirs).filter(|(r, &d)| d == 1 && r[0] == 16).count();
+        assert_eq!(west_sides, 1, "west side of the 2x2 grass merges into one quad");
+        // Each texture and composite is in the atlas once; the key table is compact.
+        assert!(e.stats.atlas_textures >= 6, "atlas textures {}", e.stats.atlas_textures);
+        assert!(e.stats.face_keys >= 8 && e.stats.face_keys <= 64, "face keys {}", e.stats.face_keys);
+        assert_eq!(e.stats.atlas_size.0 % 16, 0);
+        assert!(t.atlas_png.starts_with(&[0x89, b'P', b'N', b'G']));
+        // Keys: the glass is translucent per the hand colour (flags bit 1), grass tops are tinted.
+        let rows: Vec<Vec<f64>> = t.keys.iter().map(|k| k.as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect()).collect();
+        assert!(rows.iter().all(|r| r.len() == 14));
+        assert!(rows.iter().any(|r| r[13] as u8 & 2 != 0), "a translucent key for glass");
+        assert!(rows.iter().any(|r| r[10] < 200.0 && r[11] > r[10]), "a green-tinted key for the grass top");
+    }
+
+    #[test]
+    fn viewer_page_embeds_atlas_only_with_textures() {
+        use crate::render::assets::assets;
+        use crate::render::viewer::write_viewer_html;
+        let path = std::env::temp_dir().join("tome_viewer_textures_test").join("viewer.html");
+        let stats = write_viewer_html(&viewer_texture_scene(), None, &path).unwrap();
+        let html = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(stats.html_bytes, html.len());
+        let textured = assets().is_some();
+        assert_eq!(html.contains(r#"<script id="tex""#), textured);
+        assert_eq!(html.contains(r#"<script id="atlas""#), textured);
+        assert_eq!(html.contains(r#""tex":{"#), textured);
+        assert_eq!(html.contains("fract(vUv)"), textured);
+        assert_eq!(stats.atlas_textures > 0, textured);
+        assert!(!html.contains("<!--@"), "template markers never reach the page");
+    }
 }
