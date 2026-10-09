@@ -1152,6 +1152,9 @@ mod viewer_lighting_tests {
         };
         let (day_bg, night_bg) = (bg(&String::from_utf8_lossy(&ha)), bg(&hl));
         assert!(night_bg[0] < day_bg[0] / 4 && night_bg[2] > night_bg[0], "{night_bg:?} vs {day_bg:?}");
+    }
+}
+
 /// Lighting of the flat views (`render::lit`): an unlit render is untouched,
 /// a lone block under open sky is the unlit one scaled by the sky light, and
 /// a torch lights the wall beside it.
