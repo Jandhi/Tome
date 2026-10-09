@@ -640,15 +640,23 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
             let Some(gc) = VoxelGrid::from_scene(&scene, Some(cut)) else { continue };
             // Unlit: a light map of the clipped grid would see sky through the missing roof.
-            let pm = render_topdown_with(&gc, px, None)?;
-            let name = format!("{prefix}_cutaway_{level}.png");
-            pm.save_png(out_dir.join(&name))?;
-            cutaways.push(pm);
-            renders.push(name);
+            // The iso keeps wall heights and furniture shapes; the top-down keeps the plan exact.
+            let iso = render_iso_with(&gc, IsoCamera::SouthEast, 2 * px, None)?;
+            let top = render_topdown_with(&gc, px, None)?;
+            for (suffix, pm) in [("", &iso), ("_top", &top)] {
+                let name = format!("{prefix}_cutaway_{level}{suffix}.png");
+                pm.save_png(out_dir.join(&name))?;
+                renders.push(name);
+            }
+            cutaways.push((iso, top));
         }
         if !cutaways.is_empty() {
+            // Sheet: one column per level, iso above its top-down.
+            let n = cutaways.len();
+            let (isos, tops): (Vec<_>, Vec<_>) = cutaways.into_iter().unzip();
+            let tiles: Vec<_> = isos.into_iter().chain(tops).collect();
             let name = format!("{prefix}_cutaways.png");
-            contact_sheet(&cutaways, cutaways.len(), 8)?.save_png(out_dir.join(&name))?;
+            contact_sheet(&tiles, n, 8)?.save_png(out_dir.join(&name))?;
             renders.push(name);
         }
 
