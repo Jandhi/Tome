@@ -45,6 +45,14 @@ const GAMMA: f32 = 0.5;
 /// `1 - AO` of its light (the game steps 1.0, 0.8, 0.6, 0.4).
 const AO: f32 = 0.6;
 
+/// An RGB multiplier, each channel 0..1.
+pub type Rgb = [f32; 3];
+
+/// Colour of full block light (torches, lanterns): the game's warm orange.
+pub const BLOCK_TINT: Rgb = [1.0, 0.86, 0.64];
+/// Colour of sky light at night (moonlight), blended toward white by day.
+pub const NIGHT_SKY_TINT: Rgb = [0.60, 0.70, 1.0];
+
 /// Lighting settings a renderer applies when it lights at all.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Lighting {
@@ -55,6 +63,10 @@ pub struct Lighting {
     /// lighting, with opaque neighbours darkening corners); `false` lights a
     /// whole face by its outside cell.
     pub smooth: bool,
+    /// Colour the light like the game: block light warm ([`BLOCK_TINT`]),
+    /// sky light white by day and blue at night ([`NIGHT_SKY_TINT`]). `false`
+    /// keeps every channel at the plain brightness.
+    pub tinted: bool,
 }
 
 impl Lighting {
@@ -63,15 +75,45 @@ impl Lighting {
     pub const NIGHT: f32 = 0.15;
 
     pub fn day() -> Lighting {
-        Lighting { daylight: Self::DAY, smooth: true }
+        Lighting { daylight: Self::DAY, smooth: true, tinted: true }
     }
 
     pub fn dusk() -> Lighting {
-        Lighting { daylight: Self::DUSK, smooth: true }
+        Lighting { daylight: Self::DUSK, smooth: true, tinted: true }
     }
 
     pub fn night() -> Lighting {
-        Lighting { daylight: Self::NIGHT, smooth: true }
+        Lighting { daylight: Self::NIGHT, smooth: true, tinted: true }
+    }
+
+    /// Colour of sky light under this daylight: white at noon, moonlight blue
+    /// at night, between the two at dusk.
+    pub fn sky_tint(&self) -> Rgb {
+        if !self.tinted {
+            return [1.0; 3];
+        }
+        let d = self.daylight.clamp(0.0, 1.0);
+        [
+            NIGHT_SKY_TINT[0] + (1.0 - NIGHT_SKY_TINT[0]) * d,
+            NIGHT_SKY_TINT[1] + (1.0 - NIGHT_SKY_TINT[1]) * d,
+            NIGHT_SKY_TINT[2] + (1.0 - NIGHT_SKY_TINT[2]) * d,
+        ]
+    }
+
+    /// Colour of block light under this lighting.
+    pub fn block_tint(&self) -> Rgb {
+        if self.tinted { BLOCK_TINT } else { [1.0; 3] }
+    }
+
+    /// Coloured brightness of a packed `(block << 4) | sky` level: each
+    /// channel takes the brighter of the tinted sky and block contributions,
+    /// so a lamp-lit room glows warm and a moonlit yard goes blue, while a
+    /// sunlit face stays white.
+    pub fn rgb_of(&self, packed: u8) -> Rgb {
+        let sky = LightMap::curve((packed & 15) as f32 * self.daylight);
+        let block = LightMap::curve((packed >> 4) as f32);
+        let (st, bt) = (self.sky_tint(), self.block_tint());
+        [(sky * st[0]).max(block * bt[0]), (sky * st[1]).max(block * bt[1]), (sky * st[2]).max(block * bt[2])]
     }
 
     /// `day`, `night`, `dusk` or a daylight factor in `0..=1` (smooth lighting on).
@@ -86,7 +128,7 @@ impl Lighting {
                 .filter(|d| (0.0..=1.0).contains(d))
                 .ok_or_else(|| anyhow!("--light takes day, night, dusk or a daylight factor in 0..1, not {spec:?}"))?,
         };
-        Ok(Lighting { daylight, smooth: true })
+        Ok(Lighting { daylight, smooth: true, tinted: true })
     }
 
     /// Short name for file and directory names: `day`, `night`, `dusk` or `light0.30`.
@@ -621,18 +663,26 @@ fn bilinear(c: [f32; 4], u: f32, v: f32) -> f32 {
 /// packed level pre-computed, for a renderer's inner loop.
 pub struct LightSampler<'a> {
     map: &'a LightMap,
+    /// Plain brightness per packed level.
     lut: [f32; 256],
+    /// Coloured brightness per packed level (see [`Lighting::rgb_of`]).
+    lut_rgb: [Rgb; 256],
     smooth: bool,
     sky: f32,
+    sky_rgb: Rgb,
 }
 
 impl<'a> LightSampler<'a> {
     pub fn new(map: &'a LightMap, lighting: Lighting) -> Self {
         let mut lut = [0.0; 256];
-        for (p, v) in lut.iter_mut().enumerate() {
-            *v = LightMap::curve(LightMap::level(p as u8, lighting.daylight));
+        let mut lut_rgb = [[0.0; 3]; 256];
+        for p in 0..256 {
+            lut[p] = LightMap::curve(LightMap::level(p as u8, lighting.daylight));
+            lut_rgb[p] = lighting.rgb_of(p as u8);
         }
-        LightSampler { map, lut, smooth: lighting.smooth, sky: LightMap::curve(15.0 * lighting.daylight) }
+        let sky = LightMap::curve(15.0 * lighting.daylight);
+        let st = lighting.sky_tint();
+        LightSampler { map, lut, lut_rgb, smooth: lighting.smooth, sky, sky_rgb: [sky * st[0], sky * st[1], sky * st[2]] }
     }
 
     /// Brightness of open sky under this lighting (for backgrounds).
@@ -640,9 +690,19 @@ impl<'a> LightSampler<'a> {
         self.sky
     }
 
+    /// Colour of open sky under this lighting (for backgrounds).
+    pub fn sky_rgb(&self) -> Rgb {
+        self.sky_rgb
+    }
+
     /// Brightness of a cell (coordinates clamp into the grid).
     pub fn at(&self, cell: [i32; 3]) -> f32 {
         self.lut[self.map.levels[self.map.clamp_index(cell[0], cell[1], cell[2])] as usize]
+    }
+
+    /// Coloured light of a cell (coordinates clamp into the grid).
+    pub fn at_rgb(&self, cell: [i32; 3]) -> Rgb {
+        self.lut_rgb[self.map.levels[self.map.clamp_index(cell[0], cell[1], cell[2])] as usize]
     }
 
     /// Light for a face: smooth-interpolated at `(u, v)` across the face from
@@ -652,5 +712,30 @@ impl<'a> LightSampler<'a> {
             return self.at(outside);
         }
         bilinear(self.map.corners_with(outside, axis, |i| self.lut[self.map.levels[i] as usize]), u, v)
+    }
+
+    /// Coloured light for a face, interpolated like [`face`](Self::face).
+    pub fn face_rgb(&self, outside: [i32; 3], axis: usize, u: f32, v: f32) -> Rgb {
+        if !self.smooth {
+            return self.at_rgb(outside);
+        }
+        let mut out = [0.0; 3];
+        for (k, o) in out.iter_mut().enumerate() {
+            *o = bilinear(self.map.corners_with(outside, axis, |i| self.lut_rgb[self.map.levels[i] as usize][k]), u, v);
+        }
+        out
+    }
+
+    /// The four corner colours of a face (see [`LightMap::face_corners`]),
+    /// for renderers that interpolate on their own, such as a vertex-coloured mesh.
+    pub fn face_corners_rgb(&self, outside: [i32; 3], axis: usize) -> [Rgb; 4] {
+        let mut out = [[0.0; 3]; 4];
+        for k in 0..3 {
+            let c = self.map.corners_with(outside, axis, |i| self.lut_rgb[self.map.levels[i] as usize][k]);
+            for (ci, v) in c.into_iter().enumerate() {
+                out[ci][k] = v;
+            }
+        }
+        out
     }
 }

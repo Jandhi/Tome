@@ -245,8 +245,8 @@ fn hit_geometry(geo: &BlockGeometry, cell: [i32; 3], o: V3, d: V3, fill: Rgba, h
 /// Light factor for a hit at distance `t` along the ray in `cell`: the
 /// face's smooth or flat light from the cell on its outside, found by
 /// stepping off the hit point along the normal; inside a box, the cell's own.
-fn light_at(lit: &LightSampler, o: V3, d: V3, cell: [i32; 3], hit: &Hit) -> f32 {
-    let Some(n) = hit.normal else { return lit.at(cell) };
+fn light_at(lit: &LightSampler, o: V3, d: V3, cell: [i32; 3], hit: &Hit) -> [f32; 3] {
+    let Some(n) = hit.normal else { return lit.at_rgb(cell) };
     let q = add(add(o, scale(d, hit.t)), scale(n, FACE_EPS));
     let outside = [q[0].floor() as i32, q[1].floor() as i32, q[2].floor() as i32];
     let axis = (0..3).max_by(|&a, &b| n[a].abs().total_cmp(&n[b].abs())).unwrap_or(1);
@@ -255,13 +255,20 @@ fn light_at(lit: &LightSampler, o: V3, d: V3, cell: [i32; 3], hit: &Hit) -> f32 
         1 => (0, 2),
         _ => (0, 1),
     };
-    lit.face(outside, axis, q[t1] - q[t1].floor(), q[t2] - q[t2].floor())
+    lit.face_rgb(outside, axis, q[t1] - q[t1].floor(), q[t2] - q[t2].floor())
+}
+
+/// Multiply the colour channels by `f` per channel (alpha unchanged); the
+/// same arithmetic as [`shade`] per channel, so equal factors give equal results.
+fn tint(c: Rgba, f: [f32; 3]) -> Rgba {
+    let s = |v: u8, f: f32| (v as f32 * f).round().clamp(0.0, 255.0) as u8;
+    [s(c[0], f[0]), s(c[1], f[1]), s(c[2], f[2]), c[3]]
 }
 
 /// Colour seen along the ray from `o` (grid-local) in direction `d`.
 fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>) -> Rgba {
     let bg = match lit {
-        Some(l) => shade(BACKGROUND, l.sky()),
+        Some(l) => tint(BACKGROUND, l.sky_rgb()),
         None => BACKGROUND,
     };
     let size = [g.nx as f32, g.ny as f32, g.nz as f32];
@@ -295,13 +302,13 @@ fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>) -> Rgba {
     let mut acc = RayAcc::default();
     let mut hits = Vec::new();
     let fog_at = |t: f32| 1.0 - FOG_AMOUNT * (t / FOG_RANGE).min(1.0);
-    // Shade, fog and (when lit) light for a hit: the unlit factor is the
-    // same product as ever, so lighting off changes nothing.
-    let factor = |hit: &Hit, cell: [i32; 3]| {
-        let f = hit.shade * fog_at(hit.t);
+    // Shade and fog a hit as ever, then (when lit) colour it by the face's
+    // light; lighting off leaves the exact unlit arithmetic.
+    let colour = |hit: &Hit, cell: [i32; 3]| {
+        let c = shade(hit.color, hit.shade * fog_at(hit.t));
         match lit {
-            Some(l) => f * light_at(l, o, d, cell, hit),
-            None => f,
+            Some(l) => tint(c, light_at(l, o, d, cell, hit)),
+            None => c,
         }
     };
     loop {
@@ -310,12 +317,12 @@ fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>) -> Rgba {
             if let Some(geo) = g.geometry(m) {
                 hit_geometry(geo, cell, o, d, g.color(m), &mut hits);
                 for hit in &hits {
-                    if acc.push(shade(hit.color, factor(hit, cell))) {
+                    if acc.push(colour(hit, cell)) {
                         return acc.finish(bg);
                     }
                 }
             } else if let Some(hit) = hit_boxes(g, m, cell, o, d) {
-                if acc.push(shade(hit.color, factor(&hit, cell))) {
+                if acc.push(colour(&hit, cell)) {
                     return acc.finish(bg);
                 }
             }
