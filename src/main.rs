@@ -252,7 +252,7 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--px n]`:
+/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--knee-wall] [--tall-top] [--px n]`:
 /// build individual houses on a blank flat world (no server) and render each
 /// one, under `output/houses/<culture>-<seed>/`.
 async fn run_houses(args: &[String]) -> anyhow::Result<()> {
@@ -280,6 +280,8 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         count: arg_after("--count", 1).map(str::parse).transpose()?.unwrap_or(6),
         size,
         jetty: args.iter().any(|a| a == "--jetty"),
+        knee_wall: args.iter().any(|a| a == "--knee-wall"),
+        tall_top: args.iter().any(|a| a == "--tall-top"),
         px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
     };
     run_showcase(&opts).await?;

@@ -214,7 +214,7 @@ pub async fn build_rooms(
             }
 
             let base_y = frame.floor_y(floor);
-            let height = frame.wall_height();
+            let height = frame.wall_height_at(floor);
 
             // Filter out cells that overlap the exterior perimeter
             let interior_cells: Vec<&Point2D> = boundary.wall_cells.iter()
@@ -258,7 +258,7 @@ pub async fn build_rooms(
         // boundary.
         let active_rects: Vec<Rect2D> = active.iter().map(|&i| floor_rects[i]).collect();
         let base_y = frame.floor_y(floor);
-        let height = frame.wall_height();
+        let height = frame.wall_height_at(floor);
         for cell in phantom_wall_cells(&active_rects) {
             if perimeter.contains(&(cell.x, cell.y)) { continue; }
             for ry in 0..height {

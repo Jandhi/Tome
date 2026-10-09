@@ -115,12 +115,17 @@ pub fn gable_heightmap(
 /// Place gable wall triangles at the two short-axis edges of a rect.
 /// Fills from roof_y up to the roof surface height with PrimaryWall material.
 /// Returns (x, z) positions of any doorways placed in shared gable walls.
+/// `knee` is the rect's knee-wall height (`Frame::knee_for_rect`): outward
+/// gables sit on the exterior knee wall, but shared (interior) gables reach
+/// down through it to the attic floor so the seam stays closed and the
+/// doorway stands on the floor.
 pub async fn place_gable_walls(
     editor: &Editor,
     rect: &Rect2D,
     ridge_axis: RidgeAxis,
     pitch: GablePitch,
     roof_y: i32,
+    knee: i32,
     higher_rects: &[&Rect2D],
     all_rects: &[(&Rect2D, i32, RidgeAxis)],
     data: &LoadedData,
@@ -228,10 +233,11 @@ pub async fn place_gable_walls(
             if is_door_col {
                 doorways.push(Point2D::new(x, z));
             }
-            let door_y_start = roof_y - 1;
+            let wall_base_y = if is_outward { roof_y - 1 } else { roof_y - 1 - knee };
+            let door_y_start = wall_base_y;
             let door_y_end = door_y_start + 2;
 
-            for y in (roof_y - 1)..(y_wall_top + extra - 1) {
+            for y in wall_base_y..(y_wall_top + extra - 1) {
                 if is_door_col && y >= door_y_start && y < door_y_end {
                     continue; // leave air for doorway
                 } else if is_window_col && y >= win_y_start && y < win_y_end {

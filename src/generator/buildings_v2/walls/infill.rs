@@ -99,7 +99,7 @@ impl WallInfill {
                 );
 
                 for (idx, cell) in cells.iter().enumerate() {
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }
@@ -135,7 +135,7 @@ impl WallInfill {
                 );
 
                 for (idx, cell) in cells.iter().enumerate() {
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }
@@ -179,7 +179,7 @@ impl WallInfill {
 
                 for (idx, cell) in cells.iter().enumerate() {
                     let is_beam = beams.contains(&idx);
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }

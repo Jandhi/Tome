@@ -116,7 +116,7 @@ async fn place_floor_slabs(
     }
 }
 
-/// Place ceiling blocks at the top of each rect (one block below roof_y),
+/// Place ceiling blocks at the top of each rect (`top_ceiling_y`),
 /// skipping the exterior-wall perimeter.
 async fn place_ceilings(ctx: &mut BuildCtx<'_>, frame: &Frame) {
     let editor: &Editor = &*ctx.editor;
@@ -135,7 +135,7 @@ async fn place_ceilings(ctx: &mut BuildCtx<'_>, frame: &Frame) {
     let mut placed: HashSet<(i32, i32, i32)> = HashSet::default();
 
     for i in 0..frame.rect_count() {
-        let y = frame.roof_y(i) - 2;
+        let y = frame.top_ceiling_y(i);
         let top_floor = frame.floor_counts()[i].saturating_sub(1);
         let ceil_perimeter = if top_floor == 0 {
             &ground_perimeter
@@ -201,7 +201,7 @@ pub async fn clear_attic_stair_headroom(
                     if i == 1 {
                         // Clear the ceiling/floor block above the lowest step
                         // so the player can access the stairs.
-                        let ceil_y = frame.roof_y(0) - 2;
+                        let ceil_y = frame.top_ceiling_y(0);
                         editor.place_block_forced(
                             &"air".into(),
                             Point3D::new(pos.x, ceil_y, pos.y),

@@ -30,6 +30,10 @@ pub struct WallSegment {
     pub base_y: i32,
     /// Wall height in blocks of air for this floor
     pub height: u32,
+    /// Rows of knee wall above this floor's ceiling beam (top floor of a
+    /// knee-walled frame only; else 0). Infilled and framed like the storey,
+    /// never opened — see `infill_rows`.
+    pub knee: u32,
     /// Length of this segment in blocks
     pub length: i32,
     /// Openings cut into this segment
@@ -186,7 +190,8 @@ pub fn build_segments(frame: &Frame) -> WallSegments {
                 facing,
                 floor,
                 base_y: frame.floor_y(floor),
-                height: frame.wall_height(),
+                height: frame.wall_height_at(floor),
+                knee: if floor + 1 == frame.max_floors() { frame.knee() } else { 0 },
                 length,
                 openings: Vec::new(),
             });
@@ -194,6 +199,14 @@ pub fn build_segments(frame: &Frame) -> WallSegments {
     }
 
     WallSegments { segments }
+}
+
+impl WallSegment {
+    /// Rows (relative to `base_y`) that take wall infill: the storey's air rows
+    /// `0..height`, then any knee-wall rows above the ceiling beam at `height`.
+    pub fn infill_rows(&self) -> impl Iterator<Item = u32> {
+        (0..self.height).chain(self.height + 1..=self.height + self.knee)
+    }
 }
 
 /// Walk cells for a wall segment.

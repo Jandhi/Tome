@@ -332,7 +332,8 @@ fn try_stack_on_previous(
     // The stair must fit in both floors it spans. Jetty only grows upward, so
     // the lower floor (`floor`) is the binding extent — use its rect.
     let core = frame.rect_at(0, floor)?;
-    let run = (frame.wall_height() + 1) as i32;
+    // Rise = one storey (a tall top floor makes its flight longer).
+    let run = frame.floor_y(floor + 1) - frame.floor_y(floor);
     let dir = prev.direction;
     // Start the new flight at the previous flight's top step: its landing lands
     // one block above that step, and the steps continue past it. The two runs
@@ -453,7 +454,7 @@ fn pick_stair_for_floor(
     below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let run = (frame.wall_height() + 1) as i32;
+    let run = frame.floor_y(floor + 1) - frame.floor_y(floor);
 
     // Stairs only in core rect — wings are too small and architecturally odd.
     // Constrain to the lower floor's extent (jetty grows upward, so the lower
@@ -699,10 +700,10 @@ fn pick_attic_stair(
     below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let run = (frame.wall_height() + 1) as i32;
     // Attic stairs connect the top regular floor to the attic above it; both
     // share the top-floor extent (jettied if jetty is enabled).
     let top_floor = frame.max_floors().checked_sub(1)?;
+    let run = frame.floor_y(top_floor + 1) - frame.floor_y(top_floor);
     let rect_owned = frame.rect_at(0, top_floor)?;
     let rect = &rect_owned;
 

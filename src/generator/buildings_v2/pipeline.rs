@@ -136,6 +136,13 @@ pub async fn build_house(
     } else {
         frame
     };
+    // Vertical variants (both off by default, leaving the frame untouched).
+    let multi_storey = frame.max_floors() >= 2;
+    let top_floor_extra = u32::from(
+        bctx.tall_top_floor && multi_storey && matches!(size_class, SizeClass::Hall | SizeClass::Manor),
+    );
+    let knee = if bctx.knee_wall && multi_storey { knee_rows(roof_style) } else { 0 };
+    let frame = frame.with_vertical_options(top_floor_extra, knee);
 
     let mut wall_segs = build_segments(&frame);
     let footprint_area = building_footprint.filled_points().len() as i32;
@@ -308,6 +315,23 @@ pub async fn build_house(
         timber_pattern,
         npc_anchors,
     })
+}
+
+/// Knee-wall rows that leave one visible block of framed infill between the
+/// top floor's ceiling beam and the eave. Slab-pitched eaves already sit one
+/// row above the ceiling, so one row does it; stair-pitched eaves (and the
+/// irimoya, which uses the Stairs surface) hang down onto the ceiling row and
+/// would hide a single row, so they lift two (the upper one sits behind the
+/// eave). Flat roofs take none: their deck is the top floor's ceiling.
+fn knee_rows(roof_style: RoofStyle) -> u32 {
+    use super::roof::hipped::HippedPitch;
+    match roof_style {
+        RoofStyle::Flat => 0,
+        RoofStyle::Gable(GablePitch::Slab) | RoofStyle::Hipped(HippedPitch::Slab) => 1,
+        RoofStyle::Gable(GablePitch::Stairs | GablePitch::Double)
+        | RoofStyle::Hipped(HippedPitch::Stairs)
+        | RoofStyle::Irimoya => 2,
+    }
 }
 
 /// `(floor_base_y, cell)` pairs that NPC anchors must avoid: the interior step

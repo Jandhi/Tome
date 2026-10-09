@@ -208,7 +208,7 @@ pub(super) async fn place_gable_roof(
             .collect();
         for &i in group_indices {
             let doors = place_gable_walls(
-                editor, &rects[i], rect_axes[i], pitch, roof_y, &higher_rects,
+                editor, &rects[i], rect_axes[i], pitch, roof_y, frame.knee_for_rect(i) as i32, &higher_rects,
                 &all_rects_with_roof_y, data, palette, rng,
             ).await;
             gable_doorways.extend(doors);

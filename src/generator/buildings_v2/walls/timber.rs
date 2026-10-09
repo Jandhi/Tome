@@ -247,7 +247,7 @@ pub async fn place_frame(
             for idx in stud_indices(seg.length as u32, pattern.spacing()) {
                 if idx >= cells.len() as u32 { continue; }
                 let cell = cells[idx as usize];
-                for ry in 0..seg.height {
+                for ry in seg.infill_rows() {
                     if is_inside_opening(&seg.openings, idx, ry) { continue; }
                     pillar_placer.place_block_forced(
                         editor,
@@ -409,7 +409,7 @@ pub async fn place_frame(
                 for idx in pillars {
                     if (idx as usize) >= cells.len() { continue; }
                     let cell = cells[idx as usize];
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx, ry) { continue; }
                         pillar_placer.place_block_forced(
                             editor,
@@ -468,7 +468,10 @@ pub async fn place_frame(
         } else {
             frame.floor_y(min_floor) - 1
         };
-        let top_y = frame.floor_y(max_floor) + frame.wall_height() as i32;
+        // Posts run up through the ceiling beam, and on the top floor on through
+        // any knee wall to meet the roof base.
+        let knee = if max_floor + 1 == frame.max_floors() { frame.knee() as i32 } else { 0 };
+        let top_y = frame.ceiling_y(max_floor) + knee;
         for y in bottom_y..=top_y {
             pillar_placer.place_block_forced(
                 editor,

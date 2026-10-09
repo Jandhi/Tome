@@ -116,4 +116,5 @@ pub fn apply_jetty(frame: Frame, plot_bounds: &Rect2D) -> Frame {
         extents,
         frame.wall_height(),
     )
+    .with_vertical_options(frame.top_floor_extra(), frame.knee())
 }

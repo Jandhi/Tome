@@ -43,6 +43,11 @@ pub struct ShowcaseOptions {
     pub count: usize,
     pub size: SizeSpec,
     pub jetty: bool,
+    /// Knee wall between the top floor's windows and the eaves (see
+    /// `BuildingContext::knee_wall`).
+    pub knee_wall: bool,
+    /// Taller top floor on Halls and Manors (see `BuildingContext::tall_top_floor`).
+    pub tall_top: bool,
     /// Pixels per block for top/elevation views; iso tiles are twice this.
     /// Default 16.
     pub px: u32,
@@ -97,6 +102,12 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     if opts.jetty {
         dir_name.push_str("-jetty");
     }
+    if opts.knee_wall {
+        dir_name.push_str("-knee");
+    }
+    if opts.tall_top {
+        dir_name.push_str("-tall");
+    }
     let out_dir = PathBuf::from("output/houses").join(dir_name);
     std::fs::create_dir_all(&out_dir)?;
 
@@ -117,6 +128,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         };
         let mut bctx = BuildingContext::new(opts.culture, size_class, roof_style);
         bctx.jetty = opts.jetty;
+        bctx.knee_wall = opts.knee_wall;
+        bctx.tall_top_floor = opts.tall_top;
         // Same roll as the settlement: engawa only for the culture/size that takes it.
         let (en, ed) = opts.culture.engawa_chance(size_class);
         bctx.engawa = ed > 0 && rng.rand_i32_range(0, ed as i32) < en as i32;

@@ -21,8 +21,16 @@ pub struct Frame {
     base_y: i32,
     /// Floor count per rect, parallel to footprint.rects(). Core is index 0.
     floor_counts: Vec<u32>,
-    /// Interior wall height in blocks of air, uniform across all floors and rects.
+    /// Interior wall height in blocks of air, shared by every floor and rect
+    /// except the top floor, which adds `top_floor_extra` (see `wall_height_at`).
     wall_height: u32,
+    /// Extra wall rows on the top regular floor (index `max_floors - 1`), so a
+    /// tall upper storey reads as a full storey from outside. 0 by default.
+    top_floor_extra: u32,
+    /// Rows of exterior wall (a "knee wall") between the top floor's ceiling and
+    /// the roof base, for every rect that reaches the top floor. Raises those
+    /// rects' `roof_y`; ceilings stay put. 0 by default.
+    knee: u32,
     /// Per-rect per-floor geometric extents. Indexed `[rect_index][floor]`.
     /// `Some(r)` means rect `i` occupies extent `r` on that floor; `None` means
     /// the rect isn't present at that level. Used by all geometric queries
@@ -70,7 +78,7 @@ impl Frame {
                     .collect()
             })
             .collect();
-        Self { footprint, base_y, floor_counts, wall_height, rect_extents, active_rects_cache }
+        Self { footprint, base_y, floor_counts, wall_height, top_floor_extra: 0, knee: 0, rect_extents, active_rects_cache }
     }
 
     /// Construct a Frame with explicit per-rect per-floor extents. Used when the
@@ -117,7 +125,31 @@ impl Frame {
                     .collect()
             })
             .collect();
-        Self { footprint, base_y, floor_counts, wall_height, rect_extents, active_rects_cache }
+        Self { footprint, base_y, floor_counts, wall_height, top_floor_extra: 0, knee: 0, rect_extents, active_rects_cache }
+    }
+
+    /// Set the vertical variants: `top_floor_extra` extra wall rows on the top
+    /// floor and `knee` rows of wall between the top ceiling and the roof base
+    /// (see the field docs). Both 0 reproduces the plain frame exactly.
+    pub fn with_vertical_options(mut self, top_floor_extra: u32, knee: u32) -> Self {
+        self.top_floor_extra = top_floor_extra;
+        self.knee = knee;
+        self
+    }
+
+    pub fn top_floor_extra(&self) -> u32 {
+        self.top_floor_extra
+    }
+
+    /// Knee-wall rows above the top floor's ceiling (see the field doc).
+    pub fn knee(&self) -> u32 {
+        self.knee
+    }
+
+    /// Knee-wall rows above rect `rect_index`'s top ceiling: `knee` for rects
+    /// that reach the building's top floor, 0 for lower wings.
+    pub fn knee_for_rect(&self, rect_index: usize) -> u32 {
+        if self.floor_counts.get(rect_index) == Some(&self.max_floors()) { self.knee } else { 0 }
     }
 
     /// Geometric extent of rect `rect_index` at the given floor, or `None` if
@@ -150,8 +182,20 @@ impl Frame {
         self.base_y
     }
 
+    /// Base wall height (every floor but a tall top floor, and the cellar).
     pub fn wall_height(&self) -> u32 {
         self.wall_height
+    }
+
+    /// Wall height in blocks of air on `floor`: the base height, plus
+    /// `top_floor_extra` on the top regular floor. The cellar and the attic
+    /// index use the base height.
+    pub fn wall_height_at(&self, floor: u32) -> u32 {
+        if floor != CELLAR_FLOOR && floor + 1 == self.max_floors() {
+            self.wall_height + self.top_floor_extra
+        } else {
+            self.wall_height
+        }
     }
 
     pub fn floor_counts(&self) -> &[u32] {
@@ -163,23 +207,34 @@ impl Frame {
         self.floor_counts[0]
     }
 
-    /// Height in blocks for a given rect.
+    /// Height in blocks for a given rect: its storeys plus any knee wall.
     pub fn rect_height(&self, rect_index: usize) -> u32 {
-        self.floor_counts[rect_index] * (self.wall_height + 1)
+        let storeys = self.floor_y(self.floor_counts[rect_index]) - self.base_y;
+        storeys as u32 + self.knee_for_rect(rect_index)
     }
 
-    /// Y level of the floor surface for a given story (0-indexed).
-    /// `CELLAR_FLOOR` resolves to one story below `base_y`.
+    /// Y level of the floor surface for a given story (0-indexed). The index
+    /// one past the top floor is the attic floor. `CELLAR_FLOOR` resolves to
+    /// one story below `base_y`.
     pub fn floor_y(&self, floor: u32) -> i32 {
         if floor == CELLAR_FLOOR {
             return self.base_y - (self.wall_height as i32 + 1);
         }
-        self.base_y + floor as i32 * (self.wall_height as i32 + 1)
+        // Only the top floor can be taller, so every floor above it (the
+        // attic) is shifted by the extra rows.
+        let extra = if floor >= self.max_floors() { self.top_floor_extra as i32 } else { 0 };
+        self.base_y + floor as i32 * (self.wall_height as i32 + 1) + extra
     }
 
     /// Y level of the ceiling for a given story.
     pub fn ceiling_y(&self, floor: u32) -> i32 {
-        self.floor_y(floor) + self.wall_height as i32
+        self.floor_y(floor) + self.wall_height_at(floor) as i32
+    }
+
+    /// Y level of the ceiling over rect `rect_index`'s top floor — the attic
+    /// floor slab when there is one. Below `roof_y` by 2 plus any knee wall.
+    pub fn top_ceiling_y(&self, rect_index: usize) -> i32 {
+        self.ceiling_y(self.floor_counts[rect_index] - 1)
     }
 
     /// Y level where the roof starts for a given rect (one above top wall).
