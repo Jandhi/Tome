@@ -14,6 +14,7 @@ pub mod iso;
 pub mod perspective;
 pub mod scene;
 pub mod shape;
+pub mod texel;
 pub mod topdown;
 pub mod viewer;
 

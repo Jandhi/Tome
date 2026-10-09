@@ -197,6 +197,15 @@ mod tests {
         assert_eq!(g.ny, 3);
         let tw = 16;
         let pm = render_iso(&g, IsoCamera::SouthEast, tw as u32).unwrap();
+        // The same house with full plank blocks in place of the slab roof.
+        let mut full = shapes_scene();
+        for x in 6..=8 {
+            for z in 6..=8 {
+                full.insert(Point3D::new(x, 2, z), "minecraft:oak_planks");
+            }
+        }
+        let gf = VoxelGrid::from_scene(&full, None).unwrap();
+        let pf = render_iso(&gf, IsoCamera::SouthEast, tw as u32).unwrap();
         // Anchor of the front eave slab (8, 2, 8): SE camera, u = x, v = z.
         let (th, bh, margin) = (tw / 2, tw / 2, tw);
         let (u, y, v) = (8, 2, 8);
@@ -204,14 +213,167 @@ mod tests {
         let ay = (u + v) * th / 2 - y * bh + (g.ny - 1) * bh + margin;
         // Sample the +u (east) side a quarter tile right of the front edge: a
         // full cube would show its shaded side in both the upper and lower half.
-        let upper = rgba(&pm, (ax + tw / 4) as u32, (ay + 3 * th / 4 + bh / 4) as u32);
-        let lower = rgba(&pm, (ax + tw / 4) as u32, (ay + 3 * th / 4 + 3 * bh / 4) as u32);
-        let slab = block_color("minecraft:oak_slab");
-        let side = crate::render::grid::shade(slab, 0.8);
-        assert_eq!(lower, side, "lower half is the slab's east side");
-        assert_ne!(upper, side, "upper half must not be drawn as a side face");
-        // What shows there is what lies behind: the slab's own (unshaded) top.
-        assert_eq!(upper, slab, "upper half shows the slab top behind it");
+        let (sx, upper_y, lower_y) = ((ax + tw / 4) as u32, (ay + 3 * th / 4 + bh / 4) as u32, (ay + 3 * th / 4 + 3 * bh / 4) as u32);
+        let upper = rgba(&pm, sx, upper_y);
+        let lower = rgba(&pm, sx, lower_y);
+        // The lower half is the slab's east side: the same pixel (flat colour
+        // or texel) as the full block's side there.
+        assert_eq!(lower, rgba(&pf, sx, lower_y), "lower half is the slab's east side");
+        // The upper half shows what lies behind: the slab's own top, which
+        // sits half a block lower on screen than the full block's top.
+        assert_eq!(upper, rgba(&pf, sx, upper_y - (bh / 2) as u32), "upper half shows the slab top behind it");
+        if crate::render::assets::assets().is_none() {
+            let slab = block_color("minecraft:oak_slab");
+            let side = crate::render::grid::shade(slab, 0.8);
+            assert_eq!(lower, side, "lower half is the slab's east side");
+            assert_ne!(upper, side, "upper half must not be drawn as a side face");
+            assert_eq!(upper, slab, "upper half shows the slab top behind it");
+        }
+    }
+
+    /// One block at the origin of a 1x1x1 scene.
+    fn lone_block(block: &str) -> VoxelGrid {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(1, 1, 1) });
+        s.insert(Point3D::new(0, 0, 0), block);
+        VoxelGrid::from_scene(&s, None).unwrap()
+    }
+
+    /// Non-background pixels of a pixmap and their distinct colours.
+    fn painted(pm: &resvg::tiny_skia::Pixmap) -> (usize, usize) {
+        let mut colours: Vec<[u8; 4]> = Vec::new();
+        let mut n = 0;
+        for y in 0..pm.height() {
+            for x in 0..pm.width() {
+                let c = rgba(pm, x, y);
+                if c != BACKGROUND {
+                    n += 1;
+                    if !colours.contains(&c) {
+                        colours.push(c);
+                    }
+                }
+            }
+        }
+        (n, colours.len())
+    }
+
+    #[test]
+    fn textured_planks_iso_shows_texels_over_the_same_silhouette() {
+        if crate::render::assets::assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let planks = lone_block("minecraft:oak_planks");
+        assert!(planks.has_textures());
+        let pm = render_iso(&planks, IsoCamera::SouthEast, 32).unwrap();
+        let (n, colours) = painted(&pm);
+        assert!(colours > 3, "textured planks show more than one colour per face, got {colours}");
+        // A block the jar has no model for keeps the flat path; its full-cube
+        // silhouette covers exactly the same pixels, so the two never leave seams.
+        let flat = lone_block("minecraft:not_a_block");
+        assert!(!flat.has_textures());
+        let pf = render_iso(&flat, IsoCamera::SouthEast, 32).unwrap();
+        let (nf, cf) = painted(&pf);
+        assert_eq!(cf, 3, "flat cube: one colour per face");
+        assert_eq!(n, nf, "textured and flat cubes cover the same pixels");
+    }
+
+    #[test]
+    fn glass_pane_cutout_texels_do_not_paint() {
+        if crate::render::assets::assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        use crate::render::assets::Face6;
+        // A pane running north-south: its south piece (z 9..16) shows its east
+        // face to the SE camera, textured with the see-through pane texture.
+        let g = lone_block("minecraft:glass_pane[east=false,north=true,south=true,waterlogged=false,west=false]");
+        let geo = g.geometry(g.get(0, 0, 0)).expect("pane model");
+        let piece = geo.elements.iter().find(|e| e.to[2] > 15.0 && e.to[0] < 10.0).expect("south piece");
+        let east = crate::render::texel::face(piece, Face6::East).expect("east face");
+        let tw = 32;
+        let pm = render_iso(&g, IsoCamera::SouthEast, tw as u32).unwrap();
+        // Anchor of the only block: off_x = nv * tw / 2 + margin, off_y = margin.
+        let (ax, ay) = (tw / 2 + tw, tw);
+        let (mut holes, mut frame) = (0, 0);
+        for y in 0..(tw + tw / 2) {
+            for x in 0..tw {
+                // Invert the projection on the east face's plane (u = 9).
+                let (sx, sy) = (x as f32 + 0.5, y as f32 + 0.5);
+                let d = (sx - tw as f32 / 2.0) / (tw as f32 / 32.0);
+                let v = piece.to[0] - d;
+                let yy = 16.0 - (sy - (piece.to[0] + v) * (tw as f32 / 64.0)) * 16.0 / (tw as f32 / 2.0);
+                if v < piece.from[2] || v >= piece.to[2] || yy < 0.0 || yy >= 16.0 {
+                    continue;
+                }
+                let texel = east.sample_at([piece.to[0], yy, v]);
+                let pixel = rgba(&pm, (ax + x - tw / 2) as u32, (ay + y) as u32);
+                if texel[3] == 0 {
+                    holes += 1;
+                    assert_eq!(pixel, BACKGROUND, "cut-out texel at ({x}, {y}) must not paint");
+                } else {
+                    frame += 1;
+                    assert_ne!(pixel, BACKGROUND, "frame texel at ({x}, {y}) paints");
+                }
+            }
+        }
+        assert!(holes > 0 && frame > 0, "pane face has both holes ({holes}) and frame ({frame}) texels");
+    }
+
+    #[test]
+    fn textured_topdown_grass_is_green_and_glass_shows_through() {
+        if crate::render::assets::assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let px = 16u32;
+        let grass = render_topdown(&lone_block("minecraft:grass_block[snowy=false]"), px).unwrap();
+        let (n, colours) = painted(&grass);
+        assert_eq!(n, (px * px) as usize);
+        assert!(colours > 1, "grass top shows its texture");
+        for y in px..2 * px {
+            for x in px..2 * px {
+                let c = rgba(&grass, x, y);
+                assert!(c[1] > c[0] + 15 && c[1] > c[2], "grass pixel {c:?} is green");
+            }
+        }
+        // Glass over grass: the pane texture's clear middle lets the grass show.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(1, 2, 1) });
+        s.insert(Point3D::new(0, 0, 0), "minecraft:grass_block[snowy=false]");
+        s.insert(Point3D::new(0, 1, 0), "minecraft:glass");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        let pm = render_topdown(&g, px).unwrap();
+        let geo = g.geometry(g.get(0, 1, 0)).expect("glass model");
+        let up = crate::render::texel::face(&geo.elements[0], crate::render::assets::Face6::Up).expect("up face");
+        let (mut through, mut frame) = (0, 0);
+        for y in 0..px {
+            for x in 0..px {
+                let texel = up.sample_at([x as f32 + 0.5, 16.0, y as f32 + 0.5]);
+                let (c, below) = (rgba(&pm, px + x, px + y), rgba(&grass, px + x, px + y));
+                if texel[3] == 0 {
+                    through += 1;
+                    // The grass sits a block below the surface cell, so it
+                    // gets the full "low surface" darkening (0.8).
+                    assert_eq!(c, crate::render::grid::shade(below, 0.8), "clear glass texel shows the grass under it");
+                } else {
+                    frame += 1;
+                }
+            }
+        }
+        assert!(through > 0 && frame > 0, "glass top has clear ({through}) and frame ({frame}) texels");
+    }
+
+    #[test]
+    fn textured_elevation_shows_facade_texels() {
+        if crate::render::assets::assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let g = lone_block("minecraft:stone_bricks");
+        let px = 16u32;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        let (n, colours) = painted(&pm);
+        assert_eq!(n, (px * px) as usize, "a full block fills its square");
+        assert!(colours > 3, "the facade shows its texture, got {colours} colours");
     }
 
     #[test]
@@ -242,7 +404,8 @@ mod tests {
         assert_eq!(roof, px * px / 2, "bottom slab fills half its square");
     }
 
-    /// Render a crop of a saved scene for manual inspection:
+    /// Render a crop of a saved scene for manual inspection (`TOME_PX` / `TOME_TILE`
+    /// override the 16 px per block and 24 px iso tile):
     /// `TOME_SCENE=<path.scene> TOME_REGION="x y z sx sy sz" TOME_RENDER_OUT=<dir> cargo test render_saved_region -- --ignored`
     #[test]
     #[ignore]
@@ -256,9 +419,10 @@ mod tests {
         let n: Vec<i32> = region.split_whitespace().map(|v| v.parse().expect("region int")).collect();
         assert_eq!(n.len(), 6, "TOME_REGION needs 6 ints");
         let scene = Scene::load(&path).expect("load scene");
+        let env_or = |key: &str, default: u32| std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default);
         let opts = RenderOptions {
-            px: 16,
-            iso_tile: 24,
+            px: env_or("TOME_PX", 16),
+            iso_tile: env_or("TOME_TILE", 24),
             region: Some(Rect3D { origin: Point3D::new(n[0], n[1], n[2]), size: Point3D::new(n[3], n[4], n[5]) }),
         };
         for p in render_views(&scene, &opts, Path::new(&out), "crop_").expect("render") {
@@ -288,10 +452,18 @@ mod tests {
             }
         }
         println!("scene blocks: {}", s.blocks.len());
-
+        time_views(&s);
         let t = Instant::now();
-        let g = VoxelGrid::from_scene(&s, None).unwrap();
-        println!("grid build:   {:?}", t.elapsed());
+        let out = std::env::temp_dir().join("tome_render_timing");
+        render_all(&s, &out).unwrap();
+        println!("render_all incl. PNG encode: {:?}", t.elapsed());
+    }
+
+    /// Build the grid and render every standard view once, printing timings.
+    fn time_views(s: &Scene) {
+        let t = Instant::now();
+        let g = VoxelGrid::from_scene(s, None).unwrap();
+        println!("grid build:   {:?} (textures: {})", t.elapsed(), g.has_textures());
         let t = Instant::now();
         render_topdown(&g, 4).unwrap();
         println!("top-down:     {:?}", t.elapsed());
@@ -305,10 +477,21 @@ mod tests {
             render_elevation(&g, side, 4).unwrap();
             println!("elev {:<6}:  {:?}", side.name(), t.elapsed());
         }
+    }
+
+    /// Per-view timings of a saved town (set `TOME_NO_TEXTURES=1` to compare the flat path):
+    /// `TOME_SCENE=<path.scene> cargo test --release time_saved_scene -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn time_saved_scene() {
+        let Ok(path) = std::env::var("TOME_SCENE") else {
+            println!("set TOME_SCENE");
+            return;
+        };
         let t = Instant::now();
-        let out = std::env::temp_dir().join("tome_render_timing");
-        render_all(&s, &out).unwrap();
-        println!("render_all incl. PNG encode: {:?}", t.elapsed());
+        let scene = Scene::load(&path).expect("load scene");
+        println!("scene load:   {:?} ({} blocks)", t.elapsed(), scene.blocks.len());
+        time_views(&scene);
     }
 
     /// A 9x9 stone floor at y=0 with a 3-high spruce wall along z=8.
