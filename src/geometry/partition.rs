@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::hash::Hash;
 use crate::util::HashSet;
 
@@ -48,11 +49,10 @@ pub fn voronoi_fill_with_points<TNode>(points : &HashSet<TNode>, neighbour_func 
         section
     }).collect();
 
-    let mut queue : Vec<(TNode, usize)> = start_points.iter().enumerate().map(|(i, node)| (node.clone(), i)).collect();
+    let mut queue : VecDeque<(TNode, usize)> = start_points.iter().enumerate().map(|(i, node)| (node.clone(), i)).collect();
     let mut visited : HashSet<TNode> = start_points.iter().map(|node| node.clone()).collect(); 
 
-    while !queue.is_empty() {
-        let (point, section_index) = queue.remove(0);
+    while let Some((point, section_index)) = queue.pop_front() {
         let neighbours = neighbour_func(point);
 
         for neighbour in neighbours {
@@ -66,7 +66,7 @@ pub fn voronoi_fill_with_points<TNode>(points : &HashSet<TNode>, neighbour_func 
 
             sections[section_index].insert(neighbour.clone());
             visited.insert(neighbour.clone());
-            queue.push((neighbour, section_index));
+            queue.push_back((neighbour, section_index));
         }
     }
 

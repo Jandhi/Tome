@@ -230,6 +230,15 @@ impl Editor {
         self.world.get_block(point)
     }
 
+    /// Like [`try_get_block`](Self::try_get_block) but returns only the id, skipping
+    /// the clone of the block-state map (same cache-then-world lookup).
+    pub fn try_get_block_id(&self, point: Point3D) -> Option<BlockID> {
+        if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
+            return Some(block.id.clone());
+        }
+        self.world.get_block_id(point)
+    }
+
     /// Reads a block straight from the placement cache by its **local** coordinate
     /// — the same space `place_block` writes with. Returns `None` when nothing has
     /// been placed at `local` this run.

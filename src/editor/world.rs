@@ -4,7 +4,7 @@ use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, util::point_to_chunk_coordinates}};
 
 use super::{fixture::TerrainFixture, Editor};
 
@@ -356,8 +356,8 @@ impl World {
         // Walk down through tree blocks to the real surface. If a block read
         // fails (unloaded chunk / out of section range), stop where we are
         // rather than panicking — the height so far is the best estimate.
-        while let Some(block) = self.get_block(Point3D::new(point.x, height - 1, point.y)) {
-            if !block.id.is_tree() {
+        while let Some(id) = self.get_block_id(Point3D::new(point.x, height - 1, point.y)) {
+            if !id.is_tree() {
                 break;
             }
             height -= 1;
@@ -456,8 +456,8 @@ impl World {
     pub fn add_non_tree_height(&self, point : Point2D) -> Option<Point3D> {
         let mut new_point = Point3D::new(point.x, self.get_height_at(point)?, point.y);
         // Walk down through tree blocks; stop on a failed read rather than panic.
-        while let Some(block) = self.get_block(new_point + DOWN) {
-            if !block.id.is_tree() {
+        while let Some(id) = self.get_block_id(new_point + DOWN) {
+            if !id.is_tree() {
                 break;
             }
             new_point += DOWN;
@@ -469,7 +469,23 @@ impl World {
         self.build_area.drop_y().contains(point + self.build_area.origin.drop_y())
     }
 
-    pub fn get_block(&self, mut point: Point3D) -> Option<Block> {
+    pub fn get_block(&self, point: Point3D) -> Option<Block> {
+        self.with_block(point, |name, properties| Block {
+            id: name.into(),
+            state: properties.clone(),
+            data: None,
+        })
+    }
+
+    /// Like [`get_block`](Self::get_block) but returns only the id, skipping the
+    /// clone of the block-state map. For hot scans that only test the id.
+    pub fn get_block_id(&self, point: Point3D) -> Option<BlockID> {
+        self.with_block(point, |name, _| name.into())
+    }
+
+    /// Looks up the palette entry at `point` (local coords) and hands its name and
+    /// properties to `f`. Shared by `get_block` and `get_block_id`.
+    fn with_block<R>(&self, mut point: Point3D, f: impl FnOnce(&str, &Option<std::collections::HashMap<String, String>>) -> R) -> Option<R> {
         point = point + self.build_area.origin;
         //info!("Getting block at point: {:?}", point); uncomment if needed, but generates way to many lines of logs
 
@@ -483,9 +499,9 @@ impl World {
             // Fixture worlds drop sections far from the surface: stand in for them.
             let (lo, hi) = self.trimmed_y_range?;
             return if point.y > hi {
-                Some(Block::from("minecraft:air"))
+                Some(f("minecraft:air", &None))
             } else if point.y < lo {
-                Some(Block::from("minecraft:stone"))
+                Some(f("minecraft:stone", &None))
             } else {
                 None
             };
@@ -495,11 +511,7 @@ impl World {
 
         if block_states.data.is_none() {
             let block = block_states.palette.get(0)?;
-            return Some(Block {
-                id: block.name.as_str().into(),
-                state: block.properties.clone(),
-                data: None,
-            });
+            return Some(f(block.name.as_str(), &block.properties));
         }
 
         let data = block_states.data.as_ref()?;
@@ -508,11 +520,7 @@ impl World {
         
         let palette = &block_states.palette;
 
-        palette.get(block_index).map(|block| Block {
-            id: block.name.as_str().into(),
-            state: block.properties.clone(),
-            data: None,
-        })
+        palette.get(block_index).map(|block| f(block.name.as_str(), &block.properties))
     }
 
     pub fn get_biome(&self, mut point: Point3D) -> Option<Biome> {
