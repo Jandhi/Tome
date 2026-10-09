@@ -45,8 +45,8 @@ pub const S: u8 = 4;
 pub const W: u8 = 8;
 const SIDES: [(&str, u8); 4] = [("north", N), ("east", E), ("south", S), ("west", W)];
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Dir {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Dir {
     North,
     East,
     South,
@@ -81,6 +81,21 @@ impl Dir {
         self.cw().cw()
     }
 
+    fn is_x_axis(self) -> bool {
+        matches!(self, Dir::East | Dir::West)
+    }
+
+    /// The cell one step from `p` in this direction (+Z south, +X east).
+    pub fn offset(self, p: crate::geometry::Point3D) -> crate::geometry::Point3D {
+        let (dx, dz) = match self {
+            Dir::North => (0, -1),
+            Dir::South => (0, 1),
+            Dir::East => (1, 0),
+            Dir::West => (-1, 0),
+        };
+        crate::geometry::Point3D::new(p.x + dx, p.y, p.z + dz)
+    }
+
     /// The two quarters on this side of the cell.
     fn half(self) -> u8 {
         match self {
@@ -90,6 +105,46 @@ impl Dir {
             Dir::West => NW | SW,
         }
     }
+}
+
+pub fn is_stairs(block: &str) -> bool {
+    bare_id(block).ends_with("_stairs")
+}
+
+/// `(facing, half == top)` of a stair block string, `None` for anything else.
+pub fn stair_info(block: &str) -> Option<(Dir, bool)> {
+    if !is_stairs(block) {
+        return None;
+    }
+    let facing = state(block, "facing").and_then(Dir::parse).unwrap_or(Dir::North);
+    Some((facing, state(block, "half") == Some("top")))
+}
+
+/// Stair shape derived from the neighbours, exactly as Minecraft's
+/// `StairsBlock::getStairsShape` does on placement. The generator places
+/// stairs without a `shape` state (or with `straight`), and the server works
+/// the real one out from block updates, so a hip-roof corner that is an
+/// `outer_right` in game is just `facing=east` in our scene. `at(dir)` gives
+/// the neighbour's `(facing, top)` when it is a stair.
+pub fn infer_stairs(block: &str, at: impl Fn(Dir) -> Option<(Dir, bool)>) -> Option<Shape> {
+    let (facing, top) = stair_info(block)?;
+    let same_half = |d: Dir| at(d).filter(|&(_, t)| t == top);
+    // True unless the stair in direction `d` has our exact orientation.
+    let different = |d: Dir| at(d).map_or(true, |(f, t)| f != facing || t != top);
+    let quarters = if let Some((f2, _)) = same_half(facing)
+        .filter(|&(f2, _)| f2.is_x_axis() != facing.is_x_axis() && different(f2.opposite()))
+    {
+        // Outer corner: only the quarter shared by our high side and theirs.
+        if f2 == facing.ccw() { facing.half() & facing.ccw().half() } else { facing.half() & facing.cw().half() }
+    } else if let Some((f3, _)) = same_half(facing.opposite())
+        .filter(|&(f3, _)| f3.is_x_axis() != facing.is_x_axis() && different(f3))
+    {
+        // Inner corner: our high half plus the neighbour's.
+        if f3 == facing.ccw() { facing.half() | facing.ccw().half() } else { facing.half() | facing.cw().half() }
+    } else {
+        facing.half()
+    };
+    Some(Shape::Stairs { top, quarters })
 }
 
 /// Value of `key` in an `id[k=v,...]` block string.
@@ -435,5 +490,55 @@ mod tests {
         );
         assert!(!Shape::from_block("minecraft:oak_fence").is_full());
         assert!(Shape::from_block("minecraft:sea_lantern").is_full());
+    }
+}
+
+#[cfg(test)]
+mod stair_inference_tests {
+    use super::*;
+
+    fn lookup<'a>(map: &'a [(Dir, &'a str)]) -> impl Fn(Dir) -> Option<(Dir, bool)> + 'a {
+        move |d| map.iter().find(|(k, _)| *k == d).and_then(|(_, b)| stair_info(b))
+    }
+
+    #[test]
+    fn straight_when_alone_or_aligned() {
+        let me = "minecraft:oak_stairs[facing=north,half=bottom]";
+        assert_eq!(infer_stairs(me, lookup(&[])), Some(Shape::Stairs { top: false, quarters: NW | NE }));
+        // Same orientation on both sides keeps it straight.
+        let row = [(Dir::East, me), (Dir::West, me)];
+        assert_eq!(infer_stairs(me, lookup(&row)), Some(Shape::Stairs { top: false, quarters: NW | NE }));
+    }
+
+    #[test]
+    fn outer_corner_from_the_stair_in_front() {
+        // Facing north; the stair in front (north) faces east and nothing matches us to the west:
+        // Minecraft calls this outer_right, the north-east quarter only.
+        let me = "minecraft:oak_stairs[facing=north,half=bottom]";
+        let front = "minecraft:oak_stairs[facing=east,half=bottom]";
+        assert_eq!(infer_stairs(me, lookup(&[(Dir::North, front)])), Some(Shape::Stairs { top: false, quarters: NE }));
+        // Front faces west instead: outer_left, north-west quarter.
+        let front_w = "minecraft:oak_stairs[facing=west,half=bottom]";
+        assert_eq!(infer_stairs(me, lookup(&[(Dir::North, front_w)])), Some(Shape::Stairs { top: false, quarters: NW }));
+        // A top-half stair in front does not pair with a bottom one.
+        let front_top = "minecraft:oak_stairs[facing=east,half=top]";
+        assert_eq!(infer_stairs(me, lookup(&[(Dir::North, front_top)])), Some(Shape::Stairs { top: false, quarters: NW | NE }));
+    }
+
+    #[test]
+    fn inner_corner_from_the_stair_behind() {
+        // Facing north; the stair behind (south) faces east and the cell east of us is not our twin:
+        // inner_right = north half plus the south-east quarter.
+        let me = "minecraft:oak_stairs[facing=north,half=bottom]";
+        let back = "minecraft:oak_stairs[facing=east,half=bottom]";
+        assert_eq!(infer_stairs(me, lookup(&[(Dir::South, back)])), Some(Shape::Stairs { top: false, quarters: NW | NE | SE }));
+        // If our east neighbour is an identical stair, the corner is not formed.
+        assert_eq!(
+            infer_stairs(me, lookup(&[(Dir::South, back), (Dir::East, me)])),
+            Some(Shape::Stairs { top: false, quarters: NW | NE })
+        );
+        // Behind faces west: inner_left = north half plus south-west.
+        let back_w = "minecraft:oak_stairs[facing=west,half=bottom]";
+        assert_eq!(infer_stairs(me, lookup(&[(Dir::South, back_w)])), Some(Shape::Stairs { top: false, quarters: NW | NE | SW }));
     }
 }

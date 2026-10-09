@@ -69,9 +69,22 @@ impl VoxelGrid {
                 palette_color[i as usize][3] != 0 && (shape::connects(s) || Shape::from_block(s).is_full())
             })
         };
+        // Stairs get their corner shape from the neighbours, as the server does.
+        let is_stairs: Vec<bool> = scene.palette.iter().map(|s| shape::is_stairs(s)).collect();
+        let stair_at = |q: Point3D| scene.blocks.get(&q).and_then(|&i| shape::stair_info(&scene.palette[i as usize]));
         let mut cell_mat = |p: &Point3D, i: u32| -> u16 {
             let m = palette_mat[i as usize];
-            if m == 0 || !needs_links[i as usize] {
+            if m == 0 {
+                return m;
+            }
+            if is_stairs[i as usize] {
+                let s = &scene.palette[i as usize];
+                return match shape::infer_stairs(s, |d| stair_at(d.offset(*p))) {
+                    Some(sh) => intern(palette_color[i as usize], sh),
+                    None => m,
+                };
+            }
+            if !needs_links[i as usize] {
                 return m;
             }
             let sides = [(0, -1, shape::N), (1, 0, shape::E), (0, 1, shape::S), (-1, 0, shape::W)]
