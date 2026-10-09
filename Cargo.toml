@@ -26,6 +26,7 @@ strum = "0.27.1"
 strum_macros = "0.27.1"
 tokio = {version = "1.44.2", features = ["full"]}
 resvg = "0.44"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 # Optional visualizer dependencies
 axum = { version = "0.8", features = ["ws"], optional = true }

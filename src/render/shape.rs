@@ -127,30 +127,52 @@ pub fn stair_info(block: &str) -> Option<(Dir, bool)> {
 /// `outer_right` in game is just `facing=east` in our scene. `at(dir)` gives
 /// the neighbour's `(facing, top)` when it is a stair.
 pub fn infer_stairs(block: &str, at: impl Fn(Dir) -> Option<(Dir, bool)>) -> Option<Shape> {
+    let shape = infer_stairs_shape(block, at)?;
+    Some(Shape::from_block(&with_state(block, "shape", shape)))
+}
+
+/// The `shape` state value (`straight`, `inner_left`, …) a stair block gets
+/// in game from its neighbours; see [`infer_stairs`].
+pub fn infer_stairs_shape(block: &str, at: impl Fn(Dir) -> Option<(Dir, bool)>) -> Option<&'static str> {
     let (facing, top) = stair_info(block)?;
     let same_half = |d: Dir| at(d).filter(|&(_, t)| t == top);
     // True unless the stair in direction `d` has our exact orientation.
     let different = |d: Dir| at(d).map_or(true, |(f, t)| f != facing || t != top);
-    let quarters = if let Some((f2, _)) = same_half(facing)
+    let shape = if let Some((f2, _)) = same_half(facing)
         .filter(|&(f2, _)| f2.is_x_axis() != facing.is_x_axis() && different(f2.opposite()))
     {
         // Outer corner: only the quarter shared by our high side and theirs.
-        if f2 == facing.ccw() { facing.half() & facing.ccw().half() } else { facing.half() & facing.cw().half() }
+        if f2 == facing.ccw() { "outer_left" } else { "outer_right" }
     } else if let Some((f3, _)) = same_half(facing.opposite())
         .filter(|&(f3, _)| f3.is_x_axis() != facing.is_x_axis() && different(f3))
     {
         // Inner corner: our high half plus the neighbour's.
-        if f3 == facing.ccw() { facing.half() | facing.ccw().half() } else { facing.half() | facing.cw().half() }
+        if f3 == facing.ccw() { "inner_left" } else { "inner_right" }
     } else {
-        facing.half()
+        "straight"
     };
-    Some(Shape::Stairs { top, quarters })
+    Some(shape)
 }
 
 /// Value of `key` in an `id[k=v,...]` block string.
-fn state<'a>(block: &'a str, key: &str) -> Option<&'a str> {
+pub fn state<'a>(block: &'a str, key: &str) -> Option<&'a str> {
     let inner = block.split_once('[')?.1.trim_end_matches(']');
     inner.split(',').find_map(|kv| kv.split_once('=').filter(|(k, _)| k.trim() == key).map(|(_, v)| v.trim()))
+}
+
+/// `block` with state `key` set to `value` (replacing any existing value).
+pub fn with_state(block: &str, key: &str, value: &str) -> String {
+    let (id, inner) = match block.split_once('[') {
+        Some((id, rest)) => (id, rest.trim_end_matches(']')),
+        None => (block, ""),
+    };
+    let mut parts: Vec<String> = inner
+        .split(',')
+        .filter(|kv| !kv.trim().is_empty() && kv.split_once('=').map_or(true, |(k, _)| k.trim() != key))
+        .map(str::to_string)
+        .collect();
+    parts.push(format!("{key}={value}"));
+    format!("{id}[{}]", parts.join(","))
 }
 
 /// A `t`-thick full-width panel against side `d`, spanning `y0..y1`.
@@ -419,11 +441,22 @@ pub fn needs_connections(block: &str) -> bool {
 
 /// Shape of a stateless connecting block linked toward `sides` (`N | E | S | W`).
 pub fn with_connections(block: &str, sides: u8) -> Shape {
+    Shape::from_block(&connected_block(block, sides))
+}
+
+/// The block string a stateless connecting block gets once linked toward
+/// `sides` (`N | E | S | W`): `oak_fence[north=true,...]`, walls use
+/// `low` / `none` and keep their post.
+pub fn connected_block(block: &str, sides: u8) -> String {
     let id = bare_id(block);
-    let (on, off) = if id.ends_with("_wall") { ("low", "none") } else { ("true", "false") };
-    let state: Vec<String> =
+    let wall = id.ends_with("_wall");
+    let (on, off) = if wall { ("low", "none") } else { ("true", "false") };
+    let mut state: Vec<String> =
         SIDES.iter().map(|(k, bit)| format!("{k}={}", if sides & bit != 0 { on } else { off })).collect();
-    Shape::from_block(&format!("{id}[{}]", state.join(",")))
+    if wall {
+        state.push("up=true".to_string());
+    }
+    format!("{id}[{}]", state.join(","))
 }
 
 /// Push a centred `aw`-wide arm from a `pw`-wide centre post out to each side

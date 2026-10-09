@@ -5,6 +5,7 @@
 //! Output goes under an `out_dir`; see [`render_all`] and [`render_views`].
 //! Each call also writes an `index.txt` describing every image.
 
+pub mod assets;
 pub mod colors;
 pub mod diff;
 pub mod elevation;

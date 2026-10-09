@@ -7,6 +7,7 @@
 
 use resvg::tiny_skia::{Pixmap, PixmapPaint, Transform};
 
+use super::assets::{BlockGeometry, Face6};
 use super::grid::{canvas, shade, RayAcc, Rgba, VoxelGrid, BACKGROUND};
 
 #[derive(Debug, Clone, Copy)]
@@ -147,6 +148,49 @@ fn hit_boxes(g: &VoxelGrid, m: u16, cell: [i32; 3], o: V3, d: V3) -> Option<(f32
     best
 }
 
+/// Face hits of the ray against a textured block model in `cell`: `(t,
+/// colour, shade)`, nearest first, with coincident faces (overlays) ordered
+/// so later elements paint over earlier ones. Texels with zero alpha are
+/// holes (cut-out leaves, panes, plants) and a face the model leaves open
+/// lets the ray through, as Minecraft's back-face culling does.
+fn hit_geometry(
+    geo: &BlockGeometry,
+    cell: [i32; 3],
+    o: V3,
+    d: V3,
+    fill: Rgba,
+    hits: &mut Vec<(f32, usize, Rgba, f32)>,
+) {
+    hits.clear();
+    // Work in sixteenths inside the cell; t is converted back to world units.
+    let os = [(o[0] - cell[0] as f32) * 16.0, (o[1] - cell[1] as f32) * 16.0, (o[2] - cell[2] as f32) * 16.0];
+    for (idx, e) in geo.elements.iter().enumerate() {
+        let (oe, de) = match &e.local {
+            Some(f) => (f.point(os), f.dir(d)),
+            None => (os, d),
+        };
+        let Some((t0, t1, axis, through_max)) = slab(oe, de, e.from, e.to) else { continue };
+        if t1 < 0.0 {
+            continue;
+        }
+        if t0 < 0.0 {
+            // The eye is inside this box: it fills the view in the block's colour.
+            hits.push((0.0, idx, fill, SHADE_BOTTOM));
+            continue;
+        }
+        let face = Face6::entered(axis, through_max);
+        let Some((_, ft)) = e.faces.iter().find(|(f, _)| *f == face) else { continue };
+        let p = add(oe, scale(de, t0));
+        let c = ft.sample_at(p);
+        if c[3] == 0 {
+            continue;
+        }
+        let s = if ft.shade { face_shade(axis, through_max) } else { SHADE_TOP };
+        hits.push((t0 / 16.0, idx, c, s));
+    }
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+}
+
 /// Colour seen along the ray from `o` (grid-local) in direction `d`.
 fn cast(g: &VoxelGrid, o: V3, d: V3) -> Rgba {
     let size = [g.nx as f32, g.ny as f32, g.nz as f32];
@@ -178,12 +222,20 @@ fn cast(g: &VoxelGrid, o: V3, d: V3) -> Rgba {
     }
 
     let mut acc = RayAcc::default();
+    let mut hits = Vec::new();
+    let fog_at = |t: f32| 1.0 - FOG_AMOUNT * (t / FOG_RANGE).min(1.0);
     loop {
         let m = g.get(cell[0], cell[1], cell[2]);
         if m != 0 {
-            if let Some((t, s)) = hit_boxes(g, m, cell, o, d) {
-                let fog = 1.0 - FOG_AMOUNT * (t / FOG_RANGE).min(1.0);
-                if acc.push(shade(g.color(m), s * fog)) {
+            if let Some(geo) = g.geometry(m) {
+                hit_geometry(geo, cell, o, d, g.color(m), &mut hits);
+                for &(t, _, c, s) in &hits {
+                    if acc.push(shade(c, s * fog_at(t))) {
+                        return acc.finish(BACKGROUND);
+                    }
+                }
+            } else if let Some((t, s)) = hit_boxes(g, m, cell, o, d) {
+                if acc.push(shade(g.color(m), s * fog_at(t))) {
                     return acc.finish(BACKGROUND);
                 }
             }

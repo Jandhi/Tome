@@ -366,6 +366,63 @@ mod tests {
     }
 
     #[test]
+    fn blockstate_variants_and_multipart_pick_models() {
+        use crate::render::assets::{parse_block, pick_models, when_matches};
+        let (id, props) = parse_block("minecraft:oak_stairs[facing=east,half=top,shape=straight]");
+        assert_eq!(id, "oak_stairs");
+        assert_eq!(props.get("half").map(String::as_str), Some("top"));
+
+        let variants = serde_json::json!({ "variants": {
+            "facing=east,half=bottom": { "model": "minecraft:block/a" },
+            "facing=east,half=top": [{ "model": "minecraft:block/b", "x": 180, "y": 90, "uvlock": true }, { "model": "block/c" }],
+        }});
+        let picks = pick_models(&variants, &props);
+        assert_eq!(picks.len(), 1);
+        assert_eq!((picks[0].model.as_str(), picks[0].x, picks[0].y, picks[0].uvlock), ("block/b", 180, 90, true));
+
+        let (_, fence) = parse_block("oak_fence[north=true,east=false,south=true,west=false]");
+        let multipart = serde_json::json!({ "multipart": [
+            { "apply": { "model": "block/post" } },
+            { "when": { "north": "true" }, "apply": { "model": "block/side" } },
+            { "when": { "east": "true" }, "apply": { "model": "block/side", "y": 90 } },
+            { "when": { "OR": [{ "south": "true" }, { "west": "true" }] }, "apply": { "model": "block/or" } },
+            { "when": { "AND": [{ "north": "true" }, { "west": "true|false" }] }, "apply": { "model": "block/and" } },
+        ]});
+        let names: Vec<String> = pick_models(&multipart, &fence).into_iter().map(|p| p.model).collect();
+        assert_eq!(names, ["block/post", "block/side", "block/or", "block/and"]);
+        assert!(!when_matches(&serde_json::json!({ "up": "true" }), &fence), "a missing property never matches");
+    }
+
+    #[test]
+    fn jar_models_resolve_when_a_client_jar_is_present() {
+        use crate::render::assets::{assets, Face6};
+        let Some(a) = assets() else {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        };
+        // A straight stair is a slab plus a step.
+        let stairs = a.geometry("minecraft:oak_stairs[facing=east,half=bottom,shape=straight]").expect("oak stairs");
+        assert_eq!(stairs.elements.len(), 2);
+        // A fence with one link: post plus the rail's two bars.
+        let fence = a.geometry("oak_fence[north=true,east=false,south=false,west=false]").expect("oak fence");
+        assert_eq!(fence.elements.len(), 3);
+        // Grass: tinted green top, dirt-brown sides; a plain cube samples its own texture.
+        let grass = a.geometry("grass_block[snowy=false]").expect("grass block");
+        assert!(grass.top[1] > grass.top[0] + 15 && grass.side[0] > grass.side[1], "grass top {:?} side {:?}", grass.top, grass.side);
+        let planks = a.geometry("minecraft:oak_planks").expect("oak planks");
+        assert_eq!(planks.elements.len(), 1);
+        let (_, up) = planks.elements[0].faces.iter().find(|(f, _)| *f == Face6::Up).expect("up face");
+        assert_eq!(up.sample_at(up.origin), up.texture.sample(0.0, 0.0));
+        assert_eq!(up.sample_at([15.5, 16.0, 15.5]), up.texture.sample(15.5, 15.5));
+        // Entity-rendered blocks and bare ids the jar lacks fall back.
+        assert!(a.geometry("minecraft:chest[facing=north]").is_none());
+        assert!(a.geometry("minecraft:not_a_block").is_none());
+        // Bare generator states resolve through the defaults.
+        assert!(a.geometry("minecraft:lantern").is_some());
+        assert!(a.geometry("minecraft:oak_trapdoor[facing=north,half=bottom,open=true]").is_some());
+    }
+
+    #[test]
     fn contact_sheet_tiles_in_rows() {
         use crate::render::perspective::contact_sheet;
         let tiles: Vec<_> = (0..5).map(|_| resvg::tiny_skia::Pixmap::new(10, 6).unwrap()).collect();

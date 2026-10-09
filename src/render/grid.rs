@@ -2,10 +2,13 @@
 //! every view. All views read the grid, never the scene's hash map, so lookups
 //! are plain array indexing.
 
+use std::sync::Arc;
+
 use crate::util::HashMap;
 
 use resvg::tiny_skia::Pixmap;
 
+use super::assets::{self, BlockGeometry};
 use super::colors;
 use super::scene::Scene;
 use super::shape::{self, Box16, Shape};
@@ -17,8 +20,15 @@ pub type Rgba = [u8; 4];
 pub const BACKGROUND: Rgba = [236, 240, 244, 255];
 
 /// A dense box of material indices in local coordinates `0..nx`, `0..ny`,
-/// `0..nz`. Index 0 is empty; others index `materials` (deduplicated by colour
-/// and [`Shape`], so `water[level=0]` and `water[level=3]` share one material).
+/// `0..nz`. Index 0 is empty; others index `materials` (deduplicated by
+/// colours, [`Shape`] and model, so `water[level=0]` and `water[level=3]`
+/// share one material).
+///
+/// When Minecraft's assets are available (see [`assets`]) a material also
+/// carries the block's model: textured faces for the perspective views, and
+/// texture-average top/side colours for the flat ones. The hand-written
+/// colour table still decides which blocks are empty or translucent, and
+/// supplies the colour of blocks the jar has no element model for.
 pub struct VoxelGrid {
     /// Absolute world coordinate of local cell (0, 0, 0).
     pub origin: Point3D,
@@ -27,10 +37,15 @@ pub struct VoxelGrid {
     pub nz: i32,
     /// Column-major: `(x * nz + z) * ny + y`, so a column is contiguous.
     cells: Vec<u16>,
+    /// Top-face colour per material (the flat views' main colour).
     materials: Vec<Rgba>,
+    /// Side-face colour per material (equals `materials` without textures).
+    side_colors: Vec<Rgba>,
     shapes: Vec<Shape>,
     /// `shapes[m].boxes()`, cached.
     boxes: Vec<Vec<Box16>>,
+    /// Textured model per material, when the assets have one.
+    geometry: Vec<Option<Arc<BlockGeometry>>>,
 }
 
 impl VoxelGrid {
@@ -43,30 +58,44 @@ impl VoxelGrid {
             return None;
         }
 
+        let assets = assets::assets();
         let mut materials: Vec<Rgba> = vec![[0, 0, 0, 0]];
+        let mut side_colors: Vec<Rgba> = vec![[0, 0, 0, 0]];
         let mut shapes: Vec<Shape> = vec![Shape::Full];
-        let mut by_color: HashMap<(Rgba, Shape), u16> = HashMap::default();
-        let mut intern = |c: Rgba, shape: Shape| -> u16 {
-            *by_color.entry((c, shape)).or_insert_with(|| {
-                materials.push(c);
+        let mut geometry: Vec<Option<Arc<BlockGeometry>>> = vec![None];
+        // Key: colours, shape and the model's identity (models are cached per
+        // block string, so the pointer is stable). 0 = no model.
+        let mut by_key: HashMap<(Rgba, Rgba, Shape, usize), u16> = HashMap::default();
+        // Intern a full block string. The hand-written colour decides whether
+        // the block shows at all and how translucent it is; the jar's model,
+        // when it has one, supplies the faces and the colours.
+        let mut intern = |block: &str| -> u16 {
+            let hand = colors::block_color(block);
+            if hand[3] == 0 {
+                return 0;
+            }
+            let shape = Shape::from_block(block);
+            let geo = assets.and_then(|a| a.geometry(block));
+            let (top, side) = match &geo {
+                Some(g) => ([g.top[0], g.top[1], g.top[2], hand[3]], [g.side[0], g.side[1], g.side[2], hand[3]]),
+                None => (hand, hand),
+            };
+            let key = (top, side, shape, geo.as_ref().map_or(0, |g| Arc::as_ptr(g) as usize));
+            *by_key.entry(key).or_insert_with(|| {
+                materials.push(top);
+                side_colors.push(side);
                 shapes.push(shape);
+                geometry.push(geo);
                 (materials.len() - 1) as u16
             })
         };
-        let palette_color: Vec<Rgba> =
-            scene.palette.iter().map(|s| colors::block_color(Scene::strip_state(s))).collect();
-        let palette_mat: Vec<u16> = scene
-            .palette
-            .iter()
-            .zip(&palette_color)
-            .map(|(s, &c)| if c[3] == 0 { 0 } else { intern(c, Shape::from_block(s)) })
-            .collect();
+        let palette_mat: Vec<u16> = scene.palette.iter().map(|s| intern(s)).collect();
         // Stateless fences / walls / panes link to their neighbours per cell.
         let needs_links: Vec<bool> = scene.palette.iter().map(|s| shape::needs_connections(s)).collect();
         let links_to = |q: Point3D| {
             scene.blocks.get(&q).is_some_and(|&i| {
                 let s = &scene.palette[i as usize];
-                palette_color[i as usize][3] != 0 && (shape::connects(s) || Shape::from_block(s).is_full())
+                palette_mat[i as usize] != 0 && (shape::connects(s) || Shape::from_block(s).is_full())
             })
         };
         // Stairs get their corner shape from the neighbours, as the server does.
@@ -77,11 +106,11 @@ impl VoxelGrid {
             if m == 0 {
                 return m;
             }
+            let s = &scene.palette[i as usize];
             if is_stairs[i as usize] {
-                let s = &scene.palette[i as usize];
-                return match shape::infer_stairs(s, |d| stair_at(d.offset(*p))) {
-                    Some(sh) => intern(palette_color[i as usize], sh),
-                    None => m,
+                return match shape::infer_stairs_shape(s, |d| stair_at(d.offset(*p))) {
+                    Some(sh) if shape::state(s, "shape") != Some(sh) => intern(&shape::with_state(s, "shape", sh)),
+                    _ => m,
                 };
             }
             if !needs_links[i as usize] {
@@ -91,8 +120,7 @@ impl VoxelGrid {
                 .iter()
                 .filter(|&&(dx, dz, _)| links_to(Point3D::new(p.x + dx, p.y, p.z + dz)))
                 .fold(0, |acc, &(_, _, bit)| acc | bit);
-            let s = &scene.palette[i as usize];
-            intern(palette_color[i as usize], shape::with_connections(s, sides))
+            intern(&shape::connected_block(s, sides))
         };
 
         let visible = |p: &Point3D, i: u32| crop.contains(*p) && palette_mat[i as usize] != 0;
@@ -117,7 +145,7 @@ impl VoxelGrid {
             }
         }
         let boxes = shapes.iter().map(|s| s.boxes()).collect();
-        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, shapes, boxes })
+        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, side_colors, shapes, boxes, geometry })
     }
 
     fn index(&self, x: i32, y: i32, z: i32) -> usize {
@@ -132,8 +160,25 @@ impl VoxelGrid {
         self.cells[self.index(x, y, z)]
     }
 
+    /// Top-face colour of material `m` (the flat views' main colour).
     pub fn color(&self, m: u16) -> Rgba {
         self.materials[m as usize]
+    }
+
+    /// Side-face colour of material `m`; the same as [`color`](Self::color)
+    /// unless textures gave the block distinct top and side faces.
+    pub fn side_color(&self, m: u16) -> Rgba {
+        self.side_colors[m as usize]
+    }
+
+    /// The block model behind material `m`, when Minecraft's assets supplied one.
+    pub fn geometry(&self, m: u16) -> Option<&BlockGeometry> {
+        self.geometry[m as usize].as_deref()
+    }
+
+    /// `true` when any material carries a textured model.
+    pub fn has_textures(&self) -> bool {
+        self.geometry.iter().any(Option::is_some)
     }
 
     pub fn is_opaque(&self, m: u16) -> bool {
