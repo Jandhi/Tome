@@ -56,7 +56,7 @@ pub const NIGHT_SKY_TINT: Rgb = [0.60, 0.70, 1.0];
 /// Lighting settings a renderer applies when it lights at all.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Lighting {
-    /// Scale on the sky channel: 1.0 at noon, [`Lighting::NIGHT`] (~0.15) for
+    /// Scale on the sky channel: 1.0 at noon, [`Lighting::NIGHT`] (0.22) for
     /// a moonlit night, as the game dims open sky to about level 4 at night.
     pub daylight: f32,
     /// Interpolate light across each face from its corners (the game's smooth
@@ -71,8 +71,8 @@ pub struct Lighting {
 
 impl Lighting {
     pub const DAY: f32 = 1.0;
-    pub const DUSK: f32 = 0.45;
-    pub const NIGHT: f32 = 0.15;
+    pub const DUSK: f32 = 0.5;
+    pub const NIGHT: f32 = 0.22;
 
     pub fn day() -> Lighting {
         Lighting { daylight: Self::DAY, smooth: true, tinted: true }
@@ -579,7 +579,7 @@ impl LightMap {
         AMBIENT + (1.0 - AMBIENT) * (r + (g - r) * GAMMA)
     }
 
-    /// Brightness 0..1 of a cell under `daylight` (1.0 noon, ~0.15 night).
+    /// Brightness 0..1 of a cell under `daylight` (1.0 noon, 0.22 night).
     pub fn brightness(&self, x: i32, y: i32, z: i32, daylight: f32) -> f32 {
         Self::curve(Self::level(self.levels[self.clamp_index(x, y, z)], daylight))
     }
