@@ -14,6 +14,7 @@ pub mod perspective;
 pub mod scene;
 pub mod shape;
 pub mod topdown;
+pub mod viewer;
 
 #[cfg(test)]
 mod test;

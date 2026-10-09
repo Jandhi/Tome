@@ -4,3 +4,4 @@
 # (~20x faster than debug: 4.5 s vs 97 s for a 256x256 town).
 offline = "run --profile fast -- --offline"
 render = "run --profile fast -- --render"
+view = "run --profile fast -- --view"
