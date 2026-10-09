@@ -22,12 +22,13 @@ use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
 use crate::http_mod::GDMCHTTPProvider;
 use crate::noise::RNG;
-use crate::render::elevation::{render_elevation, ElevationSide};
+use crate::render::elevation::{render_elevation_with, ElevationSide};
 use crate::render::grid::VoxelGrid;
-use crate::render::iso::{render_iso, IsoCamera};
+use crate::render::iso::{render_iso_with, IsoCamera};
 use crate::render::light::{LightMap, Lighting};
+use crate::render::lit::Lit;
 use crate::render::perspective::{contact_sheet, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
-use crate::render::topdown::render_topdown;
+use crate::render::topdown::render_topdown_with;
 use crate::render::{render_views, RenderOptions};
 
 /// Flat ground: the grass surface sits at y = 63, the first air at 64.
@@ -125,10 +126,10 @@ pub struct ShowcaseOptions {
     /// Size class and roof style still cycle, so `--count 3` on a medieval
     /// culture shows the same footprint under all three gable pitches.
     pub rects: Option<Vec<Rect2D>>,
-    /// Light the room views (sky light through windows, lanterns and candles,
-    /// dark cellars) under this daylight; the output directory gains the
-    /// lighting's tag. `None` renders them unlit. The exterior views are
-    /// unlit either way.
+    /// Light every view (sky light through windows, lanterns and candles,
+    /// dark cellars inside; sky and lamps on the exterior crops and the
+    /// contact sheet) under this daylight; the output directory gains the
+    /// lighting's tag. `None` renders them unlit.
     pub lighting: Option<Lighting>,
 }
 
@@ -425,7 +426,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     } else {
         None
     };
-    render_views(&scene, &RenderOptions { px: 4, iso_tile: contact_tile, region: contact_region }, &out_dir, "")?;
+    let contact_opts = RenderOptions { px: 4, iso_tile: contact_tile, region: contact_region, lighting: opts.lighting };
+    render_views(&scene, &contact_opts, &out_dir, "")?;
 
     // Light-map cost over every house's interior grid, reported at the end.
     let (mut light_time, mut light_grids, mut light_cells) = (Duration::ZERO, 0usize, 0usize);
@@ -460,12 +462,23 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             renders.push(name);
             Ok(())
         };
+        // Exterior views, lit (sky and lamps) like the room views when asked.
+        let exterior_map = opts.lighting.map(|_| {
+            let t = Instant::now();
+            let map = LightMap::new(&g);
+            light_time += t.elapsed();
+            light_grids += 1;
+            light_cells += map.len();
+            map
+        });
+        let exterior_lit = exterior_map.as_ref().zip(opts.lighting).map(|(map, l)| Lit::new(&g, map, l));
+        let exterior_lit = exterior_lit.as_ref();
         for cam in [IsoCamera::SouthEast, IsoCamera::NorthWest, IsoCamera::SouthWest, IsoCamera::NorthEast] {
-            save(format!("{prefix}_iso_{}.png", cam.tag()), render_iso(&g, cam, 2 * px)?)?;
+            save(format!("{prefix}_iso_{}.png", cam.tag()), render_iso_with(&g, cam, 2 * px, exterior_lit)?)?;
         }
-        save(format!("{prefix}_top.png"), render_topdown(&g, px)?)?;
+        save(format!("{prefix}_top.png"), render_topdown_with(&g, px, exterior_lit)?)?;
         for side in ElevationSide::ALL {
-            save(format!("{prefix}_elev_{}.png", side.name()), render_elevation(&g, side, px)?)?;
+            save(format!("{prefix}_elev_{}.png", side.name()), render_elevation_with(&g, side, px, exterior_lit)?)?;
         }
 
         let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);

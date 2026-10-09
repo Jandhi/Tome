@@ -424,6 +424,7 @@ mod tests {
             px: env_or("TOME_PX", 16),
             iso_tile: env_or("TOME_TILE", 24),
             region: Some(Rect3D { origin: Point3D::new(n[0], n[1], n[2]), size: Point3D::new(n[3], n[4], n[5]) }),
+            lighting: None,
         };
         for p in render_views(&scene, &opts, Path::new(&out), "crop_").expect("render") {
             println!("Rendered {}", p.display());
@@ -1151,5 +1152,167 @@ mod viewer_lighting_tests {
         };
         let (day_bg, night_bg) = (bg(&String::from_utf8_lossy(&ha)), bg(&hl));
         assert!(night_bg[0] < day_bg[0] / 4 && night_bg[2] > night_bg[0], "{night_bg:?} vs {day_bg:?}");
+/// Lighting of the flat views (`render::lit`): an unlit render is untouched,
+/// a lone block under open sky is the unlit one scaled by the sky light, and
+/// a torch lights the wall beside it.
+#[cfg(test)]
+mod flat_lighting_tests {
+    use std::path::Path;
+
+    use resvg::tiny_skia::Pixmap;
+
+    use crate::geometry::{Point3D, Rect3D};
+    use crate::render::elevation::{render_elevation, render_elevation_with, ElevationSide};
+    use crate::render::grid::VoxelGrid;
+    use crate::render::iso::{render_iso, render_iso_with, IsoCamera};
+    use crate::render::light::{LightMap, LightSampler, Lighting};
+    use crate::render::lit::Lit;
+    use crate::render::topdown::{render_topdown, render_topdown_with};
+    use crate::render::{render_views, RenderOptions, Scene};
+
+    fn scene(sx: i32, sy: i32, sz: i32) -> Scene {
+        Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(sx, sy, sz) })
+    }
+
+    fn grid(s: &Scene) -> VoxelGrid {
+        VoxelGrid::from_scene(s, None).expect("grid")
+    }
+
+    /// A stone wall along x at z = 0 (x 0..=20, y 0..=3) with a torch on a
+    /// stone block in front of its middle, seen from the south.
+    fn torch_wall() -> Scene {
+        let mut s = scene(21, 4, 2);
+        for x in 0..=20 {
+            for y in 0..=3 {
+                s.insert(Point3D::new(x, y, 0), "minecraft:stone");
+            }
+        }
+        s.insert(Point3D::new(10, 0, 1), "minecraft:stone");
+        s.insert(Point3D::new(10, 1, 1), "minecraft:torch");
+        s
+    }
+
+    /// Mean channel value of the `size` x `size` pixel square at `(x0, y0)`.
+    fn mean_square(pm: &Pixmap, x0: usize, y0: usize, size: usize) -> f32 {
+        let (w, d) = (pm.width() as usize, pm.data());
+        let mut sum = 0.0;
+        for y in y0..y0 + size {
+            for x in x0..x0 + size {
+                let p = &d[(y * w + x) * 4..][..3];
+                sum += (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0;
+            }
+        }
+        sum / (size * size) as f32
+    }
+
+    #[test]
+    fn lone_block_under_open_sky_is_unlit_scaled_by_sky_light() {
+        let mut s = scene(3, 3, 3);
+        s.insert(Point3D::new(1, 0, 1), "minecraft:stone");
+        let g = grid(&s);
+        let map = LightMap::new(&g);
+        let unlit = render_iso(&g, IsoCamera::SouthEast, 16).unwrap();
+        let half = Lighting { daylight: 0.5, smooth: true, tinted: false };
+        for lighting in [Lighting::day(), Lighting::night(), half] {
+            let lit = Lit::new(&g, &map, lighting);
+            let pm = render_iso_with(&g, IsoCamera::SouthEast, 16, Some(&lit)).unwrap();
+            // Every face and the background see nothing but open sky, so the
+            // whole image is the unlit one times the sky colour, per channel.
+            let sky = LightSampler::new(&map, lighting).sky_rgb();
+            for (i, (a, b)) in unlit.data().chunks(4).zip(pm.data().chunks(4)).enumerate() {
+                for k in 0..3 {
+                    let want = a[k] as f32 * sky[k];
+                    assert!(
+                        (b[k] as f32 - want).abs() <= 1.0,
+                        "{}: pixel {i} channel {k}: lit {} vs unlit {} * {:.3}",
+                        lighting.tag(),
+                        b[k],
+                        a[k],
+                        sky[k]
+                    );
+                }
+            }
+            if lighting.daylight == Lighting::DAY {
+                assert_eq!(unlit.data(), pm.data(), "noon over open sky changes nothing");
+            }
+        }
+    }
+
+    #[test]
+    fn torch_lights_the_wall_near_it_in_the_elevation() {
+        let s = torch_wall();
+        let g = grid(&s);
+        let map = LightMap::new(&g);
+        let px = 4;
+        let unlit = render_elevation(&g, ElevationSide::South, px as u32).unwrap();
+        let lit = Lit::new(&g, &map, Lighting::night());
+        let pm = render_elevation_with(&g, ElevationSide::South, px as u32, Some(&lit)).unwrap();
+        // Wall cells (x, 2, 0): image column x + 1, row ny - 1 - 2 + 1 = 2.
+        let square = |pm: &Pixmap, x: usize| mean_square(pm, (x + 1) * px, 2 * px, px);
+        assert_eq!(square(&unlit, 10), square(&unlit, 0), "unlit, the wall is one colour");
+        let (near, far) = (square(&pm, 10), square(&pm, 0));
+        assert!(near > far * 2.0, "the wall above the torch ({near}) is far brighter than its far end ({far})");
+        assert!(far < square(&unlit, 0), "at night the far end is darker than unlit");
+        // Light falls off along the wall.
+        assert!(square(&pm, 7) > square(&pm, 4) && square(&pm, 4) > far);
+    }
+
+    #[test]
+    fn render_options_default_is_unlit_and_matches_lighting_none() {
+        assert!(RenderOptions::default().lighting.is_none());
+        let s = torch_wall();
+        let g = grid(&s);
+        for cam in [IsoCamera::SouthEast, IsoCamera::NorthWest] {
+            let plain = render_iso(&g, cam, 8).unwrap();
+            let with = render_iso_with(&g, cam, 8, None).unwrap();
+            assert_eq!(plain.data(), with.data(), "iso {}", cam.tag());
+        }
+        assert_eq!(render_topdown(&g, 4).unwrap().data(), render_topdown_with(&g, 4, None).unwrap().data());
+        for side in ElevationSide::ALL {
+            let plain = render_elevation(&g, side, 4).unwrap();
+            let with = render_elevation_with(&g, side, 4, None).unwrap();
+            assert_eq!(plain.data(), with.data(), "elevation {}", side.name());
+        }
+
+        let out = std::env::temp_dir().join("tome_render_unlit_identity");
+        let a = out.join("default");
+        let b = out.join("none");
+        let paths_a = render_views(&s, &RenderOptions::default(), &a, "").unwrap();
+        let paths_b = render_views(&s, &RenderOptions { lighting: None, ..Default::default() }, &b, "").unwrap();
+        assert_eq!(paths_a.len(), 7);
+        for (pa, pb) in paths_a.iter().zip(&paths_b) {
+            assert_eq!(std::fs::read(pa).unwrap(), std::fs::read(pb).unwrap(), "{}", pa.display());
+        }
+        assert_eq!(std::fs::read(a.join("index.txt")).unwrap(), std::fs::read(b.join("index.txt")).unwrap());
+        // Lit output differs, and lands wherever asked.
+        let c = out.join("night");
+        let night = RenderOptions { lighting: Some(Lighting::night()), ..Default::default() };
+        let paths_c = render_views(&s, &night, &c, "").unwrap();
+        assert_ne!(std::fs::read(&paths_a[0]).unwrap(), std::fs::read(&paths_c[0]).unwrap());
+        assert!(Path::new(&c.join("index.txt")).exists());
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    /// `Lit` gathers a face's four corner colours in one pass; it must agree
+    /// with the light map's own per-channel `face_corners_rgb`.
+    #[test]
+    fn lit_face_corners_match_the_light_sampler() {
+        let s = torch_wall();
+        let g = grid(&s);
+        let map = LightMap::new(&g);
+        for lighting in [Lighting::day(), Lighting::night()] {
+            let lit = Lit::new(&g, &map, lighting);
+            let sampler = LightSampler::new(&map, lighting);
+            for (outside, axis) in [([10, 2, 1], 2), ([0, 2, 1], 2), ([9, 1, 1], 0), ([11, 1, 1], 0), ([10, 2, 1], 1), ([10, 1, 1], 1)] {
+                let want = sampler.face_corners_rgb(outside, axis);
+                let face = lit.face(outside, axis);
+                for (ci, (u, v)) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].into_iter().enumerate() {
+                    let got = face.at(u, v);
+                    for k in 0..3 {
+                        assert!((got[k] - want[ci][k]).abs() < 1e-5, "{outside:?} axis {axis} corner {ci}: {got:?} vs {want:?}");
+                    }
+                }
+            }
+        }
     }
 }

@@ -15,22 +15,39 @@
 //! own ray: the highest upward face of the model under it supplies the texel
 //! (box-filtered to the pixel), cut-out texels and uncovered footprint fall
 //! through to the blocks below, and the height shading uses the face hit.
+//!
+//! With a [`Lit`] every column goes down its per-pixel ray: the first sample
+//! is lit by the top face's light from the cell above the surface block
+//! (smooth light interpolated across the cell), samples behind it (water
+//! under its surface, what shows through glass) by their own cell, and the
+//! hill shading applies on top as ever. Without one nothing changes.
 
 use resvg::tiny_skia::Pixmap;
 
 use super::grid::{canvas, fill_square, shade, RayAcc, Rgba, VoxelGrid, BACKGROUND};
+use super::lit::{tint, FaceLight, Lit};
 use super::shape::top_at;
 use super::texel;
 
 /// Brightness at the bottom of a cell relative to its top.
 const LOW_SURFACE: f32 = 0.8;
 
-/// Render the grid top-down at `px` pixels per block with a 1-block margin.
-/// Image size: `(nx + 2) * px` × `(nz + 2) * px`.
+/// Render the grid top-down at `px` pixels per block with a 1-block margin,
+/// unlit. Image size: `(nx + 2) * px` × `(nz + 2) * px`.
 pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
+    render_topdown_with(g, px, None)
+}
+
+/// [`render_topdown`], lit by `lit` when given (see the module doc).
+pub fn render_topdown_with(g: &VoxelGrid, px: u32, lit: Option<&Lit>) -> anyhow::Result<Pixmap> {
     let px = px.max(1) as usize;
     let (nx, nz) = (g.nx as usize, g.nz as usize);
     let mut pm = canvas((nx + 2) * px, (nz + 2) * px)?;
+    let bg = lit.map_or(BACKGROUND, |l| l.background());
+    if lit.is_some() {
+        let [r, g, b, a] = bg;
+        pm.fill(resvg::tiny_skia::Color::from_rgba8(r, g, b, a));
+    }
 
     // Pass 1: surface height, top material and composited colour per column.
     let mut heights: Vec<Option<i32>> = vec![None; nx * nz];
@@ -81,9 +98,21 @@ pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
             let f = (1.0 + 0.07 * relief as f32) * gradient;
             let (x0, y0) = ((x + 1) * px, (z + 1) * px);
 
+            if let Some(l) = lit {
+                // The surface block's top face is lit from the cell above it.
+                let face = l.face([x as i32, h + 1, z as i32], 1);
+                for k in 0..px * px {
+                    let (fu, fv) = (((k % px) as f32 + 0.5) / px as f32, ((k / px) as f32 + 0.5) / px as f32);
+                    let light = Some((l, &face, fu, fv));
+                    let (c, top) = texel_column(g, &stamps, x as i32, z as i32, h, k, px, light, bg);
+                    let t = LOW_SURFACE + (1.0 - LOW_SURFACE) * top / 16.0;
+                    fill_square(&mut pm, x0 + k % px, y0 + k / px, 1, shade(shade(c, f), t));
+                }
+                continue;
+            }
             if stamps[tops[i] as usize].is_some() {
                 for k in 0..px * px {
-                    let (c, top) = texel_column(g, &stamps, x as i32, z as i32, h, k, px);
+                    let (c, top) = texel_column(g, &stamps, x as i32, z as i32, h, k, px, None, BACKGROUND);
                     let t = LOW_SURFACE + (1.0 - LOW_SURFACE) * top / 16.0;
                     fill_square(&mut pm, x0 + k % px, y0 + k / px, 1, shade(shade(c, f), t));
                 }
@@ -107,7 +136,10 @@ pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
 /// block at `h`: textured blocks contribute the texel of their highest
 /// upward face under the pixel (cut-outs fall through), others their flat
 /// colour. Also the height in sixteenths, within the surface cell, of the
-/// first face hit (0 when it lies in a block below).
+/// first face hit (0 when it lies in a block below). With `light`, the first
+/// sample takes the surface face's light at the pixel's `(u, v)` and every
+/// later one its own cell's.
+#[allow(clippy::too_many_arguments)]
 fn texel_column(
     g: &VoxelGrid,
     stamps: &[Option<Vec<(f32, Vec<Rgba>)>>],
@@ -116,9 +148,15 @@ fn texel_column(
     h: i32,
     k: usize,
     px: usize,
+    light: Option<(&Lit, &FaceLight, f32, f32)>,
+    bg: Rgba,
 ) -> (Rgba, f32) {
     let mut acc = RayAcc::default();
     let mut top: Option<f32> = None;
+    let lit_sample = |c: Rgba, y: i32, first: bool| match light {
+        Some((l, face, fu, fv)) => tint(c, if first { face.at(fu, fv) } else { l.cell([x, y, z]) }),
+        None => c,
+    };
     'column: for y in (0..=h).rev() {
         let m = g.get(x, y, z);
         if m == 0 {
@@ -131,6 +169,7 @@ fn texel_column(
                 if c[3] == 0 {
                     continue;
                 }
+                let c = lit_sample(c, y, top.is_none());
                 top.get_or_insert((base + face_h).clamp(0.0, 16.0));
                 if acc.push(c) {
                     break 'column;
@@ -140,13 +179,14 @@ fn texel_column(
             let fx = 16.0 * ((k % px) as f32 + 0.5) / px as f32;
             let fz = 16.0 * ((k / px) as f32 + 0.5) / px as f32;
             let face_h = top_at(g.boxes(m), fx, fz).unwrap_or(16) as f32;
+            let c = lit_sample(g.color(m), y, top.is_none());
             top.get_or_insert((base + face_h).clamp(0.0, 16.0));
-            if acc.push(g.color(m)) {
+            if acc.push(c) {
                 break 'column;
             }
         }
     }
-    (acc.finish(BACKGROUND), top.unwrap_or(16.0))
+    (acc.finish(bg), top.unwrap_or(16.0))
 }
 
 /// Fill `out` (`px * px`, row-major north to south) with the surface height in

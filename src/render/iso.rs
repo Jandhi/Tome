@@ -16,11 +16,18 @@
 //! model's boxes instead, with the texel under each pixel baked in: cut-out
 //! texels are left out of the mask (so what is behind them shows), and a
 //! model that is not a fully opaque cube never hides a neighbour's face.
+//!
+//! With a [`Lit`] the painted colour of every pixel is multiplied by the
+//! light of its face: the face's outside cell is the neighbour above / +u /
+//! +v for a boundary face and the block's own cell for an inner one, and
+//! each mask pixel carries its face-local position so smooth light
+//! interpolates across the face. Without one the arithmetic is untouched.
 
 use resvg::tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 
 use super::assets::{BlockGeometry, Element, Face6, V3};
 use super::grid::{blend, canvas, shade, Rgba, VoxelGrid};
+use super::lit::{axis_of, face_uv, tint, FaceLight, Lit};
 use super::shape::{Box16, Shape};
 use super::texel;
 
@@ -120,13 +127,15 @@ const EDGE: f32 = 1e-3;
 
 /// Pixel offsets of a shape's visible faces relative to the block's anchor
 /// (the projected top-back corner of the cell), each tagged with its face
-/// (`TOP` / `RIGHT` / `LEFT`, plus `BOUNDARY`). Boxes are painted back to front
-/// within the cell, so every pixel belongs to the face visible there.
-type ShapeMask = Vec<(i32, i32, u8)>;
+/// (`TOP` / `RIGHT` / `LEFT`, plus `BOUNDARY`) and the face-local `(u, v)`
+/// of the pixel's centre for lighting (see [`face_uv`]). Boxes are painted
+/// back to front within the cell, so every pixel belongs to the face
+/// visible there.
+type ShapeMask = Vec<(i32, i32, u8, f32, f32)>;
 
 /// A [`ShapeMask`] for a textured material, each pixel carrying the shaded
 /// texel visible there.
-type TexMask = Vec<(i32, i32, u8, Rgba)>;
+type TexMask = Vec<(i32, i32, u8, Rgba, f32, f32)>;
 
 /// A box in the camera frame, sixteenths: `(u0, u1, v0, v1, y0, y1)`.
 type UvBox = (u8, u8, u8, u8, u8, u8);
@@ -156,6 +165,39 @@ fn proj(tw: i32, u: f32, v: f32, y: f32) -> (f32, f32) {
     ((u - v) * tw as f32 / 2.0 + tw as f32 / 2.0, (u + v) * th as f32 / 2.0 + (1.0 - y) * bh as f32)
 }
 
+/// Invert [`proj`] on a face's own plane: mask pixmap position `(x, y)` ->
+/// cell point `(u, v, y)` in sixteenths on the `face` of box `b` (`TOP` lies
+/// at `b`'s top, `RIGHT` at its +u side, `LEFT` at its +v side).
+fn face_point(face: u8, b: UvBoxF, tw: i32, x: f32, y: f32) -> (f32, f32, f32) {
+    let (th, bh) = (tw / 2, tw / 2);
+    // Pixels per sixteenth along u - v (screen x) and u + v (screen y).
+    let (ppx, ppy) = (tw as f32 / 32.0, th as f32 / 32.0);
+    let (_, u1, _, v1, _, y1) = b;
+    let d = (x - tw as f32 / 2.0) / ppx; // u - v
+    match face {
+        TOP => {
+            let s = (y - (16.0 - y1) / 16.0 * bh as f32) / ppy; // u + v
+            ((d + s) / 2.0, (s - d) / 2.0, y1)
+        }
+        RIGHT => {
+            let v = u1 - d;
+            (u1, v, 16.0 - (y - (u1 + v) * ppy) * 16.0 / bh as f32)
+        }
+        _ => {
+            let u = d + v1;
+            (u, v1, 16.0 - (y - (u + v1) * ppy) * 16.0 / bh as f32)
+        }
+    }
+}
+
+/// Face-local light coordinates of the cell point `(u, v, y)` (sixteenths,
+/// clamped into box `b`) on the world face `world_face`.
+fn light_uv(cam: IsoCamera, world_face: Face6, b: UvBoxF, u: f32, v: f32, y: f32) -> (f32, f32) {
+    let (u0, u1, v0, v1, y0, y1) = b;
+    let clamp = |t: f32, lo: f32, hi: f32| t.clamp(lo, (hi - EDGE).max(lo));
+    face_uv(axis_of(world_face), cam.world(clamp(u, u0, u1), clamp(v, v0, v1), clamp(y, y0, y1)))
+}
+
 /// Rasterise a projected face quad into a `pw` x `ph` coverage pixmap;
 /// `None` for a degenerate (zero-area) face.
 fn quad_coverage(quad: [(f32, f32); 4], pw: i32, ph: i32) -> anyhow::Result<Option<Pixmap>> {
@@ -178,6 +220,7 @@ fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask
     let (th, bh) = (tw / 2, tw / 2);
     let (pw, ph) = (tw, th + bh);
     let proj = |u: u8, v: u8, y: u8| proj(tw, u as f32, v as f32, y as f32);
+    let (right_face, left_face) = cam.side_faces();
 
     let boxes: Vec<UvBox> = shape
         .boxes()
@@ -189,20 +232,24 @@ fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask
         .collect();
     let behind = |a: &UvBox, b: &UvBox| a.1 <= b.0 || a.3 <= b.2 || a.5 <= b.4;
 
-    let mut label: Vec<Option<u8>> = vec![None; (pw * ph) as usize];
+    let mut label: Vec<Option<(u8, f32, f32)>> = vec![None; (pw * ph) as usize];
     for (u0, u1, v0, v1, y0, y1) in paint_order(boxes, behind) {
-        let faces: [([(u8, u8, u8); 4], u8, bool); 3] = [
-            ([(u0, v0, y1), (u1, v0, y1), (u1, v1, y1), (u0, v1, y1)], TOP, y1 == 16),
-            ([(u1, v0, y1), (u1, v1, y1), (u1, v1, y0), (u1, v0, y0)], RIGHT, u1 == 16),
-            ([(u0, v1, y1), (u1, v1, y1), (u1, v1, y0), (u0, v1, y0)], LEFT, v1 == 16),
+        let faces: [([(u8, u8, u8); 4], u8, Face6, bool); 3] = [
+            ([(u0, v0, y1), (u1, v0, y1), (u1, v1, y1), (u0, v1, y1)], TOP, Face6::Up, y1 == 16),
+            ([(u1, v0, y1), (u1, v1, y1), (u1, v1, y0), (u1, v0, y0)], RIGHT, right_face, u1 == 16),
+            ([(u0, v1, y1), (u1, v1, y1), (u1, v1, y0), (u0, v1, y0)], LEFT, left_face, v1 == 16),
         ];
-        for (quad, face, boundary) in faces {
+        let bf: UvBoxF = (u0 as f32, u1 as f32, v0 as f32, v1 as f32, y0 as f32, y1 as f32);
+        for (quad, face, world_face, boundary) in faces {
             // Degenerate (zero-area) faces have no path: nothing to draw.
             let Some(pm) = quad_coverage(quad.map(|(u, v, y)| proj(u, v, y)), pw, ph)? else { continue };
             let tag = face | if boundary { BOUNDARY } else { 0 };
             for (i, p) in pm.pixels().iter().enumerate() {
                 if p.alpha() > 0 {
-                    label[i] = Some(tag);
+                    let (px, py) = ((i as i32 % pw) as f32 + 0.5, (i as i32 / pw) as f32 + 0.5);
+                    let (u, v, yy) = face_point(face, bf, tw, px, py);
+                    let (lu, lv) = light_uv(cam, world_face, bf, u, v, yy);
+                    label[i] = Some((tag, lu, lv));
                 }
             }
         }
@@ -210,7 +257,7 @@ fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask
     Ok(label
         .iter()
         .enumerate()
-        .filter_map(|(i, t)| t.map(|t| (i as i32 % pw - tw / 2, i as i32 / pw, t)))
+        .filter_map(|(i, t)| t.map(|(t, lu, lv)| (i as i32 % pw - tw / 2, i as i32 / pw, t, lu, lv)))
         .collect())
 }
 
@@ -226,8 +273,6 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
     // Sub-samples per pixel axis: a texel each at tw = 8 (top faces 4 px tall).
     let ss = ((32 + tw - 1) / tw).clamp(1, 4);
     let n = (ss * ss) as f32;
-    // Pixels per sixteenth along u - v (screen x) and u + v (screen y).
-    let (ppx, ppy) = (tw as f32 / 32.0, th as f32 / 32.0);
     let (right_face, left_face) = cam.side_faces();
 
     let boxes: Vec<(UvBoxF, &Element)> = geo
@@ -240,8 +285,9 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
         .collect();
     let behind = |a: &(UvBoxF, &Element), b: &(UvBoxF, &Element)| a.0 .1 <= b.0 .0 || a.0 .3 <= b.0 .2 || a.0 .5 <= b.0 .4;
 
-    let mut label: Vec<Option<(u8, Rgba)>> = vec![None; (pw * ph) as usize];
-    for ((u0, u1, v0, v1, y0, y1), e) in paint_order(boxes, behind) {
+    let mut label: Vec<Option<(u8, Rgba, f32, f32)>> = vec![None; (pw * ph) as usize];
+    for (b, e) in paint_order(boxes, behind) {
+        let (u0, u1, v0, v1, y0, y1) = b;
         let faces: [([(f32, f32, f32); 4], u8, Face6, bool); 3] = [
             ([(u0, v0, y1), (u1, v0, y1), (u1, v1, y1), (u0, v1, y1)], TOP, Face6::Up, y1 >= 16.0 - EDGE),
             ([(u1, v0, y1), (u1, v1, y1), (u1, v1, y0), (u1, v0, y0)], RIGHT, right_face, u1 >= 16.0 - EDGE),
@@ -264,21 +310,7 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
                         let x = px + (si as f32 + 0.5) / ss as f32;
                         let y = py + (sj as f32 + 0.5) / ss as f32;
                         // Invert the projection on the face's own plane.
-                        let d = (x - tw as f32 / 2.0) / ppx; // u - v
-                        let (u, v, yy) = match face {
-                            TOP => {
-                                let s = (y - (16.0 - y1) / 16.0 * bh as f32) / ppy; // u + v
-                                ((d + s) / 2.0, (s - d) / 2.0, y1)
-                            }
-                            RIGHT => {
-                                let v = u1 - d;
-                                (u1, v, 16.0 - (y - (u1 + v) * ppy) * 16.0 / bh as f32)
-                            }
-                            _ => {
-                                let u = d + v1;
-                                (u, v1, 16.0 - (y - (u + v1) * ppy) * 16.0 / bh as f32)
-                            }
-                        };
+                        let (u, v, yy) = face_point(face, b, tw, x, y);
                         let c = ft.sample_at(cam.world(clamp(u, u0, u1), clamp(v, v0, v1), clamp(yy, y0, y1)));
                         let a = c[3] as f32;
                         for k in 0..3 {
@@ -293,17 +325,19 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
                 }
                 let c = shade(c, shade_f);
                 let c = match label[i] {
-                    Some((_, below)) if c[3] < 255 => over(c, below),
+                    Some((_, below, _, _)) if c[3] < 255 => over(c, below),
                     _ => c,
                 };
-                label[i] = Some((tag, c));
+                let (u, v, yy) = face_point(face, b, tw, px + 0.5, py + 0.5);
+                let (lu, lv) = light_uv(cam, world_face, b, u, v, yy);
+                label[i] = Some((tag, c, lu, lv));
             }
         }
     }
     Ok(label
         .iter()
         .enumerate()
-        .filter_map(|(i, l)| l.map(|(t, c)| (i as i32 % pw - tw / 2, i as i32 / pw, t, c)))
+        .filter_map(|(i, l)| l.map(|(t, c, lu, lv)| (i as i32 % pw - tw / 2, i as i32 / pw, t, c, lu, lv)))
         .collect())
 }
 
@@ -335,11 +369,21 @@ pub fn image_size(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> (usize, usize) 
     (w as usize, h as usize)
 }
 
+/// Render the view from `cam`, unlit.
 pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<Pixmap> {
+    render_iso_with(g, cam, tile_w, None)
+}
+
+/// Render the view from `cam`, lit by `lit` when given (see the module doc).
+pub fn render_iso_with(g: &VoxelGrid, cam: IsoCamera, tile_w: u32, lit: Option<&Lit>) -> anyhow::Result<Pixmap> {
     let tw = tile_width(tile_w);
     let (th, bh) = (tw / 2, tw / 2);
     let (w, h) = image_size(g, cam, tile_w);
     let mut pm = canvas(w, h)?;
+    if let Some(l) = lit {
+        let [r, g, b, a] = l.background();
+        pm.fill(resvg::tiny_skia::Color::from_rgba8(r, g, b, a));
+    }
     let (iw, ih) = (w as i32, h as i32);
     let data = pm.data_mut();
 
@@ -382,6 +426,26 @@ pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<
     let off_x = nv * tw / 2 + margin;
     let off_y = (g.ny - 1) * bh + margin;
 
+    // Light of one of the cell's faces, from the cell on its outside: the
+    // neighbour across a boundary face, the cell itself for an inner face.
+    // Computed once per face per cell (`cache` is keyed by face and boundary).
+    let (right_face, left_face) = cam.side_faces();
+    let face_axes = [1usize, axis_of(right_face), axis_of(left_face)];
+    let face_light = |l: &Lit, u: i32, y: i32, v: i32, tag: u8, cache: &mut [Option<FaceLight>; 6]| -> FaceLight {
+        let face = (tag & 3) as usize;
+        let boundary = tag & BOUNDARY != 0;
+        *cache[face + if boundary { 3 } else { 0 }].get_or_insert_with(|| {
+            let (du, dy, dv) = match (face as u8, boundary) {
+                (_, false) => (0, 0, 0),
+                (TOP, true) => (0, 1, 0),
+                (RIGHT, true) => (1, 0, 0),
+                _ => (0, 0, 1),
+            };
+            let (x, z) = map(u + du, v + dv);
+            l.face([x, y + dy, z], face_axes[face])
+        })
+    };
+
     for s in 0..(nu + nv - 1) {
         for y in 0..g.ny {
             for u in (s - (nv - 1)).max(0)..=s.min(nu - 1) {
@@ -399,14 +463,23 @@ pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<
                 }
                 let ax = (u - v) * tw / 2 + off_x;
                 let ay = (u + v) * th / 2 - y * bh + off_y;
+                // Per face of this cell (keyed by face and boundary): its light,
+                // and in the flat-colour path its finished colour when the light
+                // is uniform across it.
+                let mut cache: [Option<FaceLight>; 6] = [None; 6];
+                let mut ready: [Option<Rgba>; 6] = [None; 6];
                 if let Some(mask) = &tex_masks[m as usize] {
                     let depth = if g.is_opaque(m) { 1 } else { column_depth(&at, u, y, v, m) };
-                    for &(dx, dy, tag, c) in mask {
+                    for &(dx, dy, tag, c, lu, lv) in mask {
                         let face = (tag & 3) as usize;
                         if tag & BOUNDARY != 0 && hidden[face] {
                             continue;
                         }
                         let c = if depth > 1 && face == TOP as usize && c[3] < 255 { stacked(c, depth) } else { c };
+                        let c = match lit {
+                            Some(l) => tint(c, face_light(l, u, y, v, tag, &mut cache).at(lu, lv)),
+                            None => c,
+                        };
                         let (px, py) = (ax + dx, ay + dy);
                         if px >= 0 && py >= 0 && px < iw && py < ih {
                             blend(data, ((py * iw + px) * 4) as usize, c);
@@ -416,14 +489,31 @@ pub fn render_iso(g: &VoxelGrid, cam: IsoCamera, tile_w: u32) -> anyhow::Result<
                 }
                 let c = g.color(m);
                 let colors = [column_alpha(c, &at, u, y, v, m), shade(c, 0.8), shade(c, 0.64)];
-                for &(dx, dy, tag) in &masks[mat_mask[m as usize]] {
+                for &(dx, dy, tag, lu, lv) in &masks[mat_mask[m as usize]] {
                     let face = (tag & 3) as usize;
                     if tag & BOUNDARY != 0 && hidden[face] {
                         continue;
                     }
+                    let c = match lit {
+                        None => colors[face],
+                        Some(l) => {
+                            let key = face + if tag & BOUNDARY != 0 { 3 } else { 0 };
+                            match ready[key] {
+                                Some(c) => c,
+                                None => {
+                                    let fl = face_light(l, u, y, v, tag, &mut cache);
+                                    let c = tint(colors[face], fl.at(lu, lv));
+                                    if fl.uniform {
+                                        ready[key] = Some(c);
+                                    }
+                                    c
+                                }
+                            }
+                        }
+                    };
                     let (px, py) = (ax + dx, ay + dy);
                     if px >= 0 && py >= 0 && px < iw && py < ih {
-                        blend(data, ((py * iw + px) * 4) as usize, colors[face]);
+                        blend(data, ((py * iw + px) * 4) as usize, c);
                     }
                 }
             }
