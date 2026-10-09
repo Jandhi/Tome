@@ -68,18 +68,28 @@ impl VoxelGrid {
         let mut by_key: HashMap<(Rgba, Rgba, Shape, usize), u16> = HashMap::default();
         // Intern a full block string. The hand-written colour decides whether
         // the block shows at all and how translucent it is; the jar's model,
-        // when it has one, supplies the faces and the colours.
+        // when it has one, supplies the faces and the colours. A block the
+        // table doesn't know but the jar does takes its alpha from the
+        // texture too, so new translucent blocks still render as such; only
+        // blocks neither knows get the hashed fallback colour.
         let mut intern = |block: &str| -> u16 {
-            let hand = colors::block_color(block);
-            if hand[3] == 0 {
+            let known = colors::known_color(block);
+            if known.is_some_and(|c| c[3] == 0) {
                 return 0;
             }
             let shape = Shape::from_block(block);
             let geo = assets.and_then(|a| a.geometry(block));
-            let (top, side) = match &geo {
-                Some(g) => ([g.top[0], g.top[1], g.top[2], hand[3]], [g.side[0], g.side[1], g.side[2], hand[3]]),
-                None => (hand, hand),
+            let (top, side) = match (&geo, known) {
+                (Some(g), Some(hand)) => ([g.top[0], g.top[1], g.top[2], hand[3]], [g.side[0], g.side[1], g.side[2], hand[3]]),
+                (Some(g), None) => (g.top, [g.side[0], g.side[1], g.side[2], g.top[3]]),
+                (None, _) => {
+                    let hand = colors::block_color(block);
+                    (hand, hand)
+                }
             };
+            if top[3] == 0 {
+                return 0;
+            }
             let key = (top, side, shape, geo.as_ref().map_or(0, |g| Arc::as_ptr(g) as usize));
             *by_key.entry(key).or_insert_with(|| {
                 materials.push(top);

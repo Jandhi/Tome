@@ -53,6 +53,13 @@ pub fn block_color(id: &str) -> Rgba {
     hash_color(name)
 }
 
+/// Colour for a block id the table knows, without the hash fallback (and
+/// without recording the id as unknown), so callers with another source of
+/// colour, such as the block's texture, can prefer that.
+pub fn known_color(id: &str) -> Option<Rgba> {
+    lookup(base_name(id))
+}
+
 fn hash_color(name: &str) -> Rgba {
     // FNV-1a: deterministic across runs and platforms.
     let mut h: u32 = 0x811c9dc5;
