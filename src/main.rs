@@ -252,6 +252,40 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--px n]`:
+/// build individual houses on a blank flat world (no server) and render each
+/// one, under `output/houses/<culture>-<seed>/`.
+async fn run_houses(args: &[String]) -> anyhow::Result<()> {
+    let arg_after = |flag: &str, n: usize| {
+        args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
+    };
+    use crate::generator::buildings_v2::{footprint::SizeClass, showcase::{run_showcase, ShowcaseOptions, SizeSpec}, Culture};
+    let culture = match arg_after("--culture", 1).unwrap_or("medieval") {
+        "medieval" => Culture::Medieval,
+        "desert" => Culture::Desert,
+        "japanese" => Culture::Japanese,
+        other => anyhow::bail!("unknown --culture {other} (medieval|desert|japanese)"),
+    };
+    let size = match arg_after("--size", 1).unwrap_or("mixed") {
+        "mixed" => SizeSpec::Mixed,
+        "cottage" => SizeSpec::One(SizeClass::Cottage),
+        "house" => SizeSpec::One(SizeClass::House),
+        "hall" => SizeSpec::One(SizeClass::Hall),
+        "manor" => SizeSpec::One(SizeClass::Manor),
+        other => anyhow::bail!("unknown --size {other} (cottage|house|hall|manor|mixed)"),
+    };
+    let opts = ShowcaseOptions {
+        culture,
+        seed: arg_after("--seed", 1).map(str::parse).transpose()?.unwrap_or(42),
+        count: arg_after("--count", 1).map(str::parse).transpose()?.unwrap_or(6),
+        size,
+        jetty: args.iter().any(|a| a == "--jetty"),
+        px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
+    };
+    run_showcase(&opts).await?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     dotenv::dotenv().ok();
@@ -262,6 +296,13 @@ async fn main() {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
+    if args.iter().any(|a| a == "--houses") {
+        if let Err(e) = run_houses(&args).await {
+            eprintln!("House showcase failed: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--offline") {
         let Some(fixture_path) = arg_after("--offline", 1) else {
             eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");

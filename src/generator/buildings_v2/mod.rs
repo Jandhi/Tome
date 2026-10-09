@@ -12,6 +12,7 @@ pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod showcase;
 pub mod style;
 pub mod walls;
 
