@@ -3,7 +3,10 @@
 //!
 //! Views: top-down (height-shaded), isometric, and the four side elevations.
 //! Output goes under an `out_dir`; see [`render_all`] and [`render_views`].
-//! Each call also writes an `index.txt` describing every image.
+//! Each call also writes an `index.txt` describing every image. With
+//! [`RenderOptions::lighting`] set, every view is lit by the grid's
+//! Minecraft-style light map (see [`light`] and [`lit`]); unlit output is
+//! byte-identical to what it was before lighting existed.
 
 pub mod assets;
 pub mod colors;
@@ -12,6 +15,7 @@ pub mod elevation;
 pub mod grid;
 pub mod iso;
 pub mod light;
+pub mod lit;
 pub mod perspective;
 pub mod scene;
 pub mod shape;
@@ -33,6 +37,8 @@ use crate::geometry::Rect3D;
 use elevation::ElevationSide;
 use grid::VoxelGrid;
 use iso::IsoCamera;
+use light::{LightMap, Lighting};
+use lit::Lit;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RenderOptions {
@@ -42,11 +48,14 @@ pub struct RenderOptions {
     pub iso_tile: u32,
     /// Absolute-coordinate sub-box to render (e.g. one building). `None` = whole scene.
     pub region: Option<Rect3D>,
+    /// Light every view by the grid's sky and block light under this
+    /// lighting (one [`LightMap`] per call); `None` renders unlit.
+    pub lighting: Option<Lighting>,
 }
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        RenderOptions { px: 4, iso_tile: 8, region: None }
+        RenderOptions { px: 4, iso_tile: 8, region: None, lighting: None }
     }
 }
 
@@ -66,6 +75,17 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
     };
     log_unknown_blocks(scene);
     std::fs::create_dir_all(out_dir)?;
+    let light_map = opts.lighting.map(|l| {
+        let t = std::time::Instant::now();
+        let map = LightMap::new(&g);
+        log::info!(
+            "render: light map ({}) of {}x{}x{} cells, {} emitters, in {:.1?}",
+            l.tag(), g.nx, g.ny, g.nz, map.emitters, t.elapsed()
+        );
+        map
+    });
+    let lit = light_map.as_ref().zip(opts.lighting).map(|(map, l)| Lit::new(&g, map, l));
+    let lit = lit.as_ref();
 
     let lo = g.origin;
     let hi = (lo.x + g.nx - 1, lo.y + g.ny - 1, lo.z + g.nz - 1);
@@ -75,10 +95,14 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
         lo.x, hi.0, lo.y, hi.1, lo.z, hi.2, g.nx, g.ny, g.nz
     );
     let mut paths = Vec::new();
+    let lit_desc = match opts.lighting {
+        Some(l) => format!(", lit ({}: sky light at daylight {:.2}, lamps)", l.tag(), l.daylight),
+        None => String::new(),
+    };
     let mut save = |name: String, desc: String, pm: Pixmap| -> anyhow::Result<()> {
         let path = out_dir.join(&name);
         pm.save_png(&path)?;
-        writeln!(index, "{name} ({}x{} px): {desc}", pm.width(), pm.height())?;
+        writeln!(index, "{name} ({}x{} px): {desc}{lit_desc}", pm.width(), pm.height())?;
         paths.push(path);
         Ok(())
     };
@@ -89,7 +113,7 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
             "top-down orthographic, north up, east right, {} px/block, 1-block margin, hill-shaded (light from NW), water bluer with depth",
             opts.px.max(1)
         ),
-        topdown::render_topdown(&g, opts.px)?,
+        timed("top", || topdown::render_topdown_with(&g, opts.px, lit))?,
     )?;
     for (cam, desc) in [
         (IsoCamera::SouthEast, "camera at the south-east corner; south and east facades visible, north-west corner at the top"),
@@ -98,7 +122,7 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
         save(
             format!("{prefix}iso_{}.png", cam.tag()),
             format!("2:1 isometric, {desc}, tile width {} px", iso::tile_width(opts.iso_tile)),
-            iso::render_iso(&g, cam, opts.iso_tile)?,
+            timed(&format!("iso_{}", cam.tag()), || iso::render_iso_with(&g, cam, opts.iso_tile, lit))?,
         )?;
     }
     for side in ElevationSide::ALL {
@@ -109,12 +133,20 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
                 side.describe(),
                 opts.px.max(1)
             ),
-            elevation::render_elevation(&g, side, opts.px)?,
+            timed(&format!("elev_{}", side.name()), || elevation::render_elevation_with(&g, side, opts.px, lit))?,
         )?;
     }
 
     std::fs::write(out_dir.join(format!("{prefix}index.txt")), index)?;
     Ok(paths)
+}
+
+/// Run one view's renderer and log how long it took at info.
+fn timed(view: &str, render: impl FnOnce() -> anyhow::Result<Pixmap>) -> anyhow::Result<Pixmap> {
+    let t = std::time::Instant::now();
+    let pm = render()?;
+    log::info!("render: {view} ({}x{} px) drawn in {:.1?}", pm.width(), pm.height(), t.elapsed());
+    Ok(pm)
 }
 
 /// Warn once per render about block ids this scene uses that fell through to

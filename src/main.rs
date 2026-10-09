@@ -191,8 +191,9 @@ async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Resu
 }
 
 /// `--render <path.scene> [out_dir] [--light <mode>]`: re-render a saved
-/// scene, no server needed. `--light` computes the town's light map and
-/// reports its timing and levels; the flat views themselves stay unlit.
+/// scene, no server needed. `--light` reports the town's light map (timing
+/// and levels) and also writes every view lit under that mode into
+/// `<out_dir>/lit-<mode>/`, beside the unlit ones.
 fn render_saved_scene(scene_path: &str, out_dir: Option<&str>, lighting: Option<crate::render::light::Lighting>) -> anyhow::Result<()> {
     let scene_path = std::path::Path::new(scene_path);
     let scene = crate::render::Scene::load(scene_path)?;
@@ -206,13 +207,20 @@ fn render_saved_scene(scene_path: &str, out_dir: Option<&str>, lighting: Option<
     for path in crate::render::render_all(&scene, &out_dir)? {
         println!("Rendered {}", path.display());
     }
+    if let Some(lighting) = lighting {
+        let lit_dir = out_dir.join(format!("lit-{}", lighting.tag()));
+        let opts = crate::render::RenderOptions { lighting: Some(lighting), ..Default::default() };
+        for path in crate::render::render_views(&scene, &opts, &lit_dir, "")? {
+            println!("Rendered {} (lit, {})", path.display(), lighting.tag());
+        }
+    }
     write_viewer(&scene, &out_dir.join("viewer.html"))?;
     println!("Render output in {}", out_dir.display());
     Ok(())
 }
 
 /// Compute the whole scene's light map and print how long it took and how
-/// its light is distributed (nothing is written: the flat views are not lit yet).
+/// its light is distributed (the lit views are rendered separately).
 fn report_light_map(scene: &crate::render::Scene, lighting: crate::render::light::Lighting) {
     use crate::render::light::LightMap;
     let t = std::time::Instant::now();
