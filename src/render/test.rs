@@ -1018,3 +1018,138 @@ mod lighting_tests {
         assert_eq!(lm.sky_light(12, h(12, 12) + 2, 12), 15);
     }
 }
+
+/// Viewer lighting (`render::viewer` with a `Lighting`): the baked corner
+/// light of the first-person page, and the unlit page staying as it was.
+#[cfg(test)]
+mod viewer_lighting_tests {
+    use crate::geometry::{Point3D, Rect3D};
+    use crate::render::grid::VoxelGrid;
+    use crate::render::light::{LightMap, LightSampler, Lighting};
+    use crate::render::viewer::{export, export_with, write_viewer_html, write_viewer_html_with, Export, RECORD_BYTES};
+    use crate::render::Scene;
+
+    /// A 20x20 stone floor under open sky with a torch standing near its west
+    /// edge; the far corner is beyond the torch's reach (block light 0).
+    fn torch_scene() -> Scene {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(24, 8, 24) });
+        for x in 1..21 {
+            for z in 1..21 {
+                s.insert(Point3D::new(x, 61, z), "minecraft:stone");
+            }
+        }
+        s.insert(Point3D::new(2, 62, 5), "minecraft:torch");
+        s
+    }
+
+    fn lit_export(scene: &Scene, lighting: Lighting) -> Export {
+        let g = VoxelGrid::from_scene(scene, None).unwrap();
+        let map = LightMap::new(&g);
+        let lit = LightSampler::new(&map, lighting);
+        export_with(&g, Some(&lit)).unwrap()
+    }
+
+    /// Rectangle records (flat ones, then textured A ones): the five `i16`
+    /// coordinates, the dir and the face's index in the light buffer. Both
+    /// record layouts share the prefix, so this holds with or without a jar.
+    fn rect_faces(e: &Export) -> Vec<([i16; 5], u8, usize)> {
+        let mut bytes = e.flat.clone();
+        if let Some(t) = &e.textured {
+            bytes.extend_from_slice(&t.faces[..t.a_count * RECORD_BYTES]);
+        }
+        bytes
+            .chunks(RECORD_BYTES)
+            .enumerate()
+            .map(|(i, r)| {
+                let v = |k: usize| i16::from_le_bytes([r[k * 2], r[k * 2 + 1]]);
+                ([v(0), v(1), v(2), v(3), v(4)], r[10], i)
+            })
+            .collect()
+    }
+
+    /// Mean light factor (0..1 over the four corners and three channels) of
+    /// the floor's top face covering cell `(x, z)`.
+    fn floor_light(e: &Export, x: i32, z: i32) -> f32 {
+        let light = e.light.as_ref().expect("lit export carries a light buffer");
+        let (sx, sz) = (x as i16 * 16, z as i16 * 16);
+        // The grid's y range starts at the floor, so its top is the plane y = 16.
+        let (_, _, li) = rect_faces(e)
+            .into_iter()
+            .find(|(r, d, _)| *d == 2 && r[1] == 16 && r[0] <= sx && sx < r[0] + r[3] && r[2] <= sz && sz < r[2] + r[4])
+            .unwrap_or_else(|| panic!("no floor top face over ({x}, {z})"));
+        light[li * 12..li * 12 + 12].iter().map(|&b| b as f32 / 255.0).sum::<f32>() / 12.0
+    }
+
+    fn floor_top_faces(e: &Export) -> usize {
+        rect_faces(e).iter().filter(|(r, d, _)| *d == 2 && r[1] == 16).count()
+    }
+
+    #[test]
+    fn lit_export_is_brighter_beside_the_torch_than_far_from_it() {
+        let night = lit_export(&torch_scene(), Lighting::night());
+        assert_eq!(night.light.as_ref().unwrap().len(), night.stats.faces * 12, "12 light bytes per face");
+        assert_eq!(night.stats.light_bytes, night.stats.faces * 12);
+        let near = floor_light(&night, 3, 5);
+        let far = floor_light(&night, 20, 20);
+        assert!(near > far + 0.2, "beside the torch {near:.2} vs far corner {far:.2}");
+        // Torch light is warm: red leads blue beside it; moonlight is blue at the far corner.
+        let light = night.light.as_ref().unwrap();
+        let corner_rgb = |x: i32, z: i32| {
+            let (sx, sz) = (x as i16 * 16, z as i16 * 16);
+            let (_, _, li) = rect_faces(&night)
+                .into_iter()
+                .find(|(r, d, _)| *d == 2 && r[1] == 16 && r[0] <= sx && sx < r[0] + r[3] && r[2] <= sz && sz < r[2] + r[4])
+                .unwrap();
+            [light[li * 12], light[li * 12 + 1], light[li * 12 + 2]]
+        };
+        let (n, f) = (corner_rgb(3, 5), corner_rgb(20, 20));
+        assert!(n[0] > n[2], "warm beside the torch: {n:?}");
+        assert!(f[2] > f[0], "blue moonlight far away: {f:?}");
+        // By day every corner of the floor has full sky light, so the top
+        // still merges into one quad; at night the torch pool splits it.
+        let day = lit_export(&torch_scene(), Lighting::day());
+        assert_eq!(floor_top_faces(&day), 1, "day floor top merges into one quad");
+        assert!(floor_top_faces(&night) > 1, "night floor top splits around the torch");
+        assert!((floor_light(&day, 3, 5) - floor_light(&day, 20, 20)).abs() < 0.01);
+        assert!(floor_light(&day, 20, 20) > 0.95, "sunlit floor at full brightness");
+    }
+
+    #[test]
+    fn unlit_export_and_page_are_unchanged_by_the_lighting_option() {
+        let scene = torch_scene();
+        let g = VoxelGrid::from_scene(&scene, None).unwrap();
+        let plain = export(&g).unwrap();
+        let none = export_with(&g, None).unwrap();
+        assert!(none.light.is_none());
+        assert_eq!(none.stats.light_bytes, 0);
+        assert_eq!(plain.flat, none.flat);
+        assert_eq!(plain.textured.as_ref().map(|t| &t.faces), none.textured.as_ref().map(|t| &t.faces));
+        assert_eq!(plain.stats.faces, none.stats.faces);
+
+        let dir = std::env::temp_dir().join("tome_viewer_lighting_test");
+        let (a, b, lit) = (dir.join("viewer.html"), dir.join("viewer_none.html"), dir.join("viewer-night.html"));
+        write_viewer_html(&scene, None, &a).unwrap();
+        write_viewer_html_with(&scene, None, &b, None).unwrap();
+        let (ha, hb) = (std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap());
+        assert_eq!(ha, hb, "unlit page is byte-identical with lighting: None");
+        assert!(!String::from_utf8_lossy(&ha).contains(r#"id="light""#));
+
+        let stats = write_viewer_html_with(&scene, None, &lit, Some(Lighting::night())).unwrap();
+        let hl = std::fs::read_to_string(&lit).unwrap();
+        assert_eq!(stats.html_bytes, hl.len());
+        assert!(stats.light_bytes == stats.faces * 12);
+        assert!(hl.len() > ha.len(), "lit page carries the light buffer");
+        assert!(hl.contains(r#"<script id="light""#) && !hl.contains("__LIGHT__"));
+        assert!(hl.contains(r#""lighting":{"#) && hl.contains(r#""tag":"night""#));
+        assert!(hl.contains("<title>Tome town (night)</title>"));
+        assert!(!hl.contains("<!--@"));
+        // The night sky is darker and bluer than the unlit background.
+        let bg = |h: &str| {
+            let i = h.find(r#""background":["#).unwrap() + 14;
+            let end = h[i..].find(']').unwrap();
+            h[i..i + end].split(',').map(|v| v.parse::<u32>().unwrap()).collect::<Vec<_>>()
+        };
+        let (day_bg, night_bg) = (bg(&String::from_utf8_lossy(&ha)), bg(&hl));
+        assert!(night_bg[0] < day_bg[0] / 4 && night_bg[2] > night_bg[0], "{night_bg:?} vs {day_bg:?}");
+    }
+}

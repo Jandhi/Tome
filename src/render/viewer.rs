@@ -49,6 +49,21 @@
 //! Every other model face is emitted per cell. Coincident faces with the same
 //! texture frame (grass side + tinted overlay) are baked into one composite
 //! texture instead of fighting for depth.
+//!
+//! Lighting is optional and baked at export time: with a [`Lighting`], a
+//! [`LightMap`] of the grid is sampled at every face's four corners (smooth
+//! lighting, see [`light`](super::light)) and a third buffer carries, per face
+//! in emission order (flat, then A, then R records), four `u8 r g b` light
+//! factors in the viewer's corner order (u lo v lo, u hi v lo, u hi v hi, u lo
+//! v hi; a rotated face's own corner order) which the page multiplies into the
+//! vertex colours, so the GPU interpolates the light across each face like the
+//! game. A face is lit from the cell on its outside (the neighbour across a
+//! boundary face, the block's own cell for an inner face). Full-cube faces
+//! still greedy-merge, but only across cells whose quantised corner light is
+//! identical, so a merged quad's constant light is exactly what its cells
+//! would have shown; where light varies (lamp pools, shadows, walls) faces
+//! stay per cell. Without a `Lighting` the export is byte-for-byte what it
+//! always was.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -60,6 +75,7 @@ use resvg::tiny_skia::{ColorU8, Pixmap};
 
 use super::assets::{BlockGeometry, Element, Face6, FaceTex, Texture};
 use super::grid::{Rgba, VoxelGrid, BACKGROUND};
+use super::light::{LightMap, LightSampler, Lighting};
 use super::scene::Scene;
 use super::shape::Box16;
 use crate::geometry::Rect3D;
@@ -108,6 +124,10 @@ pub struct ViewerStats {
     pub atlas_size: (u32, u32),
     /// Rows in the face key table.
     pub face_keys: usize,
+    /// Raw light buffer size in bytes (0 when unlit).
+    pub light_bytes: usize,
+    /// Time spent computing the light map (zero when unlit).
+    pub light_map: std::time::Duration,
 }
 
 /// Everything the page embeds.
@@ -116,8 +136,15 @@ pub struct Export {
     pub flat: Vec<u8>,
     /// Textured faces, or `None` when no material has a model.
     pub textured: Option<TexturedExport>,
+    /// Corner light per face (12 bytes each: flat faces, then A, then R
+    /// records), when the export is lit.
+    pub light: Option<Vec<u8>>,
     pub stats: ViewerStats,
 }
+
+/// Light at a face's four corners, `r g b` factors in `0..=255`, in the
+/// viewer's corner order.
+type CornerLight = [[u8; 3]; 4];
 
 pub struct TexturedExport {
     /// A records followed by R records.
@@ -128,6 +155,8 @@ pub struct TexturedExport {
     pub keys: Vec<serde_json::Value>,
     pub atlas_png: Vec<u8>,
     pub atlas_size: (u32, u32),
+    /// Corner light of the A then R records (empty when unlit).
+    pub light: Vec<u8>,
 }
 
 /// Offsets to the six neighbours, indexed by `dir`.
@@ -142,14 +171,22 @@ fn in_plane(axis: usize) -> (usize, usize) {
     }
 }
 
-/// Growable buffer of face records.
+/// Growable buffer of face records, plus the corner light of each when lit.
 #[derive(Default)]
 struct FaceBuf {
     bytes: Vec<u8>,
     count: usize,
+    light: Vec<u8>,
 }
 
 impl FaceBuf {
+    /// Record the corner light of the face just pushed.
+    fn push_light(&mut self, l: CornerLight) {
+        for c in l {
+            self.light.extend_from_slice(&c);
+        }
+    }
+
     fn push_rect(&mut self, p: [i32; 3], w: i32, h: i32, dir: u8, tail: [u8; 5]) {
         for v in [p[0], p[1], p[2], w, h] {
             debug_assert!(i16::try_from(v).is_ok(), "face coordinate {v} out of i16 range");
@@ -193,14 +230,20 @@ fn unpack(k: u32) -> Rgba {
 /// Export every exposed face of `g`: the flat-colour buffer plus, when the
 /// grid carries block models, the textured buffer and atlas.
 pub fn export(g: &VoxelGrid) -> Result<Export> {
+    export_with(g, None)
+}
+
+/// [`export`], lit by `lit` when given (see the module doc): the export then
+/// also carries the corner light of every face.
+pub fn export_with(g: &VoxelGrid, lit: Option<&LightSampler>) -> Result<Export> {
     if g.nx > MAX_EDGE || g.ny > MAX_EDGE || g.nz > MAX_EDGE {
         return Err(anyhow!("grid {}x{}x{} too large for the viewer (max edge {MAX_EDGE} blocks)", g.nx, g.ny, g.nz));
     }
     let plain = |m: u16| g.geometry(m).is_none();
     let mut buf = FaceBuf::default();
-    full_faces(g, &mut buf, &plain);
+    full_faces(g, &mut buf, &plain, lit);
     let merged = buf.count;
-    partial_faces(g, &mut buf, &plain);
+    partial_faces(g, &mut buf, &plain, lit);
     let mut stats = ViewerStats {
         faces: buf.count,
         merged_faces: merged,
@@ -208,8 +251,95 @@ pub fn export(g: &VoxelGrid) -> Result<Export> {
         buffer_bytes: buf.bytes.len(),
         ..Default::default()
     };
-    let textured = if g.has_textures() { Some(export_textured(g, &mut stats)?) } else { None };
-    Ok(Export { flat: buf.bytes, textured, stats })
+    let textured = if g.has_textures() { Some(export_textured(g, &mut stats, lit)?) } else { None };
+    let light = lit.map(|_| {
+        let mut light = buf.light;
+        if let Some(t) = &textured {
+            light.extend_from_slice(&t.light);
+        }
+        debug_assert_eq!(light.len(), stats.faces * 12);
+        stats.light_bytes = light.len();
+        light
+    });
+    Ok(Export { flat: buf.bytes, textured, light, stats })
+}
+
+// ---------------------------------------------------------------------------
+// Corner light
+// ---------------------------------------------------------------------------
+
+/// Interning table from `(face key, corner light)` to a non-zero mask key, so
+/// greedy merging only joins cells whose light agrees.
+#[derive(Default)]
+struct LitKeys {
+    list: Vec<(u32, CornerLight)>,
+    index: HashMap<(u32, CornerLight), u32>,
+}
+
+impl LitKeys {
+    fn intern(&mut self, key: u32, light: CornerLight) -> u32 {
+        if let Some(&i) = self.index.get(&(key, light)) {
+            return i;
+        }
+        self.list.push((key, light));
+        let i = self.list.len() as u32;
+        self.index.insert((key, light), i);
+        i
+    }
+
+    fn get(&self, id: u32) -> (u32, CornerLight) {
+        self.list[id as usize - 1]
+    }
+}
+
+/// Light at the four corners of the part `u0..u1` x `v0..v1` (fractions of
+/// the cell along the viewer's in-plane axes) of a face normal to `axis`
+/// whose outside cell is `outside`, in the viewer's corner order: smooth
+/// light at the face's corners, interpolated inward for a partial face.
+fn corner_light(lit: &LightSampler, outside: [i32; 3], axis: usize, u: [f32; 2], v: [f32; 2]) -> CornerLight {
+    let c = lit.face_corners_rgb(outside, axis);
+    // The sampler's corners run over the tangent axes in ascending order; the
+    // viewer's u is the second of those for ±X faces (u = z, v = y).
+    let swap = axis == 0;
+    let at = |uu: f32, vv: f32| {
+        let (a, b) = if swap { (vv, uu) } else { (uu, vv) };
+        quantize(bilinear_rgb(c, a, b))
+    };
+    [at(u[0], v[0]), at(u[1], v[0]), at(u[1], v[1]), at(u[0], v[1])]
+}
+
+/// Light at `(a, b)` in `0..1` over the tangent axes from the corner colours
+/// `(lo, lo), (hi, lo), (lo, hi), (hi, hi)`.
+fn bilinear_rgb(c: [[f32; 3]; 4], a: f32, b: f32) -> [f32; 3] {
+    let (a, b) = (a.clamp(0.0, 1.0), b.clamp(0.0, 1.0));
+    let w = [(1.0 - a) * (1.0 - b), a * (1.0 - b), (1.0 - a) * b, a * b];
+    let mut out = [0.0; 3];
+    for (ci, wi) in w.into_iter().enumerate() {
+        for (o, v) in out.iter_mut().zip(&c[ci]) {
+            *o += v * wi;
+        }
+    }
+    out
+}
+
+fn quantize(l: [f32; 3]) -> [u8; 3] {
+    l.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8)
+}
+
+/// The cell a face of cell `(x, y, z)` is lit from: the neighbour across it
+/// when the face lies on the cell boundary, the cell itself otherwise.
+fn outside_cell(x: i32, y: i32, z: i32, dir: usize, on_boundary: bool) -> [i32; 3] {
+    if on_boundary {
+        let (dx, dy, dz) = DIRS[dir];
+        [x + dx, y + dy, z + dz]
+    } else {
+        [x, y, z]
+    }
+}
+
+/// Corner light of a boundary face of a full cell at `p` facing `dir`.
+fn full_face_light(lit: &LightSampler, p: [i32; 3], dir: usize) -> CornerLight {
+    corner_light(lit, outside_cell(p[0], p[1], p[2], dir, true), dir / 2, [0.0, 1.0], [0.0, 1.0])
 }
 
 /// The flat-colour face buffer of `g` and the stats of the whole export
@@ -221,8 +351,9 @@ pub fn export_faces(g: &VoxelGrid) -> Result<(Vec<u8>, ViewerStats)> {
 
 /// Boundary faces of full-cube cells of `plain` materials, greedy-merged per
 /// slice and colour.
-fn full_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool) {
+fn full_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool, lit: Option<&LightSampler>) {
     let n = [g.nx, g.ny, g.nz];
+    let mut lit_keys = LitKeys::default();
     for axis in 0..3 {
         let (ua, va) = in_plane(axis);
         let (nu, nv) = (n[ua], n[va]);
@@ -244,11 +375,17 @@ fn full_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool) {
                     let mut q = p;
                     q[axis] = s + 1;
                     if !g.hides(g.get(q[0], q[1], q[2]), m) {
-                        pos[(v * nu + u) as usize] = key;
+                        pos[(v * nu + u) as usize] = match lit {
+                            Some(l) => lit_keys.intern(key, full_face_light(l, p, axis * 2)),
+                            None => key,
+                        };
                     }
                     q[axis] = s - 1;
                     if !g.hides(g.get(q[0], q[1], q[2]), m) {
-                        neg[(v * nu + u) as usize] = key;
+                        neg[(v * nu + u) as usize] = match lit {
+                            Some(l) => lit_keys.intern(key, full_face_light(l, p, axis * 2 + 1)),
+                            None => key,
+                        };
                     }
                 }
             }
@@ -260,7 +397,14 @@ fn full_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool) {
                     p[axis] = plane;
                     p[ua] = u * 16;
                     p[va] = v * 16;
-                    out.push(p, w * 16, h * 16, dir, unpack(key));
+                    match lit {
+                        Some(_) => {
+                            let (colour, light) = lit_keys.get(key);
+                            out.push(p, w * 16, h * 16, dir, unpack(colour));
+                            out.push_light(light);
+                        }
+                        None => out.push(p, w * 16, h * 16, dir, unpack(key)),
+                    }
                 });
             }
         }
@@ -303,7 +447,7 @@ fn merge_rects(mask: &mut [u32], nu: i32, nv: i32, mut emit: impl FnMut(i32, i32
 
 /// Faces of every box of every partial-shape cell of a `plain` material, one
 /// quad each.
-fn partial_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool) {
+fn partial_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool, lit: Option<&LightSampler>) {
     for x in 0..g.nx {
         for z in 0..g.nz {
             for y in 0..g.ny {
@@ -338,6 +482,11 @@ fn partial_faces(g: &VoxelGrid, out: &mut FaceBuf, plain: &dyn Fn(u16) -> bool) 
                         p[ua] += b[ua] as i32;
                         p[va] += b[va] as i32;
                         out.push(p, w, h, dir as u8, c);
+                        if let Some(l) = lit {
+                            let outside = outside_cell(x, y, z, dir, on_boundary);
+                            let (u, v) = ([b[ua] as f32 / 16.0, b[ua + 3] as f32 / 16.0], [b[va] as f32 / 16.0, b[va + 3] as f32 / 16.0]);
+                            out.push_light(corner_light(l, outside, axis, u, v));
+                        }
                     }
                 }
             }
@@ -786,7 +935,7 @@ fn material_quads(geo: &BlockGeometry, translucent: bool, atlas: &mut Atlas, key
 
 /// Tileable boundary faces of textured materials, greedy-merged per slice
 /// and key like [`full_faces`].
-fn merged_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], out: &mut FaceBuf) {
+fn merged_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], out: &mut FaceBuf, lit: Option<&LightSampler>) {
     // Key + 1 of the tileable face per material and dir; 0 = none.
     let tile: Vec<[u32; 6]> = mats
         .iter()
@@ -799,6 +948,7 @@ fn merged_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], out: &mut Fac
         })
         .collect();
     let n = [g.nx, g.ny, g.nz];
+    let mut lit_keys = LitKeys::default();
     for axis in 0..3 {
         let (ua, va) = in_plane(axis);
         let (nu, nv) = (n[ua], n[va]);
@@ -816,11 +966,17 @@ fn merged_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], out: &mut Fac
                     let mut q = p;
                     q[axis] = s + 1;
                     if t[axis * 2] != 0 && !g.hides(g.get(q[0], q[1], q[2]), m) {
-                        pos[(v * nu + u) as usize] = t[axis * 2];
+                        pos[(v * nu + u) as usize] = match lit {
+                            Some(l) => lit_keys.intern(t[axis * 2], full_face_light(l, p, axis * 2)),
+                            None => t[axis * 2],
+                        };
                     }
                     q[axis] = s - 1;
                     if t[axis * 2 + 1] != 0 && !g.hides(g.get(q[0], q[1], q[2]), m) {
-                        neg[(v * nu + u) as usize] = t[axis * 2 + 1];
+                        neg[(v * nu + u) as usize] = match lit {
+                            Some(l) => lit_keys.intern(t[axis * 2 + 1], full_face_light(l, p, axis * 2 + 1)),
+                            None => t[axis * 2 + 1],
+                        };
                     }
                 }
             }
@@ -832,15 +988,41 @@ fn merged_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], out: &mut Fac
                     p[axis] = plane;
                     p[ua] = u * 16;
                     p[va] = v * 16;
-                    out.push_textured(p, w * 16, h * 16, dir, 0, (key - 1) as u16);
+                    match lit {
+                        Some(_) => {
+                            let (tile_key, light) = lit_keys.get(key);
+                            out.push_textured(p, w * 16, h * 16, dir, 0, (tile_key - 1) as u16);
+                            out.push_light(light);
+                        }
+                        None => out.push_textured(p, w * 16, h * 16, dir, 0, (key - 1) as u16),
+                    }
                 });
             }
         }
     }
 }
 
+/// Corner light of a rotated quad of cell `cell`, each corner sampled where
+/// it sits in the face's outside cell: the neighbour when the quad lies on
+/// the cell boundary facing out (a nudged overlay counts), the cell itself
+/// for anything inside it (a plant's cross, a ladder's rungs).
+fn rotated_light(lit: &LightSampler, cell: [i32; 3], q: &RQuad) -> CornerLight {
+    let dir = q.dir as usize;
+    let axis = dir / 2;
+    let plane = q.corners.iter().map(|c| c[axis]).sum::<f32>() / 4.0;
+    let on_boundary = if dir % 2 == 0 { plane >= 1.0 - 1.0 / 32.0 } else { plane <= 1.0 / 32.0 };
+    let outside = outside_cell(cell[0], cell[1], cell[2], dir, on_boundary);
+    let (t1, t2) = match axis {
+        0 => (1, 2),
+        1 => (0, 2),
+        _ => (0, 1),
+    };
+    let c = lit.face_corners_rgb(outside, axis);
+    q.corners.map(|p| quantize(bilinear_rgb(c, p[t1] - cell[t1] as f32, p[t2] - cell[t2] as f32)))
+}
+
 /// The remaining model faces of every textured cell, one record each.
-fn cell_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], a: &mut FaceBuf, r: &mut FaceBuf) {
+fn cell_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], a: &mut FaceBuf, r: &mut FaceBuf, lit: Option<&LightSampler>) {
     for x in 0..g.nx {
         for z in 0..g.nz {
             for y in 0..g.ny {
@@ -850,7 +1032,8 @@ fn cell_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], a: &mut FaceBuf
                 for q in mq.a.iter().filter(|q| !q.tile) {
                     let axis = (q.dir / 2) as usize;
                     let positive = q.dir % 2 == 0;
-                    if q.plane == if positive { 16 } else { 0 } {
+                    let on_boundary = q.plane == if positive { 16 } else { 0 };
+                    if on_boundary {
                         let (dx, dy, dz) = DIRS[q.dir as usize];
                         if g.hides(g.get(x + dx, y + dy, z + dz), m) {
                             continue;
@@ -862,26 +1045,34 @@ fn cell_textured_faces(g: &VoxelGrid, mats: &[Option<MatQuads>], a: &mut FaceBuf
                     p[ua] += q.u;
                     p[va] += q.v;
                     a.push_textured(p, q.w, q.h, q.dir, u8::from(q.double), q.key);
+                    if let Some(l) = lit {
+                        let outside = outside_cell(x, y, z, q.dir as usize, on_boundary);
+                        let (u, v) = ([q.u as f32 / 16.0, (q.u + q.w) as f32 / 16.0], [q.v as f32 / 16.0, (q.v + q.h) as f32 / 16.0]);
+                        a.push_light(corner_light(l, outside, axis, u, v));
+                    }
                 }
                 for q in &mq.r {
                     let cell = [x as f32, y as f32, z as f32];
                     r.push_rotated(q.corners.map(|c| add(c, cell)), q.key, q.dir, u8::from(q.double));
+                    if let Some(l) = lit {
+                        r.push_light(rotated_light(l, [x, y, z], q));
+                    }
                 }
             }
         }
     }
 }
 
-fn export_textured(g: &VoxelGrid, stats: &mut ViewerStats) -> Result<TexturedExport> {
+fn export_textured(g: &VoxelGrid, stats: &mut ViewerStats, lit: Option<&LightSampler>) -> Result<TexturedExport> {
     let mut atlas = Atlas::default();
     let mut keys = Keys::default();
     let mats: Vec<Option<MatQuads>> = (0..g.material_count() as u16)
         .map(|m| g.geometry(m).map(|geo| material_quads(geo, !g.is_opaque(m), &mut atlas, &mut keys)))
         .collect();
     let (mut a, mut r) = (FaceBuf::default(), FaceBuf::default());
-    merged_textured_faces(g, &mats, &mut a);
+    merged_textured_faces(g, &mats, &mut a, lit);
     let merged = a.count;
-    cell_textured_faces(g, &mats, &mut a, &mut r);
+    cell_textured_faces(g, &mats, &mut a, &mut r, lit);
     let (pos, w, h) = atlas.pack();
     let atlas_png = atlas.png(&pos, w, h)?;
     let rows = keys.list.iter().map(|k| key_row(k, pos[k.tex as usize], atlas.textures[k.tex as usize].size)).collect();
@@ -898,7 +1089,9 @@ fn export_textured(g: &VoxelGrid, stats: &mut ViewerStats) -> Result<TexturedExp
 
     let mut faces = a.bytes;
     faces.extend_from_slice(&r.bytes);
-    Ok(TexturedExport { faces, a_count: a.count, r_count: r.count, keys: rows, atlas_png, atlas_size: (w, h) })
+    let mut light = a.light;
+    light.extend_from_slice(&r.light);
+    Ok(TexturedExport { faces, a_count: a.count, r_count: r.count, keys: rows, atlas_png, atlas_size: (w, h), light })
 }
 
 // ---------------------------------------------------------------------------
@@ -926,25 +1119,36 @@ fn gzip(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(enc.finish()?)
 }
 
-/// The page template for a flat or textured page. `viewer.html` holds both:
-/// lines between `<!--@if textured-->` and `<!--@else-->` (or `<!--@end-->`)
-/// are kept only for textured pages, lines between `<!--@else-->` and
-/// `<!--@end-->` only for flat ones, and the marker lines themselves vanish.
-fn template(textured: bool) -> String {
+/// The page template for a flat or textured, lit or unlit page.
+/// `viewer.html` holds every variant: lines between `<!--@if textured-->` and
+/// `<!--@else-->` (or `<!--@end-->`) are kept only for textured pages, lines
+/// between `<!--@else-->` and `<!--@end-->` only for flat ones, and likewise
+/// `<!--@if lit-->` for lit pages; blocks nest, and the marker lines
+/// themselves vanish.
+fn template(textured: bool, lit: bool) -> String {
     let mut out = String::with_capacity(HTML_TEMPLATE.len());
-    let mut keep = true;
+    // One entry per open block: whether its current branch is kept.
+    let mut stack: Vec<bool> = Vec::new();
     for line in HTML_TEMPLATE.split_inclusive('\n') {
         match line.trim() {
-            "<!--@if textured-->" => keep = textured,
-            "<!--@else-->" => keep = !textured,
-            "<!--@end-->" => keep = true,
+            "<!--@if textured-->" => stack.push(textured),
+            "<!--@if lit-->" => stack.push(lit),
+            "<!--@else-->" => {
+                if let Some(top) = stack.last_mut() {
+                    *top = !*top;
+                }
+            }
+            "<!--@end-->" => {
+                stack.pop();
+            }
             _ => {
-                if keep {
+                if stack.iter().all(|&k| k) {
                     out.push_str(line);
                 }
             }
         }
     }
+    debug_assert!(stack.is_empty(), "unbalanced template markers");
     out
 }
 
@@ -954,24 +1158,62 @@ fn template(textured: bool) -> String {
 /// inflates them with `DecompressionStream`) and embedded as base64, as is the
 /// texture atlas PNG when the grid carries block models.
 pub fn write_viewer_html(scene: &Scene, region: Option<Rect3D>, out: &Path) -> Result<ViewerStats> {
+    write_viewer_html_with(scene, region, out, None)
+}
+
+/// [`write_viewer_html`] with optional baked lighting: the page then carries
+/// the corner light of every face (see the module doc), its sky and fog take
+/// the lighting's sky colour, and its HUD names the mode. Without a
+/// `lighting` the file is byte-for-byte the unlit page.
+pub fn write_viewer_html_with(scene: &Scene, region: Option<Rect3D>, out: &Path, lighting: Option<Lighting>) -> Result<ViewerStats> {
     let g = VoxelGrid::from_scene(scene, region).ok_or_else(|| anyhow!("nothing visible to export"))?;
-    let Export { flat, textured, mut stats } = export(&g)?;
+    let t = std::time::Instant::now();
+    let light_map = lighting.map(|_| LightMap::new(&g));
+    let light_map_time = t.elapsed();
+    let sampler = light_map.as_ref().zip(lighting).map(|(m, l)| LightSampler::new(m, l));
+    let Export { flat, textured, light, mut stats } = export_with(&g, sampler.as_ref())?;
+    if lighting.is_some() {
+        stats.light_map = light_map_time;
+    }
     let gz = gzip(&flat)?;
     stats.gzip_bytes = gz.len();
-    let title = match scene.meta.get("seed") {
+    let mut title = match scene.meta.get("seed") {
         Some(seed) => format!("Tome town {seed}"),
         None => "Tome town".to_string(),
+    };
+    if let Some(l) = lighting {
+        title = format!("{title} ({})", l.tag());
+    }
+    let background = match &sampler {
+        Some(s) => {
+            let sky = s.sky_rgb();
+            let ch = |k: usize| (BACKGROUND[k] as f32 * sky[k]).round().clamp(0.0, 255.0) as u8;
+            [ch(0), ch(1), ch(2)]
+        }
+        None => [BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]],
     };
     let mut meta = serde_json::json!({
         "origin": [g.origin.x, g.origin.y, g.origin.z],
         "size": [g.nx, g.ny, g.nz],
         "faces": stats.faces,
         "encoding": "gzip",
-        "background": [BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]],
+        "background": background,
         "title": title,
         "scene_meta": scene.meta,
     });
-    let mut html = template(textured.is_some());
+    if let Some(l) = lighting {
+        meta["lighting"] = serde_json::json!({
+            "tag": l.tag(),
+            "daylight": l.daylight,
+            "label": format!("lit: {} (daylight {:.2}, smooth)", l.tag(), l.daylight),
+        });
+    }
+    let mut html = template(textured.is_some(), lighting.is_some());
+    if let Some(light) = &light {
+        let lgz = gzip(light)?;
+        stats.gzip_bytes += lgz.len();
+        html = html.replacen("__LIGHT__", &base64(&lgz), 1);
+    }
     if let Some(t) = &textured {
         let tgz = gzip(&t.faces)?;
         stats.gzip_bytes += tgz.len();
@@ -1117,8 +1359,8 @@ mod tests {
 
     #[test]
     fn template_variants_select_their_lines() {
-        let flat = template(false);
-        let textured = template(true);
+        let flat = template(false, false);
+        let textured = template(true, false);
         assert!(!flat.contains("<!--@") && !textured.contains("<!--@"));
         assert!(flat.contains("__DATA__") && textured.contains("__DATA__"));
         assert!(!flat.contains("__TEX__") && !flat.contains("__ATLAS__"));
@@ -1126,10 +1368,16 @@ mod tests {
         // Markers come in balanced if/[else/]end groups, and the line endings
         // of the file survive the split.
         let count = |m: &str| HTML_TEMPLATE.lines().filter(|l| l.trim() == m).count();
-        assert_eq!(count("<!--@if textured-->"), count("<!--@end-->"));
-        assert!(count("<!--@else-->") <= count("<!--@if textured-->"));
+        assert_eq!(count("<!--@if textured-->") + count("<!--@if lit-->"), count("<!--@end-->"));
+        assert!(count("<!--@else-->") <= count("<!--@if textured-->") + count("<!--@if lit-->"));
         assert_eq!(flat.contains('\r'), HTML_TEMPLATE.contains('\r'));
         assert!(flat.len() < textured.len());
+        // Lit pages carry the light buffer and nothing else lit-only leaks into unlit ones.
+        for (unlit, lit) in [(&flat, template(false, true)), (&textured, template(true, true))] {
+            assert!(!unlit.contains("__LIGHT__") && lit.contains("__LIGHT__"));
+            assert!(!lit.contains("<!--@"));
+            assert!(unlit.len() < lit.len());
+        }
     }
 
     #[test]

@@ -240,24 +240,35 @@ fn report_light_map(scene: &crate::render::Scene, lighting: crate::render::light
     );
 }
 
-/// `--view <path.scene> [out.html]`: write the interactive first-person viewer
-/// page for a saved scene (default: `viewer.html` beside the scene). Open the
-/// file in a browser; no server needed.
-fn view_saved_scene(scene_path: &str, out: Option<&str>) -> anyhow::Result<()> {
+/// `--view <path.scene> [out.html] [--light <mode>]`: write the interactive
+/// first-person viewer page for a saved scene (default: `viewer.html` beside
+/// the scene, `viewer-<day|night|dusk|light0.30>.html` when `--light` bakes
+/// Minecraft-style lighting into it). Open the file in a browser; no server
+/// needed.
+fn view_saved_scene(scene_path: &str, out: Option<&str>, lighting: Option<crate::render::light::Lighting>) -> anyhow::Result<()> {
     let scene_path = std::path::Path::new(scene_path);
     let scene = crate::render::Scene::load(scene_path)?;
-    let out = match out {
-        Some(p) => std::path::PathBuf::from(p),
-        None => scene_path.with_file_name("viewer.html"),
+    let out = match (out, lighting) {
+        (Some(p), _) => std::path::PathBuf::from(p),
+        (None, Some(l)) => scene_path.with_file_name(format!("viewer-{}.html", l.tag())),
+        (None, None) => scene_path.with_file_name("viewer.html"),
     };
-    write_viewer(&scene, &out)
+    write_viewer_with(&scene, &out, lighting)
 }
 
 fn write_viewer(scene: &crate::render::Scene, out: &std::path::Path) -> anyhow::Result<()> {
+    write_viewer_with(scene, out, None)
+}
+
+fn write_viewer_with(scene: &crate::render::Scene, out: &std::path::Path, lighting: Option<crate::render::light::Lighting>) -> anyhow::Result<()> {
     let t = std::time::Instant::now();
-    let s = crate::render::viewer::write_viewer_html(scene, None, out)?;
+    let s = crate::render::viewer::write_viewer_html_with(scene, None, out, lighting)?;
+    let lit = match lighting {
+        Some(l) => format!(", lit {} ({:.1} MB light, light map {:.1?})", l.tag(), s.light_bytes as f64 / 1e6, s.light_map),
+        None => String::new(),
+    };
     println!(
-        "Viewer: {} faces ({} merged full-block, {} partial), {:.1} MB buffer, {:.1} MB html in {:.1?} -> {}",
+        "Viewer: {} faces ({} merged full-block, {} partial), {:.1} MB buffer{lit}, {:.1} MB html in {:.1?} -> {}",
         s.faces,
         s.merged_faces,
         s.partial_faces,
@@ -409,10 +420,19 @@ async fn main() {
     }
     if args.iter().any(|a| a == "--view") {
         let Some(scene_path) = arg_after("--view", 1) else {
-            eprintln!("usage: --view <path.scene> [out.html]");
+            eprintln!("usage: --view <path.scene> [out.html] [--light day|night|dusk|<0..1>]");
             std::process::exit(2);
         };
-        if let Err(e) = view_saved_scene(scene_path, arg_after("--view", 2)) {
+        // The optional out.html must not be the --light flag itself.
+        let out = arg_after("--view", 2).filter(|d| !d.starts_with("--"));
+        let lighting = match arg_after("--light", 1).map(crate::render::light::Lighting::parse).transpose() {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
+        if let Err(e) = view_saved_scene(scene_path, out, lighting) {
             eprintln!("Viewer export failed: {e:#}");
             std::process::exit(1);
         }
