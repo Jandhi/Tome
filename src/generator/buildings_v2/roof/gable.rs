@@ -42,48 +42,22 @@ pub fn pick_ridge_axis(rect: &Rect2D, rng: &mut RNG) -> RidgeAxis {
     }
 }
 
-/// Generate a gable roof heightmap for a single rect.
-/// Heights are relative to roof_y. Negative heights appear in overhang zones.
-///
-/// `suppress_gable_overhang` controls which gable ends skip the overhang:
-/// (suppress_low_end, suppress_high_end) along the ridge axis.
-/// When a gable end faces an adjacent rect, its overhang should be suppressed
-/// to avoid roof blocks overshooting past the junction.
+/// Generate a gable roof heightmap for a single rect, with a one-block
+/// overhang on every side. Heights are relative to roof_y; the eave overhang
+/// is negative. Overhang cells that run into another rect's roof are cleared
+/// afterwards by `gable_roof::clear_covered_gable_overhang`.
 pub fn gable_heightmap(
     rect: &Rect2D,
     pitch: GablePitch,
     ridge_axis: RidgeAxis,
-    suppress_gable_overhang: (bool, bool),
 ) -> RoofHeightmap {
     let overhang = 1;
     let min = rect.min();
     let max = rect.max();
     let pitch_val = pitch.value();
 
-    // Along the ridge axis, suppress overhang on gable ends adjacent to other rects
-    let (ridge_lo_oh, ridge_hi_oh) = match ridge_axis {
-        RidgeAxis::X => {
-            let lo = if suppress_gable_overhang.0 { 0 } else { overhang };
-            let hi = if suppress_gable_overhang.1 { 0 } else { overhang };
-            (lo, hi)
-        }
-        RidgeAxis::Z => {
-            let lo = if suppress_gable_overhang.0 { 0 } else { overhang };
-            let hi = if suppress_gable_overhang.1 { 0 } else { overhang };
-            (lo, hi)
-        }
-    };
-
-    let (hm_min_x, hm_max_x, hm_min_z, hm_max_z) = match ridge_axis {
-        RidgeAxis::X => (
-            min.x - ridge_lo_oh, max.x + ridge_hi_oh,
-            min.y - overhang, max.y + overhang,
-        ),
-        RidgeAxis::Z => (
-            min.x - overhang, max.x + overhang,
-            min.y - ridge_lo_oh, max.y + ridge_hi_oh,
-        ),
-    };
+    let (hm_min_x, hm_max_x, hm_min_z, hm_max_z) =
+        (min.x - overhang, max.x + overhang, min.y - overhang, max.y + overhang);
 
     let width = (hm_max_x - hm_min_x + 1) as usize;
     let depth = (hm_max_z - hm_min_z + 1) as usize;
@@ -114,10 +88,11 @@ pub fn gable_heightmap(
 
 /// Place gable wall triangles at the two short-axis edges of a rect.
 /// Fills from roof_y up to the roof surface height with PrimaryWall material.
-/// Returns (x, z) positions of any doorways placed in shared gable walls.
+/// Returns (x, z) positions of any doorways cut through shared gable walls
+/// (both cells of the opening where two gables meet end to end).
 /// `knee` is the rect's knee-wall height (`Frame::knee_for_rect`): outward
-/// gables sit on the exterior knee wall, but shared (interior) gables reach
-/// down through it to the attic floor so the seam stays closed and the
+/// gable columns sit on the exterior knee wall, but shared (interior) ones
+/// reach down through it to the attic floor so the seam stays closed and the
 /// doorway stands on the floor.
 pub async fn place_gable_walls(
     editor: &Editor,
@@ -169,34 +144,65 @@ pub async fn place_gable_walls(
     let win_y_offset = 1;
     let can_place_window = matches!(pitch, GablePitch::Double) && mid_wall_height >= win_height + 1;
 
-    for &gable_pos in &gable_positions {
-        // Check if this gable faces outward (no adjacent rect on the other side)
-        let outward_check = match ridge_axis {
-            RidgeAxis::X => {
-                let outward_x = if gable_pos == min.x { gable_pos - 1 } else { gable_pos + 1 };
-                let mid_z = (short_min + short_max) / 2;
-                Point2D::new(outward_x, mid_z)
-            }
-            RidgeAxis::Z => {
-                let outward_z = if gable_pos == min.y { gable_pos - 1 } else { gable_pos + 1 };
-                let mid_x = (short_min + short_max) / 2;
-                Point2D::new(mid_x, outward_z)
-            }
-        };
-        let is_outward = !all_rects.iter().any(|&(r, r_roof_y, _)| {
-            (r.min() != rect.min() || r.max() != rect.max())
-                && r_roof_y >= roof_y
-                && r.contains(outward_check)
-        });
+    // Our extent along the short axis, for any rect.
+    let span = |r: &Rect2D| match ridge_axis {
+        RidgeAxis::X => (r.min().y, r.max().y),
+        RidgeAxis::Z => (r.min().x, r.max().x),
+    };
+    let others: Vec<(&Rect2D, i32, RidgeAxis)> = all_rects
+        .iter()
+        .copied()
+        .filter(|(r, _, _)| r.min() != rect.min() || r.max() != rect.max())
+        .collect();
 
-        // Check if this gable is on the shared edge of another same-height rect
-        // with a perpendicular ridge axis
-        let is_shared_edge = all_rects.iter().any(|&(r, r_roof_y, r_axis)| {
-            (r.min() != rect.min() || r.max() != rect.max())
-                && r_roof_y == roof_y
-                && r_axis != ridge_axis
-                && r.contains(outward_check)
-        });
+    for &gable_pos in &gable_positions {
+        // The cell just past this gable end, at a position along the short axis.
+        let outward_along = if gable_pos == gable_positions[0] { gable_pos - 1 } else { gable_pos + 1 };
+        let outward_cell = |short_pos: i32| match ridge_axis {
+            RidgeAxis::X => Point2D::new(outward_along, short_pos),
+            RidgeAxis::Z => Point2D::new(short_pos, outward_along),
+        };
+        // A column faces outward when no rect at least as tall lies beyond it.
+        let col_outward = |short_pos: i32| {
+            !others.iter().any(|&(r, r_roof_y, _)| r_roof_y >= roof_y && r.contains(outward_cell(short_pos)))
+        };
+
+        // Doorway columns (1 wide, 2 tall), with whether the cell beyond is
+        // part of the opening too:
+        // - at our middle when the gable stands on the side of a same-height
+        //   rect with a perpendicular ridge (T/L junction);
+        // - at the middle of each same-height, same-axis rect whose own gable
+        //   meets this one end to end. The wider of the two keeps its gable
+        //   wall, standing above the narrower roof, and carries the doorway;
+        //   the narrower one's wall would only double it, so that end is
+        //   skipped and its column counts as part of the opening.
+        let mut door_cols: Vec<(i32, bool)> = Vec::new();
+        if others.iter().any(|&(r, r_roof_y, r_axis)| {
+            r_roof_y == roof_y && r_axis != ridge_axis && r.contains(outward_cell(short_mid))
+        }) {
+            door_cols.push((short_mid, false));
+        }
+        let mut covered_by_wider = false;
+        for &(r, r_roof_y, r_axis) in &others {
+            if r_roof_y != roof_y || r_axis != ridge_axis {
+                continue;
+            }
+            let (r_lo, r_hi) = span(r);
+            let (lo, hi) = (r_lo.max(short_min), r_hi.min(short_max));
+            if lo > hi || !r.contains(outward_cell(lo)) {
+                continue;
+            }
+            let same_span = (r_lo, r_hi) == (short_min, short_max);
+            let r_first = (r.min().x, r.min().y) < (rect.min().x, rect.min().y);
+            if r_lo <= short_min && r_hi >= short_max && (!same_span || r_first) {
+                covered_by_wider = true;
+            } else {
+                door_cols.push(((lo + hi) / 2, true));
+            }
+        }
+        if covered_by_wider {
+            continue;
+        }
 
         for short_pos in short_min..=short_max {
             let (x, z) = match ridge_axis {
@@ -224,14 +230,18 @@ pub async fn place_gable_walls(
                 0
             };
 
+            let is_outward = col_outward(short_pos);
             let is_window_col = can_place_window && is_outward && short_pos == short_mid;
             let win_y_start = roof_y - 1 + win_y_offset;
             let win_y_end = win_y_start + win_height;
 
-            // Doorway: 1 wide, 2 tall at center of shared-edge gable walls
-            let is_door_col = is_shared_edge && short_pos == short_mid;
-            if is_door_col {
+            let door = door_cols.iter().find(|(col, _)| *col == short_pos);
+            let is_door_col = door.is_some();
+            if let Some(&(_, through)) = door {
                 doorways.push(Point2D::new(x, z));
+                if through {
+                    doorways.push(outward_cell(short_pos));
+                }
             }
             let wall_base_y = if is_outward { roof_y - 1 } else { roof_y - 1 - knee };
             let door_y_start = wall_base_y;

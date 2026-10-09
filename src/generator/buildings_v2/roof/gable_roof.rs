@@ -77,55 +77,37 @@ fn extend_rects_for_roof(rects: &[Rect2D], axes: &[RidgeAxis]) -> Vec<Rect2D> {
     result
 }
 
-/// Check which gable ends of a rect should have their overhang suppressed.
-/// Only suppress when the gable faces the middle of an adjacent same-height,
-/// perpendicular-ridge rect (T-shape junction). Don't suppress at L-shape
-/// junctions where the gable meets the end of the neighbor.
-/// Returns (suppress_low, suppress_high) along the ridge axis.
-fn gable_adjacency(
-    rect_idx: usize,
+/// Clear the overhang cells past rect `i`'s two gable ends (the row beyond
+/// each end, corners included) that fall inside another rect of the same roof
+/// height. The roof over those cells belongs to that rect: where it is lower
+/// (a narrower wing meeting the core end to end, or a wing's eave running
+/// along the core's gable) the overhang would float one column past the gable
+/// wall with an open pocket under it, and where it is higher the overhang is
+/// buried anyway. A T-junction wing's extended end lies entirely inside the
+/// core, so this also stops its roof at the core's ridge line. Eave overhang
+/// cells inside another rect never show (they sit below that rect's eave) and
+/// are left alone.
+pub(super) fn clear_covered_gable_overhang(
+    hm: &mut RoofHeightmap,
+    i: usize,
+    roof_rect: &Rect2D,
+    axis: RidgeAxis,
     rects: &[Rect2D],
-    axes: &[RidgeAxis],
     roof_ys: &[i32],
-) -> (bool, bool) {
-    let rect = &rects[rect_idx];
-    let ridge_axis = axes[rect_idx];
-    let roof_y = roof_ys[rect_idx];
-    let min = rect.min();
-    let max = rect.max();
-
-    // Check if a same-height, perpendicular-ridge rect is adjacent at the probe
-    // AND this rect connects to its middle (the neighbor extends past this rect
-    // on both sides along the neighbor's ridge direction).
-    let check = |probe: Point2D| -> bool {
-        rects.iter().enumerate().any(|(j, r)| {
-            if j == rect_idx || roof_ys[j] != roof_y || axes[j] == ridge_axis {
-                return false;
-            }
-            if !r.contains(probe) {
-                return false;
-            }
-            // Check if neighbor extends past this rect on both sides
-            // along the neighbor's ridge axis (T-shape, not L-shape)
-            match axes[j] {
-                RidgeAxis::X => r.min().x < min.x && r.max().x > max.x,
-                RidgeAxis::Z => r.min().y < min.y && r.max().y > max.y,
-            }
-        })
+) {
+    let (min, max) = (roof_rect.min(), roof_rect.max());
+    let end_cells: Vec<Point2D> = match axis {
+        RidgeAxis::X => (min.y - 1..=max.y + 1)
+            .flat_map(|z| [Point2D::new(min.x - 1, z), Point2D::new(max.x + 1, z)])
+            .collect(),
+        RidgeAxis::Z => (min.x - 1..=max.x + 1)
+            .flat_map(|x| [Point2D::new(x, min.y - 1), Point2D::new(x, max.y + 1)])
+            .collect(),
     };
-
-    match ridge_axis {
-        RidgeAxis::X => {
-            let mid_z = (min.y + max.y) / 2;
-            let lo = check(Point2D::new(min.x - 1, mid_z));
-            let hi = check(Point2D::new(max.x + 1, mid_z));
-            (lo, hi)
-        }
-        RidgeAxis::Z => {
-            let mid_x = (min.x + max.x) / 2;
-            let lo = check(Point2D::new(mid_x, min.y - 1));
-            let hi = check(Point2D::new(mid_x, max.y + 1));
-            (lo, hi)
+    for p in end_cells {
+        let covered = rects.iter().enumerate().any(|(j, r)| j != i && roof_ys[j] == roof_ys[i] && r.contains(p));
+        if covered {
+            hm.set(p.x, p.y, f32::NEG_INFINITY);
         }
     }
 }
@@ -155,14 +137,14 @@ pub(super) async fn place_gable_roof(
     // Pre-compute roof_y per rect for adjacency checks
     let roof_ys: Vec<i32> = (0..rects.len()).map(|i| frame.roof_y(i)).collect();
 
-    // Suppress gable overhang only where a same-height perpendicular-ridge rect is adjacent
-    let gable_suppress: Vec<(bool, bool)> = (0..rects.len())
-        .map(|i| gable_adjacency(i, rects, &rect_axes, &roof_ys))
-        .collect();
-
-    // Per-rect heightmaps for downstream consumers (chimney, lantern, furnish).
+    // Per-rect heightmaps: merged into each height group's roof below, and
+    // handed to downstream consumers (chimney, lantern, furnish).
     let per_rect_heightmaps: Vec<RoofHeightmap> = (0..rects.len())
-        .map(|i| gable_heightmap(&roof_rects[i], pitch, rect_axes[i], gable_suppress[i]))
+        .map(|i| {
+            let mut hm = gable_heightmap(&roof_rects[i], pitch, rect_axes[i]);
+            clear_covered_gable_overhang(&mut hm, i, &roof_rects[i], rect_axes[i], rects, &roof_ys);
+            hm
+        })
         .collect();
 
     // Group rects by roof_y (BTreeMap keeps keys sorted)
@@ -196,10 +178,8 @@ pub(super) async fn place_gable_roof(
 
         let mut combined_hm = RoofHeightmap::new(combined_min_x, combined_min_z, width, depth);
 
-        // Use extended rects for heightmap generation
         for &i in group_indices {
-            let sub_hm = gable_heightmap(&roof_rects[i], pitch, rect_axes[i], gable_suppress[i]);
-            combined_hm.merge_max(&sub_hm);
+            combined_hm.merge_max(&per_rect_heightmaps[i]);
         }
 
         // Place gable wall triangles using original rects

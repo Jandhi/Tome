@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use crate::editor::{Editor, World};
 use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
-use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Plot, SizeClass};
+use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
+use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footprint, Plot, SizeClass};
 use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput};
 use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
@@ -104,6 +105,33 @@ pub struct ShowcaseOptions {
     /// Pixels per block for top/elevation views; iso tiles are twice this.
     /// Default 16.
     pub px: u32,
+    /// Fixed footprint for every house instead of a generated one: rects
+    /// relative to the plot's minimum corner, core first (see [`parse_rects`]).
+    /// Size class and roof style still cycle, so `--count 3` on a medieval
+    /// culture shows the same footprint under all three gable pitches.
+    pub rects: Option<Vec<Rect2D>>,
+}
+
+/// Parse a `--rects` spec: `x,z,w,h;x,z,w,h;...`, one rect per `;`, core first.
+pub fn parse_rects(spec: &str) -> anyhow::Result<Vec<Rect2D>> {
+    let mut rects = Vec::new();
+    for part in spec.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let nums: Vec<i32> = part
+            .split(',')
+            .map(|n| n.trim().parse::<i32>().map_err(|e| anyhow::anyhow!("bad number {n:?} in rect {part:?}: {e}")))
+            .collect::<Result<_, _>>()?;
+        let [x, z, w, h] = nums[..] else {
+            anyhow::bail!("rect {part:?} must be x,z,w,h");
+        };
+        if w < 1 || h < 1 {
+            anyhow::bail!("rect {part:?} must have a positive size");
+        }
+        rects.push(Rect2D::new(Point2D::new(x, z), Point2D::new(w, h)));
+    }
+    if rects.is_empty() {
+        anyhow::bail!("--rects needs at least one rect: x,z,w,h[;x,z,w,h...]");
+    }
+    Ok(rects)
 }
 
 /// Lowercase, filename-safe label: `Gable(Slab)` -> `gable_slab`.
@@ -215,6 +243,9 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     if opts.variants {
         dir_name.push_str("-variants");
     }
+    if opts.rects.is_some() {
+        dir_name.push_str("-rects");
+    }
     let out_dir = PathBuf::from("output/houses").join(dir_name);
     std::fs::create_dir_all(&out_dir)?;
 
@@ -246,10 +277,30 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
                 Point2D::new((col + 1) * cell - 1 - CELL_MARGIN, (row + 1) * cell - 1 - CELL_MARGIN),
             );
             let mut house_rng = RNG::new(house_seeds[i]);
-            let plot = Plot::fully_usable(plot_bounds);
-            let Some(footprint) = generate_footprint_biased(&mut house_rng, &plot, &size_class, opts.culture.square_bias()) else {
-                println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: no footprint fits the plot, skipped");
-                continue;
+            let footprint = match &opts.rects {
+                Some(rects) => {
+                    // Fixed footprint, shifted from plot-relative to build-area-local.
+                    let shift = plot_bounds.min();
+                    let rects: Vec<Rect2D> = rects.iter().map(|r| Rect2D::new(r.min() + shift, r.size)).collect();
+                    if let Some(r) = rects.iter().find(|r| !plot_bounds.contains_rect(r)) {
+                        anyhow::bail!(
+                            "--rects: rect at {},{} size {}x{} does not fit the {}x{} plot",
+                            r.min().x - shift.x, r.min().y - shift.y, r.size.x, r.size.y,
+                            plot_bounds.size.x, plot_bounds.size.y,
+                        );
+                    }
+                    Footprint::new(outline_from_rects(&rects), rects)
+                }
+                None => {
+                    let plot = Plot::fully_usable(plot_bounds);
+                    match generate_footprint_biased(&mut house_rng, &plot, &size_class, opts.culture.square_bias()) {
+                        Some(f) => f,
+                        None => {
+                            println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: no footprint fits the plot, skipped");
+                            continue;
+                        }
+                    }
+                }
             };
             let mut bctx = BuildingContext::new(opts.culture, size_class, roof_style);
             bctx.jetty = opts.jetty;

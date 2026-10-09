@@ -146,7 +146,7 @@ fn render_topdown(hm: &RoofHeightmap) -> String {
 fn gable_heightmap_values_pitch_1() {
     // 8-wide rect (x:0-7), 12-long (z:0-11), ridge along Z
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
 
     // Heights along X at any Z inside rect (all Z give same profile)
     // x: -1  0  1  2  3  4  5  6  7  8
@@ -170,7 +170,7 @@ fn gable_heightmap_values_pitch_1() {
 #[test]
 fn gable_heightmap_values_pitch_half() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z);
 
     // x: -1   0    1    2    3    4    5    6    7    8
     // h: -0.5 0.0  0.5  1.0  1.5  1.5  1.0  0.5  0.0 -0.5
@@ -188,7 +188,7 @@ fn gable_heightmap_values_pitch_half() {
 #[test]
 fn gable_heightmap_values_pitch_double() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z);
 
     // x: -1  0  1  2  3  4  5  6  7  8
     // h: -2  0  2  4  6  6  4  2  0 -2
@@ -207,7 +207,7 @@ fn gable_ridge_along_x() {
     // 6-wide (x:0-5), 10-long (z:0-9). Width > length so ridge along Z.
     // But if we force ridge along X, slopes fall in Z.
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(9, 5));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X);
 
     // Heights along Z at x=5 (any x inside gives same profile since ridge along X)
     // z: -1  0  1  2  3  4  5  6
@@ -231,8 +231,8 @@ fn merge_l_shape_heightmaps() {
     // Wing: 6x4 at (10,0)-(15,3), ridge along X (longer)
     let wing = Rect2D::from_points(Point2D::new(10, 0), Point2D::new(15, 3));
 
-    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X, (false, false));
-    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X, (false, false));
+    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X);
+    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X);
 
     // Merge into combined heightmap
     let combined_min_x = hm_core.min_x().min(hm_wing.min_x());
@@ -269,7 +269,7 @@ fn merge_l_shape_heightmaps() {
 fn odd_width_single_peak() {
     // 7-wide rect: should have a single peak at center
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 9));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
 
     // x: -1  0  1  2  3  4  5  6  7
     // h: -1  0  1  2  3  2  1  0 -1
@@ -404,4 +404,95 @@ async fn compare_three_pitches() {
 
     editor.flush_buffer().await;
     println!("Done — 3 buildings with different pitches");
+}
+
+// --- Gable-end overhang clearing (gable_roof::clear_covered_gable_overhang) ---
+
+/// Per-rect heightmap for rect `i` with its gable-end overhang cleared where
+/// another same-height rect lies beyond the end.
+fn cleared_heightmap(i: usize, roof_rects: &[Rect2D], rects: &[Rect2D], axes: &[RidgeAxis]) -> RoofHeightmap {
+    let roof_ys = vec![10; rects.len()];
+    let mut hm = gable_heightmap(&roof_rects[i], GablePitch::Stairs, axes[i]);
+    super::gable_roof::clear_covered_gable_overhang(&mut hm, i, &roof_rects[i], axes[i], rects, &roof_ys);
+    hm
+}
+
+#[test]
+fn end_to_end_gables_keep_the_narrower_roof_profile_at_the_junction() {
+    // Core 11x7 (z 0..6, ridge X) with a 7x5 wing (z 1..5) on its east end, both
+    // ridges along X: the two gables face each other.
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 6));
+    let wing = Rect2D::from_points(Point2D::new(11, 1), Point2D::new(17, 5));
+    let rects = [core, wing];
+    let axes = [RidgeAxis::X, RidgeAxis::X];
+
+    let hm_core = cleared_heightmap(0, &rects, &rects, &axes);
+    // The core's east overhang is cleared over the wing's columns only ...
+    for z in 1..=5 {
+        assert_eq!(hm_core.get(11, z), f32::NEG_INFINITY, "core overhang over the wing at z={z}");
+    }
+    // ... and kept beside it (eave corners and the uncovered columns), and at
+    // the free west end.
+    assert_eq!(hm_core.get(11, 0), 0.0);
+    assert_eq!(hm_core.get(11, 6), 0.0);
+    assert_eq!(hm_core.get(11, -1), -1.0);
+    assert_eq!(hm_core.get(-1, 3), 3.0);
+
+    let hm_wing = cleared_heightmap(1, &rects, &rects, &axes);
+    // The wing's west overhang lies entirely inside the core and goes; its
+    // east overhang stays.
+    for z in 0..=6 {
+        assert_eq!(hm_wing.get(10, z), f32::NEG_INFINITY, "wing overhang inside the core at z={z}");
+    }
+    assert_eq!(hm_wing.get(18, 3), 2.0);
+
+    // Merged, the junction column takes the wing's (lower) profile, so the
+    // wing's roof butts into the core's gable wall instead of the core's
+    // overhang floating over it.
+    let mut merged = RoofHeightmap::new(-1, -1, 21, 9);
+    merged.merge_max(&hm_core);
+    merged.merge_max(&hm_wing);
+    assert_eq!(merged.get(10, 3), 3.0);
+    assert_eq!(merged.get(11, 3), 2.0);
+    assert_eq!(merged.get(11, 1), 0.0);
+}
+
+#[test]
+fn t_junction_wing_roof_still_stops_at_the_core_ridge() {
+    // Core 15x7 (ridge X, centre z=3); wing 5 wide south of it (ridge Z),
+    // extended north to the ridge line for the roof.
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(14, 6));
+    let wing = Rect2D::from_points(Point2D::new(4, 7), Point2D::new(8, 11));
+    let wing_roof = Rect2D::from_points(Point2D::new(4, 3), Point2D::new(8, 11));
+    let rects = [core, wing];
+    let roof_rects = [core, wing_roof];
+    let axes = [RidgeAxis::X, RidgeAxis::Z];
+
+    let hm = cleared_heightmap(1, &roof_rects, &rects, &axes);
+    // The whole row past the extended end (corners included) is inside the core.
+    for x in 3..=9 {
+        assert_eq!(hm.get(x, 2), f32::NEG_INFINITY, "extended end overhang at x={x}");
+    }
+    // The ridge line itself, the eave overhang and the outward end keep their heights.
+    assert_eq!(hm.get(6, 3), 2.0);
+    assert_eq!(hm.get(3, 8), -1.0);
+    assert_eq!(hm.get(6, 12), 2.0);
+}
+
+#[test]
+fn l_junction_wing_ridge_no_longer_pokes_past_the_core_ridge() {
+    // Same as the T-junction but the wing is flush with the core's west edge.
+    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(14, 6));
+    let wing = Rect2D::from_points(Point2D::new(0, 7), Point2D::new(4, 11));
+    let wing_roof = Rect2D::from_points(Point2D::new(0, 3), Point2D::new(4, 11));
+    let rects = [core, wing];
+    let roof_rects = [core, wing_roof];
+    let axes = [RidgeAxis::X, RidgeAxis::Z];
+
+    let hm = cleared_heightmap(1, &roof_rects, &rects, &axes);
+    for x in 0..=5 {
+        assert_eq!(hm.get(x, 2), f32::NEG_INFINITY, "extended end overhang at x={x}");
+    }
+    // The corner cell outside the core is the only one of that row left.
+    assert_eq!(hm.get(-1, 2), -1.0);
 }

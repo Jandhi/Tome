@@ -252,7 +252,7 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--knee-wall] [--tall-top]
+/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--rects "x,z,w,h;..."] [--jetty] [--knee-wall] [--tall-top]
 /// [--variants] [--live] [--px n]`: build individual houses and render each one,
 /// under `output/houses/[live-]<culture>-<seed>[...]/`. Offline on a blank flat
 /// world by default; `--live` builds into the server's build area. `--variants`
@@ -261,7 +261,7 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
-    use crate::generator::buildings_v2::{footprint::SizeClass, showcase::{run_showcase, ShowcaseOptions, SizeSpec}, Culture};
+    use crate::generator::buildings_v2::{footprint::SizeClass, showcase::{parse_rects, run_showcase, ShowcaseOptions, SizeSpec}, Culture};
     let culture = match arg_after("--culture", 1).unwrap_or("medieval") {
         "medieval" => Culture::Medieval,
         "desert" => Culture::Desert,
@@ -287,6 +287,7 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         variants: args.iter().any(|a| a == "--variants"),
         live: args.iter().any(|a| a == "--live"),
         px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
+        rects: arg_after("--rects", 1).map(parse_rects).transpose()?,
     };
     run_showcase(&opts).await?;
     Ok(())
