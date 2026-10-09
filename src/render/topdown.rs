@@ -10,11 +10,17 @@
 //! or another shape covering the whole cell at varying heights, each pixel is
 //! darkened by how far below the cell top its surface sits, so slab roofs read
 //! darker than full blocks and stairs show their step.
+//!
+//! When the top block has a textured model, each pixel instead looks down its
+//! own ray: the highest upward face of the model under it supplies the texel
+//! (box-filtered to the pixel), cut-out texels and uncovered footprint fall
+//! through to the blocks below, and the height shading uses the face hit.
 
 use resvg::tiny_skia::Pixmap;
 
-use super::grid::{canvas, fill_square, shade, RayAcc, VoxelGrid, BACKGROUND};
+use super::grid::{canvas, fill_square, shade, RayAcc, Rgba, VoxelGrid, BACKGROUND};
 use super::shape::top_at;
+use super::texel;
 
 /// Brightness at the bottom of a cell relative to its top.
 const LOW_SURFACE: f32 = 0.8;
@@ -57,6 +63,11 @@ pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
         .fold((i32::MAX, i32::MIN), |(lo, hi), &h| (lo.min(h), hi.max(h)));
     let span = (h_max - h_min).max(1) as f32;
 
+    // Upward-face rasters of every textured material at this pixel size.
+    let models = texel::flat_models(g);
+    let stamps: Vec<Option<Vec<(f32, Vec<Rgba>)>>> =
+        models.iter().map(|fm| fm.as_ref().map(|fm| texel::top_stamps(fm.geo, px))).collect();
+
     // Pass 2: shade and paint.
     let mut sub = vec![0u8; px * px];
     for x in 0..nx {
@@ -68,9 +79,17 @@ pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
             let relief = (h - north).clamp(-4, 4) + (h - west).clamp(-4, 4);
             let gradient = 0.9 + 0.2 * (h - h_min) as f32 / span;
             let f = (1.0 + 0.07 * relief as f32) * gradient;
-            let c = shade(colors[i], f);
             let (x0, y0) = ((x + 1) * px, (z + 1) * px);
 
+            if stamps[tops[i] as usize].is_some() {
+                for k in 0..px * px {
+                    let (c, top) = texel_column(g, &stamps, x as i32, z as i32, h, k, px);
+                    let t = LOW_SURFACE + (1.0 - LOW_SURFACE) * top / 16.0;
+                    fill_square(&mut pm, x0 + k % px, y0 + k / px, 1, shade(shade(c, f), t));
+                }
+                continue;
+            }
+            let c = shade(colors[i], f);
             if surface_heights(g, tops[i], px, &mut sub) {
                 for (k, &top) in sub.iter().enumerate() {
                     let t = LOW_SURFACE + (1.0 - LOW_SURFACE) * top as f32 / 16.0;
@@ -82,6 +101,52 @@ pub fn render_topdown(g: &VoxelGrid, px: u32) -> anyhow::Result<Pixmap> {
         }
     }
     Ok(pm)
+}
+
+/// Colour seen looking down sub-pixel `k` of column `(x, z)` from its surface
+/// block at `h`: textured blocks contribute the texel of their highest
+/// upward face under the pixel (cut-outs fall through), others their flat
+/// colour. Also the height in sixteenths, within the surface cell, of the
+/// first face hit (0 when it lies in a block below).
+fn texel_column(
+    g: &VoxelGrid,
+    stamps: &[Option<Vec<(f32, Vec<Rgba>)>>],
+    x: i32,
+    z: i32,
+    h: i32,
+    k: usize,
+    px: usize,
+) -> (Rgba, f32) {
+    let mut acc = RayAcc::default();
+    let mut top: Option<f32> = None;
+    'column: for y in (0..=h).rev() {
+        let m = g.get(x, y, z);
+        if m == 0 {
+            continue;
+        }
+        let base = (y - h) as f32 * 16.0;
+        if let Some(st) = &stamps[m as usize] {
+            for (face_h, raster) in st {
+                let c = raster[k];
+                if c[3] == 0 {
+                    continue;
+                }
+                top.get_or_insert((base + face_h).clamp(0.0, 16.0));
+                if acc.push(c) {
+                    break 'column;
+                }
+            }
+        } else {
+            let fx = 16.0 * ((k % px) as f32 + 0.5) / px as f32;
+            let fz = 16.0 * ((k / px) as f32 + 0.5) / px as f32;
+            let face_h = top_at(g.boxes(m), fx, fz).unwrap_or(16) as f32;
+            top.get_or_insert((base + face_h).clamp(0.0, 16.0));
+            if acc.push(g.color(m)) {
+                break 'column;
+            }
+        }
+    }
+    (acc.finish(BACKGROUND), top.unwrap_or(16.0))
 }
 
 /// Fill `out` (`px * px`, row-major north to south) with the surface height in

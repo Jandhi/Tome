@@ -2,11 +2,17 @@
 //! looks across it; each pixel column shows the nearest block along the view
 //! axis (composited through glass/water), darkened with distance so nearby
 //! facades pop and far terrain recedes.
+//!
+//! A block with a textured model shows the texels of its faces turned toward
+//! the viewer (nearest face first, box-filtered per pixel); cut-out texels and
+//! uncovered parts of the cell let the ray carry on to the blocks behind.
 
 use resvg::tiny_skia::Pixmap;
 
-use super::grid::{canvas, fill_square, shade, RayAcc, VoxelGrid, BACKGROUND};
+use super::assets::Face6;
+use super::grid::{canvas, fill_square, shade, RayAcc, Rgba, VoxelGrid, BACKGROUND};
 use super::shape::covers;
+use super::texel;
 
 /// The side the viewer stands on. `South` looks north (east on the right).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,21 +62,33 @@ impl ElevationSide {
         };
         (cols, depth, map)
     }
+
+    /// The block face turned toward the viewer.
+    fn facing(self) -> Face6 {
+        match self {
+            ElevationSide::South => Face6::South,
+            ElevationSide::North => Face6::North,
+            ElevationSide::East => Face6::East,
+            ElevationSide::West => Face6::West,
+        }
+    }
 }
 
 /// Render one elevation at `px` pixels per block with a 1-block margin.
 /// Image size: `(columns + 2) * px` × `(ny + 2) * px`.
 ///
-/// Rays through full cubes only are resolved once per block; when a ray meets
-/// a partial shape (slab, fence, pane, …) the block's square is resolved per
-/// pixel against the shape's boxes, so a half slab shows half a block and
+/// Rays through flat-coloured full cubes only are resolved once per block;
+/// when a ray meets a partial shape (slab, fence, pane, …) or a textured
+/// block, the block's square is resolved per pixel against the shapes' boxes
+/// and the models' face rasters, so a half slab shows half a block and
 /// whatever lies behind it fills the rest.
 pub fn render_elevation(g: &VoxelGrid, side: ElevationSide, px: u32) -> anyhow::Result<Pixmap> {
     let px = px.max(1) as usize;
     let (cols, depth, map) = side.frame(g);
     let mut pm = canvas((cols as usize + 2) * px, (g.ny as usize + 2) * px)?;
     let fog_span = (depth - 1).max(1) as f32;
-    let fogged = |m: u16, d: i32| shade(g.color(m), 1.0 - 0.5 * d as f32 / fog_span);
+    let fog = |d: i32| 1.0 - 0.5 * d as f32 / fog_span;
+    let fogged = |m: u16, d: i32| shade(g.color(m), fog(d));
     // Image-left-to-right position inside a cell -> cell-local X or Z.
     let (lat_is_x, flip) = match side {
         ElevationSide::South => (true, false),
@@ -79,31 +97,46 @@ pub fn render_elevation(g: &VoxelGrid, side: ElevationSide, px: u32) -> anyhow::
         ElevationSide::West => (false, false),
     };
 
+    // Facing-face rasters of every textured material at this pixel size, and
+    // which materials stop every ray (opaque full cubes).
+    let models = texel::flat_models(g);
+    let stamps: Vec<Option<Vec<Vec<Rgba>>>> =
+        models.iter().map(|fm| fm.as_ref().map(|fm| texel::side_stamps(fm.geo, side.facing(), px, flip))).collect();
+    let stops_rays = |m: u16| match &models[m as usize] {
+        Some(fm) => fm.solid,
+        None => g.is_full(m) && g.is_opaque(m),
+    };
+
+    let mut cells: Vec<(i32, u16)> = Vec::new();
     for c in 0..cols {
         for y in 0..g.ny {
             let row = (g.ny - 1 - y) as usize + 1;
-            let mut acc = RayAcc::default();
-            let mut hit = false;
-            let mut partial = false;
+            // The blocks along the ray up to the first that stops it.
+            cells.clear();
+            let mut per_pixel = false;
             for d in 0..depth {
                 let (x, z) = map(c, d);
                 let m = g.get(x, y, z);
                 if m == 0 {
                     continue;
                 }
-                if !g.is_full(m) {
-                    partial = true;
-                    break;
-                }
-                hit = true;
-                if acc.push(fogged(m, d)) {
+                cells.push((d, m));
+                per_pixel |= stamps[m as usize].is_some() || !g.is_full(m);
+                if stops_rays(m) {
                     break;
                 }
             }
-            if !partial {
-                if hit {
-                    fill_square(&mut pm, (c as usize + 1) * px, row * px, px, acc.finish(BACKGROUND));
+            if cells.is_empty() {
+                continue;
+            }
+            if !per_pixel {
+                let mut acc = RayAcc::default();
+                for &(d, m) in &cells {
+                    if acc.push(fogged(m, d)) {
+                        break;
+                    }
                 }
+                fill_square(&mut pm, (c as usize + 1) * px, row * px, px, acc.finish(BACKGROUND));
                 continue;
             }
 
@@ -112,17 +145,26 @@ pub fn render_elevation(g: &VoxelGrid, side: ElevationSide, px: u32) -> anyhow::
                 for i in 0..px {
                     let f = (i as f32 + 0.5) / px as f32;
                     let lat = 16.0 * if flip { 1.0 - f } else { f };
+                    let k = j * px + i;
                     let mut acc = RayAcc::default();
                     let mut hit = false;
-                    for d in 0..depth {
-                        let (x, z) = map(c, d);
-                        let m = g.get(x, y, z);
-                        if m == 0 || !covers(g.boxes(m), lat_is_x, lat, fy) {
-                            continue;
-                        }
-                        hit = true;
-                        if acc.push(fogged(m, d)) {
-                            break;
+                    'ray: for &(d, m) in &cells {
+                        if let Some(st) = &stamps[m as usize] {
+                            for raster in st {
+                                let t = raster[k];
+                                if t[3] == 0 {
+                                    continue;
+                                }
+                                hit = true;
+                                if acc.push(shade(t, fog(d))) {
+                                    break 'ray;
+                                }
+                            }
+                        } else if covers(g.boxes(m), lat_is_x, lat, fy) {
+                            hit = true;
+                            if acc.push(fogged(m, d)) {
+                                break;
+                            }
                         }
                     }
                     if hit {
