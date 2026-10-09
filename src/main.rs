@@ -252,9 +252,11 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--knee-wall] [--tall-top] [--px n]`:
-/// build individual houses on a blank flat world (no server) and render each
-/// one, under `output/houses/<culture>-<seed>/`.
+/// `--houses [--culture c] [--seed n] [--count n] [--size s] [--jetty] [--knee-wall] [--tall-top]
+/// [--variants] [--live] [--px n]`: build individual houses and render each one,
+/// under `output/houses/[live-]<culture>-<seed>[...]/`. Offline on a blank flat
+/// world by default; `--live` builds into the server's build area. `--variants`
+/// builds one row per upper-storey variant (base, knee, tall, both).
 async fn run_houses(args: &[String]) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
@@ -282,6 +284,8 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         jetty: args.iter().any(|a| a == "--jetty"),
         knee_wall: args.iter().any(|a| a == "--knee-wall"),
         tall_top: args.iter().any(|a| a == "--tall-top"),
+        variants: args.iter().any(|a| a == "--variants"),
+        live: args.iter().any(|a| a == "--live"),
         px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
     };
     run_showcase(&opts).await?;
