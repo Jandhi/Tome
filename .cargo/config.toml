@@ -1,4 +1,6 @@
 [alias]
-# Offline town loop: release is ~20x faster than debug (4.5 s vs 97 s for a 256x256 town).
-offline = "run --release -- --offline"
-render = "run --release -- --render"
+# Offline town loop. The `fast` profile (Cargo.toml) is release-optimised but incremental:
+# a one-file change rebuilds in ~5 s instead of ~50 s, and towns run at release speed
+# (~20x faster than debug: 4.5 s vs 97 s for a 256x256 town).
+offline = "run --profile fast -- --offline"
+render = "run --profile fast -- --render"

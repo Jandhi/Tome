@@ -12,8 +12,8 @@ cargo test build_furnished_houses_offline       # Dry-run pipeline — no server
 cargo test pipeline_invariants_property_test    # 240 buildings × invariant checks
 cargo run                                       # Live server: generate, then save fixture + scene and render to output/runs/<seed>/
 cargo run -- --full                             # Same, plus the AI-written chronicle book (OpenAI call; off by default)
-cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --release -- --offline`; ~5 s release vs ~95 s debug)
-cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --release -- --render`)
+cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --profile fast -- --offline`: release speed, ~5 s incremental rebuilds)
+cargo render <scene> [out_dir]                  # Re-render a saved town.scene, no server (alias for `cargo run --profile fast -- --render`)
 cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
 cargo run -- --compare <a.scene> <b.scene> [out_dir]  # Block diff of two scenes: table + diff.json + diff_top.png (red only-A, green only-B, yellow changed) into out_dir (default: A's dir)
 ```
