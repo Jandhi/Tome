@@ -512,7 +512,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             light_cells += map.len();
             map
         });
-        let room_opts = PerspectiveOptions { lighting: light_map.as_ref().zip(opts.lighting) };
+        let room_opts = PerspectiveOptions { lighting: light_map.as_ref().zip(opts.lighting), fog: true };
         // A player can stand in build-area-local `cell` on walkable level
         // `floor_y` (absolute) when nothing fills the feet cell and the head
         // cell is clear; `roomy` also wants the cell above the head clear, so
@@ -640,8 +640,23 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
             let Some(gc) = VoxelGrid::from_scene(&scene, Some(cut)) else { continue };
             // Unlit: a light map of the clipped grid would see sky through the missing roof.
-            // The iso keeps wall heights and furniture shapes; the top-down keeps the plan exact.
-            let iso = render_iso_with(&gc, IsoCamera::SouthEast, 2 * px, None)?;
+            // A near-top-down perspective: high above, tilted a little toward
+            // the north, narrow field of view (close to orthographic) and no
+            // fog, so walls and furniture keep some depth while the plan stays
+            // readable. The top-down keeps the plan exact.
+            let iso = {
+                let (lo, hi) = (gc.origin, Point3D::new(gc.origin.x + gc.nx, gc.origin.y + gc.ny, gc.origin.z + gc.nz));
+                let centre = [(lo.x + hi.x) as f32 / 2.0, (lo.y + hi.y) as f32 / 2.0, (lo.z + hi.z) as f32 / 2.0];
+                let extent = (gc.nx.max(gc.nz) as f32 + 4.0) * 1.15;
+                let fov: f32 = 25.0;
+                let dist = extent / 2.0 / (fov.to_radians() / 2.0).tan();
+                let tilt: f32 = 22.0f32.to_radians();
+                let eye = [centre[0], centre[1] + dist * tilt.cos(), centre[2] + dist * tilt.sin()];
+                let cam = PerspectiveCamera { eye, target: centre, fov_deg: fov };
+                let w = (extent * px as f32) as u32;
+                let opts = PerspectiveOptions { lighting: None, fog: false };
+                render_perspective_with(&gc, &cam, w, w * 3 / 4, &opts)?
+            };
             let top = render_topdown_with(&gc, px, None)?;
             for (suffix, pm) in [("", &iso), ("_top", &top)] {
                 let name = format!("{prefix}_cutaway_{level}{suffix}.png");

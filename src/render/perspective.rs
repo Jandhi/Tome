@@ -46,6 +46,16 @@ pub struct PerspectiveOptions<'a> {
     /// [`LightMap::new`]) under the given [`Lighting`]; the sky background
     /// dims with its daylight. `None` leaves the image unlit.
     pub lighting: Option<(&'a LightMap, Lighting)>,
+    /// Darken with distance (`FOG_AMOUNT` over `FOG_RANGE` blocks). Off for
+    /// far, narrow-angle cameras that stand in for an orthographic view.
+    pub fog: bool,
+}
+
+impl<'a> PerspectiveOptions<'a> {
+    /// Unlit, with fog: what [`render_perspective`] uses.
+    pub fn plain() -> Self {
+        PerspectiveOptions { lighting: None, fog: true }
+    }
 }
 
 fn sub(a: V3, b: V3) -> V3 {
@@ -105,7 +115,7 @@ pub fn render_perspective_with(
         for px in 0..w {
             let sx = (2.0 * (px as f32 + 0.5) / w as f32 - 1.0) * half;
             let dir = normalize(add(forward, add(scale(right, sx), scale(up, sy))));
-            let c = cast(g, eye, dir, lit.as_ref());
+            let c = cast(g, eye, dir, lit.as_ref(), opts.fog);
             data[(py * w + px) * 4..][..4].copy_from_slice(&c);
         }
     }
@@ -266,7 +276,7 @@ fn tint(c: Rgba, f: [f32; 3]) -> Rgba {
 }
 
 /// Colour seen along the ray from `o` (grid-local) in direction `d`.
-fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>) -> Rgba {
+fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>, fog: bool) -> Rgba {
     let bg = match lit {
         Some(l) => tint(BACKGROUND, l.sky_rgb()),
         None => BACKGROUND,
@@ -301,7 +311,7 @@ fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>) -> Rgba {
 
     let mut acc = RayAcc::default();
     let mut hits = Vec::new();
-    let fog_at = |t: f32| 1.0 - FOG_AMOUNT * (t / FOG_RANGE).min(1.0);
+    let fog_at = |t: f32| if fog { 1.0 - FOG_AMOUNT * (t / FOG_RANGE).min(1.0) } else { 1.0 };
     // Shade and fog a hit as ever, then (when lit) colour it by the face's
     // light; lighting off leaves the exact unlit arithmetic.
     let colour = |hit: &Hit, cell: [i32; 3]| {

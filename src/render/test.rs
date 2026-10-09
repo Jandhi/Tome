@@ -945,7 +945,7 @@ mod lighting_tests {
         let g = grid(&s);
         let map = LightMap::new(&g);
         let cam = PerspectiveCamera { eye: [1.5, 2.62, 1.5], target: [7.5, 2.0, 7.5], fov_deg: 90.0 };
-        let opts = PerspectiveOptions { lighting: lighting.map(|l| (&map, l)) };
+        let opts = PerspectiveOptions { lighting: lighting.map(|l| (&map, l)), fog: true };
         render_perspective_with(&g, &cam, 96, 64, &opts).unwrap()
     }
 
