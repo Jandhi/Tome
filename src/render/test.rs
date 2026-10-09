@@ -6,7 +6,7 @@ mod tests {
     use crate::geometry::{Point3D, Rect3D};
     use crate::render::colors::block_color;
     use crate::render::elevation::{render_elevation, ElevationSide};
-    use crate::render::grid::VoxelGrid;
+    use crate::render::grid::{VoxelGrid, BACKGROUND};
     use crate::render::iso::{render_iso, IsoCamera};
     use crate::render::topdown::render_topdown;
     use crate::render::{render_all, render_views, RenderOptions, Scene};
@@ -309,5 +309,67 @@ mod tests {
         let out = std::env::temp_dir().join("tome_render_timing");
         render_all(&s, &out).unwrap();
         println!("render_all incl. PNG encode: {:?}", t.elapsed());
+    }
+
+    /// A 9x9 stone floor at y=0 with a 3-high spruce wall along z=8.
+    fn room_scene() -> Scene {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(9, 6, 9) });
+        for x in 0..9 {
+            for z in 0..9 {
+                s.insert(Point3D::new(x, 0, z), "minecraft:stone");
+            }
+            for y in 1..=3 {
+                s.insert(Point3D::new(x, y, 8), "minecraft:spruce_planks");
+            }
+        }
+        s
+    }
+
+    fn rgb(pm: &resvg::tiny_skia::Pixmap, x: u32, y: u32) -> [u8; 3] {
+        let p = pm.pixel(x, y).unwrap();
+        [p.red(), p.green(), p.blue()]
+    }
+
+    #[test]
+    fn perspective_sees_wall_floor_and_sky() {
+        use crate::render::perspective::{render_perspective, PerspectiveCamera};
+        let s = room_scene();
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        // Standing in cell (4, 1, 1), eyes at 2.62, looking level at the wall.
+        let cam = PerspectiveCamera { eye: [4.5, 2.62, 1.5], target: [4.5, 2.62, 8.0], fov_deg: 90.0 };
+        let pm = render_perspective(&g, &cam, 64, 64).unwrap();
+
+        // Centre: the wall's north face, darker than the raw colour and fogged.
+        let wall = block_color("minecraft:spruce_planks");
+        let c = rgb(&pm, 32, 32);
+        assert!(c[0] < wall[0] && c[1] < wall[1] && c[2] < wall[2], "wall pixel {c:?} vs {wall:?}");
+        assert!(c[0] > wall[0] / 2, "wall pixel {c:?} is too dark for a side face");
+        // Top row: over the wall, sky.
+        assert_eq!(rgb(&pm, 32, 0), [BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]]);
+        // Bottom row: the stone floor's top face, nearer and brighter than the wall.
+        let stone = block_color("minecraft:stone");
+        let f = rgb(&pm, 32, 63);
+        assert!(f[0] > c[0], "floor {f:?} should be brighter than the far wall {c:?}");
+        assert!(f[0] <= stone[0] && f[0] > stone[0] * 3 / 4, "floor pixel {f:?} vs {stone:?}");
+    }
+
+    #[test]
+    fn perspective_from_inside_a_block_is_uniform() {
+        use crate::render::perspective::{render_perspective, PerspectiveCamera};
+        let s = room_scene();
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        let cam = PerspectiveCamera { eye: [4.5, 0.5, 8.5], target: [4.5, 0.5, 0.0], fov_deg: 90.0 };
+        let pm = render_perspective(&g, &cam, 16, 16).unwrap();
+        let first = rgb(&pm, 0, 0);
+        assert!((0..16).all(|x| (0..16).all(|y| rgb(&pm, x, y) == first)));
+        assert_ne!(first, [BACKGROUND[0], BACKGROUND[1], BACKGROUND[2]]);
+    }
+
+    #[test]
+    fn contact_sheet_tiles_in_rows() {
+        use crate::render::perspective::contact_sheet;
+        let tiles: Vec<_> = (0..5).map(|_| resvg::tiny_skia::Pixmap::new(10, 6).unwrap()).collect();
+        let sheet = contact_sheet(&tiles, 3, 2).unwrap();
+        assert_eq!((sheet.width(), sheet.height()), (3 * 10 + 4 * 2, 2 * 6 + 3 * 2));
     }
 }

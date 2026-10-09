@@ -1,8 +1,10 @@
 //! House showcase: builds a grid of houses and renders each one as cropped,
-//! enlarged PNGs plus its ASCII floor plan, so the building generator can be
-//! judged visually. Offline by default, on a blank flat grass world (no
-//! server); `--live` builds into the server's build area instead. `--variants`
-//! builds every house once per upper-storey variant, one row per variant.
+//! enlarged PNGs (four isometric corners, top, elevations, and a perspective
+//! from inside every room) plus its ASCII floor plan, so the building
+//! generator can be judged visually inside and out. Offline by default, on a
+//! blank flat grass world (no server); `--live` builds into the server's build
+//! area instead. `--variants` builds every house once per upper-storey
+//! variant, one row per variant; `--rects` pins the footprint.
 //! Entry point: `cargo run --profile fast -- --houses [options]`.
 
 use std::path::PathBuf;
@@ -11,6 +13,8 @@ use crate::editor::{Editor, World};
 use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footprint, Plot, SizeClass};
+use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
+use crate::generator::buildings_v2::rooms::{Room, RoomRole};
 use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput};
 use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
@@ -19,6 +23,7 @@ use crate::noise::RNG;
 use crate::render::elevation::{render_elevation, ElevationSide};
 use crate::render::grid::VoxelGrid;
 use crate::render::iso::{render_iso, IsoCamera};
+use crate::render::perspective::{contact_sheet, render_perspective, PerspectiveCamera};
 use crate::render::topdown::render_topdown;
 use crate::render::{render_views, RenderOptions};
 
@@ -32,6 +37,13 @@ const CELL_MARGIN: i32 = 6;
 const CROP_PAD: i32 = 2;
 /// Widest the whole-grid contact sheet iso may get, in pixels; its tile shrinks to fit.
 const CONTACT_MAX_W: i32 = 2400;
+/// Size of each room's perspective view.
+const ROOM_W: u32 = 480;
+const ROOM_H: u32 = 320;
+/// Horizontal field of view inside rooms: wide, since most rooms are a few blocks across.
+const ROOM_FOV: f32 = 100.0;
+/// Player eye height above the cell they stand in.
+const EYE_HEIGHT: f32 = 1.62;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SizeSpec {
@@ -141,6 +153,51 @@ fn label(debug: impl std::fmt::Debug) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
         .collect();
     s.split('_').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("_")
+}
+
+/// Camera for a player standing in build-area-local cell `stand` on the floor
+/// whose walkable level is `floor_y` (absolute), looking at the middle of
+/// `room_rect` a little below eye level so the floor and furniture show.
+fn standing_camera(stand: Point2D, floor_y: i32, room_rect: Rect2D, origin: Point3D) -> PerspectiveCamera {
+    let eye = [stand.x as f32 + 0.5 + origin.x as f32, floor_y as f32 + EYE_HEIGHT, stand.y as f32 + 0.5 + origin.z as f32];
+    let mut target = [
+        (room_rect.min().x + room_rect.max().x) as f32 / 2.0 + 0.5 + origin.x as f32,
+        floor_y as f32 + 1.0,
+        (room_rect.min().y + room_rect.max().y) as f32 / 2.0 + 0.5 + origin.z as f32,
+    ];
+    // Standing on the centre cell (a one-cell room): look east instead of at our feet.
+    if (target[0] - eye[0]).abs() < 0.75 && (target[2] - eye[2]).abs() < 0.75 {
+        target = [eye[0] + 2.0, eye[1] - 0.6, eye[2]];
+    }
+    PerspectiveCamera { eye, target, fov_deg: ROOM_FOV }
+}
+
+/// The cell among `cells` that passes `free` and lies farthest from `centre`
+/// (a corner when one is free), so as much of the room as possible is in view.
+/// Ties go to the lowest (x, z), keeping the choice deterministic.
+fn pick_stand(
+    cells: impl Iterator<Item = (i32, i32)>,
+    (cx, cz): (f32, f32),
+    free: impl Fn((i32, i32)) -> bool,
+) -> Option<(i32, i32)> {
+    let dist2 = |(x, z): (i32, i32)| (x as f32 - cx).powi(2) + (z as f32 - cz).powi(2);
+    cells.filter(|&c| free(c)).max_by(|&a, &b| dist2(a).total_cmp(&dist2(b)).then(b.cmp(&a)))
+}
+
+/// Camera inside `room`: stands on the walkable, non-stair interior cell
+/// farthest from the room's centre that `free` confirms is clear (the room
+/// plan does not know about roof slopes or tall items). `None` when no cell
+/// qualifies.
+fn room_camera(room: &Room, floor_y: i32, origin: Point3D, free: impl Fn((i32, i32)) -> bool) -> Option<PerspectiveCamera> {
+    let it = room.interior;
+    let centre = ((it.min().x + it.max().x) as f32 / 2.0, (it.min().y + it.max().y) as f32 / 2.0);
+    let cells = room
+        .constraints
+        .iter_ground()
+        .map(|(cell, _)| cell)
+        .filter(|&cell| room.constraints.is_walkable(cell) && !room.constraints.is_stair(cell));
+    let stand = pick_stand(cells, centre, free)?;
+    Some(standing_camera(Point2D::new(stand.0, stand.1), floor_y, it, origin))
 }
 
 /// Build-area-local x/z bounds of grid cell (`col`, `row`).
@@ -402,6 +459,68 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         let plan_file = format!("{prefix}_plan.txt");
         std::fs::write(out_dir.join(&plan_file), render_ascii(&blueprint))?;
 
+        // Interior views: a perspective from inside every room (and the cellar
+        // from its landing), each saved on its own and tiled into one sheet.
+        // The grid reaches down to the cellar, which the exterior crop leaves out.
+        let mut rooms_json = Vec::new();
+        let interior_lo_y = if house.has_cellar { house.frame.floor_y(CELLAR_FLOOR) + origin.y - 2 } else { region.min().y };
+        let interior_region = Rect3D::from_points(Point3D::new(region.min().x, interior_lo_y, region.min().z), region.max());
+        let Some(gi) = VoxelGrid::from_scene(&scene, Some(interior_region)) else { continue };
+        // A player can stand in build-area-local `cell` on walkable level
+        // `floor_y` (absolute) when nothing fills the feet cell and the head
+        // cell is clear; `roomy` also wants the cell above the head clear, so
+        // the camera keeps away from attic eaves and low beams when it can.
+        let clear = |cell: (i32, i32), floor_y: i32, roomy: bool| {
+            let (gx, gz) = (cell.0 + origin.x - gi.origin.x, cell.1 + origin.z - gi.origin.z);
+            let at = |dy: i32| gi.get(gx, floor_y + dy - gi.origin.y, gz);
+            !gi.is_full(at(0)) && at(1) == 0 && (!roomy || at(2) == 0)
+        };
+        let mut views: Vec<(String, serde_json::Value, PerspectiveCamera)> = Vec::new();
+        for (ri, room) in house.room_plan.rooms.iter().enumerate() {
+            let floor_y = house.frame.floor_y(room.floor) + origin.y;
+            let cam = room_camera(room, floor_y, origin, |c| clear(c, floor_y, true))
+                .or_else(|| room_camera(room, floor_y, origin, |c| clear(c, floor_y, false)));
+            let Some(cam) = cam else { continue };
+            let level = match room.role {
+                RoomRole::Attic => "attic".to_string(),
+                _ => format!("floor{}", room.floor),
+            };
+            let name = format!("{prefix}_room_{ri:02}_{level}_{}.png", label(room.room_type));
+            let info = serde_json::json!({
+                "index": ri, "level": level, "type": format!("{:?}", room.room_type), "role": format!("{:?}", room.role),
+                "render": name, "eye": cam.eye,
+            });
+            views.push((name, info, cam));
+        }
+        if house.has_cellar {
+            // The cellar is not a room-plan room: stand anywhere free under the core.
+            let floor_y = house.frame.floor_y(CELLAR_FLOOR) + origin.y;
+            let core = house.footprint.rects()[0];
+            let inner = core.shrink(1);
+            let centre = ((inner.min().x + inner.max().x) as f32 / 2.0, (inner.min().y + inner.max().y) as f32 / 2.0);
+            let stand = pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, true))
+                .or_else(|| pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, false)));
+            if let Some(stand) = stand {
+                let cam = standing_camera(Point2D::new(stand.0, stand.1), floor_y, inner, origin);
+                let name = format!("{prefix}_room_cellar.png");
+                let info = serde_json::json!({ "level": "cellar", "type": "Cellar", "role": "Cellar", "render": name, "eye": cam.eye });
+                views.push((name, info, cam));
+            }
+        }
+        if !views.is_empty() {
+            let mut tiles = Vec::new();
+            for (name, info, cam) in &views {
+                let pm = render_perspective(&gi, cam, ROOM_W, ROOM_H)?;
+                pm.save_png(out_dir.join(name))?;
+                tiles.push(pm);
+                rooms_json.push(info.clone());
+            }
+            let cols = (tiles.len() as f64).sqrt().ceil() as usize;
+            let sheet_name = format!("{prefix}_rooms.png");
+            contact_sheet(&tiles, cols, 8)?.save_png(out_dir.join(&sheet_name))?;
+            renders.push(sheet_name);
+        }
+
         let fp = house.footprint.bounds();
         let floors = house.frame.max_floors();
         let rooms = house.room_plan.rooms.len();
@@ -428,6 +547,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             "region": region,
             "plan": plan_file,
             "renders": renders,
+            "rooms": rooms_json,
         }));
     }
 
