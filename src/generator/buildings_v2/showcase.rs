@@ -29,7 +29,7 @@ use crate::render::light::{LightMap, Lighting};
 use crate::render::lit::Lit;
 use crate::render::perspective::{contact_sheet, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
 use crate::render::topdown::render_topdown_with;
-use crate::render::{render_views, RenderOptions};
+use crate::render::{render_views, RenderOptions, Scene};
 
 /// Flat ground: the grass surface sits at y = 63, the first air at 64.
 const GROUND_Y: i32 = 64;
@@ -623,22 +623,53 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         // the walls, doors and furniture of that floor show as placed. One
         // image per level (cellar, floors, attic) and a sheet of them all.
         let mut cutaways = Vec::new();
-        let mut levels: Vec<(String, i32)> = Vec::new();
+        // Per level: its name, walkable y, and the rects it occupies (`None`
+        // keeps everything, so the ground floor shows its surroundings; upper
+        // levels keep only their own rooms and walls, or the roofs of lower
+        // wings would cover the side rooms).
+        let mut levels: Vec<(String, i32, Option<Vec<Rect2D>>)> = Vec::new();
         if house.has_cellar {
-            levels.push(("cellar".to_string(), house.frame.floor_y(CELLAR_FLOOR)));
+            levels.push(("cellar".to_string(), house.frame.floor_y(CELLAR_FLOOR), Some(vec![house.footprint.rects()[0]])));
         }
         for f in house.frame.floors() {
-            levels.push((format!("floor{f}"), house.frame.floor_y(f)));
+            let rects: Vec<Rect2D> = house.frame.active_rects(f).iter().filter_map(|&i| house.frame.rect_at(i, f)).collect();
+            levels.push((format!("floor{f}"), house.frame.floor_y(f), (f > 0).then_some(rects)));
         }
         if house.has_attic {
-            levels.push(("attic".to_string(), house.frame.floor_y(house.frame.max_floors())));
+            // The roof is the attic's wall, so keep only the usable interior
+            // or the eaves hide most of it.
+            let rects: Vec<Rect2D> = house.room_plan.rooms.iter().filter(|r| r.role == RoomRole::Attic).map(|r| r.interior).collect();
+            levels.push(("attic".to_string(), house.frame.floor_y(house.frame.max_floors()), Some(rects)));
         }
-        for (level, floor_y) in &levels {
+        for (level, floor_y, mask) in &levels {
             // From the floor slab up to the top air row of the storey: the
             // ceiling slab (and everything above) is cut off.
-            let (lo_y, hi_y) = (floor_y - 1 + origin.y, floor_y + house.frame.wall_height() as i32 - 1 + origin.y);
+            let rows = if level == "attic" { 2 } else { house.frame.wall_height() as i32 };
+            let (lo_y, hi_y) = (floor_y - 1 + origin.y, floor_y + rows - 1 + origin.y);
             let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
-            let Some(gc) = VoxelGrid::from_scene(&scene, Some(cut)) else { continue };
+            let masked;
+            let source = match mask {
+                None => &scene,
+                Some(rects) => {
+                    let margin = if level == "attic" { 0 } else { 1 };
+                    let inside = |p: &Point3D| {
+                        let local = Point2D::new(p.x - origin.x, p.z - origin.z);
+                        rects.iter().any(|r| {
+                            let (lo, hi) = (r.min(), r.max());
+                            local.x >= lo.x - margin && local.x <= hi.x + margin && local.y >= lo.y - margin && local.y <= hi.y + margin
+                        })
+                    };
+                    let mut sub = Scene::new(scene.bounds);
+                    for (p, &i) in &scene.blocks {
+                        if cut.contains(*p) && inside(p) {
+                            sub.insert(*p, &scene.palette[i as usize]);
+                        }
+                    }
+                    masked = sub;
+                    &masked
+                }
+            };
+            let Some(gc) = VoxelGrid::from_scene(source, Some(cut)) else { continue };
             // Unlit: a light map of the clipped grid would see sky through the missing roof.
             // A near-top-down perspective: high above, tilted a little toward
             // the north, narrow field of view (close to orthographic) and no
