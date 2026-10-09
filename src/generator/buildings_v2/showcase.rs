@@ -165,39 +165,51 @@ fn label(debug: impl std::fmt::Debug) -> String {
 }
 
 /// Camera for a player standing in build-area-local cell `stand` on the floor
-/// whose walkable level is `floor_y` (absolute), looking at the middle of
-/// `room_rect` a little below eye level so the floor and furniture show.
-fn standing_camera(stand: Point2D, floor_y: i32, room_rect: Rect2D, origin: Point3D) -> PerspectiveCamera {
+/// whose walkable level is `floor_y` (absolute), eyes 1.62 up, looking at
+/// build-area-local `(x, z)` a little below eye level so the floor and
+/// furniture show.
+fn standing_camera(stand: Point2D, floor_y: i32, look: (f32, f32), origin: Point3D) -> PerspectiveCamera {
     let eye = [stand.x as f32 + 0.5 + origin.x as f32, floor_y as f32 + EYE_HEIGHT, stand.y as f32 + 0.5 + origin.z as f32];
-    let mut target = [
-        (room_rect.min().x + room_rect.max().x) as f32 / 2.0 + 0.5 + origin.x as f32,
-        floor_y as f32 + 1.0,
-        (room_rect.min().y + room_rect.max().y) as f32 / 2.0 + 0.5 + origin.z as f32,
-    ];
-    // Standing on the centre cell (a one-cell room): look east instead of at our feet.
+    let mut target = [look.0 + origin.x as f32, floor_y as f32 + 1.0, look.1 + origin.z as f32];
+    // Looking at our own feet (a one-cell room): look east instead.
     if (target[0] - eye[0]).abs() < 0.75 && (target[2] - eye[2]).abs() < 0.75 {
         target = [eye[0] + 2.0, eye[1] - 0.6, eye[2]];
     }
     PerspectiveCamera { eye, target, fov_deg: ROOM_FOV }
 }
 
-/// The cell among `cells` that passes `free` and lies farthest from `centre`
-/// (a corner when one is free), so as much of the room as possible is in view.
+/// The cell among `cells` that passes `free` with the best view: the
+/// longest clear look (`view` gives a cell's best look as `(run, target)`),
+/// standing far from `centre` to get the whole room in when looks tie.
 /// Ties go to the lowest (x, z), keeping the choice deterministic.
 fn pick_stand(
     cells: impl Iterator<Item = (i32, i32)>,
     (cx, cz): (f32, f32),
     free: impl Fn((i32, i32)) -> bool,
-) -> Option<(i32, i32)> {
-    let dist2 = |(x, z): (i32, i32)| (x as f32 - cx).powi(2) + (z as f32 - cz).powi(2);
-    cells.filter(|&c| free(c)).max_by(|&a, &b| dist2(a).total_cmp(&dist2(b)).then(b.cmp(&a)))
+    view: impl Fn((i32, i32)) -> (f32, (f32, f32)),
+) -> Option<((i32, i32), (f32, f32))> {
+    let score = |(x, z): (i32, i32), run: f32| run + 0.15 * ((x as f32 - cx).powi(2) + (z as f32 - cz).powi(2)).sqrt();
+    cells
+        .filter(|&c| free(c))
+        .map(|c| {
+            let (run, look) = view(c);
+            (c, look, score(c, run))
+        })
+        .max_by(|a, b| a.2.total_cmp(&b.2).then(b.0.cmp(&a.0)))
+        .map(|(c, look, _)| (c, look))
 }
 
 /// Camera inside `room`: stands on the walkable, non-stair interior cell
 /// farthest from the room's centre that `free` confirms is clear (the room
 /// plan does not know about roof slopes or tall items). `None` when no cell
 /// qualifies.
-fn room_camera(room: &Room, floor_y: i32, origin: Point3D, free: impl Fn((i32, i32)) -> bool) -> Option<PerspectiveCamera> {
+fn room_camera(
+    room: &Room,
+    floor_y: i32,
+    origin: Point3D,
+    free: impl Fn((i32, i32)) -> bool,
+    view: impl Fn((i32, i32)) -> (f32, (f32, f32)),
+) -> Option<PerspectiveCamera> {
     let it = room.interior;
     let centre = ((it.min().x + it.max().x) as f32 / 2.0, (it.min().y + it.max().y) as f32 / 2.0);
     let cells = room
@@ -205,8 +217,8 @@ fn room_camera(room: &Room, floor_y: i32, origin: Point3D, free: impl Fn((i32, i
         .iter_ground()
         .map(|(cell, _)| cell)
         .filter(|&cell| room.constraints.is_walkable(cell) && !room.constraints.is_stair(cell));
-    let stand = pick_stand(cells, centre, free)?;
-    Some(standing_camera(Point2D::new(stand.0, stand.1), floor_y, it, origin))
+    let (stand, look) = pick_stand(cells, centre, free, view)?;
+    Some(standing_camera(Point2D::new(stand.0, stand.1), floor_y, look, origin))
 }
 
 /// Build-area-local x/z bounds of grid cell (`col`, `row`).
@@ -510,11 +522,61 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let at = |dy: i32| gi.get(gx, floor_y + dy - gi.origin.y, gz);
             !gi.is_full(at(0)) && at(1) == 0 && (!roomy || at(2) == 0)
         };
+        // Clear distance (blocks) of a look from `cell` along `(dx, dz)` at
+        // eye and knee height, up to 16.
+        let run = |cell: (i32, i32), floor_y: i32, room: Rect2D, (dx, dz): (f32, f32)| -> f32 {
+            let (mut x, mut z, mut d) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5, 0.0);
+            while d < 16.0 {
+                x += dx * 0.25;
+                z += dz * 0.25;
+                d += 0.25;
+                // Stay inside the room (its walls included): a look down a
+                // doorway into the next room doesn't count.
+                let (ix, iz) = (x.floor() as i32, z.floor() as i32);
+                if ix < room.min().x - 1 || ix > room.max().x + 1 || iz < room.min().y - 1 || iz > room.max().y + 1 {
+                    break;
+                }
+                let (gx, gz) = (ix + origin.x - gi.origin.x, iz + origin.z - gi.origin.z);
+                if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 || gi.is_full(gi.get(gx, floor_y - gi.origin.y, gz)) {
+                    break;
+                }
+            }
+            d
+        };
+        // The best look from `cell` in `room`: the longest clear run among
+        // the direction to the room's middle (preferred when it ties) and
+        // sixteen compass directions, so a camera hemmed in by furniture
+        // turns to face the open part of the room. Returns the run and the
+        // build-area-local point to look at.
+        let view = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> (f32, (f32, f32)) {
+            let (ex, ez) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
+            let (cx, cz) = ((room.min().x + room.max().x) as f32 / 2.0 + 0.5, (room.min().y + room.max().y) as f32 / 2.0 + 0.5);
+            let mut dirs: Vec<((f32, f32), f32)> = (0..16)
+                .map(|i| {
+                    let a = i as f32 * std::f32::consts::TAU / 16.0;
+                    ((a.cos(), a.sin()), 0.0)
+                })
+                .collect();
+            let (dx, dz) = (cx - ex, cz - ez);
+            let len = (dx * dx + dz * dz).sqrt();
+            if len >= 0.5 {
+                dirs.push(((dx / len, dz / len), 0.5));
+            }
+            let mut best = (0.0f32, (cx, cz));
+            for (dir, bonus) in dirs {
+                let r = run(cell, floor_y, room, dir);
+                if r + bonus > best.0 {
+                    best = (r + bonus, (ex + dir.0 * r.max(2.0), ez + dir.1 * r.max(2.0)));
+                }
+            }
+            best
+        };
         let mut views: Vec<(String, serde_json::Value, PerspectiveCamera)> = Vec::new();
         for (ri, room) in house.room_plan.rooms.iter().enumerate() {
             let floor_y = house.frame.floor_y(room.floor) + origin.y;
-            let cam = room_camera(room, floor_y, origin, |c| clear(c, floor_y, true))
-                .or_else(|| room_camera(room, floor_y, origin, |c| clear(c, floor_y, false)));
+            let look = |c: (i32, i32)| view(c, floor_y, room.interior);
+            let cam = room_camera(room, floor_y, origin, |c| clear(c, floor_y, true), look)
+                .or_else(|| room_camera(room, floor_y, origin, |c| clear(c, floor_y, false), look));
             let Some(cam) = cam else { continue };
             let level = match room.role {
                 RoomRole::Attic => "attic".to_string(),
@@ -533,10 +595,11 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let core = house.footprint.rects()[0];
             let inner = core.shrink(1);
             let centre = ((inner.min().x + inner.max().x) as f32 / 2.0, (inner.min().y + inner.max().y) as f32 / 2.0);
-            let stand = pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, true))
-                .or_else(|| pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, false)));
-            if let Some(stand) = stand {
-                let cam = standing_camera(Point2D::new(stand.0, stand.1), floor_y, inner, origin);
+            let look = |c: (i32, i32)| view(c, floor_y, inner);
+            let stand = pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, true), look)
+                .or_else(|| pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, false), look));
+            if let Some((stand, look)) = stand {
+                let cam = standing_camera(Point2D::new(stand.0, stand.1), floor_y, look, origin);
                 let name = format!("{prefix}_room_cellar.png");
                 let info = serde_json::json!({ "level": "cellar", "type": "Cellar", "role": "Cellar", "render": name, "eye": cam.eye });
                 views.push((name, info, cam));
@@ -554,6 +617,39 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let sheet_name = format!("{prefix}_rooms.png");
             contact_sheet(&tiles, cols, 8)?.save_png(out_dir.join(&sheet_name))?;
             renders.push(sheet_name);
+        }
+
+        // Cutaways: a top-down view of each storey clipped at its ceiling, so
+        // the walls, doors and furniture of that floor show as placed. One
+        // image per level (cellar, floors, attic) and a sheet of them all.
+        let mut cutaways = Vec::new();
+        let mut levels: Vec<(String, i32)> = Vec::new();
+        if house.has_cellar {
+            levels.push(("cellar".to_string(), house.frame.floor_y(CELLAR_FLOOR)));
+        }
+        for f in house.frame.floors() {
+            levels.push((format!("floor{f}"), house.frame.floor_y(f)));
+        }
+        if house.has_attic {
+            levels.push(("attic".to_string(), house.frame.floor_y(house.frame.max_floors())));
+        }
+        for (level, floor_y) in &levels {
+            // From the floor slab up to the top air row of the storey: the
+            // ceiling slab (and everything above) is cut off.
+            let (lo_y, hi_y) = (floor_y - 1 + origin.y, floor_y + house.frame.wall_height() as i32 - 1 + origin.y);
+            let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
+            let Some(gc) = VoxelGrid::from_scene(&scene, Some(cut)) else { continue };
+            // Unlit: a light map of the clipped grid would see sky through the missing roof.
+            let pm = render_topdown_with(&gc, px, None)?;
+            let name = format!("{prefix}_cutaway_{level}.png");
+            pm.save_png(out_dir.join(&name))?;
+            cutaways.push(pm);
+            renders.push(name);
+        }
+        if !cutaways.is_empty() {
+            let name = format!("{prefix}_cutaways.png");
+            contact_sheet(&cutaways, cutaways.len(), 8)?.save_png(out_dir.join(&name))?;
+            renders.push(name);
         }
 
         let fp = house.footprint.bounds();
