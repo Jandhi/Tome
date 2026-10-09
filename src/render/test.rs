@@ -430,3 +430,331 @@ mod tests {
         assert_eq!((sheet.width(), sheet.height()), (3 * 10 + 4 * 2, 2 * 6 + 3 * 2));
     }
 }
+
+/// Lighting (`render::light`): the emitter table, light maps, the brightness
+/// curve, smooth corners and lit perspective views.
+#[cfg(test)]
+mod lighting_tests {
+    use std::time::Instant;
+
+    use resvg::tiny_skia::Pixmap;
+
+    use crate::geometry::{Point3D, Rect3D};
+    use crate::render::grid::VoxelGrid;
+    use crate::render::light::{emission, LightMap, Lighting, AMBIENT};
+    use crate::render::perspective::{render_perspective, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
+    use crate::render::Scene;
+
+    fn scene(sx: i32, sy: i32, sz: i32) -> Scene {
+        Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(sx, sy, sz) })
+    }
+
+    /// Stone shell of the box `lo..=hi` (one block thick), interior left empty.
+    fn shell(s: &mut Scene, lo: Point3D, hi: Point3D) {
+        for x in lo.x..=hi.x {
+            for y in lo.y..=hi.y {
+                for z in lo.z..=hi.z {
+                    if x == lo.x || x == hi.x || y == lo.y || y == hi.y || z == lo.z || z == hi.z {
+                        s.insert(Point3D::new(x, y, z), "minecraft:stone");
+                    }
+                }
+            }
+        }
+    }
+
+    fn floor(s: &mut Scene, sx: i32, sz: i32, y: i32) {
+        for x in 0..sx {
+            for z in 0..sz {
+                s.insert(Point3D::new(x, y, z), "minecraft:stone");
+            }
+        }
+    }
+
+    fn grid(s: &Scene) -> VoxelGrid {
+        VoxelGrid::from_scene(s, None).expect("grid")
+    }
+
+    fn mean_brightness(pm: &Pixmap) -> f32 {
+        let d = pm.data();
+        let n = (pm.width() * pm.height()) as f32;
+        d.chunks(4).map(|p| (p[0] as f32 + p[1] as f32 + p[2] as f32) / 3.0).sum::<f32>() / n
+    }
+
+    #[test]
+    fn emitter_table_reads_block_state() {
+        assert_eq!(emission("minecraft:lantern[hanging=true]"), 15);
+        assert_eq!(emission("minecraft:wall_torch[facing=west]"), 14);
+        assert_eq!(emission("torch"), 14);
+        assert_eq!(emission("minecraft:soul_lantern"), 10);
+        assert_eq!(emission("minecraft:campfire[lit=true]"), 15);
+        assert_eq!(emission("minecraft:campfire[lit=false]"), 0);
+        assert_eq!(emission("minecraft:campfire"), 15, "campfires are lit by default");
+        assert_eq!(emission("minecraft:candle[candles=3,lit=true]"), 9);
+        assert_eq!(emission("minecraft:red_candle[candles=4,lit=true]"), 12);
+        assert_eq!(emission("minecraft:candle[candles=3]"), 0, "candles are unlit by default");
+        assert_eq!(emission("minecraft:redstone_torch"), 7);
+        assert_eq!(emission("minecraft:redstone_torch[lit=false]"), 0);
+        assert_eq!(emission("minecraft:redstone_lamp"), 0);
+        assert_eq!(emission("minecraft:redstone_lamp[lit=true]"), 15);
+        assert_eq!(emission("minecraft:waxed_exposed_copper_bulb[lit=true]"), 12);
+        assert_eq!(emission("minecraft:copper_bulb[lit=true]"), 15);
+        assert_eq!(emission("minecraft:small_amethyst_bud"), 1);
+        assert_eq!(emission("minecraft:magma_block"), 3);
+        assert_eq!(emission("minecraft:ochre_froglight[axis=y]"), 15);
+        assert_eq!(emission("minecraft:stone"), 0);
+        assert_eq!(emission("minecraft:oak_planks"), 0);
+    }
+
+    #[test]
+    fn lighting_parses_modes_and_factors() {
+        assert_eq!(Lighting::parse("day").unwrap().daylight, Lighting::DAY);
+        assert_eq!(Lighting::parse("night").unwrap().daylight, Lighting::NIGHT);
+        assert_eq!(Lighting::parse("dusk").unwrap().tag(), "dusk");
+        assert_eq!(Lighting::parse("0.3").unwrap().tag(), "light0.30");
+        assert!(Lighting::parse("noon").is_err());
+        assert!(Lighting::parse("1.5").is_err());
+    }
+
+    #[test]
+    fn sealed_room_without_emitter_is_dark() {
+        // Bounds one block wider than the box, so the columns beside it see the sky.
+        let mut s = scene(11, 6, 11);
+        shell(&mut s, Point3D::new(1, 0, 1), Point3D::new(9, 5, 9));
+        let lm = LightMap::new(&grid(&s));
+        assert_eq!(lm.sky_light(0, 3, 3), 15, "open column beside the box");
+        for (x, y, z) in [(5, 3, 5), (2, 1, 2), (8, 4, 8)] {
+            assert_eq!((lm.sky_light(x, y, z), lm.block_light(x, y, z)), (0, 0), "inside at {x},{y},{z}");
+            assert!((lm.brightness(x, y, z, 1.0) - AMBIENT).abs() < 1e-6);
+        }
+        assert!(lm.brightness(0, 3, 3, 1.0) > 0.99, "open sky at noon is full brightness");
+        assert!(lm.is_solid(1, 2, 5) && !lm.is_solid(5, 3, 5));
+    }
+
+    #[test]
+    fn torch_lights_neighbourhood_falling_off_by_one_per_block() {
+        let mut s = scene(31, 3, 31);
+        floor(&mut s, 31, 31, 0);
+        s.insert(Point3D::new(15, 1, 15), "minecraft:torch");
+        let lm = LightMap::new(&grid(&s));
+        assert_eq!(lm.emitters, 1);
+        assert_eq!(lm.block_light(15, 1, 15), 14);
+        for d in 0..=14 {
+            let want = 14u8.saturating_sub(d as u8);
+            assert_eq!(lm.block_light(15 + d, 1, 15), want, "east {d}");
+            assert_eq!(lm.block_light(15, 1, 15 - d), want, "north {d}");
+        }
+        // Light walks the grid: Manhattan distance, not Euclidean.
+        assert_eq!(lm.block_light(18, 1, 18), 8);
+        assert_eq!(lm.block_light(0, 1, 0), 0);
+        // Nothing stops sky light here, and the stone floor holds none.
+        assert_eq!(lm.sky_light(15, 1, 15), 15);
+        assert_eq!(lm.sky_light(15, 0, 15), 0);
+    }
+
+    #[test]
+    fn sky_light_reaches_open_columns_and_fades_under_roofs() {
+        // A 5x5 roof at y 4 over a floor; the roof block varies.
+        for roof in ["minecraft:stone", "minecraft:oak_slab[type=bottom]", "minecraft:oak_stairs[facing=north,half=bottom]"] {
+            let mut s = scene(11, 6, 11);
+            floor(&mut s, 11, 11, 0);
+            for x in 3..=7 {
+                for z in 3..=7 {
+                    s.insert(Point3D::new(x, 4, z), roof);
+                }
+            }
+            let lm = LightMap::new(&grid(&s));
+            assert_eq!(lm.sky_light(0, 2, 0), 15, "{roof}: open column");
+            assert_eq!(lm.sky_light(2, 3, 5), 15, "{roof}: beside the roof");
+            // Under the roof, light only comes in from the sides: 14 at the
+            // edge, 13 one in, 12 at the centre.
+            assert_eq!(lm.sky_light(3, 3, 5), 14, "{roof}: under the eave");
+            assert_eq!(lm.sky_light(4, 3, 5), 13, "{roof}");
+            assert_eq!(lm.sky_light(5, 3, 5), 12, "{roof}: under the centre");
+            assert_eq!(lm.sky_light(5, 1, 5), 12, "{roof}: under the centre, at the floor");
+            assert!(lm.brightness(5, 2, 5, 1.0) < lm.brightness(0, 2, 0, 1.0), "{roof}: shade is darker");
+        }
+        // A fence lets light straight through.
+        let mut s = scene(11, 6, 11);
+        floor(&mut s, 11, 11, 0);
+        for x in 3..=7 {
+            for z in 3..=7 {
+                s.insert(Point3D::new(x, 4, z), "minecraft:oak_fence");
+            }
+        }
+        let lm = LightMap::new(&grid(&s));
+        assert_eq!(lm.sky_light(5, 3, 5), 15);
+    }
+
+    #[test]
+    fn water_and_leaves_dim_sky_light() {
+        // A single column (the grid's sides are closed), so only the light
+        // falling straight down counts.
+        let mut s = scene(1, 8, 1);
+        s.insert(Point3D::new(0, 0, 0), "minecraft:stone");
+        for y in 1..=3 {
+            s.insert(Point3D::new(0, y, 0), "minecraft:water[level=0]");
+        }
+        s.insert(Point3D::new(0, 6, 0), "minecraft:oak_leaves[persistent=true]");
+        let lm = LightMap::new(&grid(&s));
+        // Through one leaf block: 14, and from there 1 less per block, air or water.
+        assert_eq!(lm.sky_light(0, 6, 0), 14);
+        assert_eq!(lm.sky_light(0, 5, 0), 13);
+        assert_eq!(lm.sky_light(0, 4, 0), 12);
+        assert_eq!(lm.sky_light(0, 3, 0), 11);
+        assert_eq!(lm.sky_light(0, 2, 0), 10);
+        assert_eq!(lm.sky_light(0, 1, 0), 9);
+        // Water alone under open sky dims the straight-down light air would
+        // pass untouched: 14, 13, 12.
+        let mut s = scene(1, 5, 1);
+        s.insert(Point3D::new(0, 0, 0), "minecraft:stone");
+        for y in 1..=3 {
+            s.insert(Point3D::new(0, y, 0), "minecraft:water[level=0]");
+        }
+        let lm = LightMap::new(&grid(&s));
+        assert_eq!((lm.sky_light(0, 3, 0), lm.sky_light(0, 2, 0), lm.sky_light(0, 1, 0)), (14, 13, 12));
+    }
+
+    #[test]
+    fn night_lit_room_is_brighter_than_an_unlit_one() {
+        // Two sealed rooms; the second has a lantern under its ceiling. The
+        // column at x 19..20 is open sky.
+        let mut s = scene(21, 7, 9);
+        shell(&mut s, Point3D::new(0, 0, 0), Point3D::new(8, 6, 8));
+        shell(&mut s, Point3D::new(10, 0, 0), Point3D::new(18, 6, 8));
+        s.insert(Point3D::new(14, 5, 4), "minecraft:lantern[hanging=true]");
+        let lm = LightMap::new(&grid(&s));
+        assert_eq!(lm.block_light(14, 5, 4), 15);
+        assert_eq!(lm.block_light(14, 3, 4), 13);
+        assert_eq!(lm.sky_light(14, 3, 4), 0);
+        assert_eq!(lm.sky_light(19, 3, 4), 15);
+        let night = Lighting::NIGHT;
+        let (unlit, lit, sky) = (lm.brightness(4, 3, 4, night), lm.brightness(14, 3, 4, night), lm.brightness(19, 3, 4, night));
+        assert!((unlit - AMBIENT).abs() < 1e-6, "unlit room at night {unlit}");
+        assert!(lit > 0.7, "lantern room at night {lit}");
+        assert!(sky > unlit && sky < 0.3, "moonlit sky {sky}");
+        assert!(lit > sky, "at night the lamp-lit room ({lit}) beats the open sky ({sky})");
+        // By day the open sky beats everything indoors.
+        assert!(lm.brightness(19, 3, 4, 1.0) > lm.brightness(14, 3, 4, 1.0));
+    }
+
+    #[test]
+    fn brightness_curve_is_monotonic_and_bounded() {
+        let mut last = -1.0;
+        for level in 0..=15 {
+            let b = LightMap::curve(level as f32);
+            assert!(b > last, "level {level}: {b} <= {last}");
+            last = b;
+        }
+        assert!((LightMap::curve(0.0) - AMBIENT).abs() < 1e-6);
+        assert!((LightMap::curve(15.0) - 1.0).abs() < 1e-6);
+        assert!(LightMap::curve(7.0) > 0.3 && LightMap::curve(7.0) < 0.6);
+    }
+
+    #[test]
+    fn smooth_corners_darken_against_walls() {
+        // Floor with a 3-high wall along x = 0.
+        let mut s = scene(7, 5, 7);
+        floor(&mut s, 7, 7, 0);
+        for y in 1..=3 {
+            for z in 0..7 {
+                s.insert(Point3D::new(0, y, z), "minecraft:stone");
+            }
+        }
+        let lm = LightMap::new(&grid(&s));
+        // Top face of the floor cell (1, 0, 3): the corners against the wall
+        // (low x) are darker than the open ones (high x).
+        let c = lm.face_corners([1, 1, 3], 1, 1.0);
+        assert!(c[0] < c[1] && c[2] < c[3], "corners {c:?}");
+        assert!((c[1] - 1.0).abs() < 1e-6 && (c[3] - 1.0).abs() < 1e-6, "open corners are fully lit: {c:?}");
+        // Interpolation runs from the wall side to the open side.
+        let near = lm.face_light_at([1, 1, 3], 1, 0.0, 0.5, 1.0);
+        let far = lm.face_light_at([1, 1, 3], 1, 1.0, 0.5, 1.0);
+        assert!(near < far);
+        // Far from the wall every corner is open.
+        assert_eq!(lm.face_corners([4, 1, 3], 1, 1.0), [1.0; 4]);
+    }
+
+    /// 9x6x9 sealed room; the camera stands in one corner looking across it.
+    fn room_view(lantern: bool, lighting: Option<Lighting>) -> Pixmap {
+        let mut s = scene(9, 6, 9);
+        shell(&mut s, Point3D::new(0, 0, 0), Point3D::new(8, 5, 8));
+        if lantern {
+            s.insert(Point3D::new(4, 4, 4), "minecraft:lantern[hanging=true]");
+        }
+        let g = grid(&s);
+        let map = LightMap::new(&g);
+        let cam = PerspectiveCamera { eye: [1.5, 2.62, 1.5], target: [7.5, 2.0, 7.5], fov_deg: 90.0 };
+        let opts = PerspectiveOptions { lighting: lighting.map(|l| (&map, l)) };
+        render_perspective_with(&g, &cam, 96, 64, &opts).unwrap()
+    }
+
+    #[test]
+    fn perspective_lighting_changes_mean_brightness_the_right_way() {
+        let unlit = room_view(false, None);
+        let day_sealed = room_view(false, Some(Lighting::day()));
+        let night_sealed = room_view(false, Some(Lighting::night()));
+        let night_lantern = room_view(true, Some(Lighting::night()));
+        let (u, d, n, l) = (mean_brightness(&unlit), mean_brightness(&day_sealed), mean_brightness(&night_sealed), mean_brightness(&night_lantern));
+        assert!(d < u * 0.3, "a sealed room lit by nothing is far darker than unlit ({d} vs {u})");
+        assert!((n - d).abs() < 1.0, "no sky inside: night and day alike ({n} vs {d})");
+        assert!(l > n * 2.0, "a lantern lights the room at night ({l} vs {n})");
+        assert!(l < u, "even lit, the lamp-lit room is not brighter than the unlit render ({l} vs {u})");
+        // Lighting off is the plain renderer, pixel for pixel.
+        let mut s = scene(9, 6, 9);
+        shell(&mut s, Point3D::new(0, 0, 0), Point3D::new(8, 5, 8));
+        let g = grid(&s);
+        let cam = PerspectiveCamera { eye: [1.5, 2.62, 1.5], target: [7.5, 2.0, 7.5], fov_deg: 90.0 };
+        let plain = render_perspective(&g, &cam, 96, 64).unwrap();
+        let with = render_perspective_with(&g, &cam, 96, 64, &PerspectiveOptions::default()).unwrap();
+        assert_eq!(plain.data(), with.data());
+    }
+
+    /// Town-sized grid: 256x256 columns, ~4M cells; prints the light-map time.
+    #[test]
+    fn light_map_timing_town_sized_grid() {
+        let mut s = scene(256, 128, 256);
+        for x in 0..256 {
+            for z in 0..256 {
+                let h = 60 + ((x as f32 / 23.0).sin() * 2.0 + (z as f32 / 19.0).cos() * 2.0) as i32;
+                for y in h - 3..=h {
+                    s.insert(Point3D::new(x, y, z), if y == h { "minecraft:grass_block" } else { "minecraft:dirt" });
+                }
+                // Hollow 8x8 houses every 16 blocks, a lantern in each, a few torches outside.
+                if x % 16 < 8 && z % 16 < 8 {
+                    let edge = x % 16 == 0 || x % 16 == 7 || z % 16 == 0 || z % 16 == 7;
+                    for y in h + 1..=h + 6 {
+                        if edge || y == h + 6 {
+                            s.insert(Point3D::new(x, y, z), "minecraft:oak_planks");
+                        }
+                    }
+                    if x % 16 == 4 && z % 16 == 4 {
+                        s.insert(Point3D::new(x, h + 5, z), "minecraft:lantern[hanging=true]");
+                    }
+                } else if x % 16 == 12 && z % 16 == 12 {
+                    s.insert(Point3D::new(x, h + 1, z), "minecraft:torch");
+                }
+            }
+        }
+        // A spire so the grid is a full 64 high, like a town with its towers.
+        for y in 57..121 {
+            s.insert(Point3D::new(128, y, 128), "minecraft:stone_bricks");
+        }
+        let t = Instant::now();
+        let g = grid(&s);
+        println!("grid build: {:?} ({}x{}x{} = {} cells)", t.elapsed(), g.nx, g.ny, g.nz, g.cells().len());
+        let t = Instant::now();
+        let lm = LightMap::new(&g);
+        let took = t.elapsed();
+        let (sky, block) = lm.histogram();
+        println!("light map: {took:?}; {} emitters; sky-lit {} cells, block-lit {} cells", lm.emitters, sky[15], block[1..].iter().sum::<usize>());
+        assert_eq!(lm.emitters, 256 + 256);
+        assert!(lm.len() > 4_000_000);
+        // Inside a house: no sky, lantern light; outside: full sky. The map
+        // is in grid-local coordinates, whose y starts at the lowest block.
+        let h = |x: i32, z: i32| 60 + ((x as f32 / 23.0).sin() * 2.0 + (z as f32 / 19.0).cos() * 2.0) as i32 - g.origin.y;
+        assert_eq!(lm.sky_light(4, h(4, 4) + 2, 4), 0);
+        assert_eq!(lm.block_light(4, h(4, 4) + 5, 4), 15);
+        assert_eq!(lm.block_light(4, h(4, 4) + 2, 4), 12);
+        assert_eq!(lm.sky_light(12, h(12, 12) + 2, 12), 15);
+    }
+}
