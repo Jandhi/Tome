@@ -424,7 +424,13 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         }
     }
 
-    let scene = editor.capture_scene();
+    // Saved beside the renders so a showcase can be re-rendered (`cargo render`,
+    // `cargo view`) or diffed against another run (`--compare`).
+    let mut scene = editor.capture_scene();
+    scene.meta.insert("seed".into(), opts.seed.to_string());
+    scene.meta.insert("source".into(), "houses".into());
+    scene.meta.insert("showcase".into(), out_dir.file_name().unwrap_or_default().to_string_lossy().into_owned());
+    scene.save(out_dir.join("town.scene"))?;
     let px = opts.px.max(1);
 
     // Contact sheet: every standard view of the whole grid, iso tile shrunk so
