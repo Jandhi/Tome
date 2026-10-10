@@ -190,3 +190,15 @@ async fn offline_town_is_deterministic() {
         + b.keys().filter(|p| !a.contains_key(p)).count();
     assert_eq!(diff, 0, "towns differ in {diff} cells ({} vs {} blocks)", a.len(), b.len());
 }
+
+#[test]
+fn banner_patterns_ride_along_in_the_block_string() {
+    use crate::editor::editor::block_string;
+    let mut banner = crate::minecraft::string_to_block("minecraft:red_wall_banner[facing=south]").unwrap();
+    banner.data = Some(r#"{patterns:[{pattern:"minecraft:cross",color:"white"}]}"#.to_string());
+    assert_eq!(block_string(&banner), "minecraft:red_wall_banner[facing=south,patterns=cross:white]");
+    // Other blocks' data stays out of the scene.
+    let mut chest = crate::minecraft::string_to_block("minecraft:chest[facing=north]").unwrap();
+    chest.data = Some(r#"{patterns:[{pattern:"minecraft:cross",color:"white"}]}"#.to_string());
+    assert_eq!(block_string(&chest), "minecraft:chest[facing=north]");
+}

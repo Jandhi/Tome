@@ -1,5 +1,5 @@
 //! Block models for entity-rendered blocks. The game draws chests, beds,
-//! signs and decorated pots with block-entity renderers, so the jar's block
+//! signs, decorated pots and banners with block-entity renderers, so the jar's block
 //! models for them carry only a particle texture. This module rebuilds them
 //! as ordinary block models (the jar's own JSON format) from the entity
 //! texture sheets, so every renderer reads them like any other block.
@@ -287,6 +287,42 @@ fn decorated_pot(side: &str, base: &str) -> Value {
     model(&[("t", base), ("base", base), ("side", side)], 32.0, &[body.tex("base"), panels, collar, lip])
 }
 
+/// A banner facing south, from the 64-texel `banner_base` sheet: the flag
+/// (20x40x1 at (0, 0)) hung from a crossbar (20x2x2 at (0, 42)), standing on
+/// a pole (2x42x2 at (44, 0)) or against the north wall. `BannerRenderer`
+/// draws these at 2/3 scale turned half round about x (y and z negated) from
+/// the block centre, or for a wall banner from (8, -7.67, 1), so the flag
+/// hangs 13 below a wall banner's block and a standing banner is 29.33 tall.
+/// The half turn puts each rectangle on the opposite world face only for the
+/// `North`/`South` and `Down`/`Up` pairs, all read as laid out but the
+/// bottom. The flag takes texture `flag` (see [`super::banner`]), the
+/// wood `pole`.
+fn banner(wall: bool, y_angle: f32) -> Value {
+    const S: f32 = 2.0 / 3.0;
+    let o = if wall { [8.0, -7.0 - 2.0 / 3.0, 1.0] } else { [8.0, 8.0, 8.0] };
+    // A ModelPart box at (x, y, z) sized (w, h, d), in block sixteenths.
+    let part = |at: [f32; 3], size: [f32; 3], uv: (f32, f32)| {
+        let from = [o[0] + S * at[0], o[1] - S * (at[1] + size[1]), o[2] - S * (at[2] + size[2])];
+        let to = [o[0] + S * (at[0] + size[0]), o[1] - S * at[1], o[2] - S * at[2]];
+        Box3::new(from, to, (uv, (size[0], size[1], size[2])))
+            .face("south", Slot::North, PLAIN)
+            .face("north", Slot::South, PLAIN)
+            .face("west", Slot::West, PLAIN)
+            .face("east", Slot::East, PLAIN)
+            .face("up", Slot::Down, PLAIN)
+            .face("down", Slot::Up, FLIP_V)
+            .turned(y_angle)
+    };
+    let mut boxes = vec![
+        part([-10.0, -32.0, -2.0], [20.0, 40.0, 1.0], (0.0, 0.0)).tex("flag"),
+        part([-10.0, -32.0, -1.0], [20.0, 2.0, 2.0], (0.0, 42.0)).tex("pole"),
+    ];
+    if !wall {
+        boxes.push(part([-1.0, -30.0, -1.0], [2.0, 42.0, 2.0], (44.0, 0.0)).tex("pole"));
+    }
+    model(&[("pole", "entity/banner_base"), ("flag", "tome_banner:white")], 64.0, &boxes)
+}
+
 // ---------------------------------------------------------------------------
 // Block states
 // ---------------------------------------------------------------------------
@@ -308,7 +344,8 @@ fn sixteenth(r: i32) -> (i32, i32) {
 /// Models to register (`block/<name>` keys) and the block states that pick
 /// them, for every entity block whose texture is in `has`. Families:
 /// chests (`facing`), beds (`facing`, `part`), standing, wall, hanging and
-/// wall hanging signs per wood, and the decorated pot.
+/// wall hanging signs per wood, the decorated pot, and standing and wall
+/// banners per colour.
 pub(super) fn entity_models<'a>(
     textures: impl Iterator<Item = &'a str>,
 ) -> (Vec<(String, Value)>, Vec<(String, Value)>) {
@@ -379,6 +416,31 @@ pub(super) fn entity_models<'a>(
             }
         }
         states.push((format!("{wood}_hanging_sign"), json!({ "variants": v })));
+    }
+
+    // Banners: one set of models for every colour; the flag texture is
+    // bound per block string (colour and patterns), see `super::banner`.
+    if has("entity/banner_base") && has("entity/banner/base") {
+        let wall_key = "block/tome_entity_wall_banner".to_string();
+        models.push((wall_key.clone(), banner(true, 0.0)));
+        // The models face south: facing south is no turn.
+        let wall: Map<String, Value> = FACINGS
+            .iter()
+            .map(|(f, y)| (format!("facing={f}"), json!({ "model": wall_key, "y": (y + 180) % 360 })))
+            .collect();
+        let mut standing = Map::new();
+        for r in 0..16 {
+            let (y, rem) = sixteenth(r);
+            let key = format!("block/tome_entity_banner_{}", rem + 1);
+            if !models.iter().any(|(k, _)| *k == key) {
+                models.push((key.clone(), banner(false, -(rem as f32) * 22.5)));
+            }
+            standing.insert(format!("rotation={r}"), json!({ "model": key, "y": y }));
+        }
+        for colour in super::banner::colours() {
+            states.push((format!("{colour}_wall_banner"), json!({ "variants": wall })));
+            states.push((format!("{colour}_banner"), json!({ "variants": standing })));
+        }
     }
 
     let (side, base) = ("entity/decorated_pot/decorated_pot_side", "entity/decorated_pot/decorated_pot_base");

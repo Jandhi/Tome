@@ -626,11 +626,42 @@ mod tests {
         assert!(a.geometry("minecraft:jungle_wall_sign[facing=east,waterlogged=false]").is_some());
         assert!(a.geometry("minecraft:oak_hanging_sign[attached=false,rotation=0,waterlogged=false]").is_some());
         // Other entity-rendered blocks and bare ids the jar lacks fall back.
-        assert!(a.geometry("minecraft:white_banner[rotation=0]").is_none());
+        assert!(a.geometry("minecraft:water").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());
         // Bare generator states resolve through the defaults.
         assert!(a.geometry("minecraft:lantern").is_some());
         assert!(a.geometry("minecraft:oak_trapdoor[facing=north,half=bottom,open=true]").is_some());
+    }
+
+    #[test]
+    fn banners_hang_where_the_game_draws_them() {
+        use crate::render::assets::{assets, Face6};
+        let Some(a) = assets() else {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        };
+        // (lo, hi) over a block string's elements, in sixteenths.
+        let bounds = |b: &str| a.geometry(b).unwrap_or_else(|| panic!("{b} has a model")).bounds();
+        // Standing: pole up from the floor, crossbar at 29.33, flag on the
+        // side the banner faces (rotation 0 south, 4 west).
+        let (lo, hi) = bounds("minecraft:red_banner[rotation=0]");
+        assert!(lo[1].abs() < 1e-3 && (hi[1] - 29.333).abs() < 1e-2, "standing height {lo:?}..{hi:?}");
+        assert!(hi[2] > 9.0 && lo[2] > 7.0, "flag south of the pole: {lo:?}..{hi:?}");
+        let (lo, _) = bounds("minecraft:red_banner[rotation=4]");
+        assert!(lo[0] < 7.0, "rotation 4 faces west: {lo:?}");
+        // Wall: against the wall behind it, flag hanging 13 into the block below.
+        let (lo, hi) = bounds("minecraft:red_wall_banner[facing=south]");
+        assert!(lo[2] < 0.5 && hi[2] < 2.5, "on the north wall: {lo:?}..{hi:?}");
+        assert!((lo[1] + 13.0).abs() < 1e-2 && (hi[1] - 13.667).abs() < 1e-2, "wall height {lo:?}..{hi:?}");
+        let (lo, _) = bounds("minecraft:red_wall_banner[facing=west]");
+        assert!(lo[0] > 13.5, "facing west hangs on the east wall: {lo:?}");
+        // The flag's front shows the design: a red chief over the white base.
+        let g = a.geometry("minecraft:white_wall_banner[facing=south,patterns=stripe_top:red]").unwrap();
+        let (_, front) = g.elements[0].faces.iter().find(|(f, _)| *f == Face6::South).expect("flag front");
+        let top = front.sample_at([8.0, 13.0, 2.333]);
+        let low = front.sample_at([8.0, -8.0, 2.333]);
+        assert!(top[0] > 120 && top[1] < 80, "chief is red: {top:?}");
+        assert!(low[0] > 180 && low[1] > 180 && low[2] > 180, "field is white: {low:?}");
     }
 
     #[test]
@@ -667,7 +698,7 @@ mod tests {
 
     // ---- viewer textures (jd/viewer-textures): textured export of the HTML viewer ----
 
-    /// 2x2 grass, a stair, a poppy, glass and a banner: every export path at once.
+    /// 2x2 grass, a stair, a poppy, glass and lava: every export path at once.
     fn viewer_texture_scene() -> Scene {
         let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(8, 8, 8) });
         for (x, z) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
@@ -676,7 +707,7 @@ mod tests {
         s.insert(Point3D::new(4, 61, 1), "minecraft:oak_stairs[facing=east,half=bottom,shape=straight]");
         s.insert(Point3D::new(1, 62, 1), "minecraft:poppy");
         s.insert(Point3D::new(4, 61, 4), "minecraft:glass");
-        s.insert(Point3D::new(6, 61, 6), "minecraft:white_banner[rotation=0]");
+        s.insert(Point3D::new(6, 61, 6), "minecraft:lava");
         s
     }
 
@@ -693,8 +724,8 @@ mod tests {
         let t = e.textured.expect("models give a textured buffer");
         assert_eq!(t.faces.len(), t.a_count * RECORD_BYTES + t.r_count * ROTATED_RECORD_BYTES);
         assert_eq!(e.stats.faces, e.flat.len() / RECORD_BYTES + t.a_count + t.r_count);
-        // The banner has no element model: it stays on the flat path with its hand colour.
-        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "banner faces");
+        // Lava has no element model: it stays on the flat path with its hand colour.
+        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "lava faces");
         // The poppy's cross model is two rotated quads.
         assert_eq!(t.r_count, 2, "rotated faces");
         assert_eq!(e.stats.rotated_faces, 2);
