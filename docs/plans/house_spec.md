@@ -83,6 +83,31 @@ spec is fully pinned and still carries its seed for the computed stages.
 footprint can change the rooms (they depend on it); it must not change the
 palette, timber or roof.
 
+## Status
+
+- **Phase 1 done** (288e10a, e626814): `HouseSeed`, one named stream per decision (`buildings_v2/seed.rs`).
+- **Phase 2 done** (6a9679e): `HouseSpec` written for every `--houses` and town house.
+- **Phase 3 done**: `resolve` + `ResolvedHouse::build` (`buildings_v2/spec.rs`, whose module
+  doc tables what each open field draws); `--houses --spec <file>...` and sweeps; basic
+  field-named errors (unknown names, footprint geometry, rooms shape, attic vs roof).
+  - No stream was split. Pins that live inside a multi-draw stream still make every draw
+    and override the result (frame floors, the cellar roll, the palette style pick), and
+    the pinned values that skip a draw (room types, cellar theme) sit after the stage's
+    `derive()`s, so nothing else moves. Plain `--houses` output and the caldera town are
+    block-identical to before.
+  - Sweep seeds: house k of N from a spec is `RNG::from_seed_and_string(base, "sweep<k>")
+    .next_i64()` (`showcase::spec_house_seed`), `base` = the spec's `seed`, else the
+    `--seed` stream's draw for that spec's position (what plain house j would get). A
+    single house (`--count 1`, the default with `--spec`) uses `base` as is.
+  - Open `size`/`roof`/`palette`/`colour`/`jetty` draw on their streams as a town would but
+    without a town: uniform size, the culture's roof bag, a uniform catalog style (no local
+    wood bias), the culture's colour pool. `palette.style: default` is plain `--houses`'
+    culture palette; plain `--houses` is itself a spec pinning culture, size, roof, that
+    palette and colour, jetty and the variant.
+  - `site` is ignored on input except the new `site.plot` (plot size, written by `--houses`):
+    the front door goes on the side nearest the plot edge, so the same plot puts it back.
+  - Examples: `docs/examples/house_specs/fixed_shape.yaml`, `fixed_style.yaml`.
+
 ## Phases
 
 1. **Keyed streams.** Per-house seed and per-decision streams, no spec yet.

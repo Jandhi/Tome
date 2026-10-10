@@ -1,0 +1,23 @@
+# Fixed style, open shape: a Japanese house with its palette and roof pinned,
+# footprint (and size, floors, rooms, engawa, cellar) left to the seed. A sweep
+# shows one style across many shapes. To check a style change, sweep before
+# and after the change and diff the two town.scene files:
+#
+#   cargo run --profile fast -- --houses --spec docs/examples/house_specs/fixed_style.yaml --count 8
+#   cargo run -- --compare <before>/town.scene output/houses/spec-fixed_style-x8/town.scene
+#
+# palette.style alone would also do (its pools roll per house); the materials
+# are pinned too here so every house uses exactly these palette files.
+# Japanese styles: dark_blackstone, white_slate, bamboo_roof, cherry_roof,
+# light_cherry, cypress_town, cherry_ink, teal_shrine, vermilion_hall,
+# vermilion_house, or default (the culture's plain palette).
+seed: 2026
+culture: japanese
+palette:
+  style: white_slate
+  base: japanese_dark_blackstone
+  wood: dark_oak
+  stone: blackstone
+  roof: blackstone_roof
+colour: red
+roof: irimoya         # or { hipped: slab }, { hipped: stairs }
