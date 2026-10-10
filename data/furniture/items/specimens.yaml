@@ -1,0 +1,27 @@
+# Renderer specimens: blocks the renderers need special handling for, laid
+# out for `--furniture <name>` previews. No room lists these; they exist so a
+# renderer change can be checked against every awkward block at once.
+
+specimen_doors:
+  blocks:
+    - { block: "minecraft:oak_door[facing=south,half=lower,hinge=left,open=false]", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:oak_door[facing=south,half=upper,hinge=left,open=false]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:spruce_door[facing=south,half=lower,hinge=right,open=true]", offset: [2, 0, 0], layer: ground }
+    - { block: "minecraft:spruce_door[facing=south,half=upper,hinge=right,open=true]", offset: [2, 1, 0], layer: ground }
+    - { block: "minecraft:iron_door[facing=east,half=lower,hinge=left,open=false]", offset: [4, 0, 1], layer: ground }
+    - { block: "minecraft:iron_door[facing=east,half=upper,hinge=left,open=false]", offset: [4, 1, 1], layer: ground }
+
+specimen_beds:
+  blocks:
+    - { block: "minecraft:red_bed[facing=south,part=foot]", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:red_bed[facing=south,part=head]", offset: [0, 0, 1], layer: ground }
+    - { block: "minecraft:blue_bed[facing=east,part=foot]", offset: [2, 0, 1], layer: ground }
+    - { block: "minecraft:blue_bed[facing=east,part=head]", offset: [3, 0, 1], layer: ground }
+
+specimen_signs:
+  blocks:
+    - { block: "minecraft:oak_wall_sign[facing=south]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:spruce_sign[rotation=0]", offset: [2, 0, 1], layer: ground }
+    - { block: "minecraft:oak_sign[rotation=2]", offset: [4, 0, 1], layer: ground }
+    - { block: "minecraft:oak_hanging_sign[rotation=0,attached=false]", offset: [6, 1, 1], layer: ground }
+    - { block: "minecraft:spruce_wall_hanging_sign[facing=south]", offset: [0, 2, 2], layer: ground }

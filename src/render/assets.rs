@@ -836,127 +836,27 @@ fn average_colours(elements: &[Element]) -> (Rgba, Rgba) {
     (top.unwrap_or(fallback), side.unwrap_or(fallback))
 }
 
-// ---------------------------------------------------------------------------
-// Entity-rendered blocks
-// ---------------------------------------------------------------------------
-
 /// Entity texture folders read from the jar, for the blocks the game draws
-/// with a block-entity renderer instead of a block model.
-const ENTITY_TEXTURE_DIRS: [&str; 2] = ["chest/", "decorated_pot/"];
+/// with a block-entity renderer instead of a block model (see [`super::entity`]).
+const ENTITY_TEXTURE_DIRS: [&str; 4] = ["chest/", "decorated_pot/", "bed/", "signs/"];
 
-/// Chests and decorated pots have no element model in the jar (their model
-/// files carry only a particle texture); the game draws them from entity
-/// texture sheets. Build equivalent block models from those sheets, in the
-/// jar's own model format, so every renderer reads them like any other
-/// block: chests as body, lid and latch, turned by `facing`; decorated pots
-/// as a plain body with the neck squeezed into the top of the block (the
-/// renderers only draw inside a block's own cell; the game's neck pokes
-/// above it).
+/// Register the models [`super::entity`] builds for entity-rendered blocks,
+/// replacing the jar's particle-only models and block states for them.
 fn add_entity_models(
     textures: &HashMap<String, Arc<Texture>>,
     models: &mut HashMap<String, RawModel>,
     blockstates: &mut HashMap<String, Value>,
 ) {
-    let mut add = |id: &str, model: Value, rotate: bool| {
-        let key = format!("block/tome_entity_{id}");
-        models.insert(
-            key.clone(),
-            RawModel {
-                parent: None,
-                textures: model
-                    .get("textures")
-                    .and_then(Value::as_object)
-                    .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
-                    .unwrap_or_default(),
-                elements: model.get("elements").and_then(Value::as_array).cloned(),
-            },
-        );
-        let variants: serde_json::Map<String, Value> = if rotate {
-            [("north", 0), ("east", 90), ("south", 180), ("west", 270)]
-                .into_iter()
-                .map(|(f, y)| (format!("facing={f}"), serde_json::json!({ "model": key, "y": y })))
-                .collect()
-        } else {
-            [(String::new(), serde_json::json!({ "model": key }))].into_iter().collect()
-        };
-        blockstates.insert(id.to_string(), serde_json::json!({ "variants": variants }));
-    };
-    for (id, tex) in [("chest", "normal"), ("trapped_chest", "trapped"), ("ender_chest", "ender")] {
-        let tex = format!("entity/chest/{tex}");
-        if textures.contains_key(&tex) {
-            add(id, chest_model(&tex), true);
-        }
+    let (new_models, states) = super::entity::entity_models(textures.keys().map(String::as_str));
+    for (key, model) in new_models {
+        let textures = model
+            .get("textures")
+            .and_then(Value::as_object)
+            .map(|o| o.iter().filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string()))).collect())
+            .unwrap_or_default();
+        models.insert(key, RawModel { parent: None, textures, elements: model.get("elements").and_then(Value::as_array).cloned() });
     }
-    let (side, base) = ("entity/decorated_pot/decorated_pot_side", "entity/decorated_pot/decorated_pot_base");
-    if textures.contains_key(side) && textures.contains_key(base) {
-        add("decorated_pot", decorated_pot_model(side, base), false);
+    for (id, state) in states {
+        blockstates.insert(id, state);
     }
-}
-
-/// A single chest facing north (latch on the north face) from a 64x64 chest
-/// sheet. UVs are the sheet's pixels / 4. The sheet is laid out for a model
-/// the game renders upside down, so side strips run bottom-up, the lid's
-/// outer top is the right-hand square and the body's underside the left one.
-fn chest_model(tex: &str) -> Value {
-    // One box face: pixel rect (x0, y0)-(x1, y1) on the sheet, as block-model uv.
-    let uv = |x0: f32, y0: f32, x1: f32, y1: f32| [x0 / 4.0, y0 / 4.0, x1 / 4.0, y1 / 4.0];
-    // Side strips of a 14-wide box whose strip row spans y0..y1 (drawn
-    // bottom-up): west, back (south), east, front (north).
-    let sides = |y0: f32, y1: f32| {
-        serde_json::json!({
-            "west": { "texture": "#t", "uv": uv(0.0, y1, 14.0, y0) },
-            "south": { "texture": "#t", "uv": uv(14.0, y1, 28.0, y0) },
-            "east": { "texture": "#t", "uv": uv(28.0, y1, 42.0, y0) },
-            "north": { "texture": "#t", "uv": uv(42.0, y1, 56.0, y0) },
-        })
-    };
-    let mut body = sides(33.0, 43.0);
-    body["down"] = serde_json::json!({ "texture": "#t", "uv": uv(14.0, 19.0, 28.0, 33.0) });
-    let mut lid = sides(14.0, 19.0);
-    lid["up"] = serde_json::json!({ "texture": "#t", "uv": uv(28.0, 0.0, 42.0, 14.0) });
-    serde_json::json!({
-        "textures": { "t": tex },
-        "elements": [
-            { "from": [1, 0, 1], "to": [15, 10, 15], "faces": body },
-            { "from": [1, 9, 1], "to": [15, 14, 15], "faces": lid },
-            { "from": [7, 7, 0], "to": [9, 11, 1], "faces": {
-                "north": { "texture": "#t", "uv": uv(1.0, 5.0, 3.0, 1.0) },
-                "up": { "texture": "#t", "uv": uv(1.0, 0.0, 3.0, 1.0) },
-                "down": { "texture": "#t", "uv": uv(3.0, 0.0, 5.0, 1.0) },
-                "west": { "texture": "#t", "uv": uv(0.0, 5.0, 1.0, 1.0) },
-                "east": { "texture": "#t", "uv": uv(3.0, 5.0, 4.0, 1.0) },
-            } },
-        ],
-    })
-}
-
-/// A plain decorated pot: the side sheet (16x16, the panel 14x16 at x 1..15) on the
-/// four sides of a 14-wide body, the base sheet (32x32; uv = pixels / 2) for
-/// the body's top and bottom and the neck: a narrow collar under a wider lip.
-fn decorated_pot_model(side: &str, base: &str) -> Value {
-    let uv = |x0: f32, y0: f32, x1: f32, y1: f32| [x0 / 2.0, y0 / 2.0, x1 / 2.0, y1 / 2.0];
-    // The panel is columns 1..15 of the sheet; 0 and 15 are transparent.
-    let panel = serde_json::json!({ "texture": "#side", "uv": [1, 0, 15, 16] });
-    let neck_sides = |y0: f32, y1: f32, w: f32| {
-        serde_json::json!({
-            "north": { "texture": "#base", "uv": uv(0.0, y1, w, y0) },
-            "east": { "texture": "#base", "uv": uv(w, y1, 2.0 * w, y0) },
-            "south": { "texture": "#base", "uv": uv(2.0 * w, y1, 3.0 * w, y0) },
-            "west": { "texture": "#base", "uv": uv(3.0 * w, y1, 4.0 * w, y0) },
-        })
-    };
-    let mut lip = neck_sides(8.0, 11.0, 8.0);
-    lip["up"] = serde_json::json!({ "texture": "#base", "uv": uv(16.0, 0.0, 24.0, 8.0) });
-    serde_json::json!({
-        "textures": { "side": side, "base": base },
-        "elements": [
-            { "from": [1, 0, 1], "to": [15, 13, 15], "faces": {
-                "north": panel, "south": panel, "east": panel, "west": panel,
-                "up": { "texture": "#base", "uv": uv(0.0, 13.0, 14.0, 27.0) },
-                "down": { "texture": "#base", "uv": uv(14.0, 13.0, 28.0, 27.0) },
-            } },
-            { "from": [5, 13, 5], "to": [11, 14, 11], "faces": neck_sides(11.0, 12.0, 6.0) },
-            { "from": [4, 14, 4], "to": [12, 16, 12], "faces": lip },
-        ],
-    })
 }

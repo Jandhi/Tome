@@ -12,6 +12,7 @@ pub mod assets;
 pub mod colors;
 pub mod diff;
 pub mod elevation;
+mod entity;
 pub mod grid;
 pub mod iso;
 pub mod light;

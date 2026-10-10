@@ -615,9 +615,14 @@ mod tests {
         assert_eq!(chest.elements.len(), 3);
         let latch = &chest.elements[2];
         assert!(latch.from[2] >= 15.0 && latch.faces.iter().any(|(f, _)| *f == Face6::South), "latch faces south");
-        assert_eq!(a.geometry("minecraft:decorated_pot").expect("pot").elements.len(), 3);
+        assert_eq!(a.geometry("minecraft:decorated_pot").expect("pot").elements.len(), 4);
+        // Beds per colour (mattress and two legs a half), signs per wood.
+        assert_eq!(a.geometry("minecraft:blue_bed[facing=east,part=head]").expect("bed").elements.len(), 3);
+        assert!(a.geometry("minecraft:spruce_sign[rotation=6]").is_some());
+        assert!(a.geometry("minecraft:oak_wall_sign[facing=west]").is_some());
+        assert!(a.geometry("minecraft:oak_wall_hanging_sign[facing=north]").is_some());
         // Other entity-rendered blocks and bare ids the jar lacks fall back.
-        assert!(a.geometry("minecraft:red_bed[facing=north,part=foot]").is_none());
+        assert!(a.geometry("minecraft:white_banner[rotation=0]").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());
         // Bare generator states resolve through the defaults.
         assert!(a.geometry("minecraft:lantern").is_some());
@@ -634,7 +639,7 @@ mod tests {
 
     // ---- viewer textures (jd/viewer-textures): textured export of the HTML viewer ----
 
-    /// 2x2 grass, a stair, a poppy, glass and a bed: every export path at once.
+    /// 2x2 grass, a stair, a poppy, glass and a banner: every export path at once.
     fn viewer_texture_scene() -> Scene {
         let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(8, 8, 8) });
         for (x, z) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
@@ -643,7 +648,7 @@ mod tests {
         s.insert(Point3D::new(4, 61, 1), "minecraft:oak_stairs[facing=east,half=bottom,shape=straight]");
         s.insert(Point3D::new(1, 62, 1), "minecraft:poppy");
         s.insert(Point3D::new(4, 61, 4), "minecraft:glass");
-        s.insert(Point3D::new(6, 61, 6), "minecraft:red_bed[facing=north,part=foot]");
+        s.insert(Point3D::new(6, 61, 6), "minecraft:white_banner[rotation=0]");
         s
     }
 
@@ -660,8 +665,8 @@ mod tests {
         let t = e.textured.expect("models give a textured buffer");
         assert_eq!(t.faces.len(), t.a_count * RECORD_BYTES + t.r_count * ROTATED_RECORD_BYTES);
         assert_eq!(e.stats.faces, e.flat.len() / RECORD_BYTES + t.a_count + t.r_count);
-        // The bed has no element model: it stays on the flat path with its hand colour.
-        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "bed faces");
+        // The banner has no element model: it stays on the flat path with its hand colour.
+        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "banner faces");
         // The poppy's cross model is two rotated quads.
         assert_eq!(t.r_count, 2, "rotated faces");
         assert_eq!(e.stats.rotated_faces, 2);
