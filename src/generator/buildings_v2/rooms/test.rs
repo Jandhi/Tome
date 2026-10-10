@@ -1425,12 +1425,11 @@ async fn build_irimoya_house_offline() {
 }
 
 /// Engawa regression: a large Japanese building with `bctx.engawa = true` insets
-/// its cellar/ground floor by 2 and its upper floors by 1 (so the upper storeys
-/// overhang the ground floor), raises onto a platform, and lays a 2-deep wooden
-/// deck with a pent-roof skirt over the outer ring. Builds a single-rect Manor
-/// (always ≥2 floors → guaranteed overhang), dumps blueprints, and asserts the
-/// differential inset, the 2-deep deck, and that the skirt only rings the outer
-/// deck (the cells not tucked under the overhang).
+/// every floor by 2 (a clean box set back from the veranda edge, see the
+/// `engawa` module doc), raises onto a platform, and lays a 2-deep wooden deck
+/// under an engawa roof. Builds a single-rect Manor (always ≥2 floors), dumps
+/// blueprints, and asserts the inset on every floor, the 2-deep deck, the roof
+/// rings and the corner post.
 #[tokio::test]
 async fn build_engawa_house_offline() {
     use crate::editor::World;
@@ -1468,32 +1467,18 @@ async fn build_engawa_house_offline() {
     std::fs::write("output/engawa_house.txt", render_ascii(&blueprint)).expect("write ascii");
     std::fs::write("output/engawa_house.svg", render_svg(&blueprint)).expect("write svg");
 
-    // Ground floor inset by exactly 2 on every side.
-    let ground = house.frame.rect_at(0, 0).expect("ground floor extent");
-    assert_eq!(
-        (ground.min().x, ground.min().y, ground.max().x, ground.max().y),
-        (rect.min().x + 2, rect.min().y + 2, rect.max().x - 2, rect.max().y - 2),
-        "ground floor should inset by 2 from {:?}, got {:?}", rect, ground,
-    );
-
-    // Tapered profile: the TOP floor also insets by 2 (roof pulled back in).
+    // Every floor insets by exactly 2 on every side.
+    let inset2 = (rect.min().x + 2, rect.min().y + 2, rect.max().x - 2, rect.max().y - 2);
+    let extent = |floor: u32| {
+        let r = house.frame.rect_at(0, floor).expect("floor extent");
+        (r.min().x, r.min().y, r.max().x, r.max().y)
+    };
     let floors = house.frame.floor_counts()[0];
     assert!(floors > 1, "Manor must be multi-floor; got {} floors", floors);
-    let top = house.frame.rect_at(0, floors - 1).expect("top floor extent");
-    assert_eq!(
-        (top.min().x, top.min().y, top.max().x, top.max().y),
-        (rect.min().x + 2, rect.min().y + 2, rect.max().x - 2, rect.max().y - 2),
-        "top floor should inset by 2 (matching the ground), got {:?}", top,
-    );
-    // Any MIDDLE floor insets by only 1 → it bulges out over the ground floor.
-    if floors >= 3 {
-        let mid = house.frame.rect_at(0, 1).expect("middle floor extent");
-        assert_eq!(
-            (mid.min().x, mid.min().y, mid.max().x, mid.max().y),
-            (rect.min().x + 1, rect.min().y + 1, rect.max().x - 1, rect.max().y - 1),
-            "middle floor should inset by 1 (bulging over the ground floor), got {:?}", mid,
-        );
+    for floor in 0..floors {
+        assert_eq!(extent(floor), inset2, "floor {floor} should inset by 2 from {:?}", rect);
     }
+    let (ground, top) = (extent(0), extent(floors - 1));
 
     let at = |p: Point2D, y: i32| editor.try_get_block(Point3D::new(p.x, y, p.y));
     let is_air = |b: &Block| b.id == "air".into() || b.id == "minecraft:air".into();
@@ -1514,11 +1499,12 @@ async fn build_engawa_house_offline() {
         );
     }
 
-    // Engawa roof: slabs on the inner ring (against the wall), stairs on the
-    // outer ring (the dripping eave edge).
+    // Engawa roof: full blocks on the inner ring (against the wall), stairs on
+    // the outer ring (the dripping eave edge).
+    let is_full = |b: &Block| !is_air(b) && !is_stair(b) && !is_slab(b);
     assert!(
-        at(inner_deck, roof_y).as_ref().map_or(false, is_slab),
-        "expected an inner-ring roof slab at {:?} y={}, got {:?}", inner_deck, roof_y, at(inner_deck, roof_y),
+        at(inner_deck, roof_y).as_ref().map_or(false, is_full),
+        "expected an inner-ring full roof block at {:?} y={}, got {:?}", inner_deck, roof_y, at(inner_deck, roof_y),
     );
     assert!(
         at(outer_deck, roof_y).as_ref().map_or(false, is_stair),
