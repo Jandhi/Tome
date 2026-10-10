@@ -246,8 +246,8 @@ fn stacked_under_main_stair(
 }
 
 /// Decide whether to add a cellar and, if so, excavate, build, and furnish it.
-/// Runs at the end of the pipeline; uses a derived RNG so it doesn't perturb
-/// the main stream that drives the rest of the building. Returns the descending
+/// Runs at the end of the pipeline on the house's `cellar` stream (`ctx.rng`),
+/// so the roll, theme and furniture shift nothing else. Returns the descending
 /// stair's cell positions (position 0 is the cellar landing) when a cellar was
 /// built, or None otherwise.
 pub async fn maybe_build_cellar(

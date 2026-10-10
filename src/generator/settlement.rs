@@ -1085,7 +1085,7 @@ pub async fn generate_town_with(
     // subdivider. The lot's single Plot is shared across tiers, so houses
     // placed against the arterial claim the prime frontage and later tiers
     // can't overlap them. Size gradient: houses on roads, cottages on lanes.
-    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseSeed, build_house};
     use crate::generator::buildings_v2::footprint::SizeClass;
     use crate::generator::city_houses::{
         frontage_from_roads, plot_from_block, rect_from_frontage,
@@ -1098,8 +1098,8 @@ pub async fn generate_town_with(
     // from this culture's catalog and apply them to buildings in a weighted
     // 60/30/10 mix (see StyleScheme), so the town reads as one coherent material
     // story with rare landmark punctuation. Variable wood pools lean toward the
-    // local biome's timber. `style_rng` is derived so style selection doesn't
-    // perturb the placement RNG stream.
+    // local biome's timber. Each building picks its style from the scheme and
+    // rolls its palette on its own `palette` house stream (building loop).
     use crate::generator::buildings_v2::style::{StyleScheme, local_wood_palette};
     let local_wood: Option<PaletteId> = editor
         .world()
@@ -1272,11 +1272,10 @@ pub async fn generate_town_with(
         .collect();
 
     // Town colour identity: two recurring colours sampled per ordinary building
-    // (50/25/25 with a random accent) plus a unique family colour per manor. A
-    // dedicated derived RNG keeps colour draws from shifting the placement
-    // streams. The two town colours feed the settlement namer further below.
+    // (50/25/25 with a random accent) plus a unique family colour per manor.
+    // Each building samples from its own `colour` house stream (see the
+    // building loop). The two town colours feed the settlement namer below.
     let color_scheme = ColorScheme::new(culture, MANOR_CAP, &mut rng.derive());
-    let mut color_rng = rng.derive();
     println!(
         "Town colours: dominant={:?}, second={:?}; manor family colours={:?}",
         color_scheme.town[0], color_scheme.town[1], color_scheme.manor,
@@ -1299,10 +1298,9 @@ pub async fn generate_town_with(
     }
     // Per-manor name signs are planned during the building loop (geometry known
     // once the door is cut) and lettered after the population pass rolls each
-    // family's surname. `sign_rng` keeps the designation draw off the placement
-    // streams. Designation varies per manor for flavour.
+    // family's surname. The designation (varied per manor for flavour) draws
+    // from the manor's own `sign` house stream.
     const MANOR_DESIGNATIONS: [&str; 4] = ["Manor", "Estate", "Hall", "House"];
-    let mut sign_rng = rng.derive();
     let mut manor_sign_sites: Vec<crate::generator::buildings_v2::exterior::ManorSignSite> =
         Vec::new();
     // Manor families for the chronicle, paired with their surname once the
@@ -1390,15 +1388,22 @@ pub async fn generate_town_with(
                 // rect overruns the staircased ribbon) still seat a house.
                 const MIN_FIT_DEPTH: i32 = 5;
                 while cursor + min_front <= chain_len {
+                    // One seed per slot attempt, drawn first and always: the
+                    // frontage walk is the only other draw on the town stream,
+                    // so however many draws this house's own decisions take
+                    // (or whether it is built at all), the next one is unmoved.
+                    // Every decision below draws from a named stream of it.
+                    let house_seed = HouseSeed::draw(&mut rng);
                     // A scanned manor forces its size + slice; everything else
                     // rolls a size from the tier pool and the deepest fitting depth.
                     let size_class = match manor_here {
                         Some(_) => SizeClass::Manor,
-                        None => *rng.choose(pool),
+                        None => *house_seed.stream("size").choose(pool),
                     };
+                    let mut core_rng = house_seed.stream("core");
                     let fw = match manor_here {
                         Some(c) => c.fw,
-                        None => rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
+                        None => core_rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
                     };
                     if cursor + fw > chain_len {
                         if manor_here.is_some() { break; }
@@ -1413,9 +1418,9 @@ pub async fn generate_town_with(
                             // so it gets a dome. Guarded so a 0 bias never draws RNG.
                             // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
                             // that fits, shrinking the house to hug a diagonal ribbon.
-                            let max_depth = rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
+                            let max_depth = core_rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
                             let want_square = culture.square_bias() > 0
-                                && rng.percent(culture.square_bias())
+                                && core_rng.percent(culture.square_bias())
                                 && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
                             if want_square {
                                 fw
@@ -1443,9 +1448,10 @@ pub async fn generate_town_with(
                     let scheme = block_district[lot_block[lot_idx]]
                         .and_then(|id| district_schemes.get(&id))
                         .unwrap_or(&style_scheme);
+                    let mut palette_rng = house_seed.stream("palette");
                     let mut palette = scheme
-                        .next_style(&mut style_rng)
-                        .roll_palette(&mut style_rng, &data, local_wood.as_ref());
+                        .next_style(&mut palette_rng)
+                        .roll_palette(&mut palette_rng, &data, local_wood.as_ref());
                     // Apply the town colour identity: a manor flies its unique
                     // family colour; every other building draws from the weighted
                     // town scheme. This `primary_color` then tints the building's
@@ -1455,6 +1461,7 @@ pub async fn generate_town_with(
                     } else {
                         None
                     };
+                    let mut color_rng = house_seed.stream("colour");
                     palette.primary_color = Some(
                         family_color.unwrap_or_else(|| color_scheme.next_color(&mut color_rng)),
                     );
@@ -1478,9 +1485,9 @@ pub async fn generate_town_with(
                     // Roof style weighted by culture + size (irimoya skews to the
                     // grander buildings; see `roof_styles_for`).
                     let roof_styles = culture.roof_styles_for(size_class);
-                    let roof_style = roof_styles[rng.rand_i32_range(0, roof_styles.len() as i32) as usize];
+                    let roof_style = roof_styles[house_seed.stream("roof").rand_i32_range(0, roof_styles.len() as i32) as usize];
                     let footprint = crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
-                        &mut rng, &plot, rect, frontage.outward, &size_class, culture.square_bias(),
+                        &mut house_seed.stream("footprint"), &plot, rect, frontage.outward, &size_class, culture.square_bias(),
                     );
                     // Door scoring needs the full footprint bounds, not just
                     // the core rect, so a wing extending rearward doesn't
@@ -1513,13 +1520,14 @@ pub async fn generate_town_with(
                         })
                     };
                     let mut bctx = BuildingContext::new(culture, size_class, roof_style);
+                    bctx.seed = Some(house_seed);
                     bctx.base_y_override = base_lvl;
                     // Roll the engawa veranda per the culture/size taste (every
                     // Japanese Manor, a third of Halls; see `engawa_chance`).
                     // `build_house` / `plan_engawa` still gate on the core rect
                     // staying large enough and fall back to plain walls otherwise.
                     let (en, ed) = culture.engawa_chance(size_class);
-                    bctx.engawa = ed > 0 && rng.rand_i32_range(0, ed as i32) < en as i32;
+                    bctx.engawa = ed > 0 && house_seed.stream("engawa").rand_i32_range(0, ed as i32) < en as i32;
                     // Roll the jetty per culture taste (medieval timber-frame
                     // upper-floor overhang; see `jetty_chance`). Frame generation
                     // gates on shape/floor-count/plot fit and silently no-ops when
@@ -1527,7 +1535,8 @@ pub async fn generate_town_with(
                     // Engawa wins in the pipeline, but the cultures don't overlap
                     // (jetty is medieval-only, engawa Japanese-only).
                     let (jn, jd) = culture.jetty_chance();
-                    bctx.jetty = jd > 0 && rng.rand_i32_range(0, jd as i32) < jn as i32;
+                    bctx.jetty = jd > 0 && house_seed.stream("jetty").rand_i32_range(0, jd as i32) < jn as i32;
+                    // `bctx.seed` is set, so `build_house` leaves the town stream alone.
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
@@ -1541,6 +1550,7 @@ pub async fn generate_town_with(
                                 ).await;
                                 // Plan its name sign now the door is known; it gets
                                 // lettered after the population pass names the family.
+                                let mut sign_rng = house_seed.stream("sign");
                                 let designation = MANOR_DESIGNATIONS[
                                     sign_rng.rand_i32_range(0, MANOR_DESIGNATIONS.len() as i32) as usize
                                 ].to_string();

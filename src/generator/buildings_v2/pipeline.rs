@@ -1,7 +1,9 @@
 //! Top-level building pipeline.
 //!
 //! `BuildCtx` bundles the four cross-cutting params (editor / data / palette / rng)
-//! that every placer needs. `build_house` assembles the full 18-step sequence —
+//! that every placer needs. `build_house` hands each stage its own named stream
+//! of the house seed (`ctx.on(&mut seed.stream(..))`, see `seed`), so no stage's
+//! draws shift another's. It assembles the full 18-step sequence —
 //! footprint → foundation → frame → walls → floors → walls → roof → rooms → furnish —
 //! including the non-linear walls↔rooms back-edge, where windows can only be
 //! placed after room partitioning reveals which wall cells are interior.
@@ -26,7 +28,7 @@ use crate::generator::buildings::BuildingID;
 use super::frame::{Frame, apply_jetty, generate_frame};
 use super::furnish::{decorate_rooftops, furnish_rooms};
 use super::exterior::decorate_exterior_walls;
-use super::{BuildingContext, Culture};
+use super::{BuildingContext, Culture, HouseSeed};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
 use super::roof::{place_roof, place_roof_ladder};
@@ -61,11 +63,20 @@ impl<'a> BuildCtx<'a> {
     ) -> Self {
         Self { editor, data, palette, rng }
     }
+
+    /// This context with `rng` in place of its own stream, for one stage:
+    /// `place_x(&mut ctx.on(&mut seed.stream("x")), ..)`.
+    pub fn on<'b>(&'b mut self, rng: &'b mut RNG) -> BuildCtx<'b> {
+        BuildCtx { editor: &mut *self.editor, data: self.data, palette: self.palette, rng }
+    }
 }
 
 /// Everything `build_house` produces. Callers use this for blueprint rendering
 /// and stats; the building is already placed in the editor by the time it returns.
 pub struct HouseOutput {
+    /// The seed every decision of this house drew from (`bctx.seed`, or the
+    /// one drawn from the caller's stream).
+    pub seed: HouseSeed,
     pub footprint: Footprint,
     pub frame: Frame,
     pub wall_segs: WallSegments,
@@ -94,6 +105,9 @@ pub struct HouseOutput {
 /// Runs the full per-building pipeline. Caller owns footprint generation and
 /// plot markup (so a single plot can host multiple buildings) and the final
 /// `editor.flush_buffer()`. `plot_bounds` is used for door-distance scoring.
+///
+/// Every stage draws from its own stream of the house seed (`bctx.seed`, else
+/// one draw from `ctx.rng`); the caller's `ctx.rng` is otherwise left alone.
 pub async fn build_house(
     ctx: &mut BuildCtx<'_>,
     footprint: Footprint,
@@ -104,11 +118,17 @@ pub async fn build_house(
     let roof_style = bctx.roof_style;
     let window_fill = bctx.window_fill;
 
+    // One seed per house; from here on nothing touches the caller's stream.
+    // Stages run on `ctx.on(&mut seed.stream(..))`; anything left on plain
+    // `ctx` (stages that draw nothing) falls back to the `build` stream.
+    let seed = bctx.seed.unwrap_or_else(|| HouseSeed::draw(ctx.rng));
+    let mut build_rng = seed.stream("build");
+    let ctx = &mut ctx.on(&mut build_rng);
 
     // Foundation: terrain analysis + level + stone course. Needs &mut Editor
     // to update the world heightmap. `base_y_override` pins the floor (e.g. to a
     // road's height) instead of deriving it from the terrain percentile.
-    let base_y = place_foundation(ctx, &footprint, bctx.base_y_override).await;
+    let base_y = place_foundation(&mut ctx.on(&mut seed.stream("foundation")), &footprint, bctx.base_y_override).await;
 
     // Engawa: inset the walled footprint by one on every open-air side and raise
     // it one block onto a decked platform. Japanese only; `plan_engawa` gates on
@@ -131,7 +151,7 @@ pub async fn build_house(
     // (find_boundaries, filled_points). The frame is generated from the
     // deep-inset footprint, so every engawa floor already sits at that inset —
     // no per-floor overhang. A non-engawa building may instead jetty its uppers.
-    let frame = generate_frame(building_footprint.clone(), frame_base_y, &size_class, ctx.rng);
+    let frame = generate_frame(building_footprint.clone(), frame_base_y, &size_class, &mut seed.stream("floors"));
     let frame = if engawa_plan.is_some() {
         frame
     } else if bctx.jetty {
@@ -150,7 +170,7 @@ pub async fn build_house(
     let mut wall_segs = build_segments(&frame);
     let footprint_area = building_footprint.filled_points().len() as i32;
     let boundary_cells = boundary_cell_set(building_footprint.rects());
-    place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, ctx.rng);
+    place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, &mut seed.stream("doors"));
 
     let has_attic = matches!(roof_style, RoofStyle::Gable(GablePitch::Double));
     let skip_ceilings = matches!(roof_style, RoofStyle::Flat);
@@ -161,19 +181,19 @@ pub async fn build_house(
         Vec::new()
     };
 
-    let floor_plan = place_floors(ctx, &frame, &wall_segs, has_attic, skip_ceilings).await;
+    let floor_plan = place_floors(&mut ctx.on(&mut seed.stream("floors.blocks")), seed, &frame, &wall_segs, has_attic, skip_ceilings).await;
     // Japanese walls are white shoji panels over a timber baseboard, divided by
     // vertical wood beams; other cultures keep the stone-base / solid fill.
     let (ground_infill, upper_infill) = match bctx.culture {
         Culture::Japanese => (WallInfill::TimberPanels, WallInfill::TimberPanels),
         _ => (WallInfill::StoneBase, WallInfill::Solid),
     };
-    place_wall_infill(ctx, &wall_segs, &ground_infill, &upper_infill).await;
+    place_wall_infill(&mut ctx.on(&mut seed.stream("walls.blocks")), &wall_segs, &ground_infill, &upper_infill).await;
 
     // Resolve the timber pattern now that the frame is known — auto-pick
     // filters out patterns whose studs wouldn't fit the longest wall segment.
-    // Use a derived RNG so adding the auto-pick path doesn't shift the main
-    // stream that rooms/furnish later draw from. Decorative timber framing is a
+    // Draws from its own `timber` stream, so pinning a pattern shifts nothing
+    // else. Decorative timber framing is a
     // Medieval feature; other cultures keep the plain skeleton (baseline corner
     // posts + crossbeams only).
     let timber_pattern = bctx.timber_pattern.unwrap_or_else(|| {
@@ -184,12 +204,11 @@ pub async fn build_house(
             .map(|s| s.length.max(0) as u32)
             .max()
             .unwrap_or(0);
-        let mut timber_rng = ctx.rng.derive();
-        TimberPattern::pick(size_class, max_seg_len, &mut timber_rng)
+        TimberPattern::pick(size_class, max_seg_len, &mut seed.stream("timber"))
     });
-    place_frame(ctx, &frame, &timber_pattern).await;
+    place_frame(&mut ctx.on(&mut seed.stream("frame.blocks")), &frame, &timber_pattern).await;
     ctx.editor.start_recording();
-    let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
+    let (gable_doorways, roof_heightmaps) = place_roof(&mut ctx.on(&mut seed.stream("roof.blocks")), seed, &frame, roof_style).await;
     let roof_cells = ctx.editor.stop_recording();
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
@@ -200,15 +219,15 @@ pub async fn build_house(
     // the skirt overlays cleanly; the deck planks overwrite the foundation
     // course in the perimeter ring.
     if let Some(plan) = &engawa_plan {
-        engawa::place_engawa(ctx, &frame, plan).await;
+        engawa::place_engawa(&mut ctx.on(&mut seed.stream("engawa.blocks")), &frame, plan).await;
     }
 
     // Rooms are built before windows so window placement can avoid interior
     // wall cells and attic-ladder walls.
-    let mut room_plan = build_rooms(ctx, &frame, &wall_segs, &floor_plan, has_attic, size_class).await;
+    let mut room_plan = build_rooms(&mut ctx.on(&mut seed.stream("rooms")), &frame, &wall_segs, &floor_plan, has_attic, size_class).await;
     mark_gable_doorways(&mut room_plan, &gable_doorways);
     let ladder_walls = place_attic_ladders(ctx, &mut room_plan, &frame, &floor_plan, &wall_segs, &gable_doorways).await;
-    assign_attic_types(&mut room_plan, size_class, ctx.rng);
+    assign_attic_types(&mut room_plan, size_class, &mut seed.stream("attic"));
 
     let roof_ladder_wall = if matches!(roof_style, RoofStyle::Flat) {
         place_roof_ladder(ctx, &frame, &floor_plan, &mut room_plan).await
@@ -228,9 +247,9 @@ pub async fn build_house(
     if let Some(wall_cell) = roof_ladder_wall {
         interior_wall_cells.insert(wall_cell);
     }
-    place_windows(&mut wall_segs, &interior_wall_cells, ctx.rng);
+    place_windows(&mut wall_segs, &interior_wall_cells, &mut seed.stream("windows"));
     mark_windows(&mut room_plan, &wall_segs);
-    place_openings(ctx, &wall_segs, window_fill, bctx.culture).await;
+    place_openings(&mut ctx.on(&mut seed.stream("curtains")), &wall_segs, window_fill, bctx.culture).await;
 
     // Reconcile doors with terrain: run parallel stair ramps along the wall
     // for doors where `base_y` doesn't match outside-terrain. Skipped for an
@@ -244,7 +263,7 @@ pub async fn build_house(
     // Save the real exterior entrance per door (bottom of the ramp, if any) for
     // the settlement's door→road connectors.
     let door_entrances = super::door_ramp::door_entrances(&wall_segs, &door_ramps);
-    place_door_ramps(ctx, &door_ramps).await;
+    place_door_ramps(&mut ctx.on(&mut seed.stream("ramps")), &door_ramps).await;
 
     assign_room_floors(&mut room_plan);
     place_room_floors(ctx, &frame, &room_plan, bctx).await;
@@ -253,26 +272,26 @@ pub async fn build_house(
     // Furnish, then harvest the NPC anchor scenes the placed furniture offers
     // (validated against the final per-room CellState inside furnish_rooms).
     // Rooftop terraces and the cellar add their own anchors below.
-    let mut npc_anchors = furnish_rooms(ctx, &mut room_plan, &frame, &roof_heightmaps).await;
+    let mut npc_anchors = furnish_rooms(&mut ctx.on(&mut seed.stream("furnish")), &mut room_plan, &frame, &roof_heightmaps).await;
 
     // Flat roofs are open terraces — decorate the deck (shade, seating, plants)
     // once the interior is furnished. Keeps the ladder exit clear.
     if matches!(roof_style, RoofStyle::Flat) {
-        npc_anchors.extend(decorate_rooftops(ctx, &frame, roof_ladder_wall).await);
+        npc_anchors.extend(decorate_rooftops(&mut ctx.on(&mut seed.stream("rooftop")), &frame, roof_ladder_wall).await);
     }
 
     // A few sparse props against the outside walls (barrels, pots, …) so the
     // house reads as lived-in. Skips doors, roads, and claimed cells.
-    decorate_exterior_walls(ctx, &building_footprint, &wall_segs).await;
+    decorate_exterior_walls(&mut ctx.on(&mut seed.stream("exterior")), &building_footprint, &wall_segs).await;
 
     check_building_invariants(&frame, &room_plan, &floor_plan, &roof_heightmaps)?;
 
-    // Cellar runs last: it carves below the finished building using a derived
-    // RNG, so it neither perturbs the main stream nor disturbs the room_plan
-    // that blueprint/invariant code iterates.
+    // Cellar runs last: it carves below the finished building on its own
+    // `cellar` stream, without disturbing the room_plan that blueprint/invariant
+    // code iterates.
     // Cellar uses `building_footprint` (the inset walls for an engawa) so its
     // retaining walls sit under the actual walls, not out under the veranda deck.
-    let cellar = cellar::maybe_build_cellar(ctx, &frame, &building_footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
+    let cellar = cellar::maybe_build_cellar(&mut ctx.on(&mut seed.stream("cellar")), &frame, &building_footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
     let has_cellar = cellar.is_some();
     let cellar_stair = cellar.map(|(stair, anchors)| {
         npc_anchors.extend(anchors);
@@ -305,6 +324,7 @@ pub async fn build_house(
     }
 
     Ok(HouseOutput {
+        seed,
         footprint,
         frame,
         wall_segs,

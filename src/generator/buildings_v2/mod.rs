@@ -12,11 +12,13 @@ pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod seed;
 pub mod showcase;
 pub mod style;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
+pub use seed::HouseSeed;
 pub use self::walls::{TimberPattern, WindowFill};
 
 use crate::generator::materials::PaletteId;
@@ -207,6 +209,12 @@ pub struct BuildingContext {
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
+    /// The house's seed: every decision `build_house` makes draws from its own
+    /// named stream of it (see `seed`). `None` = `build_house` draws one from
+    /// the caller's `BuildCtx::rng` (exactly one draw per house). Callers that
+    /// roll decisions before `build_house` (size, footprint, engawa, ...) set
+    /// it so those rolls and the build share one seed.
+    pub seed: Option<HouseSeed>,
 }
 
 impl BuildingContext {
@@ -225,6 +233,7 @@ impl BuildingContext {
             knee_wall: false,
             tall_top_floor: false,
             base_y_override: None,
+            seed: None,
         }
     }
 }

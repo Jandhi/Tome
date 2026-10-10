@@ -17,8 +17,9 @@ use crate::generator::buildings_v2::blueprint::{build_blueprint, render_ascii};
 use crate::generator::buildings_v2::footprint::merge::outline_from_rects;
 use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footprint, Plot, SizeClass};
 use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
+use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::generator::buildings_v2::rooms::{Room, RoomRole};
-use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput};
+use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput, HouseSeed};
 use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
 use crate::http_mod::GDMCHTTPProvider;
@@ -255,6 +256,43 @@ struct Built {
     house: HouseOutput,
 }
 
+/// One showcase house's footprint: `rects` pinned (relative to the plot's
+/// minimum corner, core first, as `--rects` takes them), else generated from
+/// the house's `footprint` stream. `Ok(None)` when no generated footprint fits.
+pub(crate) fn house_footprint(
+    rects: Option<&[Rect2D]>,
+    plot_bounds: Rect2D,
+    size_class: SizeClass,
+    culture: Culture,
+    seed: HouseSeed,
+) -> anyhow::Result<Option<Footprint>> {
+    let Some(rects) = rects else {
+        let plot = Plot::fully_usable(plot_bounds);
+        return Ok(generate_footprint_biased(&mut seed.stream("footprint"), &plot, &size_class, culture.square_bias()));
+    };
+    // Fixed footprint, shifted from plot-relative to build-area-local.
+    let shift = plot_bounds.min();
+    let rects: Vec<Rect2D> = rects.iter().map(|r| Rect2D::new(r.min() + shift, r.size)).collect();
+    if let Some(r) = rects.iter().find(|r| !plot_bounds.contains_rect(r)) {
+        anyhow::bail!(
+            "--rects: rect at {},{} size {}x{} does not fit the {}x{} plot",
+            r.min().x - shift.x, r.min().y - shift.y, r.size.x, r.size.y,
+            plot_bounds.size.x, plot_bounds.size.y,
+        );
+    }
+    Ok(Some(Footprint::new(outline_from_rects(&rects), rects)))
+}
+
+/// One showcase house's context: seeded, and with the settlement's engawa roll
+/// (only for the culture/size that takes it) on the house's `engawa` stream.
+pub(crate) fn house_context(culture: Culture, size_class: SizeClass, roof_style: RoofStyle, seed: HouseSeed) -> BuildingContext {
+    let mut bctx = BuildingContext::new(culture, size_class, roof_style);
+    bctx.seed = Some(seed);
+    let (en, ed) = culture.engawa_chance(size_class);
+    bctx.engawa = ed > 0 && seed.stream("engawa").rand_i32_range(0, ed as i32) < en as i32;
+    bctx
+}
+
 /// Build the houses, render each one and the whole grid, and return the output
 /// directory.
 pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
@@ -334,9 +372,10 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     let out_dir = PathBuf::from("output/houses").join(dir_name);
     std::fs::create_dir_all(&out_dir)?;
 
-    // One seed per house, drawn up front (each is exactly what `rng.derive()`
-    // would seed), so house i gets the same footprint, roof and engawa roll
-    // whatever variant or row it is built in.
+    // One seed per house, drawn up front, so house i is the same house whatever
+    // variant or row it is built in. Its footprint, engawa roll and every build
+    // decision draw from named streams of it (see `seed`), so `--rects` pins the
+    // footprint without moving any other decision.
     let mut rng = RNG::new(opts.seed);
     let house_seeds: Vec<i64> = (0..count).map(|_| rng.next_i64()).collect();
 
@@ -361,40 +400,18 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
                 Point2D::new(col * cell + CELL_MARGIN, row * cell + CELL_MARGIN),
                 Point2D::new((col + 1) * cell - 1 - CELL_MARGIN, (row + 1) * cell - 1 - CELL_MARGIN),
             );
-            let mut house_rng = RNG::new(house_seeds[i]);
-            let footprint = match &opts.rects {
-                Some(rects) => {
-                    // Fixed footprint, shifted from plot-relative to build-area-local.
-                    let shift = plot_bounds.min();
-                    let rects: Vec<Rect2D> = rects.iter().map(|r| Rect2D::new(r.min() + shift, r.size)).collect();
-                    if let Some(r) = rects.iter().find(|r| !plot_bounds.contains_rect(r)) {
-                        anyhow::bail!(
-                            "--rects: rect at {},{} size {}x{} does not fit the {}x{} plot",
-                            r.min().x - shift.x, r.min().y - shift.y, r.size.x, r.size.y,
-                            plot_bounds.size.x, plot_bounds.size.y,
-                        );
-                    }
-                    Footprint::new(outline_from_rects(&rects), rects)
-                }
-                None => {
-                    let plot = Plot::fully_usable(plot_bounds);
-                    match generate_footprint_biased(&mut house_rng, &plot, &size_class, opts.culture.square_bias()) {
-                        Some(f) => f,
-                        None => {
-                            println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: no footprint fits the plot, skipped");
-                            continue;
-                        }
-                    }
-                }
+            let seed = HouseSeed(house_seeds[i]);
+            let Some(footprint) = house_footprint(opts.rects.as_deref(), plot_bounds, size_class, opts.culture, seed)? else {
+                println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: no footprint fits the plot, skipped");
+                continue;
             };
-            let mut bctx = BuildingContext::new(opts.culture, size_class, roof_style);
+            let mut bctx = house_context(opts.culture, size_class, roof_style, seed);
             bctx.jetty = opts.jetty;
             bctx.knee_wall = variant.knee_wall();
             bctx.tall_top_floor = variant.tall_top();
-            // Same roll as the settlement: engawa only for the culture/size that takes it.
-            let (en, ed) = opts.culture.engawa_chance(size_class);
-            bctx.engawa = ed > 0 && house_rng.rand_i32_range(0, ed as i32) < en as i32;
-            let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut house_rng);
+            // `bctx.seed` is set, so `build_house` never draws from this one.
+            let mut caller_rng = RNG::new(seed.0);
+            let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut caller_rng);
             match build_house(&mut ctx, footprint, &bctx, plot_bounds).await {
                 Ok(house) => built.push(Built { i, variant, cell: cell_rect, ground_y, house }),
                 Err(msg) => println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: build failed, skipped: {msg}"),
