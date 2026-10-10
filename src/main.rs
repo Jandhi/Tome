@@ -26,6 +26,9 @@ pub mod data;
 pub mod config;
 pub mod ai;
 pub mod render;
+pub mod outputs;
+
+use crate::outputs::Artifact;
 
 #[cfg(feature = "visualizer")]
 pub mod visualizer;
@@ -105,7 +108,7 @@ fn random_seed() -> i64 {
         .unwrap_or(12345)
 }
 
-async fn run_generation_once(full: bool, seed_override: Option<i64>) {
+async fn run_generation_once(full: bool, seed_override: Option<i64>, out: crate::outputs::Outputs) {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     // Random per-run seed so each interactive run is a different town; printed so
@@ -115,9 +118,11 @@ async fn run_generation_once(full: bool, seed_override: Option<i64>) {
     let run_dir = std::path::PathBuf::from("output/runs").join(seed.0.to_string());
     // Save the terrain before generating: generation mutates the World's
     // heightmaps, and the fixture must hold the server's untouched values.
-    let fixture_path = run_dir.join("terrain.fixture.nbt.gz");
-    if let Err(e) = world.to_fixture().save(&fixture_path) {
-        log::warn!("Failed to save terrain fixture to {}: {e:#}", fixture_path.display());
+    if out.has(Artifact::Fixture) {
+        let fixture_path = run_dir.join("terrain.fixture.nbt.gz");
+        if let Err(e) = world.to_fixture().save(&fixture_path) {
+            log::warn!("Failed to save terrain fixture to {}: {e:#}", fixture_path.display());
+        }
     }
     let mut editor = world.get_editor();
     println!("Generating town with seed {}", seed.0);
@@ -125,62 +130,77 @@ async fn run_generation_once(full: bool, seed_override: Option<i64>) {
     let options = crate::generator::settlement::TownOptions { chronicle: full };
     let mut report = crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
 
-    if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir, &mut report) {
+    if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir, &mut report, out) {
         log::warn!("Failed to save/render town scene in {}: {e:#}", run_dir.display());
     }
 }
 
-/// Capture the generated town as `town.scene` in `dir`, write the run's
-/// `metrics.json` (the [`TownReport`](crate::generator::report::TownReport))
-/// and every house's spec (`houses/house_<n>.spec.yaml`) beside it, and render
-/// its views next to them.
+/// Write the run's artifacts that `out` asks for into `dir`: `metrics.json`
+/// (the [`TownReport`](crate::generator::report::TownReport)), every house's
+/// spec (`houses/house_<n>.spec.yaml`), the captured `town.scene`, its rendered
+/// views and `viewer.html`. The scene is only captured when something needs it.
 fn save_and_render_town(
     editor: &crate::editor::Editor,
     seed: i64,
     source: &str,
     dir: &std::path::Path,
     report: &mut crate::generator::report::TownReport,
+    out: crate::outputs::Outputs,
 ) -> anyhow::Result<()> {
     let captured_at = chrono::Local::now().to_rfc3339();
     report.source = source.into();
     report.captured_at = captured_at.clone();
-    let metrics_path = dir.join("metrics.json");
-    report.save(&metrics_path)?;
-    println!("Saved metrics to {}", metrics_path.display());
-    // One spec per buildings_v2 house; the directory is rewritten whole so a
-    // rerun with fewer houses leaves no stale specs behind.
-    let houses_dir = dir.join("houses");
-    if houses_dir.exists() {
-        std::fs::remove_dir_all(&houses_dir)?;
+    std::fs::create_dir_all(dir)?;
+    if out.has(Artifact::Metrics) {
+        let metrics_path = dir.join("metrics.json");
+        report.save(&metrics_path)?;
+        println!("Saved metrics to {}", metrics_path.display());
     }
-    std::fs::create_dir_all(&houses_dir)?;
-    for (n, spec) in report.house_specs.iter().enumerate() {
-        spec.save(houses_dir.join(format!("house_{n:03}.spec.yaml")))?;
+    if out.has(Artifact::Specs) {
+        // One spec per buildings_v2 house; the directory is rewritten whole so a
+        // rerun with fewer houses leaves no stale specs behind.
+        let houses_dir = dir.join("houses");
+        if houses_dir.exists() {
+            std::fs::remove_dir_all(&houses_dir)?;
+        }
+        std::fs::create_dir_all(&houses_dir)?;
+        for (n, spec) in report.house_specs.iter().enumerate() {
+            spec.save(houses_dir.join(format!("house_{n:03}.spec.yaml")))?;
+        }
+        println!("Saved {} house specs to {}", report.house_specs.len(), houses_dir.display());
     }
-    println!("Saved {} house specs to {}", report.house_specs.len(), houses_dir.display());
-    let mut scene = editor.capture_scene();
-    let b = scene.bounds;
-    scene.meta.insert("seed".into(), seed.to_string());
-    scene.meta.insert("source".into(), source.into());
-    scene.meta.insert("captured_at".into(), captured_at);
-    scene.meta.insert(
-        "build_area".into(),
-        format!("origin {} {} {} size {} {} {}", b.origin.x, b.origin.y, b.origin.z, b.size.x, b.size.y, b.size.z),
-    );
-    let scene_path = dir.join("town.scene");
-    scene.save(&scene_path)?;
-    println!("Saved scene ({} blocks) to {}", scene.blocks.len(), scene_path.display());
-    for path in crate::render::render_all(&scene, dir)? {
-        println!("Rendered {}", path.display());
+    if [Artifact::Scene, Artifact::Renders, Artifact::Viewer].iter().any(|a| out.has(*a)) {
+        let mut scene = editor.capture_scene();
+        let b = scene.bounds;
+        scene.meta.insert("seed".into(), seed.to_string());
+        scene.meta.insert("source".into(), source.into());
+        scene.meta.insert("captured_at".into(), captured_at);
+        scene.meta.insert(
+            "build_area".into(),
+            format!("origin {} {} {} size {} {} {}", b.origin.x, b.origin.y, b.origin.z, b.size.x, b.size.y, b.size.z),
+        );
+        if out.has(Artifact::Scene) {
+            let scene_path = dir.join("town.scene");
+            scene.save(&scene_path)?;
+            println!("Saved scene ({} blocks) to {}", scene.blocks.len(), scene_path.display());
+        }
+        if out.has(Artifact::Renders) {
+            for path in crate::render::render_all(&scene, dir)? {
+                println!("Rendered {}", path.display());
+            }
+        }
+        if out.has(Artifact::Viewer) {
+            write_viewer(&scene, &dir.join("viewer.html"))?;
+        }
     }
-    println!("Run output in {}", dir.display());
+    println!("Run output in {} ({})", dir.display(), out.names());
     Ok(())
 }
 
 /// `--offline <fixture> [seed]`: build a town from a saved terrain fixture with
 /// no server at all, then save and render it exactly like a live run, under
 /// `output/runs/offline-<seed>/`.
-async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Result<()> {
+async fn run_offline(fixture_path: &str, seed_arg: Option<&str>, out: crate::outputs::Outputs) -> anyhow::Result<()> {
     let t0 = std::time::Instant::now();
     let fixture = crate::editor::fixture::TerrainFixture::load(fixture_path)?;
     let world = World::from_fixture(fixture);
@@ -197,7 +217,8 @@ async fn run_offline(fixture_path: &str, seed_arg: Option<&str>) -> anyhow::Resu
     println!("Generated in {:.1?}", t1.elapsed());
     let dir = std::path::PathBuf::from("output/runs").join(format!("offline-{}", seed.0));
     let t2 = std::time::Instant::now();
-    save_and_render_town(&editor, seed.0, "offline", &dir, &mut report)?;
+    // The terrain came from a fixture file: there is none to write.
+    save_and_render_town(&editor, seed.0, "offline", &dir, &mut report, out.without(Artifact::Fixture))?;
     println!("Saved and rendered in {:.1?}; total {:.1?}", t2.elapsed(), t0.elapsed());
     Ok(())
 }
@@ -363,7 +384,7 @@ async fn save_fixture_only(out_path: &str) -> anyhow::Result<()> {
 /// world by default; `--live` builds into the server's build area. `--variants`
 /// builds one row per upper-storey variant (base, knee, tall, both). `--light`
 /// lights the room views with sky light and lamps (the directory gains `-day`, `-night`, ...).
-async fn run_houses(args: &[String]) -> anyhow::Result<()> {
+async fn run_houses(args: &[String], out: crate::outputs::Outputs) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
@@ -403,6 +424,7 @@ async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         rects: arg_after("--rects", 1).map(parse_rects).transpose()?,
         lighting: arg_after("--light", 1).map(crate::render::light::Lighting::parse).transpose()?,
         specs,
+        out,
     };
     run_showcase(&opts).await?;
     Ok(())
@@ -418,8 +440,20 @@ async fn main() {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
-    if args.iter().any(|a| a == "--houses") {
-        if let Err(e) = run_houses(&args).await {
+    // `--out` picks which artifacts a run writes (see `outputs`); checked
+    // before anything is generated so a typo fails at once.
+    use crate::outputs::Outputs;
+    let houses = args.iter().any(|a| a == "--houses");
+    let defaults = if houses { Outputs::houses_default() } else { Outputs::town_default() };
+    let out = match Outputs::parse(arg_after("--out", 1), defaults) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("{e:#}");
+            return;
+        }
+    };
+    if houses {
+        if let Err(e) = run_houses(&args, out).await {
             eprintln!("House showcase failed: {e:#}");
             std::process::exit(1);
         }
@@ -448,7 +482,9 @@ async fn main() {
             eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");
             std::process::exit(2);
         };
-        if let Err(e) = run_offline(fixture_path, arg_after("--offline", 2)).await {
+        // The seed is optional, so a flag right after the fixture is not it.
+        let seed = arg_after("--offline", 2).filter(|s| !s.starts_with("--"));
+        if let Err(e) = run_offline(fixture_path, seed, out).await {
             eprintln!("Offline run failed: {e:#}");
             std::process::exit(1);
         }
@@ -546,6 +582,6 @@ async fn main() {
     }
 
     if !use_visualizer {
-        run_generation_once(full, seed_arg).await;
+        run_generation_once(full, seed_arg, out).await;
     }
 }

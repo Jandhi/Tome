@@ -115,7 +115,7 @@ palette, timber or roof.
    `offline_town_is_deterministic` and the invariant property test must hold.
 2. **Spec type + emit.** `HouseSpec` with serde (snake_case names), derives on
    the decision enums, `roll_palette` reporting its picks. `--houses` writes
-   `<house>.spec.yaml`; town runs write `output/runs/<seed>/houses/*.spec.yaml`.
+   `<house>.spec.yaml`; town runs write `output/runs/<seed>/houses/*.spec.yaml` (opt-in since `--out`: `--out +specs`).
    Fix the duplicate `rooms` key in houses.json.
 3. **Build from spec.** `--houses --spec <file>...` builds one house per spec;
    `--rects` becomes shorthand for pinning `footprint`. Tests: an emitted spec

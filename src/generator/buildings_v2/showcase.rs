@@ -37,6 +37,7 @@ use crate::render::light::{LightMap, Lighting};
 use crate::render::lit::Lit;
 use crate::render::perspective::{contact_sheet, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
 use crate::render::topdown::render_topdown_with;
+use crate::outputs::Artifact;
 use crate::render::{render_views, RenderOptions, Scene};
 
 /// Flat ground: the grass surface sits at y = 63, the first air at 64.
@@ -148,6 +149,9 @@ pub struct ShowcaseOptions {
     /// `size` (unless mixed), `jetty`, `knee_wall` and `tall_top` (when set),
     /// `rects` (the footprint).
     pub specs: Vec<PathBuf>,
+    /// Which artifacts to write (`--out`). Renders are always written, they are
+    /// what a showcase is for; the scene, specs, houses.json and viewer follow this.
+    pub out: crate::outputs::Outputs,
 }
 
 /// The house seed of house `k` of `count` built from one spec whose seed is
@@ -585,7 +589,12 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     scene.meta.insert("seed".into(), opts.seed.to_string());
     scene.meta.insert("source".into(), "houses".into());
     scene.meta.insert("showcase".into(), out_dir.file_name().unwrap_or_default().to_string_lossy().into_owned());
-    scene.save(out_dir.join("town.scene"))?;
+    if opts.out.has(Artifact::Scene) {
+        scene.save(out_dir.join("town.scene"))?;
+    }
+    if opts.out.has(Artifact::Viewer) {
+        crate::render::viewer::write_viewer_html_with(&scene, None, &out_dir.join("viewer.html"), None)?;
+    }
     let px = opts.px.max(1);
 
     // Contact sheet: every standard view of the whole grid, iso tile shrunk so
@@ -659,8 +668,10 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         }
 
         // The house's decisions, footprint relative to its plot (`--rects` form).
-        let spec_file = format!("{prefix}.spec.yaml");
-        b.spec.save(out_dir.join(&spec_file))?;
+        let spec_file = opts.out.has(Artifact::Specs).then(|| format!("{prefix}.spec.yaml"));
+        if let Some(f) = &spec_file {
+            b.spec.save(out_dir.join(f))?;
+        }
 
         let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
         let plan_file = format!("{prefix}_plan.txt");
@@ -980,7 +991,9 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             l.tag(), l.daylight, light_time,
         );
     }
-    std::fs::write(out_dir.join("houses.json"), serde_json::to_string_pretty(&summary)?)?;
+    if opts.out.has(Artifact::Metrics) {
+        std::fs::write(out_dir.join("houses.json"), serde_json::to_string_pretty(&summary)?)?;
+    }
     println!(
         "{} of {} houses built on a {grid_w}x{grid_d} grid; output in {}",
         built.len(), requested, out_dir.display(),
