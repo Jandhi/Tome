@@ -141,6 +141,17 @@ pub(super) fn rotate_block(block: &Block, dir: Cardinal) -> Block {
                 state.insert("facing".into(), rotated.to_string());
             }
         }
+        // A quarter turn swaps a horizontal axis (logs, hay, chains).
+        if matches!(dir, Cardinal::East | Cardinal::West) {
+            let swapped = match state.get("axis").map(String::as_str) {
+                Some("x") => Some("z"),
+                Some("z") => Some("x"),
+                _ => None,
+            };
+            if let Some(axis) = swapped {
+                state.insert("axis".into(), axis.into());
+            }
+        }
     }
     result
 }
