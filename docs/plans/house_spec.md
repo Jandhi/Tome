@@ -85,6 +85,12 @@ palette, timber or roof.
    `--rects` becomes shorthand for pinning `footprint`. Tests: an emitted spec
    rebuilds a byte-identical `town.scene`; pinning a field to its drawn value
    changes nothing; changing `timber` changes only timber blocks.
+   **Sweeps:** `--houses --spec <file> --count N` builds the spec N times with
+   house seeds derived from the spec's seed and the index, so only the open
+   fields vary, into one contact sheet plus each house's resolved spec. Fixed
+   shape + open style shows off the generator; fixed style + open shape
+   iterates on a style across many shapes (sweep before/after a change and
+   `--compare` the two `town.scene`s). Same spec + count = same sweep.
 4. **Validation.** Errors that name the field: rects overlapping, disconnected
    or outside the plot, room lists that don't match rects/floors, unknown
    names (listing the valid ones). Aimed at an LLM fixing its own spec.
