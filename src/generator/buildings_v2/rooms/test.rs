@@ -192,7 +192,6 @@ fn house_single_floor_with_wing() {
 
 #[test]
 fn house_two_floors() {
-    let mut rng = RNG::new(13);
     let frame = make_test_frame(
         vec![
             Rect2D::from_points(Point2D::new(0, 0), Point2D::new(8, 6)),
@@ -200,13 +199,23 @@ fn house_two_floors() {
         ],
         vec![2, 2],
     );
-    let rooms = test_assign_types(&frame, SizeClass::House, false, &mut rng);
-    // Floor 0: core=Hearth, wing=Storage
-    assert_eq!(rooms[0], (0, 0, RoomType::Hearth));
-    assert_eq!(rooms[1], (1, 0, RoomType::Storage));
-    // Floor 1: all Bedroom
-    assert_eq!(rooms[2], (0, 1, RoomType::Bedroom));
-    assert_eq!(rooms[3], (1, 1, RoomType::Bedroom));
+    // A House wants 1 or 2 bedrooms (a random target), so across seeds the
+    // upstairs wing is sometimes the second bedroom and sometimes a study or
+    // storage room; everything else is fixed.
+    let (mut wing_bedroom, mut wing_other) = (false, false);
+    for seed in 0..50 {
+        let rooms = test_assign_types(&frame, SizeClass::House, false, &mut RNG::new(seed));
+        // Floor 0: core=Hearth, wing=Storage. Floor 1: the core is the first bedroom.
+        assert_eq!(rooms[0], (0, 0, RoomType::Hearth), "seed {seed}");
+        assert_eq!(rooms[1], (1, 0, RoomType::Storage), "seed {seed}");
+        assert_eq!(rooms[2], (0, 1, RoomType::Bedroom), "seed {seed}");
+        match rooms[3] {
+            (1, 1, RoomType::Bedroom) => wing_bedroom = true,
+            (1, 1, RoomType::Study | RoomType::Storage) => wing_other = true,
+            other => panic!("seed {seed}: unexpected upstairs wing {other:?}"),
+        }
+    }
+    assert!(wing_bedroom && wing_other, "both bedroom targets should occur across seeds");
 }
 
 #[test]
