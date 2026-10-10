@@ -5,11 +5,15 @@
 //! generator can be judged visually inside and out. Offline by default, on a
 //! blank flat grass world (no server); `--live` builds into the server's build
 //! area instead. `--variants` builds every house once per upper-storey
-//! variant, one row per variant; `--rects` pins the footprint; `--light`
+//! variant, one row per variant; `--rects` pins the footprint; `--spec` builds
+//! house specs (one house each, or `--count N` of each as a sweep, see
+//! [`spec_house_seed`]); `--light`
 //! lights the room views (sky and lamps; the flat views stay unlit).
 //! Entry point: `cargo run --profile fast -- --houses [options]`.
 
 use std::path::PathBuf;
+
+use anyhow::Context;
 use std::time::{Duration, Instant};
 
 use crate::editor::{Editor, World};
@@ -20,9 +24,8 @@ use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footp
 use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
 use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::generator::buildings_v2::rooms::{Room, RoomRole};
-use crate::generator::buildings_v2::spec::HouseSpec;
-use crate::generator::buildings_v2::style::PalettePicks;
-use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput, HouseSeed};
+use crate::generator::buildings_v2::spec::{resolve, HouseSpec, PaletteSpec, RectSpec, DEFAULT_STYLE};
+use crate::generator::buildings_v2::{BuildingContext, Culture, HouseOutput, HouseSeed};
 use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
 use crate::http_mod::GDMCHTTPProvider;
@@ -139,6 +142,24 @@ pub struct ShowcaseOptions {
     /// contact sheet) under this daylight; the output directory gains the
     /// lighting's tag. `None` renders them unlit.
     pub lighting: Option<Lighting>,
+    /// House spec files (`--spec`): build each one instead of the culture's
+    /// size/roof cycle, `count` times each (a sweep, see [`spec_house_seed`])
+    /// when `count` > 1. The flags fill the specs' open fields: `culture`,
+    /// `size` (unless mixed), `jetty`, `knee_wall` and `tall_top` (when set),
+    /// `rects` (the footprint).
+    pub specs: Vec<PathBuf>,
+}
+
+/// The house seed of house `k` of `count` built from one spec whose seed is
+/// `base` (the spec's `seed`, else the showcase seed's draw for that spec):
+/// `base` itself for a single house, else the first draw of the stream keyed
+/// by `base` and `"sweep<k>"`. Same spec, same count: same houses.
+pub fn spec_house_seed(base: i64, k: usize, count: usize) -> HouseSeed {
+    if count <= 1 {
+        HouseSeed(base)
+    } else {
+        HouseSeed(RNG::from_seed_and_string(crate::noise::Seed(base), &format!("sweep{k}")).next_i64())
+    }
 }
 
 /// Parse a `--rects` spec: `x,z,w,h;x,z,w,h;...`, one rect per `;`, core first.
@@ -170,6 +191,14 @@ fn label(debug: impl std::fmt::Debug) -> String {
         .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
         .collect();
     s.split('_').filter(|p| !p.is_empty()).collect::<Vec<_>>().join("_")
+}
+
+/// A spec file's name as a file-name label, `.yaml` and `.spec` dropped:
+/// `house_base_01.spec.yaml` -> `house_base_01`.
+fn spec_stem(path: &std::path::Path) -> String {
+    let name = path.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = name.trim_end_matches(".yaml").trim_end_matches(".yml").trim_end_matches(".spec");
+    label(name)
 }
 
 /// Camera for a player standing in build-area-local cell `stand` on the floor
@@ -248,10 +277,22 @@ pub fn grid_layout(opts: &ShowcaseOptions) -> (i32, usize, usize) {
     }
 }
 
+/// One house to build: its spec (the flags' pins, or a spec file's with the
+/// flags filling its open fields), seed and file prefix.
+struct Job {
+    i: usize,
+    variant: Variant,
+    spec: HouseSpec,
+    seed: HouseSeed,
+    prefix: String,
+}
+
 /// One house as built, with where it stands.
 struct Built {
     i: usize,
     variant: Variant,
+    /// File-name prefix of its renders (`house_base_03`, `house_<spec>_03`).
+    prefix: String,
     /// Build-area-local grid cell.
     cell: Rect2D,
     /// Lowest terrain under the cell before anything was built (local y).
@@ -280,7 +321,7 @@ pub(crate) fn house_footprint(
     let rects: Vec<Rect2D> = rects.iter().map(|r| Rect2D::new(r.min() + shift, r.size)).collect();
     if let Some(r) = rects.iter().find(|r| !plot_bounds.contains_rect(r)) {
         anyhow::bail!(
-            "--rects: rect at {},{} size {}x{} does not fit the {}x{} plot",
+            "footprint: rect at {},{} size {}x{} does not fit the {}x{} plot",
             r.min().x - shift.x, r.min().y - shift.y, r.size.x, r.size.y,
             plot_bounds.size.x, plot_bounds.size.y,
         );
@@ -304,18 +345,113 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     if opts.variants && (opts.knee_wall || opts.tall_top) {
         anyhow::bail!("--variants already builds every variant; drop --knee-wall / --tall-top");
     }
-    let sizes: Vec<SizeClass> = match opts.size {
-        SizeSpec::Mixed => vec![SizeClass::Cottage, SizeClass::House, SizeClass::Hall, SizeClass::Manor],
-        SizeSpec::One(s) => vec![s],
-    };
+    if opts.variants && !opts.specs.is_empty() {
+        anyhow::bail!("--variants doesn't take --spec; pin knee_wall / tall_top_floor in the spec instead");
+    }
+    let data = LoadedData::load()?;
+    let base_palette_id = opts.culture.palette_id();
+    let base_palette = data
+        .palettes
+        .get(&base_palette_id)
+        .ok_or_else(|| anyhow::anyhow!("palette {base_palette_id:?} not found"))?;
     let count = opts.count.max(1);
-    let (cell, cols, rows) = grid_layout(opts);
-    let (grid_w, grid_d) = (cols as i32 * cell, rows as i32 * cell);
     let variants: Vec<Variant> = if opts.variants {
         Variant::ALL.to_vec()
     } else {
         vec![Variant::from_flags(opts.knee_wall, opts.tall_top)]
     };
+
+    // One seed per house, drawn up front, so house i is the same house whatever
+    // variant or row it is built in (and spec j, when its seed is open, gets
+    // the seed plain house j would). Its footprint, engawa roll and every build
+    // decision draw from named streams of it (see `seed`), so `--rects` pins the
+    // footprint without moving any other decision.
+    let mut rng = RNG::new(opts.seed);
+    let draws = count.max(opts.specs.len());
+    let house_seeds: Vec<i64> = (0..draws).map(|_| rng.next_i64()).collect();
+
+    // Every house is a spec resolved against its seed. Plain `--houses` pins
+    // what the flags decide: the culture, its default palette and colour, the
+    // cycled size and roof, jetty, the variant and `--rects`; the rest is drawn.
+    let rect_specs = |rects: &[Rect2D]| -> Vec<RectSpec> {
+        rects.iter().map(|r| RectSpec { x: r.min().x, z: r.min().y, w: r.size.x, h: r.size.y, floors: None }).collect()
+    };
+    let mut jobs: Vec<Job> = Vec::new();
+    if opts.specs.is_empty() {
+        let sizes: Vec<SizeClass> = match opts.size {
+            SizeSpec::Mixed => vec![SizeClass::Cottage, SizeClass::House, SizeClass::Hall, SizeClass::Manor],
+            SizeSpec::One(s) => vec![s],
+        };
+        let roof_styles = opts.culture.roof_styles();
+        for &variant in &variants {
+            for i in 0..count {
+                let spec = HouseSpec {
+                    culture: Some(opts.culture),
+                    size: Some(sizes[i % sizes.len()]),
+                    palette: Some(PaletteSpec { style: Some(DEFAULT_STYLE.into()), ..Default::default() }),
+                    colour: base_palette.primary_color,
+                    roof: Some(roof_styles[i % roof_styles.len()]),
+                    footprint: opts.rects.as_deref().map(rect_specs),
+                    jetty: Some(opts.jetty),
+                    knee_wall: Some(variant.knee_wall()),
+                    tall_top_floor: Some(variant.tall_top()),
+                    ..Default::default()
+                };
+                let prefix = format!("house_{}_{i:02}", variant.tag());
+                jobs.push(Job { i, variant, spec, seed: HouseSeed(house_seeds[i]), prefix });
+            }
+        }
+    } else {
+        for (j, path) in opts.specs.iter().enumerate() {
+            let mut spec = HouseSpec::load(path)?;
+            spec.culture.get_or_insert(opts.culture);
+            if let SizeSpec::One(s) = opts.size {
+                spec.size.get_or_insert(s);
+            }
+            if opts.jetty {
+                spec.jetty.get_or_insert(true);
+            }
+            if opts.knee_wall {
+                spec.knee_wall.get_or_insert(true);
+            }
+            if opts.tall_top {
+                spec.tall_top_floor.get_or_insert(true);
+            }
+            if let Some(rects) = &opts.rects {
+                spec.footprint.get_or_insert_with(|| rect_specs(rects));
+            }
+            let base = spec.seed.unwrap_or(house_seeds[j]);
+            let stem = spec_stem(path);
+            for k in 0..count {
+                let prefix = format!("{stem}_{k:02}");
+                let i = j * count + k;
+                jobs.push(Job { i, variant: variants[0], spec: spec.clone(), seed: spec_house_seed(base, k, count), prefix });
+            }
+        }
+    }
+
+    // Grid: the size-class layout for plain houses; for specs, cells of the
+    // manor size grown to the largest plot a spec asks for (`site.plot`, or a
+    // pinned footprint's extent).
+    let default_inner = 48 - 2 * CELL_MARGIN;
+    let spec_plot = |spec: &HouseSpec| -> Point2D {
+        let ext = spec.plot_extent();
+        let has_site_plot = spec.site.as_ref().is_some_and(|s| s.plot.is_some());
+        match ext {
+            Some(e) if has_site_plot => e,
+            Some(e) => Point2D::new(e.x.max(default_inner), e.y.max(default_inner)),
+            None => Point2D::new(default_inner, default_inner),
+        }
+    };
+    let (cell, cols, rows) = if opts.specs.is_empty() {
+        grid_layout(opts)
+    } else {
+        let inner = jobs.iter().map(|j| spec_plot(&j.spec)).fold(default_inner, |m, p| m.max(p.x).max(p.y));
+        let n = jobs.len();
+        let cols = (n as f64).sqrt().ceil() as usize;
+        (inner + 2 * CELL_MARGIN, cols, n.div_ceil(cols))
+    };
+    let (grid_w, grid_d) = (cols as i32 * cell, rows as i32 * cell);
 
     // The world: the server's, with the grid laid out from its build area's
     // minimum corner, or a synthetic flat one exactly the size of the grid.
@@ -340,36 +476,42 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     let to_abs = |p: Point2D| Point2D::new(p.x + origin.x, p.y + origin.z);
     let mut editor: Editor = if opts.live { world.get_editor() } else { world.get_offline_editor() };
 
-    let data = LoadedData::load()?;
-    let palette_id = opts.culture.palette_id();
-    let palette = data
-        .palettes
-        .get(&palette_id)
-        .ok_or_else(|| anyhow::anyhow!("palette {palette_id:?} not found"))?
-        .clone();
-    let roof_styles = opts.culture.roof_styles();
-
-    let mut dir_name = format!("{}-{}", label(opts.culture), opts.seed);
+    let mut dir_name = if opts.specs.is_empty() {
+        format!("{}-{}", label(opts.culture), opts.seed)
+    } else {
+        // `spec-<first stem>[+<more specs>][-x<count>]`, so it never meets a
+        // `<culture>-<seed>` directory.
+        let mut name = format!("spec-{}", spec_stem(&opts.specs[0]));
+        if opts.specs.len() > 1 {
+            name.push_str(&format!("+{}", opts.specs.len() - 1));
+        }
+        if count > 1 {
+            name.push_str(&format!("-x{count}"));
+        }
+        name
+    };
     if opts.live {
         dir_name.insert_str(0, "live-");
     }
-    if let SizeSpec::One(s) = opts.size {
-        dir_name.push_str(&format!("-{}", label(s)));
-    }
-    if opts.jetty {
-        dir_name.push_str("-jetty");
-    }
-    if opts.knee_wall {
-        dir_name.push_str("-knee");
-    }
-    if opts.tall_top {
-        dir_name.push_str("-tall");
-    }
-    if opts.variants {
-        dir_name.push_str("-variants");
-    }
-    if opts.rects.is_some() {
-        dir_name.push_str("-rects");
+    if opts.specs.is_empty() {
+        if let SizeSpec::One(s) = opts.size {
+            dir_name.push_str(&format!("-{}", label(s)));
+        }
+        if opts.jetty {
+            dir_name.push_str("-jetty");
+        }
+        if opts.knee_wall {
+            dir_name.push_str("-knee");
+        }
+        if opts.tall_top {
+            dir_name.push_str("-tall");
+        }
+        if opts.variants {
+            dir_name.push_str("-variants");
+        }
+        if opts.rects.is_some() {
+            dir_name.push_str("-rects");
+        }
     }
     if let Some(l) = &opts.lighting {
         dir_name.push_str(&format!("-{}", l.tag()));
@@ -377,54 +519,41 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     let out_dir = PathBuf::from("output/houses").join(dir_name);
     std::fs::create_dir_all(&out_dir)?;
 
-    // One seed per house, drawn up front, so house i is the same house whatever
-    // variant or row it is built in. Its footprint, engawa roll and every build
-    // decision draw from named streams of it (see `seed`), so `--rects` pins the
-    // footprint without moving any other decision.
-    let mut rng = RNG::new(opts.seed);
-    let house_seeds: Vec<i64> = (0..count).map(|_| rng.next_i64()).collect();
-
+    let requested = jobs.len();
     let mut built: Vec<Built> = Vec::new();
-    for (row_block, &variant) in variants.iter().enumerate() {
-        let tag = variant.tag();
-        for i in 0..count {
-            let size_class = sizes[i % sizes.len()];
-            let roof_style = roof_styles[i % roof_styles.len()];
-            let (col, row) = if opts.variants {
-                (i as i32, row_block as i32)
-            } else {
-                ((i % cols) as i32, (i / cols) as i32)
-            };
-            let cell_rect = cell_bounds(col, row, cell);
-            let ground_y = cell_rect
-                .iter()
-                .filter_map(|p| editor.world().get_height_at(p))
-                .min()
-                .unwrap_or(GROUND_Y);
-            let plot_bounds = Rect2D::from_points(
-                Point2D::new(col * cell + CELL_MARGIN, row * cell + CELL_MARGIN),
-                Point2D::new((col + 1) * cell - 1 - CELL_MARGIN, (row + 1) * cell - 1 - CELL_MARGIN),
-            );
-            let seed = HouseSeed(house_seeds[i]);
-            let Some(footprint) = house_footprint(opts.rects.as_deref(), plot_bounds, size_class, opts.culture, seed)? else {
-                println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: no footprint fits the plot, skipped");
-                continue;
-            };
-            let mut bctx = house_context(opts.culture, size_class, roof_style, seed);
-            bctx.jetty = opts.jetty;
-            bctx.knee_wall = variant.knee_wall();
-            bctx.tall_top_floor = variant.tall_top();
-            // `bctx.seed` is set, so `build_house` never draws from this one.
-            let mut caller_rng = RNG::new(seed.0);
-            let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut caller_rng);
-            match build_house(&mut ctx, footprint, &bctx, plot_bounds).await {
-                Ok(house) => {
-                    let picks = PalettePicks::base(palette_id.clone());
-                    let spec = HouseSpec::resolved(&bctx, &house, &palette, &picks, plot_bounds.min(), origin);
-                    built.push(Built { i, variant, cell: cell_rect, ground_y, house, spec });
-                }
-                Err(msg) => println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: build failed, skipped: {msg}"),
-            }
+    for (n, job) in jobs.into_iter().enumerate() {
+        let (i, variant, prefix) = (job.i, job.variant, job.prefix);
+        let (col, row) = if opts.variants {
+            (i as i32, variants.iter().position(|&v| v == variant).unwrap_or(0) as i32)
+        } else {
+            ((n % cols) as i32, (n / cols) as i32)
+        };
+        let cell_rect = cell_bounds(col, row, cell);
+        let ground_y = cell_rect
+            .iter()
+            .filter_map(|p| editor.world().get_height_at(p))
+            .min()
+            .unwrap_or(GROUND_Y);
+        let plot_min = Point2D::new(col * cell + CELL_MARGIN, row * cell + CELL_MARGIN);
+        let plot_bounds = if opts.specs.is_empty() {
+            Rect2D::from_points(plot_min, Point2D::new((col + 1) * cell - 1 - CELL_MARGIN, (row + 1) * cell - 1 - CELL_MARGIN))
+        } else {
+            Rect2D::new(plot_min, spec_plot(&job.spec))
+        };
+        let open = |v: Option<String>| v.unwrap_or_else(|| "open".into());
+        let what = format!(
+            "{prefix}: size {}, roof {}",
+            open(job.spec.size.map(|s| format!("{s:?}"))), open(job.spec.roof.map(|r| format!("{r:?}"))),
+        );
+        let resolved = resolve(&job.spec, job.seed, plot_bounds, &data)
+            .with_context(|| format!("{prefix}: resolving its spec"))?;
+        let Some(resolved) = resolved else {
+            println!("{what}: no footprint fits the plot, skipped");
+            continue;
+        };
+        match resolved.build(&mut editor, &data).await {
+            Ok((house, spec)) => built.push(Built { i, variant, prefix, cell: cell_rect, ground_y, house, spec }),
+            Err(msg) => println!("{what}: build failed, skipped: {msg}"),
         }
     }
     editor.flush_buffer().await;
@@ -436,8 +565,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         for b in &row_houses {
             let (lo, hi) = (to_abs(b.cell.min()), to_abs(b.cell.max()));
             println!(
-                "  house {} {:02}: {:?} at x {}..{}, z {}..{}",
-                variant.tag(), b.i, b.house.size_class, lo.x, hi.x, lo.y, hi.y,
+                "  {}: {:?} at x {}..{}, z {}..{}",
+                b.prefix, b.house.size_class, lo.x, hi.x, lo.y, hi.y,
             );
         }
         if let Some(first) = row_houses.first() {
@@ -496,14 +625,14 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             hi = Point3D::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
         }
         if lo.x > hi.x {
-            println!("house {tag} {i:02}: nothing placed above ground, not rendered");
+            println!("{}: nothing placed above ground, not rendered", b.prefix);
             continue;
         }
         let pad = Point3D::new(CROP_PAD, 0, CROP_PAD);
         let region = Rect3D::from_points(lo - pad, hi + pad + Point3D::new(0, 2, 0));
         let Some(g) = VoxelGrid::from_scene(&scene, Some(region)) else { continue };
 
-        let prefix = format!("house_{tag}_{i:02}");
+        let prefix = &b.prefix;
         let mut renders = Vec::new();
         let mut save = |name: String, pm: resvg::tiny_skia::Pixmap| -> anyhow::Result<()> {
             pm.save_png(out_dir.join(&name))?;
@@ -799,17 +928,21 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         }
 
         let fp = house.footprint.bounds();
+        let style = b.spec.palette.as_ref().and_then(|p| p.style.clone()).unwrap_or_default();
         let floors = house.frame.max_floors();
         let rooms = house.room_plan.rooms.len();
         let windows = house.wall_segs.windows().count();
         println!(
-            "house {tag} {i:02}: {:?}, roof={:?}, floors={floors}, rooms={rooms}, timber={:?}, windows={windows}, attic={}, cellar={}, rects={}, footprint={}x{}",
+            "{prefix}: {:?}, style={style}, roof={:?}, floors={floors}, rooms={rooms}, timber={:?}, windows={windows}, attic={}, cellar={}, rects={}, footprint={}x{}",
             house.size_class, house.roof_style, house.timber_pattern, house.has_attic, house.has_cellar,
             house.footprint.rects().len(), fp.size.x, fp.size.y,
         );
         records.push(serde_json::json!({
             "index": i,
+            "name": prefix,
             "variant": tag,
+            "culture": format!("{:?}", b.spec.culture.unwrap_or(opts.culture)),
+            "style": style,
             "size_class": format!("{:?}", house.size_class),
             "roof_style": format!("{:?}", house.roof_style),
             "floors": floors,
@@ -832,10 +965,11 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     let mut summary = serde_json::json!({
         "culture": format!("{:?}", opts.culture),
         "seed": opts.seed,
+        "specs": opts.specs.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(),
         "live": opts.live,
         "variants": variants.iter().map(|v| v.tag()).collect::<Vec<_>>(),
         "grid_size": [grid_w, grid_d],
-        "requested": count * variants.len(),
+        "requested": requested,
         "built": built.len(),
         "houses": records,
     });
@@ -849,7 +983,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     std::fs::write(out_dir.join("houses.json"), serde_json::to_string_pretty(&summary)?)?;
     println!(
         "{} of {} houses built on a {grid_w}x{grid_d} grid; output in {}",
-        built.len(), count * variants.len(), out_dir.display(),
+        built.len(), requested, out_dir.display(),
     );
     Ok(out_dir)
 }
