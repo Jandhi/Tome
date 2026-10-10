@@ -107,6 +107,15 @@ palette, timber or roof.
   - `site` is ignored on input except the new `site.plot` (plot size, written by `--houses`):
     the front door goes on the side nearest the plot edge, so the same plot puts it back.
   - Examples: `docs/examples/house_specs/fixed_shape.yaml`, `fixed_style.yaml`.
+- **Phase 4 done**: unknown keys are refused at parse time (`deny_unknown_fields`, a
+  hand-read `cellar` naming the stray key); `resolve` lists every problem in one error
+  (`N problems:` then one line each), adds `engawa: true` off a Japanese house as an
+  error, and returns notes (`ResolvedHouse::warnings`, printed by `--houses` as
+  `<house>: note: ...`) for pins that build but are out of character: a roof outside
+  the culture's set, core floors outside the size class, more wings than it allows.
+  Area and a jetty with nothing to overhang were tried and dropped: the generator's own
+  houses trip them (small town plots; `jetty` records the request). Checked: no notes
+  on 96 `--houses` builds (test) or on 746 town specs (medieval, desert, Japanese).
 
 ## Phases
 

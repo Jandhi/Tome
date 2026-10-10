@@ -38,6 +38,15 @@
 //! the plot's edge, so the same plot puts it back where it was. The ground
 //! floor's height comes from the plot's terrain.
 //!
+//! **Checks.** Parsing refuses unknown keys and words, listing the valid
+//! ones, so a typo never drops a pin silently. [`resolve`] then refuses a
+//! spec that can't build (bad footprint geometry, room lists that don't fit
+//! the floors, an attic the roof lacks, an engawa off a Japanese house,
+//! unknown palettes or cellar themes), listing every problem in one error.
+//! Pins that build but are out of character (a roof from another culture,
+//! floors or wings outside the size class) come back as
+//! [`ResolvedHouse::warnings`] and the house is built as pinned.
+//!
 //! ```yaml
 //! seed: -1840192364981520018
 //! culture: medieval
@@ -89,6 +98,7 @@ pub const DEFAULT_STYLE: &str = "default";
 
 /// One house's decisions. See the module doc for the YAML shape.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HouseSpec {
     /// The house seed (`HouseSeed`): every open decision, and every computed
     /// stage (walls, stairs, windows, furniture), draws from its named streams.
@@ -148,6 +158,7 @@ pub struct HouseSpec {
 /// its base (what `BuildingStyle::roll_palette_picks` chose). Every field is
 /// optional; a pinned material wins over what the style would roll.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PaletteSpec {
     /// Style from the culture's catalog, snake_case (`whitewash_wattle`), or
     /// `default`: the culture's own palette with no style pools (what plain
@@ -173,6 +184,7 @@ pub struct PaletteSpec {
 
 /// One footprint rect, plot-relative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RectSpec {
     pub x: i32,
     pub z: i32,
@@ -186,7 +198,7 @@ pub struct RectSpec {
 }
 
 /// `false` (no cellar), `true` (a cellar, theme open) or `{ theme: wine }`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
 pub enum CellarSpec {
     Built(bool),
@@ -197,8 +209,28 @@ pub enum CellarSpec {
     },
 }
 
+/// Read by hand: an untagged enum's error would only say that nothing matched.
+impl<'de> Deserialize<'de> for CellarSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Themed {
+            theme: String,
+        }
+        use serde::de::Error;
+        match serde_yaml::Value::deserialize(d)? {
+            serde_yaml::Value::Bool(b) => Ok(CellarSpec::Built(b)),
+            v @ serde_yaml::Value::Mapping(_) => serde_yaml::from_value::<Themed>(v)
+                .map(|t| CellarSpec::Themed { theme: t.theme })
+                .map_err(|e| D::Error::custom(format!("{e}; write true, false or {{ theme: <name> }}"))),
+            _ => Err(D::Error::custom("expected true, false or { theme: <name> }")),
+        }
+    }
+}
+
 /// Where a house stood (read-only; see [`HouseSpec::site`]).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SiteSpec {
     /// Absolute world `[x, z]` of the corner the footprint is relative to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -339,6 +371,9 @@ pub struct ResolvedHouse {
     /// Culture, size, roof, engawa, jetty, the upper-storey variants and the
     /// pins the build itself honours (floors, timber, cellar, room types).
     pub bctx: BuildingContext,
+    /// Pins that build but are out of character for the house (see
+    /// [`warnings`]); the build goes ahead as pinned.
+    pub warnings: Vec<String>,
 }
 
 impl ResolvedHouse {
@@ -366,8 +401,10 @@ impl ResolvedHouse {
 /// `plot_bounds` (build-area local; pinned rects are relative to
 /// its minimum corner). Pinned fields are taken as written, open ones drawn
 /// as the module doc says. `Ok(None)` when no generated footprint fits the
-/// plot. Errors name the offending field.
+/// plot. An error lists every problem found, each naming its field.
 pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &LoadedData) -> anyhow::Result<Option<ResolvedHouse>> {
+    // Every problem found, so one error lists them all.
+    let mut problems: Vec<String> = Vec::new();
     let culture = spec.culture.unwrap_or(Culture::Medieval);
     let size = match spec.size {
         Some(s) => s,
@@ -387,31 +424,43 @@ pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &Lo
                 Some(a) if roof_has_attic(drawn) != a => {
                     let fits: Vec<RoofStyle> = bag.into_iter().filter(|&r| roof_has_attic(r) == a).collect();
                     if fits.is_empty() {
-                        bail!(
+                        problems.push(format!(
                             "attic: {a}, but no {} roof {} an attic; pin a roof (only {{ gable: double }} has one)",
                             label(culture), if a { "has" } else { "lacks" },
-                        );
+                        ));
+                        drawn
+                    } else {
+                        fits[rng.rand_i32_range(0, fits.len() as i32) as usize]
                     }
-                    fits[rng.rand_i32_range(0, fits.len() as i32) as usize]
                 }
                 _ => drawn,
             }
         }
     };
     let has_attic = roof_has_attic(roof);
-    if let Some(a) = spec.attic {
-        if a != has_attic {
-            bail!(
-                "attic: {a} contradicts roof: {} ({}); the attic follows the roof, only {{ gable: double }} has one",
-                roof_name(roof), if has_attic { "it has an attic" } else { "it has none" },
-            );
-        }
+    match spec.attic {
+        // Already reported when the roof was drawn.
+        Some(a) if a != has_attic && spec.roof.is_some() => problems.push(format!(
+            "attic: {a} contradicts roof: {} ({}); the attic follows the roof, only {{ gable: double }} has one",
+            roof_name(roof), if has_attic { "it has an attic" } else { "it has none" },
+        )),
+        _ => {}
+    }
+    if spec.engawa == Some(true) && culture != Culture::Japanese {
+        problems.push(format!("engawa: true, but the engawa is Japanese only (culture: {}); drop it or set culture: japanese", label(culture)));
     }
 
-    check_footprint(spec, plot_bounds)?;
-    check_rooms(spec, has_attic)?;
-    let (cellar, cellar_theme) = resolve_cellar(spec.cellar.as_ref())?;
-    let (mut palette, picks) = resolve_palette(spec.palette.as_ref(), culture, seed, data)?;
+    check_footprint(spec, plot_bounds, &mut problems);
+    check_rooms(spec, has_attic, &mut problems);
+    let cellar = resolve_cellar(spec.cellar.as_ref()).map_err(|e| problems.push(e.to_string())).ok();
+    let palette = resolve_palette(spec.palette.as_ref(), culture, seed, data).map_err(|e| problems.push(e.to_string())).ok();
+    let (Some((cellar, cellar_theme)), Some((mut palette, picks)), true) = (cellar, palette, problems.is_empty()) else {
+        match problems.len() {
+            1 => bail!("{}", problems[0]),
+            n => bail!("{n} problems:\n  - {}", problems.join("\n  - ")),
+        }
+    };
+    let warnings = warnings(spec, culture, size, roof);
     palette.primary_color = Some(match spec.colour {
         Some(c) => c,
         None => *seed.stream("colour").choose(&culture.color_pool()),
@@ -445,29 +494,29 @@ pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &Lo
     bctx.cellar_theme = cellar_theme;
     bctx.room_types = spec.rooms.clone();
 
-    Ok(Some(ResolvedHouse { seed, palette, picks, footprint, plot_bounds, bctx }))
+    Ok(Some(ResolvedHouse { seed, palette, picks, footprint, plot_bounds, bctx, warnings }))
 }
 
 /// `footprint`: no empty list or rect, nothing outside the plot, no two rects
 /// overlapping, every rect touching the rest along an edge, sane floors.
-fn check_footprint(spec: &HouseSpec, plot_bounds: Rect2D) -> anyhow::Result<()> {
-    let Some(fp) = &spec.footprint else { return Ok(()) };
+fn check_footprint(spec: &HouseSpec, plot_bounds: Rect2D, problems: &mut Vec<String>) {
+    let Some(fp) = &spec.footprint else { return };
     if fp.is_empty() {
-        bail!("footprint: empty; give at least the core rect, or leave footprint out to draw one");
+        problems.push("footprint: empty; give at least the core rect, or leave footprint out to draw one".into());
+        return;
     }
     let plot = plot_bounds.size;
     for (i, r) in fp.iter().enumerate() {
         if r.w < 1 || r.h < 1 {
-            bail!("footprint[{i}]: size {}x{} is empty (w and h must be at least 1)", r.w, r.h);
-        }
-        if r.x < 0 || r.z < 0 || r.x + r.w > plot.x || r.z + r.h > plot.y {
-            bail!(
+            problems.push(format!("footprint[{i}]: size {}x{} is empty (w and h must be at least 1)", r.w, r.h));
+        } else if r.x < 0 || r.z < 0 || r.x + r.w > plot.x || r.z + r.h > plot.y {
+            problems.push(format!(
                 "footprint[{i}]: x {}..{}, z {}..{} is outside the {}x{} plot (rects are relative to the plot's corner, x and z from 0)",
                 r.x, r.x + r.w - 1, r.z, r.z + r.h - 1, plot.x, plot.y,
-            );
+            ));
         }
         if r.floors == Some(0) {
-            bail!("footprint[{i}].floors: 0; a rect has at least one floor");
+            problems.push(format!("footprint[{i}].floors: 0; a rect has at least one floor"));
         }
     }
     // Half-open spans along one axis, and whether two of them share a cell.
@@ -476,13 +525,15 @@ fn check_footprint(spec: &HouseSpec, plot_bounds: Rect2D) -> anyhow::Result<()> 
     for (i, a) in fp.iter().enumerate() {
         for (j, b) in fp.iter().enumerate().take(i) {
             if overlap(span(a.x, a.w), span(b.x, b.w)) && overlap(span(a.z, a.h), span(b.z, b.h)) {
-                bail!("footprint[{i}]: overlaps footprint[{j}]; rects sit side by side, sharing an edge");
+                problems.push(format!("footprint[{i}]: overlaps footprint[{j}]; rects sit side by side, sharing an edge"));
             }
         }
     }
     // Touching: abutting along x with overlapping z extents, or the reverse.
+    // An overlap (reported above) counts too, so it isn't reported twice.
     let touch = |a: &RectSpec, b: &RectSpec| {
-        ((a.x + a.w == b.x || b.x + b.w == a.x) && overlap(span(a.z, a.h), span(b.z, b.h)))
+        (overlap(span(a.x, a.w), span(b.x, b.w)) && overlap(span(a.z, a.h), span(b.z, b.h)))
+            || ((a.x + a.w == b.x || b.x + b.w == a.x) && overlap(span(a.z, a.h), span(b.z, b.h)))
             || ((a.z + a.h == b.z || b.z + b.h == a.z) && overlap(span(a.x, a.w), span(b.x, b.w)))
     };
     let mut reached = vec![false; fp.len()];
@@ -496,42 +547,71 @@ fn check_footprint(spec: &HouseSpec, plot_bounds: Rect2D) -> anyhow::Result<()> 
             }
         }
     }
-    if let Some(i) = reached.iter().position(|r| !r) {
-        bail!("footprint[{i}]: does not touch the rest of the footprint; every rect shares an edge with another (no gaps, no corner-only contact)");
+    for (i, _) in reached.iter().enumerate().filter(|(_, r)| !**r) {
+        problems.push(format!("footprint[{i}]: does not touch the rest of the footprint; every rect shares an edge with another (no gaps, no corner-only contact)"));
     }
     if let Some(core) = fp[0].floors {
-        if let Some((i, f)) = fp.iter().enumerate().skip(1).find_map(|(i, r)| r.floors.filter(|&f| f > core).map(|f| (i, f))) {
-            bail!("footprint[{i}].floors: {f} is more than the core's {core}; the core (footprint[0]) has the most floors");
+        for (i, f) in fp.iter().enumerate().skip(1).filter_map(|(i, r)| r.floors.filter(|&f| f > core).map(|f| (i, f))) {
+            problems.push(format!("footprint[{i}].floors: {f} is more than the core's {core}; the core (footprint[0]) has the most floors"));
         }
     }
-    Ok(())
 }
 
 /// `rooms`: one list per footprint rect, one type per floor plus the attic.
 /// Needs the footprint and every rect's floors pinned, so the shape is known.
-fn check_rooms(spec: &HouseSpec, has_attic: bool) -> anyhow::Result<()> {
-    let Some(rooms) = &spec.rooms else { return Ok(()) };
+fn check_rooms(spec: &HouseSpec, has_attic: bool, problems: &mut Vec<String>) {
+    let Some(rooms) = &spec.rooms else { return };
     let Some(fp) = &spec.footprint else {
-        bail!("rooms: pinned but footprint is open; room types are per footprint rect, so pin the footprint (with floors) too");
+        problems.push("rooms: pinned but footprint is open; room types are per footprint rect, so pin the footprint (with floors) too".into());
+        return;
     };
     if rooms.len() != fp.len() {
-        bail!("rooms: {} lists but footprint has {} rects; give one list per rect, in footprint order", rooms.len(), fp.len());
+        problems.push(format!("rooms: {} lists but footprint has {} rects; give one list per rect, in footprint order", rooms.len(), fp.len()));
     }
     for (i, (list, r)) in rooms.iter().zip(fp).enumerate() {
         let Some(floors) = r.floors else {
-            bail!("rooms[{i}]: footprint[{i}].floors is open; pin every rect's floors to pin its rooms");
+            problems.push(format!("rooms[{i}]: footprint[{i}].floors is open; pin every rect's floors to pin its rooms"));
+            continue;
         };
         let want = floors as usize + usize::from(has_attic);
         if list.len() != want {
-            bail!(
+            problems.push(format!(
                 "rooms[{i}]: {} entries but rect {i} has {floors} floor{}{} ({want} entries, bottom floor first)",
                 list.len(),
                 if floors == 1 { "" } else { "s" },
                 if has_attic { " plus its attic room" } else { "" },
-            );
+            ));
         }
     }
-    Ok(())
+}
+
+/// Pins that build but are out of character for the house: a roof from
+/// another culture, or floors or wings outside the size class. The house is
+/// built as pinned; these are notes. The generator never makes such a house,
+/// so the specs it writes raise none. Not checked: footprint area (the
+/// class's target is loose, town plots build well under it) and a `jetty`
+/// with nothing to overhang (it is a request; specs record it as asked).
+fn warnings(spec: &HouseSpec, culture: Culture, size: SizeClass, roof: RoofStyle) -> Vec<String> {
+    let mut out = Vec::new();
+    let class = label(size);
+    let roofs = culture.roof_styles();
+    if spec.roof.is_some() && !roofs.contains(&roof) {
+        let names: Vec<String> = roofs.into_iter().map(roof_name).collect();
+        out.push(format!("roof: {} is not a {} roof ({})", roof_name(roof), label(culture), names.join(", ")));
+    }
+    let Some(fp) = &spec.footprint else { return out };
+    let wings = fp.len() as i32 - 1;
+    if wings > size.max_wings() {
+        out.push(format!("footprint: {wings} wings, but a {class} has at most {}", size.max_wings()));
+    }
+    if let Some(f) = fp[0].floors.filter(|f| !size.floor_range().contains(f)) {
+        let range = match (size.min_floors(), size.max_floors()) {
+            (lo, hi) if lo == hi => format!("{lo}"),
+            (lo, hi) => format!("{lo} to {hi}"),
+        };
+        out.push(format!("footprint[0].floors: {f}, but a {class} has {range}"));
+    }
+    out
 }
 
 /// `cellar` as the build takes it: (dig?, theme key), each `None` = rolled.

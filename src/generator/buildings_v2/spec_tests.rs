@@ -260,7 +260,7 @@ async fn sweeps_repeat_and_vary_only_open_fields() {
 #[tokio::test]
 async fn errors_name_the_field() {
     let data = LoadedData::load().expect("data");
-    let cases: [(&str, &str); 15] = [
+    let cases: [(&str, &str); 16] = [
         ("palette: { style: plywood }", "palette.style: unknown medieval style \"plywood\"; one of default, timber_spruce"),
         ("palette: { wood: balsa }", "palette.wood: unknown palette \"balsa\""),
         ("cellar: { theme: dungeon }", "cellar.theme: unknown theme \"dungeon\"; one of storage, wine, larder, workshop"),
@@ -279,6 +279,7 @@ async fn errors_name_the_field() {
         ("roof: flat\nfootprint: [{ x: 0, z: 0, w: 9, h: 7, floors: 1 }]\nrooms: [[hearth], [study]]", "rooms: 2 lists but footprint has 1 rects"),
         ("roof: { gable: slab }\nattic: true", "attic: true contradicts roof: { gable: slab }"),
         ("culture: desert\nattic: true", "attic: true, but no desert roof has an attic"),
+        ("engawa: true", "engawa: true, but the engawa is Japanese only (culture: medieval)"),
     ];
     for (yaml, want) in cases {
         let spec = HouseSpec::from_yaml(yaml).unwrap_or_else(|e| panic!("{yaml}: {e}"));
@@ -297,5 +298,74 @@ async fn errors_name_the_field() {
     std::fs::write(&path, "size: castle\n").unwrap();
     let err = format!("{:#}", HouseSpec::load(&path).unwrap_err());
     assert!(err.contains("castle") && err.contains("manor"), "{err}");
+
+    // Unknown keys are refused too, listing the valid ones: a typo is never silently dropped.
+    std::fs::write(&path, "roofs: flat\n").unwrap();
+    let err = format!("{:#}", HouseSpec::load(&path).unwrap_err());
+    assert!(err.contains("unknown field `roofs`") && err.contains("`roof`"), "{err}");
+    for (yaml, want) in [
+        ("footprint: [{ x: 0, z: 0, width: 5, h: 5 }]", "unknown field `width`"),
+        ("palette: { woods: oak }", "unknown field `woods`"),
+        ("cellar: { theme: wine, depth: 2 }", "unknown field `depth`, expected `theme`"),
+        ("cellar: wine", "expected true, false or { theme: <name> }"),
+    ] {
+        let err = format!("{:#}", HouseSpec::from_yaml(yaml).unwrap_err());
+        assert!(err.contains(want), "{yaml}:\n  got  {err}\n  want {want}");
+    }
     let _ = std::fs::remove_file(&path);
+}
+
+/// One error lists every problem in the spec, so it can be fixed in one pass.
+#[tokio::test]
+async fn every_problem_is_reported_at_once() {
+    let data = LoadedData::load().expect("data");
+    let yaml = "engawa: true\nroof: { gable: slab }\nattic: true\ncellar: { theme: dungeon }\nfootprint:\n  - { x: 0, z: 0, w: 9, h: 7, floors: 1 }\n  - { x: 8, z: 0, w: 5, h: 5, floors: 2 }\n  - { x: 30, z: 30, w: 4, h: 4 }";
+    let spec = HouseSpec::from_yaml(yaml).unwrap();
+    let err = format!("{:#}", resolve(&spec, HouseSeed(1), plot_bounds(), &data).err().expect("refused"));
+    for want in [
+        "6 problems",
+        "attic: true contradicts",
+        "engawa: true",
+        "footprint[1]: overlaps footprint[0]",
+        "footprint[2]: does not touch",
+        "footprint[1].floors: 2 is more than the core's 1",
+        "cellar.theme: unknown theme",
+    ] {
+        assert!(err.contains(want), "missing `{want}` in\n{err}");
+    }
+    assert!(!err.contains("footprint[1]: does not touch"), "an overlapping rect is not also reported as apart:\n{err}");
+}
+
+/// The generator never builds what the warnings flag, so a spec it wrote
+/// rebuilds without a note: every culture and size over a few seeds.
+#[tokio::test]
+async fn emitted_specs_raise_no_warnings() {
+    let data = LoadedData::load().expect("data");
+    for culture in [Culture::Medieval, Culture::Japanese, Culture::Desert] {
+        for size in SIZES {
+            for s in 0..8 {
+                let seed = HouseSeed(1000 + s);
+                let roof = culture.roof_styles_for(size)[s as usize % culture.roof_styles_for(size).len()];
+                let Some((_, _, spec)) = build_plain(&data, culture, size, roof, seed).await else { continue };
+                let resolved = resolve(&spec, seed, plot_bounds(), &data).expect("resolves").expect("fits");
+                assert!(resolved.warnings.is_empty(), "{culture:?} {size:?} seed {}: {:?}", seed.0, resolved.warnings);
+            }
+        }
+    }
+}
+
+/// Pins that build but are out of character come back as notes, not errors.
+#[tokio::test]
+async fn offbeat_pins_build_with_notes() {
+    let data = LoadedData::load().expect("data");
+    let yaml = "size: cottage\nroof: irimoya\nfootprint:\n  - { x: 0, z: 0, w: 9, h: 7, floors: 1 }\n  - { x: 9, z: 0, w: 5, h: 5, floors: 1 }\n  - { x: 0, z: 7, w: 5, h: 5, floors: 1 }";
+    let spec = HouseSpec::from_yaml(yaml).unwrap();
+    let resolved = resolve(&spec, HouseSeed(1), plot_bounds(), &data).unwrap().unwrap();
+    let notes = resolved.warnings.join("\n");
+    for want in ["roof: irimoya is not a medieval roof", "footprint: 2 wings, but a cottage has at most 1"] {
+        assert!(notes.contains(want), "missing `{want}` in\n{notes}");
+    }
+    let spec = HouseSpec::from_yaml("size: cottage\nfootprint: [{ x: 0, z: 0, w: 30, h: 30, floors: 4 }]").unwrap();
+    let notes = resolve(&spec, HouseSeed(1), plot_bounds(), &data).unwrap().unwrap().warnings.join("\n");
+    assert!(notes.contains("footprint[0].floors: 4, but a cottage has 1"), "{notes}");
 }

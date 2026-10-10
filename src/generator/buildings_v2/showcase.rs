@@ -555,6 +555,9 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             println!("{what}: no footprint fits the plot, skipped");
             continue;
         };
+        for w in &resolved.warnings {
+            println!("{prefix}: note: {w} (built as pinned)");
+        }
         match resolved.build(&mut editor, &data).await {
             Ok((house, spec)) => built.push(Built { i, variant, prefix, cell: cell_rect, ground_y, house, spec }),
             Err(msg) => println!("{what}: build failed, skipped: {msg}"),
