@@ -1,0 +1,100 @@
+# House spec
+
+A YAML file holding the high-level decisions of one buildings_v2 house. The
+generator writes one for every house it builds; `--spec` builds from one.
+Every field is optional: a pinned field is used as written, an open field is
+drawn from the spec's `seed`, so the same spec builds the same house every
+time, and pinning or editing one field leaves unrelated choices alone.
+
+The spec holds decisions, not blocks. Wall segments, stairs, windows and
+furniture stay computed by the pipeline (and seeded), so a spec can't build a
+house that breaks the invariants.
+
+## Example
+
+```yaml
+seed: 4127730158
+culture: medieval
+size: manor
+palette: { style: oak_town, wood: spruce, stone: cobblestone, roof: dark_slate, accent: red }
+colour: red
+roof: { gable: stairs }
+footprint:                     # plot-relative, core first (what --rects takes)
+  - { x: 0, z: 0, w: 12, h: 8, floors: 3 }
+  - { x: 12, z: 2, w: 6, h: 5, floors: 2 }
+jetty: true
+engawa: false
+timber: { decorated: { spacing: 3 } }
+cellar: { theme: wine }
+rooms:                         # per rect, per floor, bottom up
+  - [common, kitchen, bedroom]
+  - [storage, bedroom]
+# Read back, not pinnable (set by the plot / road): front_door: south, base_y: 71
+```
+
+## What we have today (findings)
+
+- Settlement houses all draw from one town-wide RNG stream (`settlement.rs:1335..1532`,
+  and the same `rng` goes into `build_house`). Any change in one house's draw
+  count reshuffles every house built after it.
+- Inside `build_house` most decisions draw from that shared stream in order:
+  floors per rect, stairs, ridge axis, chimney, parapet, room budget and types,
+  attic types, desert curtains. Timber, cellar, furnish, exterior and ramps
+  `derive()` their own (each derive still consumes one parent draw).
+- `--rects` already pins the footprint (`showcase.rs:141`, `:365`), but skipping
+  the footprint draws moves the engawa roll and everything after it, so a
+  pinned footprint doesn't rebuild the same interior.
+- `BuildingContext` (`buildings_v2/mod.rs:174`) holds most decisions but has no
+  derives; `SizeClass`, `RoofStyle`, `TimberPattern`, `WindowFill`, `Culture`,
+  `RoomType` need serde. `Rect2D`, `Cardinal`, `Color`, `Palette` already have it.
+- `roll_palette` (`style.rs:60`) returns only the merged palette, not which
+  style/wood/stone/roof/accent it picked.
+- `houses.json` writes two `"rooms"` keys, so the room count is lost.
+- `RNG::from_seed_and_string(seed, name)` exists: keyed streams are cheap.
+
+## Design
+
+**One seed per house, one stream per decision.** Each house gets a `seed`
+(the settlement draws exactly one value per house from the town stream, so
+houses stop disturbing each other). Every decision draws from
+`RNG::from_seed_and_string(seed, "<decision>")`: `size`, `core`, `palette`,
+`colour`, `roof`, `footprint`, `floors`, `engawa`, `jetty`, `timber`,
+`stairs`, `roof.ridge`, `roof.chimney`, `roof.parapet`, `rooms`, `attic`,
+`curtains`, `cellar`, `furnish`, `exterior`, `ramps`. A pinned field skips
+its own stream and touches no other.
+
+**Resolve, then build.** `HouseSpec` (all `Option`) resolves against the seed
+and the plot into a complete `ResolvedSpec`; `build_house` takes that instead
+of re-deciding. The resolved spec is what gets written out, so every emitted
+spec is fully pinned and still carries its seed for the computed stages.
+
+**Dependent choices may change, independent ones may not.** Editing the
+footprint can change the rooms (they depend on it); it must not change the
+palette, timber or roof.
+
+## Phases
+
+1. **Keyed streams.** Per-house seed and per-decision streams, no spec yet.
+   Every seed builds a different town afterwards (as with the squirrel3 fix);
+   `offline_town_is_deterministic` and the invariant property test must hold.
+2. **Spec type + emit.** `HouseSpec` with serde (snake_case names), derives on
+   the decision enums, `roll_palette` reporting its picks. `--houses` writes
+   `<house>.spec.yaml`; town runs write `output/runs/<seed>/houses/*.spec.yaml`.
+   Fix the duplicate `rooms` key in houses.json.
+3. **Build from spec.** `--houses --spec <file>...` builds one house per spec;
+   `--rects` becomes shorthand for pinning `footprint`. Tests: an emitted spec
+   rebuilds a byte-identical `town.scene`; pinning a field to its drawn value
+   changes nothing; changing `timber` changes only timber blocks.
+4. **Validation.** Errors that name the field: rects overlapping, disconnected
+   or outside the plot, room lists that don't match rects/floors, unknown
+   names (listing the valid ones). Aimed at an LLM fixing its own spec.
+5. **Later.** Settlement lots taking a spec (hand-placed landmark houses), a
+   schema reference doc for LLM authoring.
+
+## Decisions (2026-10-10)
+
+- Phase 1 may change every existing seed's output.
+- Rooms: v1 pins room types per rect and floor; the layout stays computed.
+- Palette: pinnable by style name and/or by individual materials, each optional.
+- A spec ranges from just a `seed` to a fully pinned shape, rooms and style;
+  the front door and base height always come from the plot.
