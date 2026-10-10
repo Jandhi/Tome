@@ -219,6 +219,20 @@ pub struct BuildingContext {
     /// roll decisions before `build_house` (size, footprint, engawa, ...) set
     /// it so those rolls and the build share one seed.
     pub seed: Option<HouseSeed>,
+    /// Pinned storeys per footprint rect (same order; `None` entries and a
+    /// `None` list are drawn on the `floors` stream as usual). From a house
+    /// spec's `footprint[i].floors`.
+    pub floors: Option<Vec<Option<u32>>>,
+    /// Pinned cellar: `Some(false)` never digs one, `Some(true)` digs one
+    /// whenever it fits (the `cellar` stream still makes its roll, unused, so
+    /// nothing after it moves). `None` = rolled.
+    pub cellar: Option<bool>,
+    /// Pinned cellar theme (a `cellar::CELLAR_THEMES` key); `None` = rolled.
+    pub cellar_theme: Option<&'static str>,
+    /// Pinned room types per footprint rect, bottom floor first, then the
+    /// rect's attic room (a house spec's `rooms`). The layout, interior walls
+    /// and furniture stay computed; only the types are taken from here.
+    pub room_types: Option<Vec<Vec<RoomType>>>,
 }
 
 impl BuildingContext {
@@ -238,6 +252,10 @@ impl BuildingContext {
             tall_top_floor: false,
             base_y_override: None,
             seed: None,
+            floors: None,
+            cellar: None,
+            cellar_theme: None,
+            room_types: None,
         }
     }
 }

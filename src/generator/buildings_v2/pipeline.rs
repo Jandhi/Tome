@@ -25,7 +25,7 @@ use super::footprint::{Footprint, SizeClass, find_boundaries};
 use super::foundation::place_foundation;
 use crate::generator::BuildClaim;
 use crate::generator::buildings::BuildingID;
-use super::frame::{Frame, apply_jetty, generate_frame};
+use super::frame::{Frame, apply_jetty, generate_frame_pinned};
 use super::furnish::{decorate_rooftops, furnish_rooms};
 use super::exterior::decorate_exterior_walls;
 use super::{BuildingContext, Culture, HouseSeed};
@@ -158,7 +158,7 @@ pub async fn build_house(
     // (find_boundaries, filled_points). The frame is generated from the
     // deep-inset footprint, so every engawa floor already sits at that inset —
     // no per-floor overhang. A non-engawa building may instead jetty its uppers.
-    let frame = generate_frame(building_footprint.clone(), frame_base_y, &size_class, &mut seed.stream("floors"));
+    let frame = generate_frame_pinned(building_footprint.clone(), frame_base_y, &size_class, bctx.floors.as_deref(), &mut seed.stream("floors"));
     let frame = if engawa_plan.is_some() {
         frame
     } else if bctx.jetty {
@@ -235,6 +235,17 @@ pub async fn build_house(
     mark_gable_doorways(&mut room_plan, &gable_doorways);
     let ladder_walls = place_attic_ladders(ctx, &mut room_plan, &frame, &floor_plan, &wall_segs, &gable_doorways).await;
     assign_attic_types(&mut room_plan, size_class, &mut seed.stream("attic"));
+    // Pinned room types (a house spec's `rooms`) replace the drawn ones. The
+    // `rooms` stream derives the interior-wall placer before it draws any
+    // type, and attic types draw on their own `attic` stream, so the walls
+    // and every other stream stay as they were.
+    if let Some(types) = &bctx.room_types {
+        for room in &mut room_plan.rooms {
+            if let Some(&t) = types.get(room.rect_index).and_then(|list| list.get(room.floor as usize)) {
+                room.room_type = t;
+            }
+        }
+    }
 
     let roof_ladder_wall = if matches!(roof_style, RoofStyle::Flat) {
         place_roof_ladder(ctx, &frame, &floor_plan, &mut room_plan).await
@@ -298,7 +309,7 @@ pub async fn build_house(
     // code iterates.
     // Cellar uses `building_footprint` (the inset walls for an engawa) so its
     // retaining walls sit under the actual walls, not out under the veranda deck.
-    let cellar = cellar::maybe_build_cellar(&mut ctx.on(&mut seed.stream("cellar")), &frame, &building_footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
+    let cellar = cellar::maybe_build_cellar(&mut ctx.on(&mut seed.stream("cellar")), &frame, &building_footprint, &wall_segs, &floor_plan, &room_plan, size_class, bctx.cellar, bctx.cellar_theme).await;
     let has_cellar = cellar.is_some();
     let cellar_theme = cellar.as_ref().map(|(_, _, theme)| *theme);
     let cellar_stair = cellar.map(|(stair, anchors, _)| {

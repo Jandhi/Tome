@@ -259,9 +259,14 @@ pub async fn maybe_build_cellar(
     floor_plan: &FloorPlan,
     room_plan: &RoomPlan,
     size_class: SizeClass,
+    pinned: Option<bool>,
+    pinned_theme: Option<&'static str>,
 ) -> Option<(Vec<Point2D>, Vec<AnchorScene>, &'static str)> {
     let mut rng = ctx.rng.derive();
-    if !rolls_cellar(size_class, &mut rng) {
+    // The roll is always made, so a pinned answer leaves the stair and
+    // excavation draws after it where they were.
+    let rolled = rolls_cellar(size_class, &mut rng);
+    if !pinned.unwrap_or(rolled) {
         return None;
     }
 
@@ -302,7 +307,7 @@ pub async fn maybe_build_cellar(
     let (positions, dir) = stair;
     place_descending_stair(ctx, &positions, dir, floor_y, &main_stair_cells, &mut rng).await;
 
-    let (anchors, theme) = furnish_cellar(ctx, frame, interior, &positions).await;
+    let (anchors, theme) = furnish_cellar(ctx, frame, interior, &positions, pinned_theme).await;
     Some((positions, anchors, theme))
 }
 
@@ -419,10 +424,11 @@ async fn place_descending_stair(
     }
 }
 
-/// Cellar themes — one chosen uniformly at random per building. `storage` is the
+/// Cellar themes — one chosen uniformly at random per building (or pinned by a
+/// house spec's `cellar: { theme }`, which names them without the `cellar_`). `storage` is the
 /// plain root cellar; the rest are flavoured rooms defined in `data/rooms.yaml`.
 /// All are windowless, so each list requires a lantern for light.
-const CELLAR_THEMES: [&str; 4] = ["storage", "cellar_wine", "cellar_larder", "cellar_workshop"];
+pub const CELLAR_THEMES: [&str; 4] = ["storage", "cellar_wine", "cellar_larder", "cellar_workshop"];
 
 /// Furnish the cellar from a randomly chosen theme list. Reuses the shared
 /// `furnish_interior` engine (same as rooms and rooftop terraces): we seed the
@@ -434,6 +440,7 @@ async fn furnish_cellar(
     frame: &Frame,
     interior: Rect2D,
     positions: &[Point2D],
+    pinned_theme: Option<&'static str>,
 ) -> (Vec<AnchorScene>, &'static str) {
     let mut constraints = ConstraintMap::new(&interior);
     for (i, pos) in positions.iter().enumerate() {
@@ -449,8 +456,11 @@ async fn furnish_cellar(
 
     // Pick this cellar's theme; fall back to the plain storage list if a themed
     // entry is missing from the data.
+    // A pinned theme skips the draw; `pick_rng` is its own derived stream, so
+    // the furniture stream after it is unmoved either way.
     let mut pick_rng = ctx.rng.derive();
-    let mut key = CELLAR_THEMES[pick_rng.rand_i32_range(0, CELLAR_THEMES.len() as i32) as usize];
+    let mut key = pinned_theme
+        .unwrap_or_else(|| CELLAR_THEMES[pick_rng.rand_i32_range(0, CELLAR_THEMES.len() as i32) as usize]);
     if !ctx.data.furniture.rooms.contains_key(key) {
         key = "storage";
     }
