@@ -402,6 +402,24 @@ async fn main() {
         }
         return;
     }
+    if args.iter().any(|a| a == "--furniture") {
+        let Some(names) = arg_after("--furniture", 1) else {
+            eprintln!("usage: --furniture <name[,name...]> [out_dir]");
+            std::process::exit(2);
+        };
+        let names: Vec<String> = names.split(',').map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).collect();
+        let out_dir = std::path::PathBuf::from(arg_after("--furniture", 2).unwrap_or("output/furniture"));
+        let result = crate::generator::buildings_v2::furnish::data::FurnitureData::load()
+            .and_then(|data| crate::generator::buildings_v2::furnish::preview::render_previews(&data, &names, &out_dir));
+        match result {
+            Ok(paths) => paths.iter().for_each(|p| println!("Rendered {}", p.display())),
+            Err(e) => {
+                eprintln!("Furniture preview failed: {e:#}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if args.iter().any(|a| a == "--offline") {
         let Some(fixture_path) = arg_after("--offline", 1) else {
             eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");

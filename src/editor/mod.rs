@@ -6,4 +6,5 @@ mod world;
 pub mod fixture;
 
 pub use editor::Editor;
+pub(crate) use editor::block_string;
 pub use world::World;

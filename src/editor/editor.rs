@@ -504,7 +504,7 @@ impl Drop for Editor {
 }
 /// `minecraft:id[k=v,...]` with sorted state keys (deterministic output);
 /// bare ids get the `minecraft:` namespace.
-fn block_string(block: &Block) -> String {
+pub(crate) fn block_string(block: &Block) -> String {
     let id = block.id.as_str();
     let mut out = if id.contains(':') { id.to_string() } else { format!("minecraft:{id}") };
     if let Some(state) = block.state.as_ref().filter(|s| !s.is_empty()) {
