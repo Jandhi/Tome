@@ -609,8 +609,15 @@ mod tests {
         for (b, face) in [("north", Face6::North), ("south", Face6::South), ("east", Face6::East), ("west", Face6::West), ("down", Face6::Down)] {
             assert_eq!(lid(&format!("minecraft:barrel[facing={b},open=false]"), face), top, "barrel facing {b}");
         }
-        // Entity-rendered blocks and bare ids the jar lacks fall back.
-        assert!(a.geometry("minecraft:chest[facing=north]").is_none());
+        // Chests and decorated pots get models built from their entity
+        // sheets: body, lid and a latch on the facing side; body and neck.
+        let chest = a.geometry("minecraft:chest[facing=south]").expect("chest from the entity sheet");
+        assert_eq!(chest.elements.len(), 3);
+        let latch = &chest.elements[2];
+        assert!(latch.from[2] >= 15.0 && latch.faces.iter().any(|(f, _)| *f == Face6::South), "latch faces south");
+        assert_eq!(a.geometry("minecraft:decorated_pot").expect("pot").elements.len(), 3);
+        // Other entity-rendered blocks and bare ids the jar lacks fall back.
+        assert!(a.geometry("minecraft:red_bed[facing=north,part=foot]").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());
         // Bare generator states resolve through the defaults.
         assert!(a.geometry("minecraft:lantern").is_some());
@@ -627,7 +634,7 @@ mod tests {
 
     // ---- viewer textures (jd/viewer-textures): textured export of the HTML viewer ----
 
-    /// 2x2 grass, a stair, a poppy, glass and a chest: every export path at once.
+    /// 2x2 grass, a stair, a poppy, glass and a bed: every export path at once.
     fn viewer_texture_scene() -> Scene {
         let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(8, 8, 8) });
         for (x, z) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
@@ -636,7 +643,7 @@ mod tests {
         s.insert(Point3D::new(4, 61, 1), "minecraft:oak_stairs[facing=east,half=bottom,shape=straight]");
         s.insert(Point3D::new(1, 62, 1), "minecraft:poppy");
         s.insert(Point3D::new(4, 61, 4), "minecraft:glass");
-        s.insert(Point3D::new(6, 61, 6), "minecraft:chest[facing=north]");
+        s.insert(Point3D::new(6, 61, 6), "minecraft:red_bed[facing=north,part=foot]");
         s
     }
 
@@ -653,8 +660,8 @@ mod tests {
         let t = e.textured.expect("models give a textured buffer");
         assert_eq!(t.faces.len(), t.a_count * RECORD_BYTES + t.r_count * ROTATED_RECORD_BYTES);
         assert_eq!(e.stats.faces, e.flat.len() / RECORD_BYTES + t.a_count + t.r_count);
-        // The chest has no element model: it stays on the flat path with its hand colour.
-        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "chest faces");
+        // The bed has no element model: it stays on the flat path with its hand colour.
+        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "bed faces");
         // The poppy's cross model is two rotated quads.
         assert_eq!(t.r_count, 2, "rotated faces");
         assert_eq!(e.stats.rotated_faces, 2);
