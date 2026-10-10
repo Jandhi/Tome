@@ -598,6 +598,17 @@ mod tests {
         let (_, up) = planks.elements[0].faces.iter().find(|(f, _)| *f == Face6::Up).expect("up face");
         assert_eq!(up.sample_at(up.origin), up.texture.sample(0.0, 0.0));
         assert_eq!(up.sample_at([15.5, 16.0, 15.5]), up.texture.sample(15.5, 15.5));
+        // Variant x rotation turns the model's top the game's way: a barrel's
+        // lid faces where the barrel does (north is `x: 90`, south adds `y: 180`).
+        let lid = |b: &str, face: Face6| {
+            let g = a.geometry(b).expect("barrel");
+            let (_, t) = g.elements[0].faces.iter().find(|(f, _)| *f == face).expect("face");
+            t.texture.sample(8.0, 8.0)
+        };
+        let top = lid("minecraft:barrel[facing=up,open=false]", Face6::Up);
+        for (b, face) in [("north", Face6::North), ("south", Face6::South), ("east", Face6::East), ("west", Face6::West), ("down", Face6::Down)] {
+            assert_eq!(lid(&format!("minecraft:barrel[facing={b},open=false]"), face), top, "barrel facing {b}");
+        }
         // Entity-rendered blocks and bare ids the jar lacks fall back.
         assert!(a.geometry("minecraft:chest[facing=north]").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());

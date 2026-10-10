@@ -255,8 +255,9 @@ fn quarter_matrix(axis_y: bool, quarter_turns: i32) -> [[f32; 3]; 3] {
         // (x, y, z) -> (-z, y, x)
         [[0.0, 0.0, -1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
     } else {
-        // (x, y, z) -> (x, -z, y)
-        [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]]
+        // (x, y, z) -> (x, z, -y): the game's x = 90 turns a model's top
+        // to the north (a north-facing barrel is `x: 90` alone).
+        [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, -1.0, 0.0]]
     };
     let mut m = IDENTITY;
     for _ in 0..quarter_turns.rem_euclid(4) {
