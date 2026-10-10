@@ -4,7 +4,9 @@
 
 chest:
   blocks:
-    - block: "minecraft:chest"
+    # The literal must carry `facing` for the constraint's away_from_wall to
+    # take: apply_facing only rewrites a facing the block already declares.
+    - block: "minecraft:chest[facing=north]"
       offset: [0, 0, 0]
       layer: ground
       loot: storage
