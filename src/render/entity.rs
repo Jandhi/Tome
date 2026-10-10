@@ -170,7 +170,8 @@ fn chest(tex: &str) -> Value {
 /// is a 16x16x6 mattress (head at (0, 0), foot at (0, 22)) laid flat on 3x3x3
 /// legs at the outer corners: the mattress's `North` rectangle is its top,
 /// `South` its underside, `Down`/`Up` the head and foot ends, and the long
-/// sides read `West`/`East` turned a quarter.
+/// sides read `West`/`East` turned a quarter. Every side and end strip is
+/// wool or sheet over a wooden frame (its two outer texels), as in game.
 fn bed_half(tex: &str, head: bool) -> Value {
     let (v, end, end_face, leg_z) = if head {
         (0.0, Slot::Down, "north", 0.0)
@@ -180,11 +181,14 @@ fn bed_half(tex: &str, head: bool) -> Value {
     let mattress = Box3::new([0.0, 3.0, 0.0], [16.0, 9.0, 16.0], ((0.0, v), (16.0, 16.0, 6.0)))
         .face("up", Slot::North, PLAIN)
         .face("down", Slot::South, PLAIN)
-        .face(end_face, end, Xf { flip_u: false, flip_v: head, rot: 0 })
-        // The side strips run foot-to-head down the sheet: turned onto the
-        // long sides, flip them lengthwise (their v axis).
-        .face("west", Slot::West, Xf { rot: 90, flip_v: true, ..PLAIN })
-        .face("east", Slot::East, Xf { rot: 270, flip_v: true, ..PLAIN });
+        // End strips too keep the frame on their outer rows: read bottom-up.
+        .face(end_face, end, FLIP_V)
+        // The side strips run foot-to-head down the sheet and carry the
+        // wooden frame on their outer edge (2 of their 6 texels): turned onto
+        // the long sides, flip them lengthwise and across, so the white
+        // sheet sits under the pillow and the frame along the bottom.
+        .face("west", Slot::West, Xf { rot: 90, flip_u: true, flip_v: true })
+        .face("east", Slot::East, Xf { rot: 270, flip_u: true, flip_v: true });
     let leg = |x: f32| {
         let r = [53.0, 3.0, 56.0, 6.0];
         let mut b = Box3::new([x, 0.0, leg_z], [x + 3.0, 3.0, leg_z + 3.0], ((50.0, 0.0), (3.0, 3.0, 3.0)));
