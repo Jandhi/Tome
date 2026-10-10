@@ -536,21 +536,26 @@ impl LightMap {
         }
     }
 
-    /// Index of the cell nearest to `(x, y, z)` (coordinates clamp into the grid).
+    /// Packed light (sky in the low nibble, block in the high) at a local
+    /// cell. A cell beyond the grid is open sky (sky 15, no block light):
+    /// clamping it onto the edge would read the topmost block, often a
+    /// solid one, and darken every face that looks out of the grid.
     #[inline]
-    fn clamp_index(&self, x: i32, y: i32, z: i32) -> usize {
-        let (x, y, z) = (x.clamp(0, self.nx - 1), y.clamp(0, self.ny - 1), z.clamp(0, self.nz - 1));
-        ((x * self.nz + z) * self.ny + y) as usize
+    fn packed(&self, x: i32, y: i32, z: i32) -> u8 {
+        if x < 0 || y < 0 || z < 0 || x >= self.nx || y >= self.ny || z >= self.nz {
+            return 15;
+        }
+        self.levels[((x * self.nz + z) * self.ny + y) as usize]
     }
 
-    /// Sky light 0..15 at a local cell (clamped into the grid).
+    /// Sky light 0..15 at a local cell (15 beyond the grid).
     pub fn sky_light(&self, x: i32, y: i32, z: i32) -> u8 {
-        self.levels[self.clamp_index(x, y, z)] & 15
+        self.packed(x, y, z) & 15
     }
 
-    /// Block light 0..15 at a local cell (clamped into the grid).
+    /// Block light 0..15 at a local cell (0 beyond the grid).
     pub fn block_light(&self, x: i32, y: i32, z: i32) -> u8 {
-        self.levels[self.clamp_index(x, y, z)] >> 4
+        self.packed(x, y, z) >> 4
     }
 
     /// `true` when the cell holds an opaque full cube; `false` outside the grid.
@@ -579,9 +584,10 @@ impl LightMap {
         AMBIENT + (1.0 - AMBIENT) * (r + (g - r) * GAMMA)
     }
 
-    /// Brightness 0..1 of a cell under `daylight` (1.0 noon, 0.22 night).
+    /// Brightness 0..1 of a cell under `daylight` (1.0 noon, 0.22 night);
+    /// beyond the grid, open sky.
     pub fn brightness(&self, x: i32, y: i32, z: i32, daylight: f32) -> f32 {
-        Self::curve(Self::level(self.levels[self.clamp_index(x, y, z)], daylight))
+        Self::curve(Self::level(self.packed(x, y, z), daylight))
     }
 
     /// Smooth lighting: the light at the four corners of a face whose outside
@@ -591,7 +597,7 @@ impl LightMap {
     /// averages the cells touching it on the face's outside; opaque cells
     /// contribute no light and darken the corner.
     pub fn face_corners(&self, outside: [i32; 3], axis: usize, daylight: f32) -> [f32; 4] {
-        self.corners_with(outside, axis, |i| Self::curve(Self::level(self.levels[i], daylight)))
+        self.corners_with(outside, axis, |p| Self::curve(Self::level(p, daylight)))
     }
 
     /// Smooth light at `(u, v)` in `0..1` across the face (see [`face_corners`](Self::face_corners)).
@@ -599,7 +605,7 @@ impl LightMap {
         bilinear(self.face_corners(outside, axis, daylight), u, v)
     }
 
-    fn corners_with(&self, outside: [i32; 3], axis: usize, bright: impl Fn(usize) -> f32) -> [f32; 4] {
+    fn corners_with(&self, outside: [i32; 3], axis: usize, bright: impl Fn(u8) -> f32) -> [f32; 4] {
         let (t1, t2) = match axis {
             0 => (1, 2),
             1 => (0, 2),
@@ -619,10 +625,10 @@ impl LightMap {
             let sc = self.is_solid(c[0], c[1], c[2]) || (sa && sb);
             let (mut sum, mut n) = (0.0, 0);
             for (cell, s) in [(outside, false), (a, sa), (b, sb), (c, sc)] {
-                let i = self.clamp_index(cell[0], cell[1], cell[2]);
+                let p = self.packed(cell[0], cell[1], cell[2]);
                 // Solid cells add nothing, unless they glow themselves.
-                if !s || self.levels[i] >> 4 > 0 {
-                    sum += bright(i);
+                if !s || p >> 4 > 0 {
+                    sum += bright(p);
                     n += 1;
                 }
             }
@@ -695,14 +701,14 @@ impl<'a> LightSampler<'a> {
         self.sky_rgb
     }
 
-    /// Brightness of a cell (coordinates clamp into the grid).
+    /// Brightness of a cell (open sky beyond the grid).
     pub fn at(&self, cell: [i32; 3]) -> f32 {
-        self.lut[self.map.levels[self.map.clamp_index(cell[0], cell[1], cell[2])] as usize]
+        self.lut[self.map.packed(cell[0], cell[1], cell[2]) as usize]
     }
 
-    /// Coloured light of a cell (coordinates clamp into the grid).
+    /// Coloured light of a cell (open sky beyond the grid).
     pub fn at_rgb(&self, cell: [i32; 3]) -> Rgb {
-        self.lut_rgb[self.map.levels[self.map.clamp_index(cell[0], cell[1], cell[2])] as usize]
+        self.lut_rgb[self.map.packed(cell[0], cell[1], cell[2]) as usize]
     }
 
     /// Light for a face: smooth-interpolated at `(u, v)` across the face from
@@ -711,7 +717,7 @@ impl<'a> LightSampler<'a> {
         if !self.smooth {
             return self.at(outside);
         }
-        bilinear(self.map.corners_with(outside, axis, |i| self.lut[self.map.levels[i] as usize]), u, v)
+        bilinear(self.map.corners_with(outside, axis, |p| self.lut[p as usize]), u, v)
     }
 
     /// Coloured light for a face, interpolated like [`face`](Self::face).
@@ -721,7 +727,7 @@ impl<'a> LightSampler<'a> {
         }
         let mut out = [0.0; 3];
         for (k, o) in out.iter_mut().enumerate() {
-            *o = bilinear(self.map.corners_with(outside, axis, |i| self.lut_rgb[self.map.levels[i] as usize][k]), u, v);
+            *o = bilinear(self.map.corners_with(outside, axis, |p| self.lut_rgb[p as usize][k]), u, v);
         }
         out
     }
@@ -731,7 +737,7 @@ impl<'a> LightSampler<'a> {
     pub fn face_corners_rgb(&self, outside: [i32; 3], axis: usize) -> [Rgb; 4] {
         let mut out = [[0.0; 3]; 4];
         for k in 0..3 {
-            let c = self.map.corners_with(outside, axis, |i| self.lut_rgb[self.map.levels[i] as usize][k]);
+            let c = self.map.corners_with(outside, axis, |p| self.lut_rgb[p as usize][k]);
             for (ci, v) in c.into_iter().enumerate() {
                 out[ci][k] = v;
             }

@@ -9,8 +9,8 @@
 //! block's own cell for a face inside it. Samples behind the first one along
 //! a ray (water below its surface, what shows through glass) take their own
 //! cell's light. An outside cell beyond the grid (above the topmost block,
-//! or past a side, as the front row of an elevation has) counts as open sky:
-//! the map itself would clamp it onto the edge block, often a solid one.
+//! or past a side, as the front row of an elevation has) counts as open sky,
+//! as it does in the map itself.
 
 use super::grid::{Rgba, VoxelGrid};
 use super::light::{LightMap, LightSampler, Lighting, Rgb};

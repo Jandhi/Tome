@@ -702,7 +702,7 @@ mod lighting_tests {
 
     use crate::geometry::{Point3D, Rect3D};
     use crate::render::grid::VoxelGrid;
-    use crate::render::light::{emission, LightMap, Lighting, AMBIENT};
+    use crate::render::light::{emission, LightMap, LightSampler, Lighting, AMBIENT};
     use crate::render::perspective::{render_perspective, render_perspective_with, PerspectiveCamera, PerspectiveOptions};
     use crate::render::Scene;
 
@@ -792,6 +792,27 @@ mod lighting_tests {
     }
 
     #[test]
+    fn cells_beyond_the_grid_are_open_sky() {
+        // A stone floor under a stone cap: the grid ends at the cap, so the
+        // cap's top faces look out of the grid and must be sky-lit, not lit
+        // from the stone they would be clamped onto.
+        let mut s = scene(5, 4, 5);
+        floor(&mut s, 5, 5, 0);
+        floor(&mut s, 5, 5, 3);
+        let g = grid(&s);
+        let lm = LightMap::new(&g);
+        let top = g.ny - 1;
+        assert!(lm.is_solid(2, top, 2));
+        assert_eq!((lm.sky_light(2, top + 1, 2), lm.block_light(2, top + 1, 2)), (15, 0), "above the grid");
+        assert_eq!(lm.sky_light(-1, top, 2), 15, "past a side");
+        let face = lm.face_light_at([2, top + 1, 2], 1, 0.5, 0.5, 1.0);
+        assert!(face > 0.99, "top face under open sky at noon, got {face}");
+        let sampler = LightSampler::new(&lm, Lighting::parse("day").unwrap());
+        assert!(sampler.face_rgb([2, top + 1, 2], 1, 0.5, 0.5).iter().all(|&c| c > 0.9));
+        // Under the cap, the grid's own cells stay dark.
+        assert_eq!(lm.sky_light(2, top - 1, 2), 0);
+    }
+
     fn torch_lights_neighbourhood_falling_off_by_one_per_block() {
         let mut s = scene(31, 3, 31);
         floor(&mut s, 31, 31, 0);
