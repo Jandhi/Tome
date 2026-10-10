@@ -181,8 +181,10 @@ fn bed_half(tex: &str, head: bool) -> Value {
         .face("up", Slot::North, PLAIN)
         .face("down", Slot::South, PLAIN)
         .face(end_face, end, Xf { flip_u: false, flip_v: head, rot: 0 })
-        .face("west", Slot::West, Xf { rot: 90, ..PLAIN })
-        .face("east", Slot::East, Xf { rot: 270, ..PLAIN });
+        // The side strips run foot-to-head down the sheet: turned onto the
+        // long sides, flip them lengthwise (their v axis).
+        .face("west", Slot::West, Xf { rot: 90, flip_v: true, ..PLAIN })
+        .face("east", Slot::East, Xf { rot: 270, flip_v: true, ..PLAIN });
     let leg = |x: f32| {
         let r = [53.0, 3.0, 56.0, 6.0];
         let mut b = Box3::new([x, 0.0, leg_z], [x + 3.0, 3.0, leg_z + 3.0], ((50.0, 0.0), (3.0, 3.0, 3.0)));
