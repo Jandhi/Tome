@@ -33,7 +33,10 @@ use hipped::HippedPitch;
 pub use flat_roof::place_roof_ladder;
 
 /// Top-level roof style. Determines which roof algorithm runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serialised (house spec) as `flat`, `irimoya`, or a one-key map with the
+/// pitch: `{ gable: stairs }`, `{ hipped: slab }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RoofStyle {
     Gable(GablePitch),
     Hipped(HippedPitch),

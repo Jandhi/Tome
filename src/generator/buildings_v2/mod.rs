@@ -14,12 +14,15 @@ pub mod roof;
 pub mod rooms;
 pub mod seed;
 pub mod showcase;
+pub mod spec;
 pub mod style;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
 pub use seed::HouseSeed;
 pub use self::walls::{TimberPattern, WindowFill};
+
+use serde::{Deserialize, Serialize};
 
 use crate::generator::materials::PaletteId;
 use crate::minecraft::Color;
@@ -34,7 +37,8 @@ pub enum BuildingType {
 }
 
 /// Cultural style that drives palette selection, roof/window/floor defaults.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Culture {
     Medieval,
     Desert,
@@ -238,7 +242,8 @@ impl BuildingContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RoomType {
     /// Single-room house: bed, furnace, crafting table, chest.
     Common,

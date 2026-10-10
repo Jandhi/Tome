@@ -1,6 +1,7 @@
 //! House showcase: builds a grid of houses and renders each one as cropped,
 //! enlarged PNGs (four isometric corners, top, elevations, and a perspective
-//! from inside every room) plus its ASCII floor plan, so the building
+//! from inside every room) plus its ASCII floor plan and its resolved house
+//! spec (`<house>.spec.yaml`, see `spec`), so the building
 //! generator can be judged visually inside and out. Offline by default, on a
 //! blank flat grass world (no server); `--live` builds into the server's build
 //! area instead. `--variants` builds every house once per upper-storey
@@ -19,6 +20,8 @@ use crate::generator::buildings_v2::footprint::{generate_footprint_biased, Footp
 use crate::generator::buildings_v2::frame::CELLAR_FLOOR;
 use crate::generator::buildings_v2::roof::RoofStyle;
 use crate::generator::buildings_v2::rooms::{Room, RoomRole};
+use crate::generator::buildings_v2::spec::HouseSpec;
+use crate::generator::buildings_v2::style::PalettePicks;
 use crate::generator::buildings_v2::{build_house, BuildCtx, BuildingContext, Culture, HouseOutput, HouseSeed};
 use crate::generator::data::LoadedData;
 use crate::geometry::{Point2D, Point3D, Rect2D, Rect3D};
@@ -254,6 +257,8 @@ struct Built {
     /// Lowest terrain under the cell before anything was built (local y).
     ground_y: i32,
     house: HouseOutput,
+    /// The house's resolved spec, footprint relative to its plot.
+    spec: HouseSpec,
 }
 
 /// One showcase house's footprint: `rects` pinned (relative to the plot's
@@ -413,7 +418,11 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             let mut caller_rng = RNG::new(seed.0);
             let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut caller_rng);
             match build_house(&mut ctx, footprint, &bctx, plot_bounds).await {
-                Ok(house) => built.push(Built { i, variant, cell: cell_rect, ground_y, house }),
+                Ok(house) => {
+                    let picks = PalettePicks::base(palette_id.clone());
+                    let spec = HouseSpec::resolved(&bctx, &house, &palette, &picks, plot_bounds.min(), origin);
+                    built.push(Built { i, variant, cell: cell_rect, ground_y, house, spec });
+                }
                 Err(msg) => println!("house {tag} {i:02}: {size_class:?} {roof_style:?}: build failed, skipped: {msg}"),
             }
         }
@@ -519,6 +528,10 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         for side in ElevationSide::ALL {
             save(format!("{prefix}_elev_{}.png", side.name()), render_elevation_with(&g, side, px, exterior_lit)?)?;
         }
+
+        // The house's decisions, footprint relative to its plot (`--rects` form).
+        let spec_file = format!("{prefix}.spec.yaml");
+        b.spec.save(out_dir.join(&spec_file))?;
 
         let blueprint = build_blueprint(&house.frame, &house.wall_segs, &house.floor_plan, &house.room_plan, house.has_attic);
         let plan_file = format!("{prefix}_plan.txt");
@@ -800,7 +813,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             "size_class": format!("{:?}", house.size_class),
             "roof_style": format!("{:?}", house.roof_style),
             "floors": floors,
-            "rooms": rooms,
+            "room_count": rooms,
             "timber_pattern": format!("{:?}", house.timber_pattern),
             "windows": windows,
             "attic": house.has_attic,
@@ -810,6 +823,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             "cell": [cmin.x, cmin.y, cmax.x, cmax.y],
             "region": region,
             "plan": plan_file,
+            "spec": spec_file,
             "renders": renders,
             "rooms": rooms_json,
         }));

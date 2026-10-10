@@ -14,7 +14,7 @@ use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::Palette;
 use crate::generator::population::AnchorScene;
-use crate::geometry::{Point2D, Point3D, Rect2D};
+use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D};
 use crate::noise::RNG;
 
 use super::cellar;
@@ -77,6 +77,11 @@ pub struct HouseOutput {
     /// The seed every decision of this house drew from (`bctx.seed`, or the
     /// one drawn from the caller's stream).
     pub seed: HouseSeed,
+    /// Ground-floor level from the foundation (build-area local): the door
+    /// sill, before an engawa raises the building one more block.
+    pub base_y: i32,
+    /// The side the front door opens out of (`place_doors`' primary door).
+    pub front_door: Option<Cardinal>,
     pub footprint: Footprint,
     pub frame: Frame,
     pub wall_segs: WallSegments,
@@ -88,6 +93,8 @@ pub struct HouseOutput {
     pub door_entrances: Vec<Point2D>,
     pub has_attic: bool,
     pub has_cellar: bool,
+    /// The cellar's furnishing theme (`storage`, `cellar_wine`, ...) when one was built.
+    pub cellar_theme: Option<&'static str>,
     /// Every build-area-local cell the roof stage placed (surface, fill,
     /// gable walls, chimney), so a cutaway can leave the roof out.
     pub roof_cells: Vec<Point3D>,
@@ -170,7 +177,7 @@ pub async fn build_house(
     let mut wall_segs = build_segments(&frame);
     let footprint_area = building_footprint.filled_points().len() as i32;
     let boundary_cells = boundary_cell_set(building_footprint.rects());
-    place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, &mut seed.stream("doors"));
+    let front_door = place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, &mut seed.stream("doors"));
 
     let has_attic = matches!(roof_style, RoofStyle::Gable(GablePitch::Double));
     let skip_ceilings = matches!(roof_style, RoofStyle::Flat);
@@ -293,7 +300,8 @@ pub async fn build_house(
     // retaining walls sit under the actual walls, not out under the veranda deck.
     let cellar = cellar::maybe_build_cellar(&mut ctx.on(&mut seed.stream("cellar")), &frame, &building_footprint, &wall_segs, &floor_plan, &room_plan, size_class).await;
     let has_cellar = cellar.is_some();
-    let cellar_stair = cellar.map(|(stair, anchors)| {
+    let cellar_theme = cellar.as_ref().map(|(_, _, theme)| *theme);
+    let cellar_stair = cellar.map(|(stair, anchors, _)| {
         npc_anchors.extend(anchors);
         stair
     });
@@ -325,6 +333,8 @@ pub async fn build_house(
 
     Ok(HouseOutput {
         seed,
+        base_y,
+        front_door,
         footprint,
         frame,
         wall_segs,
@@ -334,6 +344,7 @@ pub async fn build_house(
         door_entrances,
         has_attic,
         has_cellar,
+        cellar_theme,
         roof_cells,
         cellar_stair,
         roof_style,

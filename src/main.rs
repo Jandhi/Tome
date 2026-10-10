@@ -132,7 +132,8 @@ async fn run_generation_once(full: bool, seed_override: Option<i64>) {
 
 /// Capture the generated town as `town.scene` in `dir`, write the run's
 /// `metrics.json` (the [`TownReport`](crate::generator::report::TownReport))
-/// beside it, and render its views next to them.
+/// and every house's spec (`houses/house_<n>.spec.yaml`) beside it, and render
+/// its views next to them.
 fn save_and_render_town(
     editor: &crate::editor::Editor,
     seed: i64,
@@ -146,6 +147,17 @@ fn save_and_render_town(
     let metrics_path = dir.join("metrics.json");
     report.save(&metrics_path)?;
     println!("Saved metrics to {}", metrics_path.display());
+    // One spec per buildings_v2 house; the directory is rewritten whole so a
+    // rerun with fewer houses leaves no stale specs behind.
+    let houses_dir = dir.join("houses");
+    if houses_dir.exists() {
+        std::fs::remove_dir_all(&houses_dir)?;
+    }
+    std::fs::create_dir_all(&houses_dir)?;
+    for (n, spec) in report.house_specs.iter().enumerate() {
+        spec.save(houses_dir.join(format!("house_{n:03}.spec.yaml")))?;
+    }
+    println!("Saved {} house specs to {}", report.house_specs.len(), houses_dir.display());
     let mut scene = editor.capture_scene();
     let b = scene.bounds;
     scene.meta.insert("seed".into(), seed.to_string());

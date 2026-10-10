@@ -1086,6 +1086,7 @@ pub async fn generate_town_with(
     // placed against the arterial claim the prime frontage and later tiers
     // can't overlap them. Size gradient: houses on roads, cottages on lanes.
     use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseSeed, build_house};
+    use crate::generator::buildings_v2::spec::HouseSpec;
     use crate::generator::buildings_v2::footprint::SizeClass;
     use crate::generator::city_houses::{
         frontage_from_roads, plot_from_block, rect_from_frontage,
@@ -1449,9 +1450,9 @@ pub async fn generate_town_with(
                         .and_then(|id| district_schemes.get(&id))
                         .unwrap_or(&style_scheme);
                     let mut palette_rng = house_seed.stream("palette");
-                    let mut palette = scheme
+                    let (mut palette, palette_picks) = scheme
                         .next_style(&mut palette_rng)
-                        .roll_palette(&mut palette_rng, &data, local_wood.as_ref());
+                        .roll_palette_picks(&mut palette_rng, &data, local_wood.as_ref());
                     // Apply the town colour identity: a manor flies its unique
                     // family colour; every other building draws from the weighted
                     // town scheme. This `primary_color` then tints the building's
@@ -1540,6 +1541,12 @@ pub async fn generate_town_with(
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
+                            // Record the house's decisions, footprint relative
+                            // to its own bounds (reads only, draws nothing).
+                            report.house_specs.push(HouseSpec::resolved(
+                                &bctx, &output, &palette, &palette_picks,
+                                output.footprint.bounds().min(), bctx_editor.editor.world().build_area.origin,
+                            ));
                             // A manor flies its family colour: banners flanking
                             // the front door so the street reads the household
                             // before you step inside. Other buildings carry their

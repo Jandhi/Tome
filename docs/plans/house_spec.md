@@ -16,21 +16,32 @@ house that breaks the invariants.
 seed: 4127730158
 culture: medieval
 size: manor
-palette: { style: oak_town, wood: spruce, stone: cobblestone, roof: dark_slate, accent: red }
+palette: { style: whitewash_wattle, base: medieval_spruce, wood: oak, stone: cobblestone, roof: brick_roof }
 colour: red
-roof: { gable: stairs }
+roof: { gable: stairs }        # or flat, irimoya, { hipped: slab }
 footprint:                     # plot-relative, core first (what --rects takes)
   - { x: 0, z: 0, w: 12, h: 8, floors: 3 }
   - { x: 12, z: 2, w: 6, h: 5, floors: 2 }
 jetty: true
 engawa: false
-timber: { decorated: { spacing: 3 } }
-cellar: { theme: wine }
-rooms:                         # per rect, per floor, bottom up
+knee_wall: false
+tall_top_floor: false
+timber: { decorated: { spacing: 3 } }   # or plain
+attic: false                   # derived: today exactly { gable: double } has one
+cellar: { theme: wine }        # or false; themes storage, wine, larder, workshop
+rooms:                         # per rect, per floor, bottom up; then its attic room
   - [common, kitchen, bedroom]
   - [storage, bedroom]
-# Read back, not pinnable (set by the plot / road): front_door: south, base_y: 71
+site: { origin: [120, 344], front_door: south, base_y: 71 }   # read back, not pinnable
 ```
+
+The generator writes these (phase 2) with every field filled; serde_yaml
+writes them in block style. `site` records where the house stood (absolute
+corner the footprint is relative to, front door side, ground-floor y); a
+build from the spec takes all three from its plot and road. `window_fill` is
+left out: it is the culture's default, not a per-house decision. The manor
+family banner is left out too (its design is block-entity NBT drawn on the
+`colour` stream; the blazon goes to the chronicle).
 
 ## What we have today (findings)
 

@@ -59,6 +59,11 @@ pub struct TownReport {
     pub npcs_by_job: Vec<(String, usize)>,
     /// `(stage, milliseconds)` in pipeline order.
     pub timings_ms: Vec<(String, u64)>,
+    /// The resolved spec of every buildings_v2 house the town built, in build
+    /// order. Written as `houses/house_<n>.spec.yaml` beside `metrics.json`,
+    /// not into it.
+    #[serde(skip)]
+    pub house_specs: Vec<crate::generator::buildings_v2::spec::HouseSpec>,
 }
 
 impl TownReport {

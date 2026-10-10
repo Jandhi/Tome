@@ -248,8 +248,9 @@ fn stacked_under_main_stair(
 /// Decide whether to add a cellar and, if so, excavate, build, and furnish it.
 /// Runs at the end of the pipeline on the house's `cellar` stream (`ctx.rng`),
 /// so the roll, theme and furniture shift nothing else. Returns the descending
-/// stair's cell positions (position 0 is the cellar landing) when a cellar was
-/// built, or None otherwise.
+/// stair's cell positions (position 0 is the cellar landing), the cellar's
+/// anchors and its theme (a `CELLAR_THEMES` key) when a cellar was built, or
+/// None otherwise.
 pub async fn maybe_build_cellar(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
@@ -258,7 +259,7 @@ pub async fn maybe_build_cellar(
     floor_plan: &FloorPlan,
     room_plan: &RoomPlan,
     size_class: SizeClass,
-) -> Option<(Vec<Point2D>, Vec<AnchorScene>)> {
+) -> Option<(Vec<Point2D>, Vec<AnchorScene>, &'static str)> {
     let mut rng = ctx.rng.derive();
     if !rolls_cellar(size_class, &mut rng) {
         return None;
@@ -301,8 +302,8 @@ pub async fn maybe_build_cellar(
     let (positions, dir) = stair;
     place_descending_stair(ctx, &positions, dir, floor_y, &main_stair_cells, &mut rng).await;
 
-    let anchors = furnish_cellar(ctx, frame, interior, &positions).await;
-    Some((positions, anchors))
+    let (anchors, theme) = furnish_cellar(ctx, frame, interior, &positions).await;
+    Some((positions, anchors, theme))
 }
 
 /// Carve the cellar void and enclose it: stone floor slab under the whole core
@@ -427,12 +428,13 @@ const CELLAR_THEMES: [&str; 4] = ["storage", "cellar_wine", "cellar_larder", "ce
 /// `furnish_interior` engine (same as rooms and rooftop terraces): we seed the
 /// constraint map so no furniture lands on the stair steps or hangs over the
 /// shaft, then pack the chosen list against the cellar's interior rect.
+/// Returns the anchors and the theme key actually furnished.
 async fn furnish_cellar(
     ctx: &mut BuildCtx<'_>,
     frame: &Frame,
     interior: Rect2D,
     positions: &[Point2D],
-) -> Vec<AnchorScene> {
+) -> (Vec<AnchorScene>, &'static str) {
     let mut constraints = ConstraintMap::new(&interior);
     for (i, pos) in positions.iter().enumerate() {
         let cell = (pos.x, pos.y);
@@ -448,16 +450,13 @@ async fn furnish_cellar(
     // Pick this cellar's theme; fall back to the plain storage list if a themed
     // entry is missing from the data.
     let mut pick_rng = ctx.rng.derive();
-    let key = CELLAR_THEMES[pick_rng.rand_i32_range(0, CELLAR_THEMES.len() as i32) as usize];
-    let room_list = match ctx
-        .data
-        .furniture
-        .rooms
-        .get(key)
-        .or_else(|| ctx.data.furniture.rooms.get("storage"))
-    {
+    let mut key = CELLAR_THEMES[pick_rng.rand_i32_range(0, CELLAR_THEMES.len() as i32) as usize];
+    if !ctx.data.furniture.rooms.contains_key(key) {
+        key = "storage";
+    }
+    let room_list = match ctx.data.furniture.rooms.get(key) {
         Some(list) => list,
-        None => return Vec::new(),
+        None => return (Vec::new(), key),
     };
 
     // The cellar's deck sits at the CELLAR_FLOOR surface; its ceiling is the
@@ -493,7 +492,7 @@ async fn furnish_cellar(
     let mut claimed: HashSet<(i32, i32, i32)> = HashSet::default();
     let mut scenes: Vec<AnchorScene> = Vec::new();
     harvest_anchors(&placed, &constraints, floor_y, &mut claimed, &mut scenes);
-    scenes
+    (scenes, key)
 }
 
 #[cfg(test)]
