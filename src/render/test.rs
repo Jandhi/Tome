@@ -621,12 +621,40 @@ mod tests {
         assert!(a.geometry("minecraft:spruce_sign[rotation=6]").is_some());
         assert!(a.geometry("minecraft:oak_wall_sign[facing=west]").is_some());
         assert!(a.geometry("minecraft:oak_wall_hanging_sign[facing=north]").is_some());
+        // Extra state the synthesised block states don't mention still matches.
+        assert!(a.geometry("minecraft:decorated_pot[cracked=false,facing=east,waterlogged=false]").is_some());
+        assert!(a.geometry("minecraft:jungle_wall_sign[facing=east,waterlogged=false]").is_some());
+        assert!(a.geometry("minecraft:oak_hanging_sign[attached=false,rotation=0,waterlogged=false]").is_some());
         // Other entity-rendered blocks and bare ids the jar lacks fall back.
         assert!(a.geometry("minecraft:white_banner[rotation=0]").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());
         // Bare generator states resolve through the defaults.
         assert!(a.geometry("minecraft:lantern").is_some());
         assert!(a.geometry("minecraft:oak_trapdoor[facing=north,half=bottom,open=true]").is_some());
+    }
+
+    #[test]
+    fn models_reaching_past_their_cell_render_in_the_neighbour() {
+        use crate::render::assets::assets;
+        use crate::render::perspective::{render_perspective, PerspectiveCamera};
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        // A decorated pot's neck rises to 20/16: the grid grows a layer for
+        // it and the cell above lists the pot as reaching in.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:decorated_pot");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2, "a layer above the pot for its neck");
+        assert_eq!(g.overhangs_into(1, 1, 1), &[[1, 0, 1]]);
+        assert!(g.overhangs(g.get(1, 0, 1)));
+        // Looking level at the neck, just above the block, hits it.
+        let cam = PerspectiveCamera { eye: [1.5, 1.12, -3.0], target: [1.5, 1.12, 1.5], fov_deg: 2.0 };
+        let pm = render_perspective(&g, &cam, 3, 3).unwrap();
+        let centre = pm.pixel(1, 1).unwrap().demultiply();
+        let c = [centre.red(), centre.green(), centre.blue(), centre.alpha()];
+        assert_ne!(c, BACKGROUND, "the neck above the block is drawn");
     }
 
     #[test]

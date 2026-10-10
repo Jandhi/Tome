@@ -321,9 +321,38 @@ fn cast(g: &VoxelGrid, o: V3, d: V3, lit: Option<&LightSampler>, fog: bool) -> R
             None => c,
         }
     };
+    let mut merged: Vec<Hit> = Vec::new();
     loop {
         let m = g.get(cell[0], cell[1], cell[2]);
-        if m != 0 {
+        let over = g.overhangs_into(cell[0], cell[1], cell[2]);
+        if !over.is_empty() || (m != 0 && g.overhangs(m)) {
+            // Models reach across cell boundaries here: take every model
+            // touching this cell (its own and its neighbours' overhangs),
+            // keep the hits inside this cell, nearest first. Each part of an
+            // overhanging model is drawn by the cell it lies in.
+            merged.clear();
+            let inside = |h: &Hit| {
+                let p = add(o, scale(d, h.t));
+                (0..3).all(|k| p[k] >= cell[k] as f32 - 1e-3 && p[k] <= cell[k] as f32 + 1.0 + 1e-3)
+            };
+            for (src, sm) in std::iter::once((cell, m)).chain(over.iter().map(|&c| (c, g.get(c[0], c[1], c[2])))) {
+                if sm == 0 {
+                    continue;
+                }
+                if let Some(geo) = g.geometry(sm) {
+                    hit_geometry(geo, src, o, d, g.color(sm), &mut hits);
+                    merged.extend(hits.drain(..).filter(|h| inside(h)));
+                } else if let Some(hit) = hit_boxes(g, sm, src, o, d) {
+                    merged.push(hit);
+                }
+            }
+            merged.sort_by(|a, b| a.t.total_cmp(&b.t));
+            for hit in &merged {
+                if acc.push(colour(hit, cell)) {
+                    return acc.finish(bg);
+                }
+            }
+        } else if m != 0 {
             if let Some(geo) = g.geometry(m) {
                 hit_geometry(geo, cell, o, d, g.color(m), &mut hits);
                 for hit in &hits {

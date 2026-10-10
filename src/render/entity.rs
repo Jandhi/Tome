@@ -14,7 +14,9 @@
 //! is why side faces often read their rectangle bottom-up (`flip_v`).
 //!
 //! Parts the game draws outside the block (a sign board's top, a pot's neck)
-//! are squeezed inside it: the renderers only draw a block within its cell.
+//! stay outside it: the grid records which cells a model reaches into
+//! (`VoxelGrid::overhangs_into`) and the perspective views draw them there.
+//! The flat views clip a model to its own cell.
 
 use serde_json::{json, Map, Value};
 
@@ -194,7 +196,7 @@ fn bed_half(tex: &str, head: bool) -> Value {
 
 /// The sign board (24x12x2 at (0, 0)) and post (2x14x2 at (0, 14)) of a
 /// 64-texel sign sheet, at the game's 2/3 scale: a 16x8 board. Standing:
-/// the board on top of its post, squeezed down to end at the block's top;
+/// the board on top of its 9.33-high post, reaching 1.33 above the block;
 /// on a wall: the board alone, against the block's north edge.
 fn sign(tex: &str, wall: bool, y_angle: f32) -> Value {
     let board_faces = |b: Box3| {
@@ -209,13 +211,13 @@ fn sign(tex: &str, wall: bool, y_angle: f32) -> Value {
     let boxes = if wall {
         vec![board_faces(Box3::new([0.0, 4.33, 14.67], [16.0, 12.33, 16.0], board_box))]
     } else {
-        let post = Box3::new([7.33, 0.0, 7.33], [8.67, 8.0, 8.67], ((0.0, 14.0), (2.0, 14.0, 2.0)))
+        let post = Box3::new([7.33, 0.0, 7.33], [8.67, 9.33, 8.67], ((0.0, 14.0), (2.0, 14.0, 2.0)))
             .face("north", Slot::North, PLAIN)
             .face("south", Slot::South, PLAIN)
             .face("west", Slot::West, PLAIN)
             .face("east", Slot::East, PLAIN)
             .turned(y_angle);
-        vec![board_faces(Box3::new([0.0, 8.0, 7.33], [16.0, 16.0, 8.67], board_box)).turned(y_angle), post]
+        vec![board_faces(Box3::new([0.0, 9.33, 7.33], [16.0, 17.33, 8.67], board_box)).turned(y_angle), post]
     };
     model(&[("t", tex)], 64.0, &boxes)
 }
@@ -255,25 +257,25 @@ fn hanging_sign(tex: &str, wall: bool, y_angle: f32) -> Value {
 
 /// A plain decorated pot: the 16-texel side sheet's panel (x 1..15) on the
 /// four sides of a 14-wide body, the 32-texel base sheet for the body's top
-/// and bottom (14x0x14 at (0, 13)) and the neck, a 6x1x6 collar (0, 5) under
-/// an 8x3x8 lip (0, 0), squeezed into the top of the block.
+/// and bottom (14x0x14 at (0, 13)) and the neck above the block: a 6x1x6
+/// collar (0, 5) under an 8x3x8 lip (0, 0), reaching 20/16 high.
 fn decorated_pot(side: &str, base: &str) -> Value {
     let panel = [1.0, 0.0, 15.0, 16.0];
     // The side sheet is 16 texels wide, the base 32: scale the panel up.
     let panel = [panel[0] * 2.0, panel[1] * 2.0, panel[2] * 2.0, panel[3] * 2.0];
     // The game offsets this flat box by -14 texels, so its rectangles start at x 0.
-    let body = Box3::new([1.0, 0.0, 1.0], [15.0, 13.0, 15.0], ((-14.0, 13.0), (14.0, 0.0, 14.0)))
+    let body = Box3::new([1.0, 0.0, 1.0], [15.0, 16.0, 15.0], ((-14.0, 13.0), (14.0, 0.0, 14.0)))
         .face("up", Slot::Down, PLAIN)
         .face("down", Slot::Up, PLAIN);
-    let mut panels = Box3::new([1.0, 0.0, 1.0], [15.0, 13.0, 15.0], ((0.0, 0.0), (0.0, 0.0, 0.0))).tex("side");
+    let mut panels = Box3::new([1.0, 0.0, 1.0], [15.0, 16.0, 15.0], ((0.0, 0.0), (0.0, 0.0, 0.0))).tex("side");
     for f in ["north", "south", "west", "east"] {
         panels = panels.rect(f, panel, PLAIN);
     }
     let neck_sides = |b: Box3| {
         b.face("north", Slot::North, FLIP_V).face("south", Slot::South, FLIP_V).face("west", Slot::West, FLIP_V).face("east", Slot::East, FLIP_V)
     };
-    let collar = neck_sides(Box3::new([5.0, 13.0, 5.0], [11.0, 14.0, 11.0], ((0.0, 5.0), (6.0, 1.0, 6.0)))).tex("base");
-    let lip = neck_sides(Box3::new([4.0, 14.0, 4.0], [12.0, 16.0, 12.0], ((0.0, 0.0), (8.0, 3.0, 8.0))))
+    let collar = neck_sides(Box3::new([5.0, 16.0, 5.0], [11.0, 17.0, 11.0], ((0.0, 5.0), (6.0, 1.0, 6.0)))).tex("base");
+    let lip = neck_sides(Box3::new([4.0, 17.0, 4.0], [12.0, 20.0, 12.0], ((0.0, 0.0), (8.0, 3.0, 8.0))))
         .face("up", Slot::Up, PLAIN)
         .tex("base");
     model(&[("t", base), ("base", base), ("side", side)], 32.0, &[body.tex("base"), panels, collar, lip])

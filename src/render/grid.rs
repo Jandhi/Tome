@@ -49,6 +49,12 @@ pub struct VoxelGrid {
     geometry: Vec<Option<Arc<BlockGeometry>>>,
     /// What each material does to light (see [`light`]).
     light: Vec<LightProps>,
+    /// Cells that models from neighbouring cells reach into (a sign board
+    /// standing above its post, a pot's neck): cell index to the local
+    /// coordinates of the overhanging blocks. Empty for most scenes.
+    overhangs: HashMap<usize, Vec<[i32; 3]>>,
+    /// Per material: its model reaches past its cell.
+    reaches: Vec<bool>,
 }
 
 impl VoxelGrid {
@@ -140,11 +146,24 @@ impl VoxelGrid {
         };
 
         let visible = |p: &Point3D, i: u32| crop.contains(*p) && palette_mat[i as usize] != 0;
+        // How far each palette entry's model reaches past its cell, in cells
+        // per axis: (-1 or 0, 0 or 1). Neighbour-dependent variants (stair
+        // corners, fence links) stay inside their cell, so the palette's own
+        // model is enough.
+        let reach_of = |block: &str| -> Option<([i32; 3], [i32; 3])> {
+            let (lo, hi) = assets?.geometry(block)?.bounds();
+            let lo = lo.map(|v| if v < -1e-3 { -1 } else { 0 });
+            let hi = hi.map(|v| if v > 16.0 + 1e-3 { 1 } else { 0 });
+            (lo != [0; 3] || hi != [0; 3]).then_some((lo, hi))
+        };
+        let palette_reach: Vec<Option<([i32; 3], [i32; 3])>> =
+            scene.palette.iter().zip(&palette_mat).map(|(s, &m)| if m == 0 { None } else { reach_of(s) }).collect();
         let (mut y_min, mut y_max) = (i32::MAX, i32::MIN);
         for (p, &i) in &scene.blocks {
             if visible(p, i) {
-                y_min = y_min.min(p.y);
-                y_max = y_max.max(p.y);
+                let (dlo, dhi) = palette_reach[i as usize].map_or((0, 0), |(lo, hi)| (lo[1], hi[1]));
+                y_min = y_min.min(p.y + dlo);
+                y_max = y_max.max(p.y + dhi);
             }
         }
         if y_min > y_max {
@@ -154,14 +173,40 @@ impl VoxelGrid {
         let (nx, ny, nz) = (crop.size.x, y_max - y_min + 1, crop.size.z);
         let origin = Point3D::new(crop.origin.x, y_min, crop.origin.z);
         let mut cells = vec![0; (nx as usize) * (ny as usize) * (nz as usize)];
+        let mut overhangs: HashMap<usize, Vec<[i32; 3]>> = HashMap::default();
         for (p, &i) in &scene.blocks {
             if visible(p, i) {
                 let (x, y, z) = (p.x - origin.x, p.y - origin.y, p.z - origin.z);
                 cells[((x * nz + z) * ny + y) as usize] = cell_mat(p, i);
+                if let Some((lo, hi)) = palette_reach[i as usize] {
+                    for dx in lo[0]..=hi[0] {
+                        for dy in lo[1]..=hi[1] {
+                            for dz in lo[2]..=hi[2] {
+                                let (qx, qy, qz) = (x + dx, y + dy, z + dz);
+                                if (dx, dy, dz) == (0, 0, 0) || qx < 0 || qy < 0 || qz < 0 || qx >= nx || qy >= ny || qz >= nz {
+                                    continue;
+                                }
+                                overhangs.entry(((qx * nz + qz) * ny + qy) as usize).or_default().push([x, y, z]);
+                            }
+                        }
+                    }
+                }
             }
         }
+        for sources in overhangs.values_mut() {
+            sources.sort_unstable();
+        }
         let boxes = shapes.iter().map(|s| s.boxes()).collect();
-        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, side_colors, shapes, boxes, geometry, light: lights })
+        let reaches = geometry
+            .iter()
+            .map(|g| {
+                g.as_ref().is_some_and(|g| {
+                    let (lo, hi) = g.bounds();
+                    lo.iter().any(|&v| v < -1e-3) || hi.iter().any(|&v| v > 16.0 + 1e-3)
+                })
+            })
+            .collect();
+        Some(VoxelGrid { origin, nx, ny, nz, cells, materials, side_colors, shapes, boxes, geometry, light: lights, overhangs, reaches })
     }
 
     /// Index of local `(x, y, z)` in [`cells`](Self::cells); no bounds check.
@@ -172,6 +217,20 @@ impl VoxelGrid {
     /// Every cell's material in [`index`](Self::index) order (`y` fastest).
     pub fn cells(&self) -> &[u16] {
         &self.cells
+    }
+
+    /// Local coordinates of the blocks whose models reach into local cell
+    /// `(x, y, z)` from a neighbouring cell (see [`BlockGeometry::bounds`]).
+    pub fn overhangs_into(&self, x: i32, y: i32, z: i32) -> &[[i32; 3]] {
+        if self.overhangs.is_empty() || x < 0 || y < 0 || z < 0 || x >= self.nx || y >= self.ny || z >= self.nz {
+            return &[];
+        }
+        self.overhangs.get(&self.index(x, y, z)).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether material `m`'s model reaches past its own cell.
+    pub fn overhangs(&self, m: u16) -> bool {
+        self.reaches[m as usize]
     }
 
     /// Material at local `(x, y, z)`; 0 (empty) outside the grid.

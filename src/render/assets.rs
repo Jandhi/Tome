@@ -213,6 +213,34 @@ pub struct BlockGeometry {
     pub side: Rgba,
 }
 
+impl BlockGeometry {
+    /// World-space bounds of every element in sixteenths, rotated elements
+    /// included: `(min, max)`. Beyond `0..16` the model reaches into a
+    /// neighbouring cell (a sign board's top, a pot's neck).
+    pub fn bounds(&self) -> (V3, V3) {
+        let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for e in &self.elements {
+            for i in 0..8 {
+                let c = [
+                    if i & 1 == 0 { e.from[0] } else { e.to[0] },
+                    if i & 2 == 0 { e.from[1] } else { e.to[1] },
+                    if i & 4 == 0 { e.from[2] } else { e.to[2] },
+                ];
+                // A rotated element's corners are in its own frame: p' = m p + t.
+                let w = match &e.local {
+                    Some(f) => mul_mat(&transpose(&f.m), sub(c, f.t)),
+                    None => c,
+                };
+                for k in 0..3 {
+                    lo[k] = lo[k].min(w[k]);
+                    hi[k] = hi[k].max(w[k]);
+                }
+            }
+        }
+        (lo, hi)
+    }
+}
+
 pub type V3 = [f32; 3];
 
 fn add(a: V3, b: V3) -> V3 {
