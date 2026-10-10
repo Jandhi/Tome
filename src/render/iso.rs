@@ -17,6 +17,11 @@
 //! texels are left out of the mask (so what is behind them shows), and a
 //! model that is not a fully opaque cube never hides a neighbour's face.
 //!
+//! A model reaching past its cell (a wall banner's flag, a pot's neck) is
+//! clipped to each cell it lies in and every piece is painted with that
+//! cell, so it takes its place in the back-to-front order: a cell a model
+//! reaches into paints the overhanging pieces first, then its own block.
+//!
 //! With a [`Lit`] the painted colour of every pixel is multiplied by the
 //! light of its face: the face's outside cell is the neighbour above / +u /
 //! +v for a boundary face and the block's own cell for an inner one, and
@@ -30,6 +35,7 @@ use super::grid::{blend, canvas, shade, Rgba, VoxelGrid};
 use super::lit::{axis_of, face_uv, tint, FaceLight, Lit};
 use super::shape::{Box16, Shape};
 use super::texel;
+use crate::util::HashMap;
 
 /// Which corner the camera looks from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -267,7 +273,12 @@ fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask
 /// face) times the face's shade. A face is painted over what is already in
 /// the mask, so a cut-out texel leaves the box behind visible and a
 /// translucent one blends over it.
-fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexMask> {
+///
+/// Only the part of the model inside one cell is drawn: `off` is the
+/// model's own cell minus that cell (in cells), `[0; 3]` for its own. Boxes
+/// are clipped to the cell, and a face whose plane lies outside it is left
+/// to the cell it lies in ([`texel::in_cell`]).
+fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32, off: [i32; 3]) -> anyhow::Result<TexMask> {
     let (th, bh) = (tw / 2, tw / 2);
     let (pw, ph) = (tw, th + bh);
     // Sub-samples per pixel axis: a texel each at tw = 8 (top faces 4 px tall).
@@ -275,18 +286,37 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
     let n = (ss * ss) as f32;
     let (right_face, left_face) = cam.side_faces();
 
-    let boxes: Vec<(UvBoxF, &Element)> = geo
+    // Each element's box in the drawn cell's sixteenths, clipped to the cell,
+    // and which of its camera-facing faces (top, +u, +v) lie in the cell.
+    let shift = off.map(|o| 16.0 * o as f32);
+    let max_side = |f: Face6| matches!(f, Face6::Up | Face6::East | Face6::South);
+    let boxes: Vec<(UvBoxF, [bool; 3], &Element)> = geo
         .elements
         .iter()
-        .map(|e| {
-            let (u0, u1, v0, v1) = cam.box_uv_f(e.from, e.to);
-            ((u0, u1, v0, v1, e.from[1], e.to[1]), e)
+        .filter_map(|e| {
+            let (mut from, mut to) = (e.from, e.to);
+            for k in 0..3 {
+                let (lo, hi) = ((e.from[k] + shift[k]).clamp(0.0, 16.0), (e.to[k] + shift[k]).clamp(0.0, 16.0));
+                // Clipped away, or cut down to a sliver on the boundary.
+                if lo > hi || (lo == hi && e.from[k] < e.to[k]) {
+                    return None;
+                }
+                (from[k], to[k]) = (lo, hi);
+            }
+            let keep = [Face6::Up, right_face, left_face].map(|f| {
+                let k = axis_of(f);
+                let plane = if max_side(f) { e.to[k] } else { e.from[k] };
+                texel::in_cell(plane + shift[k], off[k])
+            });
+            let (u0, u1, v0, v1) = cam.box_uv_f(from, to);
+            Some(((u0, u1, v0, v1, from[1], to[1]), keep, e))
         })
         .collect();
-    let behind = |a: &(UvBoxF, &Element), b: &(UvBoxF, &Element)| a.0 .1 <= b.0 .0 || a.0 .3 <= b.0 .2 || a.0 .5 <= b.0 .4;
+    type Clipped<'e> = (UvBoxF, [bool; 3], &'e Element);
+    let behind = |a: &Clipped, b: &Clipped| a.0 .1 <= b.0 .0 || a.0 .3 <= b.0 .2 || a.0 .5 <= b.0 .4;
 
     let mut label: Vec<Option<(u8, Rgba, f32, f32)>> = vec![None; (pw * ph) as usize];
-    for (b, e) in paint_order(boxes, behind) {
+    for (b, keep, e) in paint_order(boxes, behind) {
         let (u0, u1, v0, v1, y0, y1) = b;
         let faces: [([(f32, f32, f32); 4], u8, Face6, bool); 3] = [
             ([(u0, v0, y1), (u1, v0, y1), (u1, v1, y1), (u0, v1, y1)], TOP, Face6::Up, y1 >= 16.0 - EDGE),
@@ -294,6 +324,9 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
             ([(u0, v1, y1), (u1, v1, y1), (u1, v1, y0), (u0, v1, y0)], LEFT, left_face, v1 >= 16.0 - EDGE),
         ];
         for (quad, face, world_face, boundary) in faces {
+            if !keep[face as usize] {
+                continue;
+            }
             let Some(ft) = texel::face(e, world_face) else { continue };
             let Some(pm) = quad_coverage(quad.map(|(u, v, y)| proj(tw, u, v, y)), pw, ph)? else { continue };
             let shade_f = if ft.shade { FACE_SHADE[face as usize] } else { 1.0 };
@@ -311,7 +344,9 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32) -> anyhow::Result<TexM
                         let y = py + (sj as f32 + 0.5) / ss as f32;
                         // Invert the projection on the face's own plane.
                         let (u, v, yy) = face_point(face, b, tw, x, y);
-                        let c = ft.sample_at(cam.world(clamp(u, u0, u1), clamp(v, v0, v1), clamp(yy, y0, y1)));
+                        // Back into the model's own cell to read the texel.
+                        let p = cam.world(clamp(u, u0, u1), clamp(v, v0, v1), clamp(yy, y0, y1));
+                        let c = ft.sample_at([p[0] - shift[0], p[1] - shift[1], p[2] - shift[2]]);
                         let a = c[3] as f32;
                         for k in 0..3 {
                             rgb[k] += c[k] as f32 * a;
@@ -409,10 +444,28 @@ pub fn render_iso_with(g: &VoxelGrid, cam: IsoCamera, tile_w: u32, lit: Option<&
     let mut tex_masks: Vec<Option<TexMask>> = Vec::with_capacity(models.len());
     let mut cutout: Vec<bool> = Vec::with_capacity(models.len());
     for (m, model) in models.iter().enumerate() {
-        tex_masks.push(model.as_ref().map(|fm| tex_mask(fm.geo, cam, tw)).transpose()?);
+        tex_masks.push(model.as_ref().map(|fm| tex_mask(fm.geo, cam, tw, [0; 3])).transpose()?);
         cutout.push(model.as_ref().is_some_and(|fm| !fm.solid && g.is_opaque(m as u16)));
     }
     let hides = |n: u16, m: u16| g.hides(n, m) && !cutout[n as usize];
+
+    // Pieces of textured models lying in a neighbouring cell: one mask per
+    // (material, model's cell minus drawn cell), and which grid columns
+    // (x * nz + z) hold a cell such a piece lies in.
+    let mut over_masks: HashMap<(u16, [i32; 3]), TexMask> = HashMap::default();
+    let mut over_cols: Vec<bool> = Vec::new();
+    for ([x, y, z], sources) in g.overhang_cells() {
+        for s in sources {
+            let sm = g.get(s[0], s[1], s[2]);
+            let Some(fm) = &models[sm as usize] else { continue };
+            let off = [s[0] - x, s[1] - y, s[2] - z];
+            if !over_masks.contains_key(&(sm, off)) {
+                over_masks.insert((sm, off), tex_mask(fm.geo, cam, tw, off)?);
+            }
+            over_cols.resize((g.nx * g.nz) as usize, false);
+            over_cols[(x * g.nz + z) as usize] = true;
+        }
+    }
 
     let (nu, nv, map) = cam.frame(g);
     let at = |u: i32, y: i32, v: i32| {
@@ -446,11 +499,73 @@ pub fn render_iso_with(g: &VoxelGrid, cam: IsoCamera, tile_w: u32, lit: Option<&
         })
     };
 
+    // Paint textured mask `mask` with its anchor at `(ax, ay)` for cell
+    // `(u, y, v)`: `hidden[face]` tells which boundary faces its neighbours
+    // cover, `depth` how deep a translucent column it tops.
+    #[allow(clippy::too_many_arguments)]
+    let paint_tex = |data: &mut [u8],
+                     mask: &TexMask,
+                     hidden: [bool; 3],
+                     depth: i32,
+                     (ax, ay): (i32, i32),
+                     (u, y, v): (i32, i32, i32),
+                     cache: &mut [Option<FaceLight>; 6]| {
+        for &(dx, dy, tag, c, lu, lv) in mask {
+            let face = (tag & 3) as usize;
+            if tag & BOUNDARY != 0 && hidden[face] {
+                continue;
+            }
+            let c = if depth > 1 && face == TOP as usize && c[3] < 255 { stacked(c, depth) } else { c };
+            let c = match lit {
+                Some(l) => tint(c, face_light(l, u, y, v, tag, cache).at(lu, lv)),
+                None => c,
+            };
+            let (px, py) = (ax + dx, ay + dy);
+            if px >= 0 && py >= 0 && px < iw && py < ih {
+                blend(data, ((py * iw + px) * 4) as usize, c);
+            }
+        }
+    };
+
+    // Per u along the current diagonal: its column holds overhanging pieces
+    // (read once per diagonal, and only on diagonals that have any).
+    let mut over_row: Vec<bool> = vec![false; if over_cols.is_empty() { 0 } else { nu as usize }];
     for s in 0..(nu + nv - 1) {
+        let us = (s - (nv - 1)).max(0)..=s.min(nu - 1);
+        let mut diagonal_over = false;
+        if !over_row.is_empty() {
+            for u in us.clone() {
+                let (x, z) = map(u, s - u);
+                over_row[u as usize] = over_cols[(x * g.nz + z) as usize];
+                diagonal_over |= over_row[u as usize];
+            }
+        }
         for y in 0..g.ny {
-            for u in (s - (nv - 1)).max(0)..=s.min(nu - 1) {
+            for u in us.clone() {
                 let v = s - u;
-                let m = at(u, y, v);
+                let (x, z) = map(u, v);
+                let m = g.get(x, y, z);
+                let over = if diagonal_over && over_row[u as usize] { g.overhangs_into(x, y, z) } else { &[][..] };
+                if m == 0 && over.is_empty() {
+                    continue;
+                }
+                let ax = (u - v) * tw / 2 + off_x;
+                let ay = (u + v) * th / 2 - y * bh + off_y;
+                // Per face of this cell (keyed by face and boundary): its light,
+                // and in the flat-colour path its finished colour when the light
+                // is uniform across it.
+                let mut cache: [Option<FaceLight>; 6] = [None; 6];
+                let mut ready: [Option<Rgba>; 6] = [None; 6];
+                // Pieces of neighbours' models lying in this cell go first, lit
+                // by this cell's faces; the cell's own block paints over them.
+                for src in over {
+                    let sm = g.get(src[0], src[1], src[2]);
+                    if let Some(mask) = over_masks.get(&(sm, [src[0] - x, src[1] - y, src[2] - z])) {
+                        let hidden =
+                            [hides(at(u, y + 1, v), sm), hides(at(u + 1, y, v), sm), hides(at(u, y, v + 1), sm)];
+                        paint_tex(data, mask, hidden, 1, (ax, ay), (u, y, v), &mut cache);
+                    }
+                }
                 if m == 0 {
                     continue;
                 }
@@ -461,30 +576,9 @@ pub fn render_iso_with(g: &VoxelGrid, cam: IsoCamera, tile_w: u32, lit: Option<&
                 if hidden.iter().all(|&h| h) {
                     continue;
                 }
-                let ax = (u - v) * tw / 2 + off_x;
-                let ay = (u + v) * th / 2 - y * bh + off_y;
-                // Per face of this cell (keyed by face and boundary): its light,
-                // and in the flat-colour path its finished colour when the light
-                // is uniform across it.
-                let mut cache: [Option<FaceLight>; 6] = [None; 6];
-                let mut ready: [Option<Rgba>; 6] = [None; 6];
                 if let Some(mask) = &tex_masks[m as usize] {
                     let depth = if g.is_opaque(m) { 1 } else { column_depth(&at, u, y, v, m) };
-                    for &(dx, dy, tag, c, lu, lv) in mask {
-                        let face = (tag & 3) as usize;
-                        if tag & BOUNDARY != 0 && hidden[face] {
-                            continue;
-                        }
-                        let c = if depth > 1 && face == TOP as usize && c[3] < 255 { stacked(c, depth) } else { c };
-                        let c = match lit {
-                            Some(l) => tint(c, face_light(l, u, y, v, tag, &mut cache).at(lu, lv)),
-                            None => c,
-                        };
-                        let (px, py) = (ax + dx, ay + dy);
-                        if px >= 0 && py >= 0 && px < iw && py < ih {
-                            blend(data, ((py * iw + px) * 4) as usize, c);
-                        }
-                    }
+                    paint_tex(data, mask, hidden, depth, (ax, ay), (u, y, v), &mut cache);
                     continue;
                 }
                 let c = g.color(m);

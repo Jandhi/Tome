@@ -15,8 +15,9 @@
 //!
 //! Parts the game draws outside the block (a sign board's top, a pot's neck)
 //! stay outside it: the grid records which cells a model reaches into
-//! (`VoxelGrid::overhangs_into`) and the perspective views draw them there.
-//! The flat views clip a model to its own cell.
+//! (`VoxelGrid::overhangs_into`) and every view draws them there: the
+//! perspective views and the flat ones (iso, top-down, elevations) alike
+//! draw each part of a model with the cell it lies in.
 
 use serde_json::{json, Map, Value};
 

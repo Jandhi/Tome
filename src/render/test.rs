@@ -688,6 +688,101 @@ mod tests {
         assert_ne!(c, BACKGROUND, "the neck above the block is drawn");
     }
 
+    /// A stone floor and a north wall (z = 0) three high over x 0..3, the
+    /// wall carrying a south-facing red wall banner at (1, 2, 1) when
+    /// `banner`: its flag hangs 13/16 into the air cell below.
+    fn wall_banner_scene(banner: bool) -> VoxelGrid {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 4, 3) });
+        for x in 0..3 {
+            for z in 0..3 {
+                s.insert(Point3D::new(x, 0, z), "minecraft:stone");
+            }
+            for y in 1..4 {
+                s.insert(Point3D::new(x, y, 0), "minecraft:stone");
+            }
+        }
+        if banner {
+            s.insert(Point3D::new(1, 2, 1), "minecraft:red_wall_banner[facing=south]");
+        }
+        VoxelGrid::from_scene(&s, None).unwrap()
+    }
+
+    fn rgba_at(pm: &resvg::tiny_skia::Pixmap, x: u32, y: u32) -> [u8; 4] {
+        let p = pm.pixel(x, y).unwrap().demultiply();
+        [p.red(), p.green(), p.blue(), p.alpha()]
+    }
+
+    #[test]
+    fn flat_views_draw_a_wall_banner_flag_below_its_block() {
+        use crate::render::assets::assets;
+        use crate::render::iso::tile_width;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let (with, without) = (wall_banner_scene(true), wall_banner_scene(false));
+        assert_eq!(with.ny, without.ny, "same grid either way");
+        assert_eq!(with.overhangs_into(1, 1, 1), &[[1, 2, 1]]);
+
+        // Iso from the south-east: the banner's cell projects to the hexagon
+        // under anchor (ax, ay); the flag below it changes pixels further
+        // down than that hexagon reaches, which the clipped model never did.
+        let tw = tile_width(32);
+        let a = render_iso(&with, IsoCamera::SouthEast, 32).unwrap();
+        let b = render_iso(&without, IsoCamera::SouthEast, 32).unwrap();
+        let (u, y, v) = (1, 2, 1);
+        let ax = (u - v) * tw / 2 + with.nz * tw / 2 + tw;
+        let ay = (u + v) * tw / 4 - y * tw / 2 + (with.ny - 1) * tw / 2 + tw;
+        let below = (ay + tw..a.height() as i32)
+            .flat_map(|py| (ax - tw / 2..ax + tw / 2).map(move |px| (px, py)))
+            .filter(|&(px, py)| rgba_at(&a, px as u32, py as u32) != rgba_at(&b, px as u32, py as u32))
+            .count();
+        assert!(below > 20, "the flag is drawn below the banner's cell in iso ({below} px)");
+
+        // South elevation: in the cell below the banner the flag covers the
+        // wall behind it.
+        let px = 16;
+        let (a, b) = (
+            render_elevation(&with, ElevationSide::South, px).unwrap(),
+            render_elevation(&without, ElevationSide::South, px).unwrap(),
+        );
+        let row = (with.ny - 1 - 1 + 1) as u32 * px;
+        let (cx, cy) = (2 * px + px / 2, row + px / 4);
+        assert_ne!(rgba_at(&a, cx, cy), rgba_at(&b, cx, cy), "the flag hangs over the wall in the cell below");
+        // ... and stops 13/16 down: the bottom of that cell shows the wall.
+        assert_eq!(rgba_at(&a, cx, row + px - 1), rgba_at(&b, cx, row + px - 1));
+    }
+
+    #[test]
+    fn flat_views_draw_model_tops_above_their_block() {
+        use crate::render::assets::assets;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        // A decorated pot's neck (16..20) seen from the south, in the layer
+        // above the pot: the bottom quarter of that cell, at its middle.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:decorated_pot");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        let px = 16;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        let row = (g.ny - 1 - 1 + 1) as u32 * px;
+        assert_ne!(rgba_at(&pm, 2 * px + px / 2, row + px - 2), BACKGROUND, "the neck shows above the pot");
+        assert_eq!(rgba_at(&pm, 2 * px + px / 2, row + 2), BACKGROUND, "and ends at 20/16");
+
+        // A standing banner seen from above: its crossbar (y 29.33, z 7.33
+        // to 9.33) tops the column one layer up, beside the pole.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:red_banner[rotation=0]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2);
+        let pm = render_topdown(&g, px).unwrap();
+        let (x0, z0) = (2 * px, 2 * px);
+        assert_ne!(rgba_at(&pm, x0 + 3, z0 + 8), BACKGROUND, "the crossbar is seen from above");
+        assert_ne!(rgba_at(&pm, x0 + 3, z0 + 8), rgba_at(&pm, x0 + 3, z0 + 2), "nothing north of it");
+    }
+
     #[test]
     fn contact_sheet_tiles_in_rows() {
         use crate::render::perspective::contact_sheet;
