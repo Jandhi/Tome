@@ -73,8 +73,6 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
         log::info!("render: nothing visible to render into {}", out_dir.display());
         return Ok(Vec::new());
     };
-    log_unknown_blocks(scene);
-    std::fs::create_dir_all(out_dir)?;
     let light_map = opts.lighting.map(|l| {
         let t = std::time::Instant::now();
         let map = LightMap::new(&g);
@@ -84,7 +82,24 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
         );
         map
     });
-    let lit = light_map.as_ref().zip(opts.lighting).map(|(map, l)| Lit::new(&g, map, l));
+    render_grid_views(scene, &g, light_map.as_ref(), opts, out_dir, prefix)
+}
+
+/// [`render_views`] from a grid (and, when `opts.lighting` is set, its light
+/// map) the caller already built, so several renders of one scene share
+/// them. `g` must come from `scene` (`opts.region` was applied when it was
+/// built and is not read here); `light_map` must be `LightMap::new(g)`.
+pub fn render_grid_views(
+    scene: &Scene,
+    g: &VoxelGrid,
+    light_map: Option<&LightMap>,
+    opts: &RenderOptions,
+    out_dir: &Path,
+    prefix: &str,
+) -> anyhow::Result<Vec<PathBuf>> {
+    log_unknown_blocks(scene);
+    std::fs::create_dir_all(out_dir)?;
+    let lit = light_map.zip(opts.lighting).map(|(map, l)| Lit::new(g, map, l));
     let lit = lit.as_ref();
 
     let lo = g.origin;
@@ -113,7 +128,7 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
             "top-down orthographic, north up, east right, {} px/block, 1-block margin, hill-shaded (light from NW), water bluer with depth",
             opts.px.max(1)
         ),
-        timed("top", || topdown::render_topdown_with(&g, opts.px, lit))?,
+        timed("top", || topdown::render_topdown_with(g, opts.px, lit))?,
     )?;
     for (cam, desc) in [
         (IsoCamera::SouthEast, "camera at the south-east corner; south and east facades visible, north-west corner at the top"),
@@ -122,7 +137,7 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
         save(
             format!("{prefix}iso_{}.png", cam.tag()),
             format!("2:1 isometric, {desc}, tile width {} px", iso::tile_width(opts.iso_tile)),
-            timed(&format!("iso_{}", cam.tag()), || iso::render_iso_with(&g, cam, opts.iso_tile, lit))?,
+            timed(&format!("iso_{}", cam.tag()), || iso::render_iso_with(g, cam, opts.iso_tile, lit))?,
         )?;
     }
     for side in ElevationSide::ALL {
@@ -133,7 +148,7 @@ pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix:
                 side.describe(),
                 opts.px.max(1)
             ),
-            timed(&format!("elev_{}", side.name()), || elevation::render_elevation_with(&g, side, opts.px, lit))?,
+            timed(&format!("elev_{}", side.name()), || elevation::render_elevation_with(g, side, opts.px, lit))?,
         )?;
     }
 

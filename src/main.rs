@@ -201,17 +201,28 @@ fn render_saved_scene(scene_path: &str, out_dir: Option<&str>, lighting: Option<
         Some(d) => std::path::PathBuf::from(d),
         None => scene_path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
     };
-    if let Some(lighting) = lighting {
-        report_light_map(&scene, lighting);
-    }
-    for path in crate::render::render_all(&scene, &out_dir)? {
-        println!("Rendered {}", path.display());
-    }
-    if let Some(lighting) = lighting {
-        let lit_dir = out_dir.join(format!("lit-{}", lighting.tag()));
-        let opts = crate::render::RenderOptions { lighting: Some(lighting), ..Default::default() };
-        for path in crate::render::render_views(&scene, &opts, &lit_dir, "")? {
-            println!("Rendered {} (lit, {})", path.display(), lighting.tag());
+    // One grid (and, with --light, one light map) serves the report and
+    // both sets of views.
+    let t = std::time::Instant::now();
+    let grid = crate::render::grid::VoxelGrid::from_scene(&scene, None);
+    let grid_time = t.elapsed();
+    match &grid {
+        None => println!("Nothing visible in the scene to render"),
+        Some(g) => {
+            let defaults = crate::render::RenderOptions::default();
+            for path in crate::render::render_grid_views(&scene, g, None, &defaults, &out_dir, "")? {
+                println!("Rendered {}", path.display());
+            }
+            if let Some(lighting) = lighting {
+                let t = std::time::Instant::now();
+                let map = crate::render::light::LightMap::new(g);
+                report_light_map(g, &map, lighting, grid_time, t.elapsed());
+                let lit_dir = out_dir.join(format!("lit-{}", lighting.tag()));
+                let opts = crate::render::RenderOptions { lighting: Some(lighting), ..defaults };
+                for path in crate::render::render_grid_views(&scene, g, Some(&map), &opts, &lit_dir, "")? {
+                    println!("Rendered {} (lit, {})", path.display(), lighting.tag());
+                }
+            }
         }
     }
     write_viewer(&scene, &out_dir.join("viewer.html"))?;
@@ -219,19 +230,15 @@ fn render_saved_scene(scene_path: &str, out_dir: Option<&str>, lighting: Option<
     Ok(())
 }
 
-/// Compute the whole scene's light map and print how long it took and how
-/// its light is distributed (the lit views are rendered separately).
-fn report_light_map(scene: &crate::render::Scene, lighting: crate::render::light::Lighting) {
-    use crate::render::light::LightMap;
-    let t = std::time::Instant::now();
-    let Some(g) = crate::render::grid::VoxelGrid::from_scene(scene, None) else {
-        println!("Light map: nothing visible in the scene");
-        return;
-    };
-    let grid_time = t.elapsed();
-    let t = std::time::Instant::now();
-    let map = LightMap::new(&g);
-    let map_time = t.elapsed();
+/// Print how long the scene's grid and light map took and how the map's
+/// light is distributed.
+fn report_light_map(
+    g: &crate::render::grid::VoxelGrid,
+    map: &crate::render::light::LightMap,
+    lighting: crate::render::light::Lighting,
+    grid_time: std::time::Duration,
+    map_time: std::time::Duration,
+) {
     let (sky, block) = map.histogram();
     let open: usize = sky.iter().sum();
     let pct = |n: usize| if open == 0 { 0.0 } else { 100.0 * n as f64 / open as f64 };
