@@ -40,9 +40,13 @@ multi_bedroom:
   optional: [chest, bookshelf, desk, chair, shelf, library_shelf, vase, wall_banner, table, carpet, carpet, reading_nook, dressing_screen, potted_plant]
 
 pantry:
-  fill_threshold: 0.78
+  fill_threshold: 0.6
   required: [lantern, pantry_shelf]
   optional:
+    - storage_set
+    - storage_set
+    - storage_set
+    - storage_set
     - barrel
     - barrel_stack
     - crate
@@ -57,10 +61,18 @@ pantry:
     - chest
     - crate
 
+# Storage-type rooms (storage, pantry, larder cellar) list `storage_set`
+# first so the multi-block set pieces (furniture/items/storage_sets.yaml)
+# take the walls before single-block filler, and stop at 0.6: the pieces'
+# aisle cells count as filled, so the room still reads as full.
 storage:
-  fill_threshold: 0.82
+  fill_threshold: 0.6
   required: [lantern]
   optional:
+    - storage_set
+    - storage_set
+    - storage_set
+    - storage_set
     - crate
     - barrel_stack
     - hay_pile
@@ -219,9 +231,13 @@ cellar_wine:
 
 # Larder / cold store — food stores and preservation. A well-stocked pantry.
 cellar_larder:
-  fill_threshold: 0.7
+  fill_threshold: 0.6
   required: [lantern, barrel, pantry_shelf]
   optional:
+    - storage_set
+    - storage_set
+    - storage_set
+    - storage_set
     - sack_pile
     - hay_pile
     - barrel
@@ -239,6 +255,8 @@ cellar_workshop:
   fill_threshold: 0.6
   required: [lantern, crafting_table]
   optional:
+    - wood_pile
+    - lumber_stack
     - tool_shelf
     - anvil
     - loom

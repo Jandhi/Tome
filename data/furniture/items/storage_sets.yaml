@@ -1,0 +1,185 @@
+# Storage set pieces: pre-composed multi-block groups that read as arranged
+# by hand, so a storeroom is a few deliberate fixtures along its walls rather
+# than single crates scattered over the floor. Authored against a north wall:
+# offsets are [along, up, away], `facing=south` faces into the room. Wall
+# pieces keep the row in front walkable (`empty_reachable`) as an aisle.
+# Rooms pick them through the `storage_set` tag; untagged pieces here are
+# drafts that did not read well in `--furniture` previews yet.
+
+# Two tiers of casks lying on their sides, lids to the room, a lantern on
+# the short end of the top tier.
+cask_rack:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:barrel[facing=south]", offset: [0, 0, 0], layer: ground, loot: pantry }
+    - { block: "minecraft:barrel[facing=south]", offset: [1, 0, 0], layer: ground, loot: pantry }
+    - { block: "minecraft:barrel[facing=south]", offset: [2, 0, 0], layer: ground, loot: pantry }
+    - { block: "minecraft:barrel[facing=south]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:barrel[facing=south]", offset: [1, 1, 0], layer: ground }
+    - { block: "minecraft:lantern[hanging=false]", offset: [2, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# A stepped hay mow against the wall: three bales, two on top, one pulled out.
+hay_loft:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:hay_block", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [2, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [1, 1, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [0, 0, 1], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: blocked_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Split firewood stacked end-on, rings to the room, one log laid across the top.
+wood_pile:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:spruce_log[axis=z]", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=z]", offset: [1, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=z]", offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=z]", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=x]", offset: [1, 1, 0], layer: ground, swap: wood }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Grain and flour sacks heaped against the wall, the top ones slumped
+# (carpets), one sack pulled out in front.
+sack_heap:
+  blocks:
+    - { block: "minecraft:white_wool", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:white_wool", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:white_wool", offset: [2, 0, 0], layer: ground }
+    - { block: "minecraft:white_wool", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:white_carpet", offset: [1, 1, 0], layer: ground }
+    - { block: "minecraft:white_carpet", offset: [0, 2, 0], layer: ground }
+    - { block: "minecraft:white_carpet", offset: [2, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Barrel, chest, barrel under a plank shelf with small wares on it.
+shelving_bay:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:barrel[facing=south]", offset: [0, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:chest[facing=south]", offset: [1, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:barrel[facing=south]", offset: [2, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:spruce_trapdoor[facing=south,half=top,open=false]", offset: [0, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_trapdoor[facing=south,half=top,open=false]", offset: [1, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_trapdoor[facing=south,half=top,open=false]", offset: [2, 1, 0], layer: ground, swap: wood }
+    - { block: "minecraft:flower_pot", offset: [0, 2, 0], layer: ground }
+    - { block: "minecraft:candle[candles=3,lit=true]", offset: [1, 2, 0], layer: ground }
+    - { block: "minecraft:decorated_pot", offset: [2, 2, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Slatted crates (composters) stacked in a step.
+crate_stack:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:composter", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:composter", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:composter", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:composter", offset: [0, 0, 1], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [0, 1], constraint: blocked_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+
+# A packing counter: chest, plank worktop with candles, barrel and lantern.
+packing_bench:
+  blocks:
+    - { block: "minecraft:chest[facing=south]", offset: [0, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:spruce_slab[type=top]", offset: [1, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:barrel[facing=up]", offset: [2, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:candle[candles=2,lit=true]", offset: [1, 1, 0], layer: ground }
+    - { block: "minecraft:lantern[hanging=false]", offset: [2, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Freestanding 2x2 cargo heap for the middle of a large storeroom: hay
+# bales and a barrel, a barrel and a chest on top.
+cargo_island:
+  tags: [storage_set]
+  min_room_area: 30
+  blocks:
+    - { block: "minecraft:hay_block", offset: [0, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [0, 0, 1], layer: ground }
+    - { block: "minecraft:barrel[facing=up]", offset: [1, 0, 1], layer: ground, loot: storage }
+    - { block: "minecraft:barrel[facing=up]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:chest[facing=south]", offset: [1, 1, 1], layer: ground, loot: storage }
+  constraints:
+    - { offset: [0, 0], constraint: blocked_reachable }
+    - { offset: [1, 0], constraint: blocked_reachable }
+    - { offset: [0, 1], constraint: blocked_reachable }
+    - { offset: [1, 1], constraint: blocked_reachable }
+
+# A row with a skyline: a three-high barrel tower, two bales, a chest.
+storage_row:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:barrel[facing=up]", offset: [0, 0, 0], layer: ground, loot: storage }
+    - { block: "minecraft:barrel[facing=up]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:barrel[facing=up]", offset: [0, 2, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [1, 0, 0], layer: ground }
+    - { block: "minecraft:hay_block", offset: [1, 1, 0], layer: ground }
+    - { block: "minecraft:chest[facing=south]", offset: [2, 0, 0], layer: ground, loot: storage }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }
+
+# Seasoning timber laid along the wall: bark logs below, a shorter course of
+# stripped (squared) beams on top.
+lumber_stack:
+  tags: [storage_set]
+  blocks:
+    - { block: "minecraft:spruce_log[axis=x]", offset: [0, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=x]", offset: [1, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:spruce_log[axis=x]", offset: [2, 0, 0], layer: ground, swap: wood }
+    - { block: "minecraft:stripped_spruce_log[axis=x]", offset: [0, 1, 0], layer: ground }
+    - { block: "minecraft:stripped_spruce_log[axis=x]", offset: [1, 1, 0], layer: ground }
+  constraints:
+    - { offset: [0, 0], constraint: wall }
+    - { offset: [1, 0], constraint: wall }
+    - { offset: [2, 0], constraint: wall }
+    - { offset: [0, 1], constraint: empty_reachable }
+    - { offset: [1, 1], constraint: empty_reachable }
+    - { offset: [2, 1], constraint: empty_reachable }

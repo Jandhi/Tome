@@ -311,6 +311,12 @@ pub async fn furnish_rooms(
             roof_hm,
             palette, materials, &furniture_data.loot, &mut room_rng,
         ).await;
+        log::debug!(
+            "furnish: {key} (floor {}, fill {:.2}): {}",
+            room.floor,
+            room.constraints.fill_ratio(),
+            room.furniture.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join(", "),
+        );
     }
 
     // Validate furniture anchor candidates against the finished layout. One
