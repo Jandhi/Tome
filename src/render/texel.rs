@@ -1,18 +1,23 @@
 //! Texture sampling for the flat views (isometric, top-down, elevations).
 //!
-//! A material's block model ([`BlockGeometry`]) is usable by these views when
-//! every element is world-oriented; models with freely rotated elements
-//! (crops, flowers, levers) keep the flat colour path, as do blocks without a
-//! model. The views look along one axis, so each one only ever sees faces of
-//! one kind (upward faces from above, the facing side faces from the side);
-//! those faces are rasterised once per material into box-filtered `px` x `px`
-//! "stamps" of the cell, ordered nearest-first, and a pixel's colour is the
-//! first stamp texel with any alpha along its ray. Texels with zero alpha are
-//! holes the ray passes through (leaves, panes, trapdoor windows), as in the
-//! perspective view.
+//! Every material with a block model ([`BlockGeometry`]) is drawn from it;
+//! blocks without one keep the flat colour path. The views look along one
+//! axis, so each one only ever sees faces of one kind (upward faces from
+//! above, the facing side faces from the side); those faces are rasterised
+//! once per material into box-filtered `px` x `px` "stamps" of the cell,
+//! ordered nearest-first, and a pixel's colour is the first stamp texel with
+//! any alpha along its ray. Texels with zero alpha are holes the ray passes
+//! through (leaves, panes, trapdoor windows), as in the perspective view.
+//!
+//! A model with freely rotated elements (a banner or sign at a rotation
+//! between the four sides, torches, levers) has no faces lying in the
+//! view's planes, so its stamps are cast instead: orthographic rays through
+//! the elements ([`ray_hits`]), the n-th face each sub-sample's ray meets
+//! going into the n-th stamp ([`peel`]).
 
 use super::assets::{BlockGeometry, Element, Face6, FaceTex, V3};
 use super::grid::{Rgba, VoxelGrid};
+use super::perspective::slab;
 
 /// A material's model as the flat views use it.
 pub struct FlatModel<'a> {
@@ -24,22 +29,25 @@ pub struct FlatModel<'a> {
 }
 
 /// Per-material models for the flat views: `None` for materials without a
-/// model and for models with rotated elements.
+/// model.
 pub fn flat_models(g: &VoxelGrid) -> Vec<Option<FlatModel<'_>>> {
     (0..g.material_count())
         .map(|m| {
             let geo = g.geometry(m as u16)?;
-            if geo.elements.iter().any(|e| e.local.is_some()) {
-                return None;
-            }
             Some(FlatModel { geo, solid: g.is_opaque(m as u16) && is_solid(geo) })
         })
         .collect()
 }
 
+/// Whether the model has freely rotated elements, which the flat views
+/// draw by casting rays ([`ray_hits`]) instead of stamping aligned faces.
+pub fn is_rotated(geo: &BlockGeometry) -> bool {
+    geo.elements.iter().any(|e| e.local.is_some())
+}
+
 fn is_solid(geo: &BlockGeometry) -> bool {
     geo.elements.iter().any(|e| {
-        let full = e.from.iter().all(|&v| v <= 0.0) && e.to.iter().all(|&v| v >= 16.0);
+        let full = e.local.is_none() && e.from.iter().all(|&v| v <= 0.0) && e.to.iter().all(|&v| v >= 16.0);
         full && Face6::ALL.iter().all(|&f| face(e, f).is_some_and(|ft| ft.texture.avg[3] == 255))
     })
 }
@@ -107,6 +115,10 @@ pub fn top_stamps(geo: &BlockGeometry, px: usize) -> Vec<(f32, Vec<Rgba>)> {
 /// reaching into a neighbour is drawn there piece by piece (see
 /// [`in_cell`]).
 pub fn top_stamps_in(geo: &BlockGeometry, px: usize, off: [i32; 3]) -> Vec<(f32, Vec<Rgba>)> {
+    if is_rotated(geo) {
+        // Straight down from above the cell; the key is the hit's height.
+        return peel(geo, px, off, |fi, fj| ([16.0 * fi, 64.0, 16.0 * fj], [0.0, -1.0, 0.0]), |p| p[1]);
+    }
     let shift = off.map(|o| 16.0 * o as f32);
     let mut faces: Vec<(f32, usize, &Element, &FaceTex)> = geo
         .elements
@@ -138,7 +150,7 @@ pub fn in_cell(p: f32, off: i32) -> bool {
     const E: f32 = 1e-3;
     match off {
         0 => (-E..=16.0 + E).contains(&p),
-        o if o > 0 => p >= -E && p < 16.0 - E,
+        o if o > 0 => (-E..16.0 - E).contains(&p),
         _ => p > E && p <= 16.0 + E,
     }
 }
@@ -160,6 +172,21 @@ pub fn side_stamps(geo: &BlockGeometry, f: Face6, px: usize, flip: bool, off: [i
         Face6::West => (2, 0, false),
         Face6::Up | Face6::Down => return Vec::new(),
     };
+    if is_rotated(geo) {
+        // From the viewer's side of the cell toward it; the key is the hit's
+        // distance toward the viewer.
+        let sign = if toward_max { 1.0 } else { -1.0 };
+        let ray = |fi: f32, fj: f32| {
+            let mut o: V3 = [0.0; 3];
+            o[lat] = 16.0 * if flip { 1.0 - fi } else { fi };
+            o[1] = 16.0 * (1.0 - fj);
+            o[depth] = 8.0 + 56.0 * sign;
+            let mut d: V3 = [0.0; 3];
+            d[depth] = -sign;
+            (o, d)
+        };
+        return peel(geo, px, off, ray, |p| sign * p[depth]);
+    }
     let shift = off.map(|o| 16.0 * o as f32);
     let mut faces: Vec<(f32, usize, &Element, &FaceTex)> = geo
         .elements
@@ -192,6 +219,119 @@ pub fn side_stamps(geo: &BlockGeometry, f: Face6, px: usize, flip: bool, off: [i
                 Some(ft.sample_at(p))
             });
             (key + if toward_max { shift[depth] } else { -shift[depth] }, raster)
+        })
+        .collect()
+}
+
+/// A face a ray enters: distance along the ray, the texel there, the face's
+/// world normal, whether it takes directional shade, and the point hit in
+/// the model's cell (sixteenths).
+pub struct RayHit {
+    pub t: f32,
+    pub color: Rgba,
+    pub normal: V3,
+    pub shade: bool,
+    pub p: V3,
+}
+
+/// Every face of `geo` the ray `o + t d` (the model's cell, sixteenths)
+/// enters, nearest first, as the perspective view finds them: one entry
+/// face per element (a face the model leaves open lets the ray through),
+/// zero-alpha texels skipped, coincident faces with the later element first.
+pub fn ray_hits(geo: &BlockGeometry, o: V3, d: V3, hits: &mut Vec<(usize, RayHit)>) {
+    hits.clear();
+    for (idx, e) in geo.elements.iter().enumerate() {
+        let (oe, de) = match &e.local {
+            Some(f) => (f.point(o), f.dir(d)),
+            None => (o, d),
+        };
+        let Some((t0, t1, axis, through_max)) = slab(oe, de, e.from, e.to) else { continue };
+        if t1 < 0.0 || t0 < 0.0 {
+            continue;
+        }
+        let Some(ft) = face(e, Face6::entered(axis, through_max)) else { continue };
+        let pe = [oe[0] + de[0] * t0, oe[1] + de[1] * t0, oe[2] + de[2] * t0];
+        let color = ft.sample_at(pe);
+        if color[3] == 0 {
+            continue;
+        }
+        // A rotated element's normal comes back to world space through the
+        // rotation's transpose (its inverse).
+        let sign = if through_max { 1.0 } else { -1.0 };
+        let normal = match &e.local {
+            Some(f) => [sign * f.m[axis][0], sign * f.m[axis][1], sign * f.m[axis][2]],
+            None => {
+                let mut n = [0.0; 3];
+                n[axis] = sign;
+                n
+            }
+        };
+        let p = [o[0] + d[0] * t0, o[1] + d[1] * t0, o[2] + d[2] * t0];
+        hits.push((idx, RayHit { t: t0, color, normal, shade: ft.shade, p }));
+    }
+    hits.sort_by(|a, b| a.1.t.total_cmp(&b.1.t).then(b.0.cmp(&a.0)));
+}
+
+/// Whether point `p` (sixteenths of the drawn cell) lies in that cell, `off`
+/// being the model's cell minus it ([`in_cell`] on every axis).
+pub fn point_in_cell(p: V3, off: [i32; 3]) -> bool {
+    (0..3).all(|k| in_cell(p[k], off[k]))
+}
+
+/// Stamps of a rotated model by casting rays, in the stamp layout of
+/// [`top_stamps_in`] / [`side_stamps`]: `ray(fi, fj)` gives the origin and
+/// direction (drawn cell, sixteenths) of the ray through raster fraction
+/// `(fi, fj)`, starting outside anything the model can reach. Each
+/// sub-sample's ray keeps the faces it meets inside the drawn cell, and its
+/// n-th goes into the n-th stamp, box-filtered per pixel; a stamp's key is
+/// the mean of `key(hit point)` over its hits.
+pub fn peel(
+    geo: &BlockGeometry,
+    px: usize,
+    off: [i32; 3],
+    ray: impl Fn(f32, f32) -> (V3, V3),
+    key: impl Fn(V3) -> f32,
+) -> Vec<(f32, Vec<Rgba>)> {
+    let shift = off.map(|o| 16.0 * o as f32);
+    let ss = (16usize).div_ceil(px).clamp(1, 16);
+    let n = (ss * ss) as f32;
+    // Per stamp: alpha-weighted colour sums and alpha per pixel, key sum and count.
+    let mut sums: Vec<(Vec<([f32; 3], f32)>, f32, usize)> = Vec::new();
+    let mut hits = Vec::new();
+    for j in 0..px {
+        for i in 0..px {
+            for sj in 0..ss {
+                for si in 0..ss {
+                    let fi = (i as f32 + (si as f32 + 0.5) / ss as f32) / px as f32;
+                    let fj = (j as f32 + (sj as f32 + 0.5) / ss as f32) / px as f32;
+                    let (o, d) = ray(fi, fj);
+                    ray_hits(geo, [o[0] - shift[0], o[1] - shift[1], o[2] - shift[2]], d, &mut hits);
+                    let inside = hits.iter().filter_map(|(_, h)| {
+                        let p = [h.p[0] + shift[0], h.p[1] + shift[1], h.p[2] + shift[2]];
+                        point_in_cell(p, off).then_some((p, h.color))
+                    });
+                    for (layer, (p, c)) in inside.enumerate() {
+                        if sums.len() <= layer {
+                            sums.push((vec![([0.0; 3], 0.0); px * px], 0.0, 0));
+                        }
+                        let (pixels, key_sum, count) = &mut sums[layer];
+                        let (rgb, a_sum) = &mut pixels[j * px + i];
+                        let a = c[3] as f32;
+                        for k in 0..3 {
+                            rgb[k] += c[k] as f32 * a;
+                        }
+                        *a_sum += a;
+                        *key_sum += key(p);
+                        *count += 1;
+                    }
+                }
+            }
+        }
+    }
+    sums.into_iter()
+        .map(|(pixels, key_sum, count)| {
+            let raster = pixels.into_iter().map(|(rgb, a_sum)| average(rgb, a_sum, n)).collect();
+            (key_sum / count.max(1) as f32, raster)
         })
         .collect()
 }

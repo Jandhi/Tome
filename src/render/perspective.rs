@@ -124,7 +124,7 @@ pub fn render_perspective_with(
 
 /// Ray/box slab test. Returns `(t_enter, t_exit, axis, entered_through_max_plane)`
 /// when the ray meets the box; `t_enter` may be negative when the origin is inside.
-fn slab(o: V3, d: V3, lo: V3, hi: V3) -> Option<(f32, f32, usize, bool)> {
+pub(super) fn slab(o: V3, d: V3, lo: V3, hi: V3) -> Option<(f32, f32, usize, bool)> {
     let (mut t0, mut t1) = (f32::NEG_INFINITY, f32::INFINITY);
     let (mut axis, mut through_max) = (1, true);
     for k in 0..3 {

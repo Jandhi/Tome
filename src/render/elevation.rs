@@ -6,6 +6,8 @@
 //! A block with a textured model shows the texels of its faces turned toward
 //! the viewer (nearest face first, box-filtered per pixel); cut-out texels and
 //! uncovered parts of the cell let the ray carry on to the blocks behind.
+//! A model with freely rotated elements gets the same rasters by casting the
+//! view's rays through it ([`texel::peel`]).
 //! A model reaching past its cell (a wall banner's flag, a pot's neck) is
 //! drawn piece by piece by the cells it lies in: a cell it reaches into
 //! merges that part's faces with its own block's, nearest first.

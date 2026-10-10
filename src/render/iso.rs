@@ -16,6 +16,9 @@
 //! model's boxes instead, with the texel under each pixel baked in: cut-out
 //! texels are left out of the mask (so what is behind them shows), and a
 //! model that is not a fully opaque cube never hides a neighbour's face.
+//! A model with freely rotated elements (a banner turned 45 degrees, a
+//! flower) has no box faces toward the camera, so its mask is cast instead:
+//! a view ray per sub-sample through the elements ([`ray_mask`]).
 //!
 //! A model reaching past its cell (a wall banner's flag, a pot's neck) is
 //! clipped to each cell it lies in and every piece is painted with that
@@ -279,6 +282,9 @@ fn shape_mask(shape: Shape, cam: IsoCamera, tw: i32) -> anyhow::Result<ShapeMask
 /// are clipped to the cell, and a face whose plane lies outside it is left
 /// to the cell it lies in ([`texel::in_cell`]).
 fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32, off: [i32; 3]) -> anyhow::Result<TexMask> {
+    if texel::is_rotated(geo) {
+        return Ok(ray_mask(geo, cam, tw, off));
+    }
     let (th, bh) = (tw / 2, tw / 2);
     let (pw, ph) = (tw, th + bh);
     // Sub-samples per pixel axis: a texel each at tw = 8 (top faces 4 px tall).
@@ -376,6 +382,93 @@ fn tex_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32, off: [i32; 3]) -> anyh
         .collect())
 }
 
+/// [`tex_mask`] of a model with freely rotated elements, whose faces are not
+/// the camera-facing sides of boxes: every sub-sample casts the view ray
+/// through the model ([`texel::ray_hits`]) and composites, front to back,
+/// the faces it meets inside the drawn cell. A face is shaded by its world
+/// normal (the squared normal's components weigh the top, right and left
+/// shades, which gives those faces exactly their usual shade), and a pixel
+/// is lit as the face of the cell its first hit leans toward most: never a
+/// boundary face, so it takes the drawn cell's own light and no neighbour
+/// hides it.
+fn ray_mask(geo: &BlockGeometry, cam: IsoCamera, tw: i32, off: [i32; 3]) -> TexMask {
+    let (th, bh) = (tw / 2, tw / 2);
+    let (pw, ph) = (tw, th + bh);
+    let ss = ((32 + tw - 1) / tw).clamp(1, 4);
+    let n = (ss * ss) as f32;
+    let shift = off.map(|o| 16.0 * o as f32);
+    let (right_face, left_face) = cam.side_faces();
+    let normal_of = |f: Face6| {
+        let mut n = [0.0f32; 3];
+        n[axis_of(f)] = if matches!(f, Face6::East | Face6::South | Face6::Up) { 1.0 } else { -1.0 };
+        n
+    };
+    let axes = [normal_of(Face6::Up), normal_of(right_face), normal_of(left_face)];
+    let world_faces = [Face6::Up, right_face, left_face];
+    // The view direction (toward the scene) in world sixteenths.
+    let (w0, w1) = (cam.world(0.0, 0.0, 0.0), cam.world(-1.0, -1.0, -1.0));
+    let dir = [w1[0] - w0[0], w1[1] - w0[1], w1[2] - w0[2]];
+    let dot = |a: V3, b: V3| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+    let mut hits = Vec::new();
+    let mut out = TexMask::new();
+    for py in 0..ph {
+        for px in 0..pw {
+            let (mut rgb, mut a_sum) = ([0.0f32; 3], 0.0f32);
+            let mut first: Option<(u8, V3)> = None;
+            for sj in 0..ss {
+                for si in 0..ss {
+                    let x = px as f32 + (si as f32 + 0.5) / ss as f32;
+                    let y = py as f32 + (sj as f32 + 0.5) / ss as f32;
+                    // Invert the projection onto the line of points under
+                    // the sub-sample, starting well above the cell.
+                    let a = (x - tw as f32 / 2.0) * 32.0 / tw as f32; // u - v
+                    let s = (y - tw as f32 / 2.0) * 64.0 / tw as f32; // u + v - 2y
+                    let yy = 80.0;
+                    let o = cam.world((s + 2.0 * yy + a) / 2.0, (s + 2.0 * yy - a) / 2.0, yy);
+                    texel::ray_hits(geo, [o[0] - shift[0], o[1] - shift[1], o[2] - shift[2]], dir, &mut hits);
+                    // Front to back, premultiplied.
+                    let (mut acc, mut acc_a) = ([0.0f32; 3], 0.0f32);
+                    for (_, h) in &hits {
+                        let p = [h.p[0] + shift[0], h.p[1] + shift[1], h.p[2] + shift[2]];
+                        if !texel::point_in_cell(p, off) {
+                            continue;
+                        }
+                        let w = axes.map(|ax| dot(h.normal, ax).powi(2));
+                        let f = if h.shade { (0..3).map(|k| w[k] * FACE_SHADE[k]).sum() } else { 1.0 };
+                        let c = shade(h.color, f);
+                        first.get_or_insert_with(|| {
+                            let face = (0..3).max_by(|&i, &j| w[i].total_cmp(&w[j])).unwrap_or(0);
+                            (face as u8, p)
+                        });
+                        let wgt = (1.0 - acc_a) * c[3] as f32 / 255.0;
+                        for k in 0..3 {
+                            acc[k] += wgt * c[k] as f32;
+                        }
+                        acc_a += wgt;
+                        if acc_a >= 0.985 {
+                            break;
+                        }
+                    }
+                    for k in 0..3 {
+                        rgb[k] += acc[k] * 255.0;
+                    }
+                    a_sum += acc_a * 255.0;
+                }
+            }
+            let c = texel::average(rgb, a_sum, n);
+            let Some((face, p)) = first else { continue };
+            if c[3] == 0 {
+                continue;
+            }
+            let clamp = |t: f32| t.clamp(0.0, 16.0 - EDGE);
+            let (lu, lv) = face_uv(axis_of(world_faces[face as usize]), p.map(clamp));
+            out.push((px - tw / 2, py, face, c, lu, lv));
+        }
+    }
+    out
+}
+
 /// Straight-alpha `c` composited over straight-alpha `below`.
 fn over(c: Rgba, below: Rgba) -> Rgba {
     let a = c[3] as f32 / 255.0;
@@ -459,8 +552,8 @@ pub fn render_iso_with(g: &VoxelGrid, cam: IsoCamera, tile_w: u32, lit: Option<&
             let sm = g.get(s[0], s[1], s[2]);
             let Some(fm) = &models[sm as usize] else { continue };
             let off = [s[0] - x, s[1] - y, s[2] - z];
-            if !over_masks.contains_key(&(sm, off)) {
-                over_masks.insert((sm, off), tex_mask(fm.geo, cam, tw, off)?);
+            if let std::collections::hash_map::Entry::Vacant(e) = over_masks.entry((sm, off)) {
+                e.insert(tex_mask(fm.geo, cam, tw, off)?);
             }
             over_cols.resize((g.nx * g.nz) as usize, false);
             over_cols[(x * g.nz + z) as usize] = true;

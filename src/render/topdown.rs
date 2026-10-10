@@ -15,6 +15,9 @@
 //! own ray: the highest upward face of the model under it supplies the texel
 //! (box-filtered to the pixel), cut-out texels and uncovered footprint fall
 //! through to the blocks below, and the height shading uses the face hit.
+//! A model with freely rotated elements gets its rasters by casting rays
+//! down through it ([`texel::peel`]); one showing nothing from above (a
+//! flower's crossed planes) keeps the flat-colour square.
 //! A model reaching past its cell (a pot's neck, a standing banner's top) is
 //! drawn piece by piece by the cells it lies in: a cell it reaches into
 //! merges that part's upward faces with its own block's, highest first, and
@@ -82,10 +85,18 @@ pub fn render_topdown_with(g: &VoxelGrid, px: u32, lit: Option<&Lit>) -> anyhow:
         }
     }
 
-    // Upward-face rasters of every textured material at this pixel size.
+    // Upward-face rasters of every textured material at this pixel size. A
+    // rotated model showing nothing from above (a flower's crossed planes
+    // stand edge-on) keeps its flat-colour square, so meadows stay on the map.
     let models = texel::flat_models(g);
-    let stamps: Vec<Option<TopStamps>> =
-        models.iter().map(|fm| fm.as_ref().map(|fm| texel::top_stamps(fm.geo, px))).collect();
+    let stamps: Vec<Option<TopStamps>> = models
+        .iter()
+        .map(|fm| {
+            let fm = fm.as_ref()?;
+            let st = texel::top_stamps(fm.geo, px);
+            (!st.is_empty() || !texel::is_rotated(fm.geo)).then_some(st)
+        })
+        .collect();
 
     // Cells that textured models reach into from a neighbour: the upward
     // faces drawn there (the cell's own textured block's and the overhanging
@@ -102,7 +113,7 @@ pub fn render_topdown_with(g: &VoxelGrid, px: u32, lit: Option<&Lit>) -> anyhow:
         let mut faces: TopStamps = Vec::new();
         for s in sources {
             let sm = g.get(s[0], s[1], s[2]);
-            if let Some(fm) = &models[sm as usize] {
+            if let (Some(fm), Some(_)) = (&models[sm as usize], &stamps[sm as usize]) {
                 let off = [s[0] - x, s[1] - y, s[2] - z];
                 let piece = pieces.entry((sm, off)).or_insert_with(|| texel::top_stamps_in(fm.geo, px, off));
                 faces.extend(piece.iter().cloned());

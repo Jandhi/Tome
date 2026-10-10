@@ -783,6 +783,56 @@ mod tests {
         assert_ne!(rgba_at(&pm, x0 + 3, z0 + 8), rgba_at(&pm, x0 + 3, z0 + 2), "nothing north of it");
     }
 
+    /// Pixels of `pm` within `x0..x1`, `y0..y1` that are not the background.
+    fn drawn(pm: &resvg::tiny_skia::Pixmap, (x0, x1): (u32, u32), (y0, y1): (u32, u32)) -> Vec<[u8; 4]> {
+        (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).map(|(x, y)| rgba_at(pm, x, y)).filter(|&c| c != BACKGROUND).collect()
+    }
+
+    #[test]
+    fn flat_views_texture_rotated_models_and_their_overhangs() {
+        use crate::render::assets::assets;
+        use crate::render::iso::tile_width;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        // A standing banner turned 45 degrees, its red flag with a white top
+        // stripe: drawn from its rotated model (both colours, not one flat
+        // average) and up into the layer above its block.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:red_banner[rotation=2,patterns=stripe_top:white]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2, "a layer above the banner for its upper half");
+        let whitish = |c: &[u8; 4]| c.iter().take(3).all(|&v| v > 150) && c.iter().take(3).max().unwrap() - c.iter().take(3).min().unwrap() < 30;
+        let reddish = |c: &[u8; 4]| c[0] as u16 > 2 * c[1] as u16 && c[0] as u16 > 2 * c[2] as u16 && c[0] > 60;
+
+        let px = 16;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        let (cols, upper, lower) = ((2 * px, 3 * px), (px, 2 * px), (2 * px, 3 * px));
+        let up = drawn(&pm, cols, upper);
+        assert!(up.iter().any(whitish), "the white stripe tops the flag in the layer above");
+        assert!(up.iter().chain(&drawn(&pm, cols, lower)).any(reddish), "the red field shows too");
+
+        let tw = tile_width(32);
+        let pm = render_iso(&g, IsoCamera::SouthEast, 32).unwrap();
+        let ax = (1 - 1) * tw / 2 + g.nz * tw / 2 + tw;
+        let ay = (1 + 1) * tw / 4 + (g.ny - 1) * tw / 2 + tw;
+        let span = ((ax - tw / 2) as u32, (ax + tw / 2) as u32);
+        let above = drawn(&pm, span, (0, ay as u32));
+        assert!(above.iter().any(whitish), "iso: the white stripe above the banner's cell");
+        assert!(drawn(&pm, span, (0, pm.height())).iter().any(reddish), "iso: the red field");
+
+        // A standing sign at rotation 1: the board's top (to 17.33) shows in
+        // the bottom of the layer above, from the south.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:oak_sign[rotation=1]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2);
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        assert!(!drawn(&pm, cols, (2 * px - 1, 2 * px)).is_empty(), "the board's top shows above the sign");
+        assert!(drawn(&pm, cols, (px, px + 4)).is_empty(), "and stops at 17.33");
+    }
+
     #[test]
     fn contact_sheet_tiles_in_rows() {
         use crate::render::perspective::contact_sheet;
