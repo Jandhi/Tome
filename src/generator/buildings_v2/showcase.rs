@@ -49,6 +49,9 @@ const ROOM_H: u32 = 320;
 const ROOM_FOV: f32 = 100.0;
 /// Player eye height above the cell they stand in.
 const EYE_HEIGHT: f32 = 1.62;
+/// Room cameras: blocks of clear look a crowding neighbour costs (a
+/// head-high item beside the eye; see `crowd` in `run_showcase`).
+const CROWD_PENALTY: f32 = 2.0;
 
 #[derive(Debug, Clone, Copy)]
 pub enum SizeSpec {
@@ -544,10 +547,28 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
             }
             d
         };
+        // Furniture at head height in the eight cells around `cell` (inside
+        // `room`; walls don't count, a camera in a corner looks out of it):
+        // anything there fills the edge of a wide-angle frame.
+        let crowd = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> usize {
+            let mut n = 0;
+            for (dx, dz) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+                let (x, z) = (cell.0 + dx, cell.1 + dz);
+                if x < room.min().x || x > room.max().x || z < room.min().y || z > room.max().y {
+                    continue;
+                }
+                let (gx, gz) = (x + origin.x - gi.origin.x, z + origin.z - gi.origin.z);
+                if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 {
+                    n += 1;
+                }
+            }
+            n
+        };
         // The best look from `cell` in `room`: the longest clear run among
         // the direction to the room's middle (preferred when it ties) and
         // sixteen compass directions, so a camera hemmed in by furniture
-        // turns to face the open part of the room. Returns the run and the
+        // turns to face the open part of the room, less a penalty per
+        // crowding neighbour (see `crowd`). Returns the score and the
         // build-area-local point to look at.
         let view = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> (f32, (f32, f32)) {
             let (ex, ez) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
@@ -570,7 +591,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
                     best = (r + bonus, (ex + dir.0 * r.max(2.0), ez + dir.1 * r.max(2.0)));
                 }
             }
-            best
+            (best.0 - CROWD_PENALTY * crowd(cell, floor_y, room) as f32, best.1)
         };
         let mut views: Vec<(String, serde_json::Value, PerspectiveCamera)> = Vec::new();
         for (ri, room) in house.room_plan.rooms.iter().enumerate() {
