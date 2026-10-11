@@ -534,7 +534,7 @@ mod tests {
         let stone = block_color("minecraft:stone");
         let f = rgb(&pm, 32, 63);
         assert!(f[0] > c[0], "floor {f:?} should be brighter than the far wall {c:?}");
-        assert!(f[0] <= stone[0] && f[0] > stone[0] * 3 / 4, "floor pixel {f:?} vs {stone:?}");
+        assert!(f[0] <= stone[0] && f[0] as u32 > stone[0] as u32 * 3 / 4, "floor pixel {f:?} vs {stone:?}");
     }
 
     #[test]
@@ -864,6 +864,7 @@ mod lighting_tests {
         assert_eq!(lm.sky_light(2, top - 1, 2), 0);
     }
 
+    #[test]
     fn torch_lights_neighbourhood_falling_off_by_one_per_block() {
         let mut s = scene(31, 3, 31);
         floor(&mut s, 31, 31, 0);
