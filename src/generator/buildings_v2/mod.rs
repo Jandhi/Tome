@@ -191,18 +191,10 @@ pub struct BuildingContext {
     /// enough and silently no-ops when ineligible, so it's safe to set true to
     /// request the style; only Japanese buildings honour it (see `build_house`).
     pub engawa: bool,
-    /// Raise the roof on buildings with 2+ floors and a pitched roof so a
-    /// one-block band of knee wall (framed and infilled like the storey, no
-    /// windows) shows between the upper windows' ceiling beam and the eaves.
-    /// The lift is one row for slab pitches and two for stair-pitched eaves,
-    /// which hang onto the ceiling row (see `pipeline::knee_rows`). Ceilings
-    /// stay put; an attic gains the rows. Flat roofs ignore it (their deck is
-    /// the ceiling). See `Frame::knee`.
+    /// Show a band of knee wall between the top windows and the eaves (2+ floors,
+    /// pitched roofs). See `Frame::knee`.
     pub knee_wall: bool,
-    /// Halls and Manors only: the top floor's walls are 4 blocks high instead
-    /// of 3, so the upper storey reads as a full storey. Stairs to the attic,
-    /// the attic, and the roof all sit on the taller floor. See
-    /// `Frame::top_floor_extra`.
+    /// Halls and Manors only: a 4-block-high top floor. See `Frame::top_floor_extra`.
     pub tall_top_floor: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.

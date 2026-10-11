@@ -75,9 +75,7 @@ pub fn render_town_map(
     );
 
     // Base layer: water / footprints / wall / alleys (roads drawn on top).
-    // Horizontal runs of one fill are emitted as a single `width=N` rect: the map
-    // is crisp-edged on whole cells, so it rasterizes to the same pixels as N unit
-    // rects while keeping the SVG (and its parse time) a fraction of the size.
+    // Horizontal runs of one fill become a single wide rect to keep the SVG small.
     for z in minz..=maxz {
         // Current run: (start x, fill), flushed when the fill changes or breaks.
         let mut run: Option<(i32, &str)> = None;
