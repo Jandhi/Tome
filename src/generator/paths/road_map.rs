@@ -6,7 +6,7 @@
 //! road's id at its centroid, and optionally overlays the abstract road graph
 //! (MST + shortcut edges with numbered nodes). Written to `output/town.svg`.
 //!
-//! Shared by the placement test and the live `generate_town` pipeline so there's
+//! Shared by the placement test and the live `generate_settlement` pipeline so there's
 //! a single town-map renderer.
 
 use crate::util::{HashMap, HashSet};

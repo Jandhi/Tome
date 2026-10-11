@@ -1044,7 +1044,7 @@ mod lighting_tests {
 
     /// Town-sized grid: 256x256 columns, ~4M cells; prints the light-map time.
     #[test]
-    fn light_map_timing_town_sized_grid() {
+    fn light_map_timing_settlement_sized_grid() {
         let mut s = scene(256, 128, 256);
         for x in 0..256 {
             for z in 0..256 {

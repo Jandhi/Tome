@@ -13,17 +13,17 @@ cargo test pipeline_invariants_property_test    # 240 buildings × invariant che
 cargo run                                       # Live server: generate, then save fixture + scene and render to output/runs/<seed>/
 cargo run -- --full                             # Same, plus the AI-written chronicle book (OpenAI call; off by default)
 cargo offline <fixture> [seed]                  # No server: town from a saved terrain fixture -> output/runs/offline-<seed>/ (alias for `cargo run --profile fast -- --offline`: release speed, ~5 s incremental rebuilds)
-cargo render <scene> [out_dir] [--light <mode>] # Re-render a saved town.scene, no server (alias for `cargo run --profile fast -- --render`); also writes viewer.html; --light day|night|dusk|<0..1> also writes every view lit into <out_dir>/lit-<mode>/ (see Lighting)
+cargo render <scene> [out_dir] [--light <mode>] # Re-render a saved settlement.scene, no server (alias for `cargo run --profile fast -- --render`); also writes viewer.html; --light day|night|dusk|<0..1> also writes every view lit into <out_dir>/lit-<mode>/ (see Lighting)
 cargo view <scene> [out.html] [--light day|night|dusk|<0..1>]   # First-person 3D viewer of a saved scene as one self-contained HTML file (default viewer.html beside the scene), textured from the client jar's block models when one is found (see Textures; flat colours otherwise); open it in Chrome, click to look, WASD/Space/Shift to fly, F walk, P screenshot; HUD shows /tp coords. --light bakes Minecraft-style lighting into the page (sky + lamps, smooth per vertex, see Lighting) and writes viewer-<day|night|dusk|light0.30>.html instead; without it the page is unchanged
 cargo run --profile fast -- --houses [--culture medieval|desert|japanese] [--seed N] [--count N] [--size cottage|house|hall|manor|mixed] [--rects "x,z,w,h;..."] [--jetty] [--px N] [--light day|night|dusk|<0..1>]   # No server: houses on a flat world, per-house crops + a perspective inside every room (<house>_rooms.png sheet) + ASCII plans + houses.json -> output/houses/<culture>-<seed>/ ; --rects pins the footprint (plot-relative, core first) so one shape can be checked under every roof style; --light lights the room views (sky + lamps, see Lighting) into output/houses/<culture>-<seed>-<day|night|...>/
 cargo run --profile fast -- --furniture <name,...> [out_dir]   # No server: each furniture item alone in a walled corner, two lit 3/4 views -> output/furniture/<name>.png + sheet.png; check new pieces here before they go into rooms
-cargo run -- --fixture <path>                   # Capture terrain only from the live server (~2 s)
+cargo run -- --snapshot <path>                  # Capture terrain only from the live server (~2 s)
 cargo run -- --compare <a.scene> <b.scene> [out_dir]  # Block diff of two scenes: table + diff.json + diff_top.png (red only-A, green only-B, yellow changed) into out_dir (default: A's dir)
 ```
 
 ### Saved towns and renders
 
-Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `terrain.fixture.nbt.gz` (chunks + heightmaps, taken before generation), `town.scene` (terrain surface + every placed block, gzip text, palette-interned `id[state]` strings) and PNG renders (`top.png` hill-shaded top-down, `iso_se.png`/`iso_nw.png` isometric, `elev_{south,north,east,west}.png`, described in `index.txt`), plus `metrics.json` (`TownReport` from `src/generator/report.rs`: counts per stage, NPC jobs, stage timings, returned by `generate_town_with`). Read the PNGs before asking for an in-game check. `src/render/` is the renderer (`render_all`, `render_views` with a region crop for one building); `Editor::capture_scene` builds the scene; `src/editor/fixture.rs` is the fixture.
+Every run leaves a dossier under `output/runs/<seed>/` (or `offline-<seed>/`): `terrain.fixture.nbt.gz` (chunks + heightmaps, taken before generation), `settlement.scene` (terrain surface + every placed block, gzip text, palette-interned `id[state]` strings) and PNG renders (`top.png` hill-shaded top-down, `iso_se.png`/`iso_nw.png` isometric, `elev_{south,north,east,west}.png`, described in `index.txt`), plus `metrics.json` (`SettlementReport` from `src/generator/report.rs`: counts per stage, NPC jobs, stage timings, returned by `generate_settlement_with`). Read the PNGs before asking for an in-game check. `src/render/` is the renderer (`render_all`, `render_views` with a region crop for one building); `Editor::capture_scene` builds the scene; `src/editor/terrain_snapshot.rs` is the saved terrain (`TerrainSnapshot`).
 
 ### Textures
 
@@ -35,7 +35,7 @@ Off by default; renders are byte-identical unless a renderer is handed a `Lighti
 
 ### Determinism
 
-Generation is deterministic in the seed only because generator code imports `crate::util::{HashMap, HashSet}` (fixed hasher, `src/util/stable_hash.rs`). Never use `std::collections::{HashMap, HashSet}` in generator/editor/geometry code (`Block.state` is the exception and stays std). Construct with `default()` / `from_iter` / `with_capacity_and_hasher`. Regression check: `TOME_FIXTURE=<fixture> cargo test --release offline_town_is_deterministic -- --ignored`.
+Generation is deterministic in the seed only because generator code imports `crate::util::{HashMap, HashSet}` (fixed hasher, `src/util/stable_hash.rs`). Never use `std::collections::{HashMap, HashSet}` in generator/editor/geometry code (`Block.state` is the exception and stays std). Construct with `default()` / `from_iter` / `with_capacity_and_hasher`. Regression check: `TOME_FIXTURE=<fixture> cargo test --release offline_settlement_is_deterministic -- --ignored`.
 
 ### Offline / dry-run mode
 

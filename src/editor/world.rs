@@ -6,7 +6,7 @@ use log::info;
 
 use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, util::point_to_chunk_coordinates}};
 
-use super::{fixture::TerrainFixture, Editor};
+use super::{terrain_snapshot::TerrainSnapshot, Editor};
 
 const CHUNK_SIZE : i32 = 16;
 
@@ -136,7 +136,7 @@ impl World {
     /// Assemble a World from raw server data: the chunks plus the three
     /// heightmaps exactly as the GDMC server returns them (absolute Y, indexed
     /// `[x][z]`). Derives the local-Y heightmaps, `ground_block_map` and
-    /// `ground_biome_map`. Shared by [`World::new`] and [`World::from_fixture`].
+    /// `ground_biome_map`. Shared by [`World::new`] and [`World::from_snapshot`].
     pub fn from_parts(
         build_area: Rect3D,
         chunks: HashMap<Point2D, Chunk>,
@@ -206,9 +206,9 @@ impl World {
         world
     }
 
-    /// Rebuild a World from a saved [`TerrainFixture`] without any HTTP traffic.
+    /// Rebuild a World from a saved [`TerrainSnapshot`] without any HTTP traffic.
     /// `get_block` returns `None` outside the fixture's `kept_y_range`.
-    pub fn from_fixture(fixture: TerrainFixture) -> World {
+    pub fn from_snapshot(fixture: TerrainSnapshot) -> World {
         let chunks = fixture.chunks.into_iter().map(|c| (Point2D::new(c.x_pos, c.z_pos), c)).collect();
         let mut world = World::from_parts(fixture.build_area, chunks, fixture.ground_map, fixture.ocean_map, fixture.motion_blocking_map);
         world.trimmed_y_range = Some(fixture.kept_y_range);
@@ -216,13 +216,13 @@ impl World {
     }
 
     /// Snapshot the raw terrain inputs (chunks + absolute heightmaps) so this
-    /// World can be rebuilt offline with [`World::from_fixture`]. Take it
+    /// World can be rebuilt offline with [`World::from_snapshot`]. Take it
     /// before generation: the heightmaps are mutated as the town is built.
-    /// Chunk sections outside the terrain band are dropped (see `TerrainFixture`).
-    pub fn to_fixture(&self) -> TerrainFixture {
+    /// Chunk sections outside the terrain band are dropped (see `TerrainSnapshot`).
+    pub fn to_snapshot(&self) -> TerrainSnapshot {
         let y = self.build_area.origin.y;
         let abs = |m: &Vec<Vec<i32>>| m.iter().map(|col| col.iter().map(|h| h + y).collect()).collect();
-        TerrainFixture::new(
+        TerrainSnapshot::new(
             self.build_area,
             self.chunks.values().cloned().collect(),
             abs(&self.ground_height_map),
