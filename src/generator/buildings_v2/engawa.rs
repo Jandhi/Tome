@@ -15,7 +15,8 @@
 //! rects staying usable; the frame is built straight from the inset footprint;
 //! [`place_engawa`] lays the deck and roof after the roof.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -151,7 +152,7 @@ pub fn plan_engawa(footprint: &Footprint) -> Option<EngawaPlan> {
     // around junctions where a partial seam stopped a rect from insetting — the
     // band simply bumps outward there to keep the ring unbroken.
     let ground_cells: HashSet<Point2D> = inset_rects.iter().flat_map(|r| r.iter()).collect();
-    let mut deck: HashSet<Point2D> = HashSet::new();
+    let mut deck: HashSet<Point2D> = HashSet::default();
     for cell in &ground_cells {
         for dx in -DECK_DEPTH..=DECK_DEPTH {
             for dz in -DECK_DEPTH..=DECK_DEPTH {

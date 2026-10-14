@@ -8,7 +8,8 @@ pub async fn a_star<TNode>(
     heuristic : impl Fn(&TNode) -> u64,
     mut explore_node_callback : impl AsyncFnMut(&TNode),
 ) -> Option<TNode> where TNode: Clone + Eq + Hash + Debug {
-    use std::collections::{BinaryHeap, HashSet};
+    use std::collections::BinaryHeap;
+    use crate::util::HashSet;
 
     #[derive(Eq, PartialEq, Debug, Clone)]
     struct Node<TNode> {
@@ -30,7 +31,7 @@ pub async fn a_star<TNode>(
     }
 
     let mut open_set = BinaryHeap::new();
-    let mut closed_set = HashSet::new();
+    let mut closed_set = HashSet::default();
 
     open_set.push(Node {
         cost: 0,

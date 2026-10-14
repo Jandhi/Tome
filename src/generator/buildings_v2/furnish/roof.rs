@@ -9,7 +9,7 @@
 //! Runs after interior furnishing and only for `RoofStyle::Flat`. Dome rects
 //! (square, ≥ `MIN_DOME_SIDE`) have no walkable deck and are skipped.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::population::AnchorScene;
@@ -87,7 +87,7 @@ pub async fn decorate_rooftops(
 
     // Terrace anchors (someone tending the roof garden, sleeping under the
     // stars, …) harvested across all decks of this building.
-    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::default();
     let mut scenes: Vec<AnchorScene> = Vec::new();
 
     let rects = top_floor_rects(frame);

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::{generator::{buildings::{stairs::StairPlacement, Grid}, nbts::Rotation}, geometry::{Cardinal, Point2D, Point3D}};
 use serde_derive::{Deserialize, Serialize};

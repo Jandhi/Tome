@@ -122,7 +122,7 @@ impl Loadable<'_, Structure, StructureType> for Structure {
         item.id.clone()
     }
 
-    fn post_load(items : &mut std::collections::HashMap<StructureType, Structure>) -> anyhow::Result<()> {
+    fn post_load(items : &mut crate::util::HashMap<StructureType, Structure>) -> anyhow::Result<()> {
         for item in items.values_mut() {
             item.meta.path = item.meta.path.replace('\\', "/");
         }

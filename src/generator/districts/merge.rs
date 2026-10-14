@@ -1,10 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use log::info;
 
 use crate::editor::{Editor, World};
 
-use super::analysis::analyze_parcel;
+use super::analysis::{analyze_parcel, AnalysisCache};
 use super::{constants::{TARGET_PARCEL_AMOUNT, ADJACENCY_WEIGHT, PARCEL_SIZE_LOWER_FACTOR, PARCEL_SIZE_UPPER_FACTOR}, ParcelAnalysis, District, DistrictID};
 use super::{Parcel, ParcelID, HasParcelData};
 
@@ -22,7 +22,7 @@ fn block_size(sd : &District) -> usize {
 /// is below the band floor `L = PARCEL_SIZE_LOWER_FACTOR * S` up into a neighbour, never pushing a
 /// parent above the ceiling `U = PARCEL_SIZE_UPPER_FACTOR * S`. Off-limits (border) parcels are
 /// exempt from the ceiling — they only get coalesced up to `L` so we don't leave tiny fragments.
-pub async fn merge_down(districts : &mut HashMap<DistrictID, District>, parcels : &HashMap<ParcelID, Parcel>, parcel_analysis_data : &mut HashMap<DistrictID, ParcelAnalysis>, editor : &mut Editor) {
+pub async fn merge_down(districts : &mut HashMap<DistrictID, District>, parcels : &HashMap<ParcelID, Parcel>, parcel_analysis_data : &mut HashMap<DistrictID, ParcelAnalysis>, editor : &mut Editor, analysis_cache : &mut AnalysisCache) {
     // Target average size S is derived from the interior (non-border) mass only, so off-limits
     // regions don't distort the band. The band is then [L, U] around S.
     let interior_blocks : usize = districts.values()
@@ -46,7 +46,7 @@ pub async fn merge_down(districts : &mut HashMap<DistrictID, District>, parcels 
 
     // Parcels we've given up on (genuinely isolated below-L pockets). Permanently skipped so the
     // loop always makes progress and terminates.
-    let mut ignore : HashSet<DistrictID> = HashSet::new();
+    let mut ignore : HashSet<DistrictID> = HashSet::default();
 
     // Keep merging while any non-ignored parcel is below the floor. Every merge removes a below-L
     // child and only ever grows the parent, so the below-L set shrinks monotonically.
@@ -91,7 +91,7 @@ pub async fn merge_down(districts : &mut HashMap<DistrictID, District>, parcels 
             continue;
         };
 
-        merge(districts, parcels, parcel_analysis_data, parent, child, editor).await;
+        merge(districts, parcels, parcel_analysis_data, parent, child, editor, analysis_cache);
     }
 }
 
@@ -105,7 +105,7 @@ fn remove_parcel(parcels : &mut HashMap<DistrictID, District>, parcel_id : Distr
 }
 
 
-async fn merge(districts : &mut HashMap<DistrictID, District>, parcels : &HashMap<ParcelID, Parcel>, parcel_analysis_data : &mut HashMap<DistrictID, ParcelAnalysis>, parent : DistrictID, child : DistrictID, editor : &mut Editor) {
+fn merge(districts : &mut HashMap<DistrictID, District>, parcels : &HashMap<ParcelID, Parcel>, parcel_analysis_data : &mut HashMap<DistrictID, ParcelAnalysis>, parent : DistrictID, child : DistrictID, editor : &mut Editor, analysis_cache : &mut AnalysisCache) {
     let child = districts.remove(&child).expect(&format!("District with id {} not found", child.0));
 
     let parcel_ids = districts.keys().map(|id| id.clone()).collect::<Vec<DistrictID>>();
@@ -119,7 +119,7 @@ async fn merge(districts : &mut HashMap<DistrictID, District>, parcels : &HashMa
     }
     let parent = districts.get_mut(&parent).expect(&format!("District with id {} not found", parent.0));
     parent.add_district(&child, parcels, editor.world_mut());
-    let new_analysis = analyze_parcel(parent.data(), editor).await;
+    let new_analysis = analyze_parcel(parent.data(), editor, analysis_cache);
     parcel_analysis_data.insert(parent.id(), new_analysis);
 }
 

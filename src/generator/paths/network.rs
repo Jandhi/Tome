@@ -8,7 +8,9 @@
 //!
 //! Run *after* an urban flatten so A* plans over gentled terrain.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::districts::ParcelType;
@@ -124,14 +126,14 @@ pub async fn build_road_network(
 ) -> RoadNetwork {
     let urban = editor.world().get_urban_points();
     if urban.is_empty() {
-        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new(), road_labels: HashMap::new() };
+        return RoadNetwork { paths: Vec::new(), nodes: Vec::new(), edges: Vec::new(), road_labels: HashMap::default() };
     }
 
     // Destination nodes (town centre, industry, district centres, gates),
     // deduped and relocated off building footprints.
     let (nodes, kinds) = assemble_nodes(editor, include_town_center, anchor_nodes, blocked, &urban);
     if nodes.len() < 2 {
-        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new(), road_labels: HashMap::new() };
+        return RoadNetwork { paths: Vec::new(), nodes, edges: Vec::new(), road_labels: HashMap::default() };
     }
 
     // --- Edges: MST backbone + capped loop-closing shortcuts. ---
@@ -162,8 +164,8 @@ pub async fn build_road_network(
     let mut path_edges: Vec<(usize, usize)> = Vec::new();
     // The network built so far: later edges get a steep discount for running on
     // these cells (so they merge), and snap to their height.
-    let mut road_cells: HashSet<Point2D> = HashSet::new();
-    let mut road_height: HashMap<Point2D, i32> = HashMap::new();
+    let mut road_cells: HashSet<Point2D> = HashSet::default();
+    let mut road_height: HashMap<Point2D, i32> = HashMap::default();
 
     // Route order: all arterials first (so the medium roads merge onto the large
     // trunk), then the rest. Within each tier, MST edges before shortcuts. For an
@@ -223,7 +225,7 @@ pub async fn build_road_network(
     log::info!(
         "geometric road labelling: {} centreline cells -> {} roads",
         road_labels.len(),
-        road_labels.values().copied().collect::<std::collections::HashSet<_>>().len(),
+        road_labels.values().copied().collect::<crate::util::HashSet<_>>().len(),
     );
 
     let edges = all_edges.iter().enumerate().map(|(ei, &(a, b))| RoadEdge {
@@ -314,7 +316,7 @@ fn select_arterials(nodes: &[Point3D], edges: &[(usize, usize)]) -> Vec<bool> {
     if arterial_count > 0 {
         let seed = by_traffic[0];
         is_arterial[seed] = true;
-        let mut spine_nodes: HashSet<usize> = HashSet::new();
+        let mut spine_nodes: HashSet<usize> = HashSet::default();
         spine_nodes.insert(edges[seed].0);
         spine_nodes.insert(edges[seed].1);
         let mut count = 1;
@@ -421,7 +423,7 @@ fn group_into_roads(nodes: &[Point3D], edges: &[(usize, usize)]) -> Vec<u32> {
     };
 
     // Incident segments per node.
-    let mut incident: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut incident: HashMap<usize, Vec<usize>> = HashMap::default();
     for (ei, &(a, b)) in edges.iter().enumerate() {
         incident.entry(a).or_default().push(ei);
         incident.entry(b).or_default().push(ei);
@@ -440,7 +442,7 @@ fn group_into_roads(nodes: &[Point3D], edges: &[(usize, usize)]) -> Vec<u32> {
             }
         }
         cands.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        let mut used: HashSet<usize> = HashSet::new();
+        let mut used: HashSet<usize> = HashSet::default();
         for (s, e1, e2) in cands {
             if s < STROKE_MIN_STRAIGHTNESS {
                 break;
@@ -458,7 +460,7 @@ fn group_into_roads(nodes: &[Point3D], edges: &[(usize, usize)]) -> Vec<u32> {
     }
 
     // Compact roots into dense 0..road_count ids.
-    let mut root_to_id: HashMap<usize, u32> = HashMap::new();
+    let mut root_to_id: HashMap<usize, u32> = HashMap::default();
     let mut next = 0u32;
     let mut out = vec![0u32; m];
     for ei in 0..m {
@@ -539,14 +541,14 @@ pub fn find_blocks(
     min_size: usize,
 ) -> Vec<HashSet<Point2D>> {
     let open: HashSet<Point2D> = region.difference(barriers).copied().collect();
-    let mut visited: HashSet<Point2D> = HashSet::new();
+    let mut visited: HashSet<Point2D> = HashSet::default();
     let mut blocks: Vec<HashSet<Point2D>> = Vec::new();
 
     for &start in &open {
         if !visited.insert(start) {
             continue;
         }
-        let mut block: HashSet<Point2D> = HashSet::new();
+        let mut block: HashSet<Point2D> = HashSet::default();
         let mut queue: VecDeque<Point2D> = VecDeque::new();
         queue.push_back(start);
         while let Some(cell) = queue.pop_front() {
@@ -577,7 +579,7 @@ pub(super) fn wall_distance_field(urban: &HashSet<Point2D>, max_dist: i32) -> Ha
         .copied()
         .collect();
 
-    let mut dist: HashMap<Point2D, i32> = HashMap::new();
+    let mut dist: HashMap<Point2D, i32> = HashMap::default();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
     for &c in &wall_cells {
         dist.insert(c, 0);
@@ -658,9 +660,9 @@ fn node_dist(a: Point3D, b: Point3D) -> f64 {
 /// Length of the unique tree path between nodes `i` and `j`, summed as XZ
 /// Euclidean edge lengths. BFS over the tree adjacency; the node count is small.
 fn tree_path_length(adj: &[Vec<usize>], nodes: &[Point3D], i: usize, j: usize) -> f64 {
-    let mut parent: HashMap<usize, usize> = HashMap::new();
+    let mut parent: HashMap<usize, usize> = HashMap::default();
     let mut queue: VecDeque<usize> = VecDeque::new();
-    let mut seen: HashSet<usize> = HashSet::new();
+    let mut seen: HashSet<usize> = HashSet::default();
     queue.push_back(i);
     seen.insert(i);
     while let Some(c) = queue.pop_front() {

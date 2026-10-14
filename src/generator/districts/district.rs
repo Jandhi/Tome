@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use crate::{editor::World, geometry::Point3D};
 
 use super::{adjacency::AdjacencyAnalyzeable, data::{ParcelData, HasParcelData}, Parcel, ParcelID, ParcelType};
@@ -28,7 +28,7 @@ impl District {
     pub fn new(id : DistrictID) -> Self {
         District {
             id,
-            parcels: HashSet::new(),
+            parcels: HashSet::default(),
             data: ParcelData::empty(),
         }
     }
@@ -74,7 +74,7 @@ impl District {
     }
 
     pub fn get_subtypes(&self, parcels : &HashMap<ParcelID, Parcel>) -> HashMap<ParcelType, u32> {
-        let mut subtypes: HashMap<ParcelType, u32> = HashMap::new();
+        let mut subtypes: HashMap<ParcelType, u32> = HashMap::default();
         for parcel_id in self.parcels(){
             let parcel = parcels.get(parcel_id).expect(&format!("Parcel with id {} not found", parcel_id.0));
             let parcel_type = parcel.data.parcel_type;

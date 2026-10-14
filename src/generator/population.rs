@@ -35,7 +35,7 @@
 //!   4. [`populate_town`] — the existing seeded + weighted anchor draw, but
 //!      the per-house pool now reads from `population.households[h].members`.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use serde_derive::Deserialize;
 
@@ -1258,8 +1258,8 @@ pub fn build_households(
     // suffixes ≈ 900 combos against ~50 households, this terminates in 1-2
     // tries per house on average; the cap below is defensive in case the
     // pool is ever shrunk below the household count.
-    let mut used_surnames: std::collections::HashSet<String> =
-        std::collections::HashSet::with_capacity(houses.len());
+    let mut used_surnames: crate::util::HashSet<String> =
+        crate::util::HashSet::with_capacity_and_hasher(houses.len(), Default::default());
     const SURNAME_MAX_TRIES: usize = 64;
     for (h_idx, house) in houses.iter().enumerate() {
         let budget = house.population.max(1);
@@ -1591,7 +1591,7 @@ pub fn log_population_stats(pop: &Population) {
     }
 
     // Household size distribution.
-    let mut size_dist: HashMap<usize, usize> = HashMap::new();
+    let mut size_dist: HashMap<usize, usize> = HashMap::default();
     for h in &pop.households {
         *size_dist.entry(h.members.len()).or_insert(0) += 1;
     }
@@ -1664,7 +1664,7 @@ pub fn log_population_stats(pop: &Population) {
     }
 
     // Surname diversity (top 5 by count).
-    let mut surname_counts: HashMap<String, usize> = HashMap::new();
+    let mut surname_counts: HashMap<String, usize> = HashMap::default();
     for h in &pop.households {
         for m in &h.members {
             *surname_counts.entry(m.surname.clone()).or_insert(0) += 1;
@@ -1679,7 +1679,7 @@ pub fn log_population_stats(pop: &Population) {
     }
 
     // Employment breakdown (full sorted by count).
-    let mut emp_counts: HashMap<String, usize> = HashMap::new();
+    let mut emp_counts: HashMap<String, usize> = HashMap::default();
     let mut unemployed = 0usize;
     for h in &pop.households {
         for m in &h.members {
@@ -2560,7 +2560,7 @@ mod tests {
         assert_eq!(pop.households.len(), houses.len());
 
         // Every household's primary surname is unique within the town.
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = crate::util::HashSet::default();
         for h in &pop.households {
             assert!(
                 seen.insert(h.surname.clone()),

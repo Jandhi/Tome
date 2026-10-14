@@ -221,12 +221,12 @@ fn cell_state(cell: &KeelCell, placement: &Placement, on_water: bool) -> Option<
     let mut state = match cell.form {
         BlockForm::Stairs => {
             let facing = placement.world_cardinal(cell.facing.unwrap_or(ShipDir::Bow));
-            HashMap::from([
+            HashMap::from_iter([
                 ("facing".to_string(), facing.to_string()),
                 ("half".to_string(), if cell.top_half { "top" } else { "bottom" }.to_string()),
             ])
         }
-        BlockForm::Slab => HashMap::from([(
+        BlockForm::Slab => HashMap::from_iter([(
             "type".to_string(),
             if cell.top_half { "top" } else { "bottom" }.to_string(),
         )]),

@@ -15,7 +15,7 @@ pub mod walk;
 #[cfg(test)]
 mod test;
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::generator::buildings_v2::footprint::{Footprint, Plot, SizeClass, generate_footprint_biased};
 use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseOutput, build_house};

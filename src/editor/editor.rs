@@ -1,10 +1,10 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use anyhow::Ok;
 use log::{error, info, warn};
 
-use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
+use crate::{data::Loadable, editor::World, generator::materials::{Material, MaterialId}, geometry::{Point2D, Point3D, Rect3D}, http_mod::{Coordinate, CommandResponse, GDMCHTTPProvider, PositionedBlock, PositionedEntity}, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
 
 /// Editor provides the interface for modifying the Minecraft world.
 ///
@@ -27,6 +27,9 @@ pub struct Editor {
     /// Defaults to true; toggle via `set_block_updates` around a structure paste.
     block_updates: RefCell<bool>,
     block_cache: RefCell<HashMap<Point3D, Block>>,
+    /// While `Some`, every placement's build-area-local cell is appended
+    /// (see `start_recording` / `stop_recording`).
+    recording: RefCell<Option<Vec<Point3D>>>,
     world: World,
     materials: HashMap<MaterialId, Material>,
     block_form_cache: RefCell<HashMap<BlockID, BlockForm>>,
@@ -38,6 +41,23 @@ pub struct Editor {
 }
 
 impl Editor {
+    /// Start collecting the build-area-local cell of every placement until
+    /// `stop_recording`; nested starts restart the list.
+    pub fn start_recording(&self) {
+        *self.recording.borrow_mut() = Some(Vec::new());
+    }
+
+    /// The cells placed since `start_recording` (empty if not recording).
+    pub fn stop_recording(&self) -> Vec<Point3D> {
+        self.recording.borrow_mut().take().unwrap_or_default()
+    }
+
+    fn record(&self, point: Point3D) {
+        if let Some(log) = self.recording.borrow_mut().as_mut() {
+            log.push(point);
+        }
+    }
+
     pub fn new(build_area: Rect3D, world: World) -> Self {
         let mut editor = Self {
             build_area,
@@ -45,10 +65,11 @@ impl Editor {
             block_buffer: RefCell::new(Vec::new()),
             buffer_size: 32,
             block_updates: RefCell::new(true),
-            block_cache: RefCell::new(HashMap::new()),
+            block_cache: RefCell::new(HashMap::default()),
+            recording: RefCell::new(None),
             world,
-            materials: HashMap::new(),
-            block_form_cache: RefCell::new(HashMap::new()),
+            materials: HashMap::default(),
+            block_form_cache: RefCell::new(HashMap::default()),
             offline: false,
         };
         editor.load_data().expect("Failed to load materials");
@@ -134,6 +155,7 @@ impl Editor {
         }
 
         self.block_cache.borrow_mut().insert(point, block.clone());
+        self.record(point);
         self.block_buffer.borrow_mut().push(
             PositionedBlock::from_block(block.clone(), (point + self.build_area.origin).into())
         );
@@ -174,6 +196,7 @@ impl Editor {
         }
 
         self.block_cache.borrow_mut().insert(point, block.clone());
+        self.record(point);
 
         if self.offline {
             return;
@@ -230,6 +253,15 @@ impl Editor {
         self.world.get_block(point)
     }
 
+    /// Like [`try_get_block`](Self::try_get_block) but returns only the id, skipping
+    /// the clone of the block-state map (same cache-then-world lookup).
+    pub fn try_get_block_id(&self, point: Point3D) -> Option<BlockID> {
+        if let Some(block) = self.block_cache.borrow().get(&(point - self.build_area.origin)) {
+            return Some(block.id.clone());
+        }
+        self.world.get_block_id(point)
+    }
+
     /// Reads a block straight from the placement cache by its **local** coordinate
     /// — the same space `place_block` writes with. Returns `None` when nothing has
     /// been placed at `local` this run.
@@ -276,6 +308,79 @@ impl Editor {
         }
     }
 
+    /// Every block this run placed, in build-area LOCAL coords, including air
+    /// (cleared terrain). Order is unspecified.
+    pub fn placed_blocks(&self) -> Vec<(Point3D, Block)> {
+        self.block_cache.borrow().iter().map(|(p, b)| (*p, b.clone())).collect()
+    }
+
+    /// Snapshot the town as a [`Scene`](crate::render::Scene) in absolute coords:
+    /// a terrain layer derived from the World's heightmaps and chunks, then every
+    /// placed block (air included) on top. Sets no meta; callers do.
+    pub fn capture_scene(&self) -> crate::render::Scene {
+        let origin = self.build_area.origin;
+        let world = self.world();
+        let mut scene = crate::render::Scene::new(self.build_area);
+        let mut put = |local: Point3D, block: &Block| scene.insert(local + origin, &block_string(block));
+        // Real block from the chunks, ignoring air (missing data or a column the
+        // generator since raised); callers fall back to a stand-in block.
+        let solid_at = |p: Point3D| world.get_block(p).filter(|b| !b.id.is_air());
+
+        // Top of the solid ground per column (local Y of the first cell above it):
+        // the seabed for water columns, the surface otherwise.
+        let solid_top = |c: Point2D| -> Option<i32> {
+            if world.is_water(c) { world.get_ocean_floor_height_at(c) } else { world.get_height_at(c) }
+        };
+
+        for c in world.iter_points_2d() {
+            let (Some(ground), Some(surface), Some(top)) = (world.get_height_at(c), world.get_ground_block(c), solid_top(c)) else {
+                continue;
+            };
+            let (x, z) = (c.x, c.y);
+            let at = |y: i32| Point3D::new(x, y, z);
+
+            if surface.id.is_water() {
+                // Water (or ice/kelp) from the seabed up to the surface block.
+                for y in top..ground - 1 {
+                    put(at(y), &solid_at(at(y)).unwrap_or_else(|| "minecraft:water".into()));
+                }
+                put(at(ground - 1), surface);
+                put(at(top - 1), &solid_at(at(top - 1)).unwrap_or_else(|| "minecraft:sand".into()));
+            } else {
+                put(at(ground - 1), surface);
+            }
+
+            // Fill down to the lowest neighbouring ground so slopes and cliffs
+            // render as solid faces instead of floating tiles, but at most
+            // MAX_FILL_DEPTH below this column's own top so cave mouths and
+            // ravines don't hang long columns below the terrain.
+            const MAX_FILL_DEPTH: i32 = 8;
+            let low = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .filter_map(|&(dx, dz)| solid_top(Point2D::new(x + dx, z + dz)))
+                .fold(top, i32::min)
+                .max(top - MAX_FILL_DEPTH);
+            let filler = solid_at(at(top - 1)).unwrap_or_else(|| surface.clone());
+            for y in low - 1..top - 1 {
+                put(at(y), &solid_at(at(y)).unwrap_or_else(|| filler.clone()));
+            }
+
+            // Trees and tall plants above the no-plants surface.
+            if let Some(mb) = world.get_motion_blocking_height_at(c) {
+                for y in ground..mb {
+                    if let Some(b) = solid_at(at(y)) {
+                        put(at(y), &b);
+                    }
+                }
+            }
+        }
+
+        for (p, b) in self.block_cache.borrow().iter() {
+            put(*p, b);
+        }
+        scene
+    }
+
     pub fn world(&self) -> &World {
         &self.world
     }
@@ -285,6 +390,10 @@ impl Editor {
     }
 
     pub async fn give_player_book(&self, pages: &[&str], title: &str, author: &str) -> anyhow::Result<CommandResponse> {
+        if self.offline {
+            log::debug!("offline editor: skipping give_player_book {title:?}");
+            return Ok(CommandResponse::default());
+        }
         let title = if title.chars().count() > 32 {
             title.chars().take(32).collect::<String>()
         } else {
@@ -307,6 +416,9 @@ impl Editor {
     /// buffer/cache**, so the placed blocks won't be visible to later
     /// `get_block` reads.
     pub async fn place_feature(&self, feature: &str, point: Point3D) -> anyhow::Result<()> {
+        if self.offline {
+            return Ok(());
+        }
         let world = point + self.build_area.origin;
         let command = format!("place feature {} {} {} {}", feature, world.x, world.y, world.z);
         self.provider.command(vec![command]).await?;
@@ -389,4 +501,19 @@ impl Drop for Editor {
             error!("Editor was dropped with non-empty block buffer!");
         }
     }
+}
+/// `minecraft:id[k=v,...]` with sorted state keys (deterministic output);
+/// bare ids get the `minecraft:` namespace.
+pub(crate) fn block_string(block: &Block) -> String {
+    let id = block.id.as_str();
+    let mut out = if id.contains(':') { id.to_string() } else { format!("minecraft:{id}") };
+    if let Some(state) = block.state.as_ref().filter(|s| !s.is_empty()) {
+        let mut kv: Vec<_> = state.iter().collect();
+        kv.sort();
+        let parts: Vec<String> = kv.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
+        out.push('[');
+        out.push_str(&parts.join(","));
+        out.push(']');
+    }
+    out
 }

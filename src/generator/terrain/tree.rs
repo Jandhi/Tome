@@ -1,6 +1,6 @@
 use log::info;
 use serde_derive::{Deserialize, Serialize};
-use std::{collections::HashMap};
+use crate::util::HashMap;
 
 use crate::{editor::Editor, geometry::Point3D, noise::{RNG, Seed}, minecraft::{string_to_block,Block}};
 

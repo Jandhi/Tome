@@ -11,7 +11,7 @@
 //! one is: new file + `pub mod x;` + a match arm in [`build_addition`]. The pipeline
 //! just iterates [`BUILD_ORDER`].
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
@@ -305,7 +305,7 @@ pub async fn build_addition(
 /// with the re-stamped inner deck port).
 fn prow_side_ports(prow: &[Point3D], gun_row: i32) -> Vec<(Point3D, ShipDir)> {
     // Outermost |z| of the solid prow per station, at the gun-deck row.
-    let mut outer: HashMap<i32, i32> = HashMap::new();
+    let mut outer: HashMap<i32, i32> = HashMap::default();
     for c in prow {
         if c.y == gun_row && c.z != 0 {
             let e = outer.entry(c.x).or_insert(0);
@@ -359,7 +359,7 @@ pub async fn restamp_gun_ports(
         let mut placer_rng = ctx.rng.derive();
         let mut placer = MaterialPlacer::new(Placer::new(&ctx.data.materials, &mut placer_rng), material);
         for (cell, dir) in &ports {
-            let st = HashMap::from([
+            let st = std::collections::HashMap::from([
                 ("facing".to_string(), place.world_cardinal(*dir).to_string()),
                 ("half".to_string(), "bottom".to_string()),
                 ("open".to_string(), "true".to_string()),

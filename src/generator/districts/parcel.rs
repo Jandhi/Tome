@@ -1,10 +1,12 @@
-use std::{collections::{HashMap, HashSet}, hash::Hash};
+use std::collections::VecDeque;
+use std::hash::Hash;
+use crate::util::HashMap;
 
 use log::info;
 
 use crate::{editor::{Editor, World}, geometry::{Point2D, Point3D, Rect2D, CARDINALS_2D}, noise::{Seed, RNG}};
 
-use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::analyze_parcel, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_PARCELS_MIN_DISTANCE, SPAWN_PARCELS_RETRIES}, data::{ParcelData, HasParcelData}, merge::merge_down, classification::{classify_parcels, classify_districts}, footprint::{regularize_urban_footprint, reconcile_districts_to_footprint}, ParcelAnalysis, District, DistrictID};
+use super::{adjacency::{analyze_adjacency, AdjacencyAnalyzeable}, analysis::{analyze_parcel, AnalysisCache}, constants::{CHUNK_SIZE, NUM_RECENTER, SPAWN_PARCELS_MIN_DISTANCE, SPAWN_PARCELS_RETRIES}, data::{ParcelData, HasParcelData}, merge::merge_down, classification::{classify_parcels, classify_districts}, footprint::{regularize_urban_footprint, reconcile_districts_to_footprint}, ParcelAnalysis, District, DistrictID};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ParcelID(pub usize);
@@ -86,14 +88,25 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
 
     
 
+    // Sub-step timings, logged at debug level once the stage is done.
+    let stage_start = std::time::Instant::now();
+    let mut lap = stage_start;
+    let mut laps : Vec<(&str, u128)> = Vec::new();
+    let mut mark = |name, laps : &mut Vec<(&str, u128)>| {
+        laps.push((name, lap.elapsed().as_millis()));
+        lap = std::time::Instant::now();
+    };
+
     info!("Bubbling out parcels...");
     bubble_out(&mut parcels, editor.world_mut());
     
+    mark("bubble_out", &mut laps);
     info!("Re-centering parcels...");
     for _ in 0..NUM_RECENTER {
         recenter_parcels(editor.world_mut(), &mut parcels);
     }
 
+    mark("recenter", &mut laps);
     info!("Analyzing adjacency of parcels...");
     {
         let world = editor.world_mut();
@@ -103,12 +116,13 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     info!("Creating districts...");
     // TODO: super parcels
     let mut district_id_counter = 0;
-    let mut districts : HashMap<DistrictID, District> = HashMap::new();
-    let mut parcel_analysis_data : HashMap<ParcelID, ParcelAnalysis> = HashMap::new();
+    let mut districts : HashMap<DistrictID, District> = HashMap::default();
+    let mut parcel_analysis_data : HashMap<ParcelID, ParcelAnalysis> = HashMap::default();
+    let mut analysis_cache = AnalysisCache::new(editor);
 
     for parcel in parcels.values() {
         info!("Analyzing parcel {}", parcel.id.0);
-        let analysis = analyze_parcel(parcel.data(), editor).await;
+        let analysis = analyze_parcel(parcel.data(), editor, &mut analysis_cache);
         parcel_analysis_data.insert(parcel.id, analysis);
     }
 
@@ -121,12 +135,13 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     }
 
     // Get Parcel Analysis Data
-    let mut district_analysis_data : HashMap<DistrictID, ParcelAnalysis> = HashMap::new();
+    let mut district_analysis_data : HashMap<DistrictID, ParcelAnalysis> = HashMap::default();
     for parcel in districts.values() {
         info!("Analyzing parcel {}", parcel.id().0);
-        district_analysis_data.insert(parcel.id(), analyze_parcel(parcel.data(), editor).await);
+        district_analysis_data.insert(parcel.id(), analyze_parcel(parcel.data(), editor, &mut analysis_cache));
     }
 
+    mark("adjacency+analysis", &mut laps);
     //parcel classification
     classify_parcels(&mut parcels, &parcel_analysis_data);
 
@@ -134,13 +149,15 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
         let world = editor.world_mut();
         analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d(), true);
     }
+    mark("classify_parcels", &mut laps);
     info!("Merging down districts...");
-    merge_down(&mut districts, &parcels, &mut district_analysis_data, editor).await;
+    merge_down(&mut districts, &parcels, &mut district_analysis_data, editor, &mut analysis_cache).await;
     {
         let world = editor.world_mut();
         analyze_adjacency(&mut districts, world.get_height_map(), &world.district_map, &world.world_rect_2d(),false);
     }
 
+    mark("merge_down", &mut laps);
     editor.world_mut().parcels = parcels;
     editor.world_mut().districts = districts;
 
@@ -156,6 +173,8 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
     reconcile_districts_to_footprint(&mut world.districts, &footprint);
     world.urban_footprint = Some(footprint);
 
+    mark("classify_districts+footprint", &mut laps);
+    log::debug!("generate_parcels timings (ms): {:?}, total {}", laps, stage_start.elapsed().as_millis());
     info!("Parcels generated successfully");
 
     //prune urban chokepoints??
@@ -166,28 +185,33 @@ pub async fn generate_parcels(seed : Seed, editor : &mut Editor) {
 }
 
 fn bubble_out(parcels : &mut HashMap<ParcelID, Parcel>, world : &mut World) { // this is broken
-    let mut queue : Vec<Point2D> = parcels.iter().map(|(_, parcel)| parcel.data.origin.drop_y()).collect::<Vec<_>>();
-    let mut visited : HashSet<Point2D> = queue.iter().cloned().collect();
+    let mut queue : VecDeque<Point2D> = parcels.iter().map(|(_, parcel)| parcel.data.origin.drop_y()).collect();
+    // Flat in-bounds grid instead of a HashSet: only in-bounds cells are ever marked.
+    let size_z = world.build_area.size.z as usize;
+    let mut visited = vec![false; world.build_area.size.x as usize * size_z];
+    let index = |p : Point2D| p.x as usize * size_z + p.y as usize;
+    for origin in queue.iter() {
+        visited[index(*origin)] = true;
+    }
 
-    while queue.len() > 0 {
-        let next = queue.remove(0);
+    while let Some(next) = queue.pop_front() {
 
         let current_parcel = world.parcel_map[next.x as usize][next.y as usize].expect("Every explored tile should have a parcel");
 
         for neighbour in CARDINALS_2D.iter().map(|c| *c + next) {
-            if visited.contains(&neighbour) {
-                continue;
-            }
-
             if !world.is_in_bounds_2d(neighbour) {
                 info!("Skipping {:?} because it is out of bounds", neighbour);
                 parcels.get_mut(&current_parcel).expect("Every explored tile should have a parcel").set_to_border_parcel();
                 continue;
             }
 
+            if visited[index(neighbour)] {
+                continue;
+            }
+
             let Some(neighbour_point) = world.add_non_tree_height(neighbour) else { continue; };
-            visited.insert(neighbour);
-            queue.push(neighbour);
+            visited[index(neighbour)] = true;
+            queue.push_back(neighbour);
             world.parcel_map[neighbour.x as usize][neighbour.y as usize] = Some(current_parcel);
             parcels.get_mut(&current_parcel)
                 .expect(&format!("No parcel found with id {}", current_parcel.0))

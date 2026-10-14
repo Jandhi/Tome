@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use anyhow::Result;
 use log::{info, warn};
@@ -425,7 +425,7 @@ pub fn resolve_rural_production(
     rng: &mut RNG,
 ) -> SettlementProductionResult {
     // Map each gather resource to its building footprint (size + steep tolerance).
-    let mut gather_footprints: HashMap<String, (i32, i32, bool)> = HashMap::new();
+    let mut gather_footprints: HashMap<String, (i32, i32, bool)> = HashMap::default();
     for recipe in data.resource_registry.recipes().values() {
         if !recipe.inputs.is_empty() {
             continue; // only gather (no-input) recipes seat a rural building
@@ -558,7 +558,7 @@ pub async fn place_urban_building(
 /// claims its footprint, so subsequent placements steer around what's already been built.
 pub async fn place_urban_buildings(
     urban_districts: &[&District],
-    building_counts: &std::collections::HashMap<String, u32>,
+    building_counts: &crate::util::HashMap<String, u32>,
     rng: &mut RNG,
     editor: &mut Editor,
     data: &LoadedData,
@@ -1015,7 +1015,7 @@ fn footprint_target_height(cells: &[Point2D], editor: &Editor, allow_steep: bool
 }
 
 fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Point3D> {
-    let mut out: HashSet<Point3D> = HashSet::new();
+    let mut out: HashSet<Point3D> = HashSet::default();
     let world = editor.world();
     for p in expanded_rect_cells(rect, BLEND_RADIUS) {
         if rect.contains(p) {
@@ -1048,7 +1048,7 @@ fn build_blend_ring(rect: &Rect2D, target_y: i32, editor: &Editor) -> HashSet<Po
 /// a rocky hill — rather than a dirt scar. Falls back to stone.
 fn sample_foundation_material(rect: &Rect2D, editor: &Editor) -> Block {
     let world = editor.world();
-    let mut counts: HashMap<String, u32> = HashMap::new();
+    let mut counts: HashMap<String, u32> = HashMap::default();
     for p in rect.iter() {
         if !world.is_in_bounds_2d(p) {
             continue;
@@ -1101,7 +1101,7 @@ async fn build_foundation_skirt(editor: &mut Editor, rect: &Rect2D, target_y: i3
         }
     }
 
-    let mut new_heights: HashSet<Point3D> = HashSet::new();
+    let mut new_heights: HashSet<Point3D> = HashSet::default();
     for (p, natural_y, skirt_top) in plan {
         if skirt_top > natural_y {
             // Downhill: raise a solid material plinth from grade up to the skirt top.

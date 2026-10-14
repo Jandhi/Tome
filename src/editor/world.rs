@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use anyhow::Ok;
 use fastnbt::LongArray;
 use log::info;
 
-use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, Chunk, util::point_to_chunk_coordinates}};
+use crate::{generator::{build_claim::BuildClaim, buildings::BuildingData, districts::{Parcel, ParcelAnalysis, ParcelID, ParcelType, District, DistrictID}, nbts::StructureID}, geometry::{Cardinal, DOWN, Point2D, Point3D, Rect2D, Rect3D}, http_mod::{GDMCHTTPProvider, HeightMapType}, minecraft::{Biome, Block, BlockID, Chunk, util::point_to_chunk_coordinates}};
 
-use super::Editor;
+use super::{terrain_snapshot::TerrainSnapshot, Editor};
 
 const CHUNK_SIZE : i32 = 16;
 
@@ -81,6 +81,10 @@ pub struct World {
     motion_blocking_height_map : Vec<Vec<i32>>,
     build_claim_map : Vec<Vec<BuildClaim>>,
     pub chunks: HashMap<Point2D, Chunk>,
+    /// Absolute Y band a terrain fixture kept chunk sections for. Outside it
+    /// `get_block` synthesises air above and stone below instead of `None`,
+    /// so a fixture world reads like the live one. `None` for live/synthetic.
+    pub trimmed_y_range: Option<(i32, i32)>,
 }
 
 impl World {
@@ -92,11 +96,6 @@ impl World {
             build_area.size.x,
             build_area.size.z,
         );
-        let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
-
-        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
-        let district_map = vec![vec![None; size_z_usize]; size_x_usize];
-
         let chunk_rect = Rect3D {
             origin: point_to_chunk_coordinates(build_area.origin),
             size: point_to_chunk_coordinates(build_area.max()) - point_to_chunk_coordinates(build_area.origin) + Point3D::new(1, 1, 1),
@@ -131,7 +130,23 @@ impl World {
             .get_heightmap(origin_x, origin_z, size_x, size_z, HeightMapType::MotionBlocking)
             .await?;
 
-        let (size_x_usize, size_z_usize) = (size_x as usize, size_z as usize);
+        Ok(World::from_parts(build_area, chunks, ground_map, ocean_map, motion_blocking_map))
+    }
+
+    /// Assemble a World from raw server data: the chunks plus the three
+    /// heightmaps exactly as the GDMC server returns them (absolute Y, indexed
+    /// `[x][z]`). Derives the local-Y heightmaps, `ground_block_map` and
+    /// `ground_biome_map`. Shared by [`World::new`] and [`World::from_snapshot`].
+    pub fn from_parts(
+        build_area: Rect3D,
+        chunks: HashMap<Point2D, Chunk>,
+        ground_map: Vec<Vec<i32>>,
+        ocean_map: Vec<Vec<i32>>,
+        motion_blocking_map: Vec<Vec<i32>>,
+    ) -> World {
+        let (size_x_usize, size_z_usize) = (build_area.size.x as usize, build_area.size.z as usize);
+        let parcel_map = vec![vec![None; size_z_usize]; size_x_usize];
+        let district_map = vec![vec![None; size_z_usize]; size_x_usize];
 
         let ground_height_map = vec![vec![0; size_z_usize]; size_x_usize];
         let ocean_floor_height_map = vec![vec![0; size_z_usize]; size_x_usize];
@@ -142,8 +157,9 @@ impl World {
 
         let mut world = World {
             build_area,
-            parcels: HashMap::new(),
-            districts: HashMap::new(),
+            trimmed_y_range: None,
+            parcels: HashMap::default(),
+            districts: HashMap::default(),
             parcel_map,
             district_map,
             buildings: Vec::new(),
@@ -151,7 +167,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
-            structure_anchors: HashMap::new(),
+            structure_anchors: HashMap::default(),
             urban_footprint: None,
             ground_height_map,
             ocean_floor_height_map,
@@ -160,8 +176,8 @@ impl World {
             chunks,
             ground_biome_map,
             ground_block_map,
-            parcel_analysis_data: HashMap::new(),
-            district_analysis_data: HashMap::new(),
+            parcel_analysis_data: HashMap::default(),
+            district_analysis_data: HashMap::default(),
         };
 
         let y_offset = build_area.origin.y;
@@ -187,7 +203,32 @@ impl World {
             }
         }
 
-        Ok(world)
+        world
+    }
+
+    /// Rebuild a World from a saved [`TerrainSnapshot`] without any HTTP traffic.
+    /// `get_block` returns `None` outside the fixture's `kept_y_range`.
+    pub fn from_snapshot(fixture: TerrainSnapshot) -> World {
+        let chunks = fixture.chunks.into_iter().map(|c| (Point2D::new(c.x_pos, c.z_pos), c)).collect();
+        let mut world = World::from_parts(fixture.build_area, chunks, fixture.ground_map, fixture.ocean_map, fixture.motion_blocking_map);
+        world.trimmed_y_range = Some(fixture.kept_y_range);
+        world
+    }
+
+    /// Snapshot the raw terrain inputs (chunks + absolute heightmaps) so this
+    /// World can be rebuilt offline with [`World::from_snapshot`]. Take it
+    /// before generation: the heightmaps are mutated as the town is built.
+    /// Chunk sections outside the terrain band are dropped (see `TerrainSnapshot`).
+    pub fn to_snapshot(&self) -> TerrainSnapshot {
+        let y = self.build_area.origin.y;
+        let abs = |m: &Vec<Vec<i32>>| m.iter().map(|col| col.iter().map(|h| h + y).collect()).collect();
+        TerrainSnapshot::new(
+            self.build_area,
+            self.chunks.values().cloned().collect(),
+            abs(&self.ground_height_map),
+            abs(&self.ocean_floor_height_map),
+            abs(&self.motion_blocking_height_map),
+        )
     }
 
     pub fn get_editor(self) -> Editor {
@@ -217,10 +258,11 @@ impl World {
 
         World {
             build_area,
-            parcels: HashMap::new(),
-            parcel_analysis_data: HashMap::new(),
-            districts: HashMap::new(),
-            district_analysis_data: HashMap::new(),
+            trimmed_y_range: None,
+            parcels: HashMap::default(),
+            parcel_analysis_data: HashMap::default(),
+            districts: HashMap::default(),
+            district_analysis_data: HashMap::default(),
             parcel_map,
             district_map,
             buildings: Vec::new(),
@@ -228,7 +270,7 @@ impl World {
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
             tower_bases: Vec::new(),
-            structure_anchors: HashMap::new(),
+            structure_anchors: HashMap::default(),
             urban_footprint: None,
             ground_height_map,
             ground_block_map,
@@ -236,7 +278,7 @@ impl World {
             ground_biome_map,
             motion_blocking_height_map,
             build_claim_map,
-            chunks: HashMap::new(),
+            chunks: HashMap::default(),
         }
     }
 
@@ -314,8 +356,8 @@ impl World {
         // Walk down through tree blocks to the real surface. If a block read
         // fails (unloaded chunk / out of section range), stop where we are
         // rather than panicking — the height so far is the best estimate.
-        while let Some(block) = self.get_block(Point3D::new(point.x, height - 1, point.y)) {
-            if !block.id.is_tree() {
+        while let Some(id) = self.get_block_id(Point3D::new(point.x, height - 1, point.y)) {
+            if !id.is_tree() {
                 break;
             }
             height -= 1;
@@ -414,8 +456,8 @@ impl World {
     pub fn add_non_tree_height(&self, point : Point2D) -> Option<Point3D> {
         let mut new_point = Point3D::new(point.x, self.get_height_at(point)?, point.y);
         // Walk down through tree blocks; stop on a failed read rather than panic.
-        while let Some(block) = self.get_block(new_point + DOWN) {
-            if !block.id.is_tree() {
+        while let Some(id) = self.get_block_id(new_point + DOWN) {
+            if !id.is_tree() {
                 break;
             }
             new_point += DOWN;
@@ -427,7 +469,23 @@ impl World {
         self.build_area.drop_y().contains(point + self.build_area.origin.drop_y())
     }
 
-    pub fn get_block(&self, mut point: Point3D) -> Option<Block> {
+    pub fn get_block(&self, point: Point3D) -> Option<Block> {
+        self.with_block(point, |name, properties| Block {
+            id: name.into(),
+            state: properties.clone(),
+            data: None,
+        })
+    }
+
+    /// Like [`get_block`](Self::get_block) but returns only the id, skipping the
+    /// clone of the block-state map. For hot scans that only test the id.
+    pub fn get_block_id(&self, point: Point3D) -> Option<BlockID> {
+        self.with_block(point, |name, _| name.into())
+    }
+
+    /// Looks up the palette entry at `point` (local coords) and hands its name and
+    /// properties to `f`. Shared by `get_block` and `get_block_id`.
+    fn with_block<R>(&self, mut point: Point3D, f: impl FnOnce(&str, &Option<std::collections::HashMap<String, String>>) -> R) -> Option<R> {
         point = point + self.build_area.origin;
         //info!("Getting block at point: {:?}", point); uncomment if needed, but generates way to many lines of logs
 
@@ -437,18 +495,23 @@ impl World {
         let chunk = self.chunks.get(&chunk_coordinates.drop_y())?;
         //info!("Found chunk: {:?}", chunk);
 
-        let section = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y)?;
-        //info!("Found section: {:?}", section);
+        let Some(section) = chunk.sections.iter().find(|s| s.y == chunk_coordinates.y) else {
+            // Fixture worlds drop sections far from the surface: stand in for them.
+            let (lo, hi) = self.trimmed_y_range?;
+            return if point.y > hi {
+                Some(f("minecraft:air", &None))
+            } else if point.y < lo {
+                Some(f("minecraft:stone", &None))
+            } else {
+                None
+            };
+        };
 
         let block_states = section.block_states.as_ref()?;
 
         if block_states.data.is_none() {
             let block = block_states.palette.get(0)?;
-            return Some(Block {
-                id: block.name.as_str().into(),
-                state: block.properties.clone(),
-                data: None,
-            });
+            return Some(f(block.name.as_str(), &block.properties));
         }
 
         let data = block_states.data.as_ref()?;
@@ -457,11 +520,7 @@ impl World {
         
         let palette = &block_states.palette;
 
-        palette.get(block_index).map(|block| Block {
-            id: block.name.as_str().into(),
-            state: block.properties.clone(),
-            data: None,
-        })
+        palette.get(block_index).map(|block| f(block.name.as_str(), &block.properties))
     }
 
     pub fn get_biome(&self, mut point: Point3D) -> Option<Biome> {

@@ -7,7 +7,9 @@
 //! [`RegionType`] — plaza, nook, park, or yard. The per-type `furnish_*`
 //! functions (in the submodules) then decorate each gap in place.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use serde_derive::Deserialize;
 
@@ -319,7 +321,7 @@ fn partition_cells(green: &HashSet<Point2D>) -> Vec<Vec<Point2D>> {
         .collect();
 
     // Label each connected core blob.
-    let mut label: HashMap<Point2D, usize> = HashMap::new();
+    let mut label: HashMap<Point2D, usize> = HashMap::default();
     let mut next_id = 0;
     for &c in &core {
         if !label.contains_key(&c) {

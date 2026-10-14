@@ -11,7 +11,7 @@ use crate::http_mod::GDMCHTTPProvider;
 use crate::minecraft::Block;
 use crate::noise::RNG;
 use crate::util::init_logger;
-use std::collections::HashSet;
+use crate::util::HashSet;
 use super::{build_segments, boundary_cell_set, place_doors, place_windows, segment_cells, OpeningKind, DoorStyle};
 
 fn make_frame(rects: Vec<Rect2D>, floor_counts: Vec<u32>) -> Frame {
@@ -107,7 +107,7 @@ fn place_door_picks_nearest_plot_edge() {
     // Plot extends far to the north so north-facing wall is further from any edge.
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 4), Point2D::new(20, 25));
     let area = 8 * 6; // 48
-    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::default(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert_eq!(doors.len(), 1, "Small building should get 1 door");
@@ -126,7 +126,7 @@ fn place_door_large_building_gets_two() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 15));
     let area = 15 * 11; // 165, > 100
-    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::default(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert_eq!(doors.len(), 2, "Large building should get 2 doors");
@@ -146,7 +146,7 @@ fn place_door_double_style_for_huge_building() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 20));
     let area = 200; // > 150
-    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::default(), &mut rng);
 
     let doors: Vec<_> = wall_segs.doors().collect();
     assert!(!doors.is_empty());
@@ -162,7 +162,7 @@ fn windows_placed_on_segments() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
+    place_windows(&mut wall_segs, &crate::util::HashSet::default(), &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(!windows.is_empty(), "Should place at least one window");
@@ -181,8 +181,8 @@ fn windows_avoid_doors() {
     let mut rng = RNG::new(1);
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 12));
-    place_doors(&mut wall_segs, &plot_bounds, 50, &HashSet::new(), &mut rng);
-    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, 50, &HashSet::default(), &mut rng);
+    place_windows(&mut wall_segs, &crate::util::HashSet::default(), &mut rng);
 
     // Check no window overlaps a door on the same segment
     for seg in &wall_segs.segments {
@@ -213,7 +213,7 @@ fn short_segment_gets_no_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
+    place_windows(&mut wall_segs, &crate::util::HashSet::default(), &mut rng);
 
     let windows: Vec<_> = wall_segs.windows().collect();
     assert!(windows.is_empty(), "Tiny segments should get no windows");
@@ -226,7 +226,7 @@ fn upper_floors_get_more_windows() {
     let mut wall_segs = build_segments(&frame);
     let mut rng = RNG::new(1);
 
-    place_windows(&mut wall_segs, &std::collections::HashSet::new(), &mut rng);
+    place_windows(&mut wall_segs, &crate::util::HashSet::default(), &mut rng);
 
     let floor0_windows = wall_segs.segments.iter()
         .filter(|s| s.floor == 0)
@@ -361,7 +361,7 @@ fn ascii_visualize_simple_house() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(12, 12));
     let area = 10 * 8;
-    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::default(), &mut rng);
 
 
     println!("\n=== Simple 10x8 house, 1 floor ===");
@@ -380,7 +380,7 @@ fn ascii_visualize_large_hall() {
 
     let plot_bounds = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 20));
     let area = 15 * 11; // 165 > 150 so Double door, > 100 so 2 doors
-    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::new(), &mut rng);
+    place_doors(&mut wall_segs, &plot_bounds, area, &HashSet::default(), &mut rng);
 
 
     println!("\n=== Large 15x11 hall, 2 floors ===");
@@ -415,8 +415,8 @@ fn ascii_visualize_l_shape() {
 /// Each segment gets a unique letter (A, B, C...). Cells claimed by multiple
 /// segments show '+'. Empty cells show '.'.
 fn render_overhead(wall_segs: &super::WallSegments, floor: u32) {
-    use std::collections::HashMap;
-    let mut cell_owners: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+    use crate::util::HashMap;
+    let mut cell_owners: HashMap<(i32, i32), Vec<usize>> = HashMap::default();
     let mut min_x = i32::MAX;
     let mut min_z = i32::MAX;
     let mut max_x = i32::MIN;

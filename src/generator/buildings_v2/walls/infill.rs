@@ -99,7 +99,7 @@ impl WallInfill {
                 );
 
                 for (idx, cell) in cells.iter().enumerate() {
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }
@@ -135,7 +135,7 @@ impl WallInfill {
                 );
 
                 for (idx, cell) in cells.iter().enumerate() {
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }
@@ -171,7 +171,7 @@ impl WallInfill {
                     wood_id,
                 );
 
-                let beams: std::collections::HashSet<usize> =
+                let beams: crate::util::HashSet<usize> =
                     beam_indices(cells.len()).into_iter().collect();
                 // Wood baseboard only on the ground floor; upper floors get beams
                 // over white with no timber sill.
@@ -179,7 +179,7 @@ impl WallInfill {
 
                 for (idx, cell) in cells.iter().enumerate() {
                     let is_beam = beams.contains(&idx);
-                    for ry in 0..seg.height {
+                    for ry in seg.infill_rows() {
                         if is_inside_opening(&seg.openings, idx as u32, ry) {
                             continue;
                         }

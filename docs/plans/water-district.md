@@ -164,7 +164,7 @@ If nothing fits after `ATTEMPTS`, place fewer ships on that body.
 
 ## Part 3 — Integration
 
-One call at the end of `generate_town` (`src/generator/settlement.rs`), before
+One call at the end of `generate_settlement` (`src/generator/settlement.rs`), before
 the final `editor.flush_buffer().await`:
 
 ```rust

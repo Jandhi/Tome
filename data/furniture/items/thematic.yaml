@@ -46,7 +46,7 @@ banner_pair:
 # footlocker of arms; distinct from the generic `chest` only by its contents.
 weapon_chest:
   blocks:
-    - block: "minecraft:chest"
+    - block: "minecraft:chest[facing=north]"
       offset: [0, 0, 0]
       layer: ground
       loot: armory

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use log::info;
 use crate::{generator::{data::LoadedData, districts::build_wall_gate, materials::{MaterialId, Palette, Placer}, nbts::{load_nbt_structure, place_structure, Structure, StructureType}, BuildClaim}, geometry::{get_neighbours_in_set, get_edge, is_point_surrounded_by_points, Cardinal, Point2D, Point3D, CARDINALS_2D}, minecraft::BlockForm, noise::RNG};
 
@@ -37,7 +37,7 @@ pub(crate) fn connected_components(region: &HashSet<Point2D>) -> Vec<HashSet<Poi
 
     while let Some(&start) = remaining.iter().next() {
         remaining.remove(&start);
-        let mut component = HashSet::new();
+        let mut component = HashSet::default();
         let mut stack = vec![start];
         while let Some(point) = stack.pop() {
             component.insert(point);
@@ -276,7 +276,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
 
     let mut walkway_points = Vec::<Point2D>::new();
-    let mut walkway_heights: HashMap<Point2D, i32> = HashMap::new();
+    let mut walkway_heights: HashMap<Point2D, i32> = HashMap::default();
 
     let mut previous_dir = Cardinal::North; // Default direction
 
@@ -307,7 +307,7 @@ pub async fn build_wall_standard(wall_points: &Vec<Point2D>, editor: &mut Editor
             // Parapet cap: a stair lip only on outer-face cells. Inner staircase cells
             // were already dropped a slab above and read as walkway, so they get no cap.
             if is_outer {
-                let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+                let state = std::collections::HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
                 material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
             }
         
@@ -371,9 +371,9 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
     let enhanced_wall_points = check_water(&mut add_wall_points_directionality(&wall_points_with_height, &wall_set, urban_points), editor);
 
     let mut walkway_points = Vec::<Point2D>::new();
-    let mut walkway_heights: HashMap<Point2D, i32> = HashMap::new();
+    let mut walkway_heights: HashMap<Point2D, i32> = HashMap::default();
 
-    let mut inner_wall_points = HashSet::<Point3D>::new();
+    let mut inner_wall_points = HashSet::<Point3D>::default();
 
 
     let mut previous_dir = Cardinal::North; // Default direction
@@ -413,7 +413,7 @@ pub async fn build_wall_standard_with_inner(wall_points: &Vec<Point2D>, editor: 
             // Parapet cap: a stair lip only on outer-face cells. Inner staircase cells
             // were already dropped a slab above and read as walkway, so they get no cap.
             if is_outer {
-                let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+                let state = std::collections::HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
                 material_placer.place_block(editor, Point3D { x: point.x, y: point.y + 1, z: point.z }, material_id, BlockForm::Stairs, Some(&state), None).await;
             }
         
@@ -729,16 +729,16 @@ pub async fn flatten_walkway(
     for (&point, &height) in updated_walkway_heights.clone().iter() {
         let frac_height = height % 1.0;
         if (frac_height <= 0.25) || (frac_height > 0.75){
-            //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+            //let state = HashMap::from_iter([("facing".to_string(), previous_dir.rotate_right().to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32, z: point.y }, material_id, BlockForm::Slab, None, None).await;
             updated_walkway_heights.insert(point, height.round());
         } else if (frac_height > 0.25) && (frac_height <= 0.5) {
-            let state = HashMap::from([("type".to_string(), "top".to_string())]);
+            let state = std::collections::HashMap::from([("type".to_string(), "top".to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32, z: point.y }, material_id, BlockForm::Slab, Some(&state), None).await;
             updated_walkway_heights.insert(point, height.round() + 0.49);
         } else if (frac_height > 0.5) && (frac_height <= 0.75) {
-            //let state = HashMap::from([("facing".to_string(), previous_dir.rotate_right().to_string())]);
-            let state = HashMap::from([("type".to_string(), "top".to_string())]);
+            //let state = HashMap::from_iter([("facing".to_string(), previous_dir.rotate_right().to_string())]);
+            let state = std::collections::HashMap::from([("type".to_string(), "top".to_string())]);
             material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 - 1, z: point.y }, material_id, BlockForm::Slab, Some(&state), None).await;
             updated_walkway_heights.insert(point, height.round() - 0.51);
         }
@@ -752,11 +752,11 @@ pub async fn flatten_walkway(
             }
             else if height % 1.0 == 0.0 { // bottom slab
                 if updated_walkway_heights.get(&neighbour).unwrap() - height >= 1.0 {
-                    let state = HashMap::from([("facing".to_string(), Cardinal::from_point_2d(direction).expect("Expected cardinal direction").to_string())]);
+                    let state = std::collections::HashMap::from([("facing".to_string(), Cardinal::from_point_2d(direction).expect("Expected cardinal direction").to_string())]);
                     material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32, z: point.y }, material_id, BlockForm::Stairs, Some(&state), None).await;
                 }
             } else if updated_walkway_heights.get(&neighbour).unwrap() - height <= -1.0 {
-                let state = HashMap::from([("facing".to_string(), Cardinal::from_point_2d(direction).expect("Expected cardinal direction").opposite().to_string())]);
+                let state = std::collections::HashMap::from([("facing".to_string(), Cardinal::from_point_2d(direction).expect("Expected cardinal direction").opposite().to_string())]);
                 material_placer.place_block(editor, Point3D { x: point.x, y: height.round() as i32 + 1, z: point.y }, material_id, BlockForm::Stairs, Some(&state), None).await;
             }
         }
@@ -955,7 +955,7 @@ mod tests {
         let world = World::synthetic(build_area, 64);
         let mut editor = world.get_offline_editor();
 
-        let mut heights = HashSet::new();
+        let mut heights = HashSet::default();
         let mut wall_points = Vec::new();
         for (i, &h) in terrain.iter().enumerate() {
             wall_points.push(Point2D::new(i as i32, 1));
@@ -1076,7 +1076,7 @@ mod tests {
 
     /// A solid axis-aligned rectangle of cells [x0,x1) × [z0,z1).
     fn filled_rect(x0: i32, z0: i32, x1: i32, z1: i32) -> HashSet<Point2D> {
-        let mut set = HashSet::new();
+        let mut set = HashSet::default();
         for x in x0..x1 {
             for z in z0..z1 {
                 set.insert(Point2D::new(x, z));
@@ -1241,7 +1241,7 @@ mod tests {
     #[test]
     fn two_dimensional_walkway_band_has_no_open_faces() {
         // A 3-wide band that steps up along its length — exercises both axes.
-        let mut heights = HashMap::new();
+        let mut heights = HashMap::default();
         for x in 0..8 {
             let surface = 64.0 + x as f64; // 1 per cell along x
             for z in 0..3 {

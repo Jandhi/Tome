@@ -26,6 +26,7 @@ strum = "0.27.1"
 strum_macros = "0.27.1"
 tokio = {version = "1.44.2", features = ["full"]}
 resvg = "0.44"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 # Optional visualizer dependencies
 axum = { version = "0.8", features = ["ws"], optional = true }
@@ -34,3 +35,11 @@ chrono = "0.4.44"
 
 [features]
 visualizer = ["axum", "tower-http"]
+
+[profile.fast]
+# Dev loop profile: release-level optimisation with incremental compilation so a
+# one-file change rebuilds in seconds rather than ~50 s. Used by `cargo offline`/`cargo render`.
+inherits = "release"
+incremental = true
+codegen-units = 256
+debug = false

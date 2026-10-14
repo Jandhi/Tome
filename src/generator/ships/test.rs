@@ -11,13 +11,13 @@ use crate::generator::ships::keel;
 fn hull_watertight_scan() {
     use crate::generator::ships::hull::{build_hull_model, HullShape};
     use crate::generator::ships::keel::build_keel_model;
-    use std::collections::HashSet;
+    use crate::util::HashSet;
 
     for length in 14..=22 {
         for shape in [HullShape::Teardrop, HullShape::Oval] {
             let keel = build_keel_model(length);
             let hull = build_hull_model(length, keel.depth, 2.7, shape, &keel.top_profile());
-            let mut solid: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut solid: HashSet<(i32, i32, i32)> = HashSet::default();
             for c in &hull.cells { solid.insert((c.x, c.y, c.z)); }
             for b in &hull.bevel { solid.insert((b.local.x, b.local.y, b.local.z)); }
             for c in &keel.cells { solid.insert((c.local.x, c.local.y, c.local.z)); }
@@ -28,7 +28,7 @@ fn hull_watertight_scan() {
             let (ylo, yhi) = (1, keel.depth - 1); // strictly below the waterline rim
             if yhi < ylo { continue; }
             let air = |p: (i32, i32, i32)| !solid.contains(&p);
-            let mut seen: HashSet<(i32, i32, i32)> = HashSet::new();
+            let mut seen: HashSet<(i32, i32, i32)> = HashSet::default();
             let mut stack: Vec<(i32, i32, i32)> = Vec::new();
             // Seed from the bounding-box shell (exterior), in the underwater band.
             for y in ylo..=yhi {
@@ -64,7 +64,7 @@ fn hull_watertight_scan() {
 #[ignore]
 fn analyze_bowsprit_nbt() {
     use fastnbt::Value;
-    use std::collections::HashMap;
+    use crate::util::HashMap;
     use std::io::Read;
 
     fn read_nbt(path: &str) -> Value {
@@ -84,7 +84,7 @@ fn analyze_bowsprit_nbt() {
             _ => panic!("not int: {v:?}"),
         }
     }
-    fn comp(v: &Value) -> &HashMap<String, Value> {
+    fn comp(v: &Value) -> &std::collections::HashMap<String, Value> {
         match v {
             Value::Compound(c) => c,
             _ => panic!("not compound"),
@@ -147,7 +147,7 @@ fn analyze_bowsprit_nbt() {
                 '#'
             }
         };
-        let mut occ: HashMap<(i32, i32, i32), usize> = HashMap::new();
+        let mut occ: HashMap<(i32, i32, i32), usize> = HashMap::default();
         for b in list(&c["blocks"]) {
             let bc = comp(b);
             let st = as_i32(&bc["state"]) as usize;
@@ -203,7 +203,7 @@ fn analyze_bowsprit_nbt() {
 #[test]
 fn masthead_flags_have_no_floating_blocks() {
     use crate::generator::ships::additions::masts::build_masts_model;
-    use std::collections::HashSet;
+    use crate::util::HashSet;
 
     let mut rng = crate::noise::RNG::new(11);
     for length in [14, 20, 26, 32, 40, 46] {
@@ -356,7 +356,7 @@ fn square_sail_surface_has_no_holes() {
 #[test]
 fn spanker_sail_has_no_holes() {
     use crate::generator::ships::additions::masts::{build_masts_model, spanker_billow};
-    use std::collections::HashSet;
+    use crate::util::HashSet;
 
     for length in [26, 32, 38, 44] {
         for count in [2, 3] {
@@ -794,7 +794,7 @@ async fn ship_levels_offline() {
 fn jib_sail_has_no_holes() {
     use crate::generator::ships::additions::masts::{curved_sail_xy, jib_billow, line_xy};
     use crate::geometry::Point3D;
-    use std::collections::HashSet;
+    use crate::util::HashSet;
 
     // A few representative jib triangles (bowsprit start A, tip B, foremast top C).
     let cases = [
@@ -1263,7 +1263,7 @@ async fn scatter_ships_offline() {
 /// land hulk. Offline: pure geometry over a built `ShipOutput`, no server.
 #[tokio::test]
 async fn crew_scenes_offline() {
-    use std::collections::HashSet;
+    use crate::util::HashSet;
 
     use crate::editor::World;
     use crate::generator::data::LoadedData;
@@ -1305,7 +1305,7 @@ async fn crew_scenes_offline() {
     assert_eq!(captain.slots[0].title.as_deref(), Some("Captain"), "captain title from fixture");
 
     // Every post is a single-slot Worker on a distinct deck cell.
-    let mut cells: HashSet<(i32, i32)> = HashSet::new();
+    let mut cells: HashSet<(i32, i32)> = HashSet::default();
     for s in &scenes {
         assert_eq!(s.slots.len(), 1, "crew posts are solo scenes");
         let slot = &s.slots[0];

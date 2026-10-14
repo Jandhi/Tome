@@ -12,7 +12,7 @@
 //! ([`CREW_SAILORS_SMALL`] …). Names come from the roster the settlement layer hands the
 //! scenes.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::buildings_v2::Culture;

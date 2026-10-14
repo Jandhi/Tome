@@ -1,4 +1,4 @@
-use std::{collections::HashMap};
+use crate::util::HashMap;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::{data::Loadable, editor::Editor, generator::materials::{feature::{map_features, MaterialParameters}, MaterialFeature}, geometry::Point3D, minecraft::{Block, BlockForm, BlockID}, noise::RNG};
@@ -80,7 +80,7 @@ impl Material {
         }
     }
 
-    pub async fn place_block(&self, editor: &Editor, point: Point3D, form: BlockForm, materials: &HashMap<MaterialId, Material>, state: Option<&HashMap<String, String>>, data: Option<&String>, parameters: MaterialParameters, rng: &mut RNG, is_forced: bool) {
+    pub async fn place_block(&self, editor: &Editor, point: Point3D, form: BlockForm, materials: &HashMap<MaterialId, Material>, state: Option<&std::collections::HashMap<String, String>>, data: Option<&String>, parameters: MaterialParameters, rng: &mut RNG, is_forced: bool) {
         let material = map_features(&parameters, self.id(), materials);
         
         if let Some(block_id) = materials.get(&material).unwrap().get_block(&form, rng) {

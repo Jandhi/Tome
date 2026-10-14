@@ -17,7 +17,9 @@
 //! 5. Drop strokes shorter than [`MIN_ROAD_CELLS`], densely renumber the rest,
 //!    and return a `cell -> road number` map (junction cells included).
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use crate::geometry::Point2D;
 
@@ -51,7 +53,7 @@ const NB8: [(i32, i32); 8] = [
 /// dense road number; unlabelled (too-short) cells are absent.
 pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
     // 1. Densified centreline cell set (paths may step on a coarse lattice).
-    let mut cells: HashSet<Point2D> = HashSet::new();
+    let mut cells: HashSet<Point2D> = HashSet::default();
     for path in paths {
         let pts: Vec<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
         match pts.split_first() {
@@ -69,7 +71,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
         }
     }
     if cells.is_empty() {
-        return HashMap::new();
+        return HashMap::default();
     }
 
     let nbrs = |c: Point2D| -> Vec<Point2D> {
@@ -87,7 +89,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
         .collect();
 
     // 3. Segments: connected components of (cells − junctions).
-    let mut seg_of: HashMap<Point2D, usize> = HashMap::new();
+    let mut seg_of: HashMap<Point2D, usize> = HashMap::default();
     let mut segments: Vec<Vec<Point2D>> = Vec::new();
     for &start in &cells {
         if junction.contains(&start) || seg_of.contains_key(&start) {
@@ -113,7 +115,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
     // 4a. Cluster junction cells into blobs, so a fat multi-road crossing counts
     // as ONE junction. (Pairing per single cell left collinear roads on opposite
     // sides of a wide junction unmerged — the cause of the over-fragmentation.)
-    let mut blob_of: HashMap<Point2D, usize> = HashMap::new();
+    let mut blob_of: HashMap<Point2D, usize> = HashMap::default();
     let mut blobs: Vec<Vec<Point2D>> = Vec::new();
     for &jc in &junction {
         if blob_of.contains_key(&jc) {
@@ -147,7 +149,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
         );
         // Incident segments (deduped) with their heading leaving the blob.
         let mut incident: Vec<(usize, (f64, f64))> = Vec::new();
-        let mut seen: HashSet<usize> = HashSet::new();
+        let mut seen: HashSet<usize> = HashSet::default();
         for &bcell in blob {
             for nb in nbrs(bcell) {
                 if let Some(&sid) = seg_of.get(&nb) {
@@ -177,7 +179,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
             }
         }
         cands.sort_by(|x, y| y.0.partial_cmp(&x.0).unwrap_or(std::cmp::Ordering::Equal));
-        let mut used: HashSet<usize> = HashSet::new();
+        let mut used: HashSet<usize> = HashSet::default();
         for (s, sa, sb) in cands {
             if s < STRAIGHTNESS_MIN {
                 break;
@@ -192,11 +194,11 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
     }
 
     // 5. Stroke size, length cutoff, dense renumbering.
-    let mut stroke_cells: HashMap<usize, usize> = HashMap::new();
+    let mut stroke_cells: HashMap<usize, usize> = HashMap::default();
     for (sid, seg) in segments.iter().enumerate() {
         *stroke_cells.entry(find(&mut parent, sid)).or_insert(0) += seg.len();
     }
-    let mut remap: HashMap<usize, u32> = HashMap::new();
+    let mut remap: HashMap<usize, u32> = HashMap::default();
     let mut next = 0u32;
     for (&root, &count) in &stroke_cells {
         if count >= MIN_ROAD_CELLS {
@@ -206,7 +208,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
     }
 
     // Cell -> road number for every segment cell of a surviving stroke.
-    let mut labels: HashMap<Point2D, u32> = HashMap::new();
+    let mut labels: HashMap<Point2D, u32> = HashMap::default();
     for (sid, seg) in segments.iter().enumerate() {
         if let Some(&rid) = remap.get(&find(&mut parent, sid)) {
             for &c in seg {
@@ -217,7 +219,7 @@ pub fn label_roads_geometric(paths: &[Path]) -> HashMap<Point2D, u32> {
     // Junction cells: adopt the most common road number among their segment
     // neighbours, so a through-road's colour carries across the crossing.
     for &j in &junction {
-        let mut votes: HashMap<u32, usize> = HashMap::new();
+        let mut votes: HashMap<u32, usize> = HashMap::default();
         for n in nbrs(j) {
             if let Some(&rid) = labels.get(&n) {
                 *votes.entry(rid).or_insert(0) += 1;
@@ -242,7 +244,7 @@ fn heading_from_blob(
     nbrs: &impl Fn(Point2D) -> Vec<Point2D>,
 ) -> (f64, f64) {
     let mut cur = entry;
-    let mut visited: HashSet<Point2D> = HashSet::new();
+    let mut visited: HashSet<Point2D> = HashSet::default();
     visited.insert(cur);
     for _ in 0..DIR_LOOKAHEAD {
         let next = nbrs(cur)

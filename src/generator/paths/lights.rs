@@ -5,7 +5,8 @@
 //! side. Run *after* [`build_paths_merged`](super::build_paths_merged) so the
 //! pavement is already down and we only have to step just off its edge.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::BuildClaim;
@@ -134,7 +135,7 @@ pub(super) fn verge_anchors(
 /// The widened paved footprint of `paths`, mirroring the shoulder pass in
 /// [`build_paths_merged`](super::build_paths_merged).
 fn paved_cells(paths: &[&Path]) -> HashSet<Point2D> {
-    let mut paved: HashSet<Point2D> = HashSet::new();
+    let mut paved: HashSet<Point2D> = HashSet::default();
     for path in paths {
         let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
         paved.extend(get_surrounding_set(&centre, path.width().saturating_sub(1)));

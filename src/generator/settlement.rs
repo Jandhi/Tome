@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::data::Loadable;
 use crate::editor::Editor;
@@ -14,6 +14,7 @@ use crate::generator::terrain::{clear_floating_logs, drain_liquids, flatten_urba
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
+use crate::generator::report::{sorted_counts, SettlementReport};
 
 /// Full town-generation pipeline: feathered urban flatten + tiered A* road
 /// network, then hierarchical house placement.
@@ -192,7 +193,7 @@ fn biome_counts(world: &crate::editor::World) -> Vec<(crate::minecraft::Biome, u
         .parcel_analysis_data
         .iter()
         .flat_map(|(_, data)| data.biome_count())
-        .fold(HashMap::new(), |mut acc, (biome, count)| {
+        .fold(HashMap::default(), |mut acc, (biome, count)| {
             *acc.entry(biome.clone()).or_insert(0u32) += *count;
             acc
         })
@@ -215,7 +216,7 @@ pub fn dominant_biome(world: &crate::editor::World) -> Option<crate::minecraft::
 }
 
 /// Assemble the chronicle's [`CityDossier`] from the final settlement state. All
-/// inputs are locals still in scope at the end of [`generate_town`]; this does the
+/// inputs are locals still in scope at the end of [`generate_settlement`]; this does the
 /// id→name / colour→word / coords→quarter conversion so the LLM sees only
 /// human-readable, relational facts. Roads are emitted first because they are the
 /// `near` vocabulary every other landmark anchors to.
@@ -282,7 +283,7 @@ fn assemble_dossier(
     let mut landmarks: Vec<Landmark> = Vec::new();
 
     // ── Roads first (the `near` vocabulary) ──
-    let mut road_cells: HashMap<u32, Vec<Point2D>> = HashMap::new();
+    let mut road_cells: HashMap<u32, Vec<Point2D>> = HashMap::default();
     for (&c, &rid) in road_labels {
         road_cells.entry(rid).or_default().push(c);
     }
@@ -303,7 +304,7 @@ fn assemble_dossier(
             scan.extend(sd.data.points_2d.iter().copied());
         }
     }
-    let mut by_kind: HashMap<String, Vec<Point2D>> = HashMap::new();
+    let mut by_kind: HashMap<String, Vec<Point2D>> = HashMap::default();
     for p in scan {
         if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
             by_kind.entry(id.structure_type.0.clone()).or_default().push(p);
@@ -356,7 +357,7 @@ fn assemble_dossier(
     }
 
     // ── Gates (deduped by side) ──
-    let mut gate_names: HashSet<String> = HashSet::new();
+    let mut gate_names: HashSet<String> = HashSet::default();
     for (gpos, _dir) in &editor.world().gate_locations {
         let dir = compass_word(gpos.drop_y(), centre);
         let name = format!("the {dir} gate");
@@ -430,8 +431,8 @@ pub fn minimal_dossier(
     let named = crate::generator::naming::generate_settlement_name(
         editor.world(), &urban, &[], culture, &[], rng,
     );
-    let no_roads: HashMap<u32, String> = HashMap::new();
-    let no_labels: HashMap<Point2D, u32> = HashMap::new();
+    let no_roads: HashMap<u32, String> = HashMap::default();
+    let no_labels: HashMap<Point2D, u32> = HashMap::default();
     assemble_dossier(
         editor, &urban, culture, &named, &[], "", &no_roads, &no_labels, &[], &[],
         editor.world().buildings.len(), 0, &[], &[], rng,
@@ -443,7 +444,7 @@ pub fn minimal_dossier(
 /// savanna, …). `None` when no biome has a usable wood palette (e.g. all desert/
 /// badlands), so the caller can fall back.
 fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &LoadedData) -> Option<MaterialId> {
-    let mut counts: HashMap<MaterialId, usize> = HashMap::new();
+    let mut counts: HashMap<MaterialId, usize> = HashMap::default();
     for column in biome_map {
         for biome in column {
             let Some(palette) = local_wood_palette(biome.clone())
@@ -455,13 +456,37 @@ fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &Loaded
     counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
 }
 
-pub async fn generate_town(
+/// Per-run switches that are not part of the town itself.
+#[derive(Debug, Clone, Default)]
+pub struct SettlementOptions {
+    /// Ask OpenAI to write the chronicle book at the end (live runs only; it
+    /// costs an API call). Off by default; `cargo run -- --full` turns it on.
+    pub chronicle: bool,
+}
+
+pub async fn generate_settlement(
     editor: &mut Editor,
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
 ) {
+    generate_settlement_with(editor, seed, culture, &SettlementOptions::default()).await;
+}
+
+pub async fn generate_settlement_with(
+    editor: &mut Editor,
+    seed: Seed,
+    culture: Option<crate::generator::buildings_v2::Culture>,
+    options: &SettlementOptions,
+) -> SettlementReport {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
+    let mut report = SettlementReport { seed: seed.0, ..Default::default() };
+    {
+        let b = editor.world().build_area;
+        report.build_area_origin = [b.origin.x, b.origin.y, b.origin.z];
+        report.build_area_size = [b.size.x, b.size.y, b.size.z];
+    }
+    let mut stage_t = std::time::Instant::now();
 
     // Terraforming and block edits go through the HTTP interface with block updates
     // on, which can spawn block-drop item entities (e.g. when a placed block replaces
@@ -492,6 +517,7 @@ pub async fn generate_town(
         println!("Auto-selected culture {c:?} from build-area climate");
         c
     });
+    report.culture = format!("{culture:?}");
 
     // Infrastructure materials follow the culture: a desert town gets sandstone
     // roads and walls, a Japanese town a blackstone wall (matching its palette-
@@ -529,6 +555,7 @@ pub async fn generate_town(
     // building placement would later drop. (Rural terrain is still natural here —
     // flatten/walls only touch urban.)
     let result = resolve_rural_production(&data, editor, &rural_analysis, &mut rng);
+    report.lap(&mut stage_t, "parcels");
 
     // Phase 1 — feathered urban flatten.
     let urban = editor.world().get_urban_points();
@@ -556,6 +583,7 @@ pub async fn generate_town(
     drain_liquids(editor, &urban).await;
     println!("Drained liquids from {} urban cells", urban.len());
     flatten_urban_area(editor, &urban, 16, 12, true).await;
+    report.lap(&mut stage_t, "terraform");
 
     // Wall + gates — gates populate world.gate_locations, used by the network.
     let materials = Material::load().expect("Failed to load materials");
@@ -598,6 +626,9 @@ pub async fn generate_town(
         .flatten();
     let wall_material = palisade_material.as_ref().unwrap_or(&wall_material);
     println!("City size {n_urban} urban super-parcels -> {wall_type:?} wall ({})", wall_material.as_str());
+    report.urban_super_parcels = n_urban;
+    report.wall_type = format!("{wall_type:?}");
+    report.wall_material = wall_material.as_str().to_string();
     build_wall(
         &editor.world().get_urban_points(), editor, &mut rng2,
         &mut placer, wall_material, &structures, wall_type, tower_skin.as_ref(),
@@ -608,7 +639,10 @@ pub async fn generate_town(
     {
         let n_total = editor.world().districts.len();
         println!("URBAN super-parcels: {}/{} total | gates: {}", n_urban, n_total, editor.world().gate_locations.len());
+        report.total_super_parcels = n_total;
+        report.gates = editor.world().gate_locations.len();
     }
+    report.lap(&mut stage_t, "wall");
 
     let mut sd_ids: Vec<_> = result.parcel_assignments.keys().cloned().collect();
         sd_ids.sort_by_key(|id| id.0);
@@ -665,7 +699,7 @@ pub async fn generate_town(
         // Flatten the routed corridor to the road heights (skipping building /
         // wall cells so a placed structure isn't re-graded), then meld the
         // surface — mirrors the urban road realization.
-        let mut corridor: HashMap<Point2D, i32> = HashMap::new();
+        let mut corridor: HashMap<Point2D, i32> = HashMap::default();
         for path in &rural_paths {
             let w = path.width() as i32;
             for pt in path.points() {
@@ -699,6 +733,7 @@ pub async fn generate_town(
         }
     }
     println!("Rural roads: {} segments", rural_paths.len());
+    report.rural_road_segments = rural_paths.len();
 
     // A torii gate straddling each rural road, set a little way out from the
     // gate — the threshold into the countryside. Japanese-only; no-op otherwise.
@@ -713,6 +748,7 @@ pub async fn generate_town(
         let Some(district) = editor.world().districts.get(&p.district).cloned() else { continue };
         paint_production_area_for(&district, painter, &p.resource, &p.structure, &data, editor, &mut rng).await;
     }
+    report.lap(&mut stage_t, "rural");
 
 
     // ---- Industrial buildings FIRST ----
@@ -724,7 +760,7 @@ pub async fn generate_town(
     use crate::generator::BuildClaim;
     use crate::generator::placement::place_urban_buildings;
 
-    let mut ind_counts: HashMap<String, u32> = HashMap::new();
+    let mut ind_counts: HashMap<String, u32> = HashMap::default();
     for b in ["smithy", "mill", "bakery", "carpenter", "tannery", "weaver"] {
         ind_counts.insert(b.to_string(), 1);
     }
@@ -747,6 +783,8 @@ pub async fn generate_town(
         editor.world().structures.len() - n_before, ind_counts.values().sum::<u32>(),
     );
     let urban_industrial_count = editor.world().structures.len() - n_before;
+    report.industrial_placed = urban_industrial_count;
+    report.industrial_attempted = ind_counts.values().sum::<u32>() as usize;
 
     // ---- Rural buildings ----
     // The rural resource-chain pass above already placed each gathering/
@@ -762,11 +800,14 @@ pub async fn generate_town(
         "Placed {} rural buildings across {} rural parcels",
         rural_building_count, rural_parcel_count,
     );
+    report.rural_buildings = rural_building_count;
+    report.rural_parcels = rural_parcel_count;
+    report.lap(&mut stage_t, "industrial");
 
     // Footprints → a `blocked` barrier (footprint + margin) and one node per
     // building for the network to connect.
     const IND_MARGIN: i32 = 2;
-    let mut ind_footprints: HashMap<u32, Vec<Point2D>> = HashMap::new();
+    let mut ind_footprints: HashMap<u32, Vec<Point2D>> = HashMap::default();
     for &p in &urban {
         if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
             ind_footprints.entry(id.id).or_default().push(p);
@@ -798,12 +839,20 @@ pub async fn generate_town(
     ).await;
     let paths = road_network.paths.clone();
     println!("Routed {} road segments", paths.len());
+    report.road_segments = paths.len();
+    {
+        let mut by_tier: HashMap<String, usize> = HashMap::default();
+        for path in &paths {
+            *by_tier.entry(format!("{:?}", path.priority())).or_insert(0) += 1;
+        }
+        report.road_segments_by_tier = sorted_counts(&by_tier);
+    }
 
     // DEBUG: Phase A merge check — how many of each path's cells coincide
     // with cells already laid by earlier paths? High overlap = routes are
     // merging onto the network instead of crossing it blindly.
     {
-        let mut seen: HashSet<Point2D> = HashSet::new();
+        let mut seen: HashSet<Point2D> = HashSet::default();
         for path in &paths {
             let cells: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
             let shared = cells.iter().filter(|c| seen.contains(c)).count();
@@ -854,7 +903,7 @@ pub async fn generate_town(
     let mut wall_zone = wall_ring.clone();
     let mut frontier = wall_ring;
     for _ in 0..WALL_BUFFER {
-        let mut next: HashSet<Point2D> = HashSet::new();
+        let mut next: HashSet<Point2D> = HashSet::default();
         for &c in &frontier {
             for d in crate::geometry::CARDINALS_2D {
                 let n = c + d;
@@ -865,7 +914,7 @@ pub async fn generate_town(
         }
         frontier = next;
     }
-    let mut barriers: HashSet<Point2D> = HashSet::new();
+    let mut barriers: HashSet<Point2D> = HashSet::default();
     for path in &paths {
         barriers.extend(paved(path));
     }
@@ -908,7 +957,7 @@ pub async fn generate_town(
     // All main-road (arterial + collector) paved cells, used to peel a
     // frontage ribbon off each block before subdividing its interior.
     let main_road_cells: HashSet<Point2D> = {
-        let mut s = HashSet::new();
+        let mut s = HashSet::default();
         for path in &paths {
             s.extend(paved(path));
         }
@@ -930,9 +979,9 @@ pub async fn generate_town(
     // mapped back to its district's style scheme. A "district" here is one city
     // block from `find_blocks`.
     let mut lot_block: Vec<usize> = Vec::new();
-    let mut alley_band: HashSet<Point2D> = HashSet::new();
+    let mut alley_band: HashSet<Point2D> = HashSet::default();
     let mut ribbon_lot_count = 0usize;
-    let mut ribbon_cells: HashSet<Point2D> = HashSet::new(); // DEBUG: all reserved ribbon cells
+    let mut ribbon_cells: HashSet<Point2D> = HashSet::default(); // DEBUG: all reserved ribbon cells
     for (block_idx, block) in blocks.iter().enumerate() {
         let (mut ribbon_lots, interior) =
             crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
@@ -977,7 +1026,7 @@ pub async fn generate_town(
     // width ring, min y on overlap), so a house can pin its floor to the
     // road it fronts. Built from `all_paths` so alley-facing houses get the
     // alley level too.
-    let mut road_h: HashMap<Point2D, i32> = HashMap::new();
+    let mut road_h: HashMap<Point2D, i32> = HashMap::default();
     for path in &all_paths {
         let w = path.width() as i32;
         for pt in path.points() {
@@ -993,7 +1042,7 @@ pub async fn generate_town(
 
     // Frontage bands per tier (paved cells, matching the roads we'll build).
     let band = |prio: PathPriority| -> HashSet<Point2D> {
-        let mut s = HashSet::new();
+        let mut s = HashSet::default();
         for path in paths.iter().filter(|p| p.priority() == prio) {
             s.extend(paved(path));
         }
@@ -1029,6 +1078,7 @@ pub async fn generate_town(
             editor.world_mut().claim(c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
         }
     }
+    report.lap(&mut stage_t, "roads");
 
     // ---- Phase 4: hierarchical house placement ----
     // Per lot, walk frontage densest-tier first: arterial → collector →
@@ -1076,7 +1126,7 @@ pub async fn generate_town(
     let block_district: Vec<Option<DistrictID>> = blocks
         .iter()
         .map(|block| {
-            let mut tally: HashMap<DistrictID, usize> = HashMap::new();
+            let mut tally: HashMap<DistrictID, usize> = HashMap::default();
             for &c in block {
                 if let Some(id) = editor.world().get_district_at(c) {
                     let urban = editor
@@ -1096,7 +1146,7 @@ pub async fn generate_town(
         .iter()
         .flatten()
         .copied()
-        .collect::<std::collections::HashSet<_>>()
+        .collect::<crate::util::HashSet<_>>()
         .into_iter()
         .map(|id| {
             let mut drng = RNG::from_seed_and_string(seed, &format!("district_style_{}", id.0));
@@ -1210,7 +1260,7 @@ pub async fn generate_town(
                 "Manor pre-pass: {} {}-eligible lots, chose {} to host Manors",
                 eligible.len(), manor_tier_label, lots.len(),
             );
-            (lots, HashMap::new())
+            (lots, HashMap::default())
         };
     // Iterate manor-lots first (in shuffled order), then everything else in
     // natural sub_block order. "Before the rest of the houses" is enforced
@@ -1265,10 +1315,11 @@ pub async fn generate_town(
     let mut town_anchors: Vec<crate::generator::population::HouseAnchors> = Vec::new();
     // Houses placed per SizeClass — used to size the wealth distribution
     // (Cottage/House = common, Hall = wealthy craftsman, Manor = elite).
-    let mut size_counts: HashMap<String, usize> = HashMap::new();
+    let mut size_counts: HashMap<String, usize> = HashMap::default();
+    let mut roof_counts: HashMap<String, usize> = HashMap::default();
     // Footprint rect-count distribution (1 = single-rect / no wings, 2 = one
     // wing, 3+ = multi-wing L/T/U shapes). Reads how often wings actually land.
-    let mut rect_count_dist: HashMap<usize, usize> = HashMap::new();
+    let mut rect_count_dist: HashMap<usize, usize> = HashMap::default();
     let mut tier_cells = [0usize; 3];   // frontage cells found per tier
     let mut tier_placed = [0usize; 3];  // houses placed per tier
     let mut tier_fail = [0usize; 3];    // build_house failures per tier
@@ -1540,6 +1591,7 @@ pub async fn generate_town(
                             total_buildings += 1;
                             tier_placed[ti] += 1;
                             *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
+                            *roof_counts.entry(format!("{:?}", roof_style)).or_insert(0) += 1;
                             if size_class == SizeClass::Manor {
                                 manors_placed += 1;
                             }
@@ -1585,6 +1637,11 @@ pub async fn generate_town(
         }
     }
     println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
+    report.buildings_total = total_buildings;
+    report.lots = sub_blocks.len();
+    report.buildings_by_size = sorted_counts(&size_counts);
+    report.buildings_by_roof = sorted_counts(&roof_counts);
+    report.lap(&mut stage_t, "buildings");
     {
         let order = ["Cottage", "House", "Hall", "Manor"];
         let parts: Vec<String> = order
@@ -1650,6 +1707,7 @@ pub async fn generate_town(
     };
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
     println!("Placed {} street lamps", lamps.len());
+    report.street_lamps = lamps.len();
 
     // Name the roads (layered: landmark → gate/centre → generic) now that all
     // buildings have claimed their cells, then sign the intersections. Runs
@@ -1664,6 +1722,7 @@ pub async fn generate_town(
         editor, &all_paths, &road_network.road_labels, &road_names,
     ).await;
     println!("Placed {} street signs", signs.len());
+    report.street_signs = signs.len();
 
     // ---- Open spaces: furnish the leftover gaps between buildings and roads ----
     // Detect the empty pockets inside the wall and furnish each by type: plazas
@@ -1690,7 +1749,7 @@ pub async fn generate_town(
         // Names are picked alongside furnishing so a park is named for the type it
         // was actually built as; `used` keeps every name unique within the town.
         let names = OpenSpaceNames::load();
-        let mut used: HashSet<String> = HashSet::new();
+        let mut used: HashSet<String> = HashSet::default();
         let mut counts = [0usize; 4]; // plaza, nook, park, yard
         // Stone lanterns (tōrō) scattered through the green spaces — Japanese
         // only; the call is a no-op for other cultures, so we ring nooks and parks
@@ -1764,6 +1823,7 @@ pub async fn generate_town(
     // Count plaza employment for the jobs summary: a stall is any scene with a
     // `Worker` slot (market vendors), a stage is a `Performance` scene, and its
     // performer slots are the per-stage cast. Onlookers/browsers aren't jobs.
+    report.lap(&mut stage_t, "decoration");
     let (market_stall_count, stage_count, performer_slot_count) = {
         use crate::generator::population::{SceneKind, SlotRole};
         let stalls = plaza_scenes.iter()
@@ -1815,7 +1875,7 @@ pub async fn generate_town(
     let mut workplace_backfill: Vec<crate::generator::population::WorkerSlot> = Vec::new();
     let mut bound_worker_count = 0usize;
     let workplace_count: usize;
-    let mut worker_by_job: HashMap<String, usize> = HashMap::new();
+    let mut worker_by_job: HashMap<String, usize> = HashMap::default();
     // Resident headcount (sum of per-house bed budgets), captured from the
     // population block below so the chronicle can quote the town's size. This is
     // the deterministic target the crowd is sized to, computed regardless of the
@@ -1836,6 +1896,7 @@ pub async fn generate_town(
         };
         let budget: usize = town_anchors.iter().map(|h| h.population).sum();
         population_count = budget;
+        report.population = budget;
         let candidate_anchors: usize = town_anchors.iter().map(|h| h.scenes.len()).sum();
         println!(
             "Population target: {} residents across {} houses ({} candidate anchors)",
@@ -2068,7 +2129,14 @@ pub async fn generate_town(
         for (job, count) in &by_job {
             println!("  {:<14} {}", job, count);
         }
+        report.workers = industrial_job_slots;
+        report.guards = guard_count;
+        report.market_stalls = market_stall_count;
+        report.stages = stage_count;
+        report.performer_slots = performer_slot_count;
+        report.npcs_by_job = by_job;
     }
+    report.lap(&mut stage_t, "npcs");
 
     // Top-down town map (SVG) for inspection: footprints + named roads coloured
     // by id + the abstract MST/node overlay, with sign posts marked.
@@ -2102,6 +2170,8 @@ pub async fn generate_town(
             editor, &urban, &named.name, &named.subtitle,
         ).await;
         println!("Placed welcome-title sensor for \"{}\" ({})", named.name, named.subtitle);
+        report.settlement_name = named.name.clone();
+        report.settlement_subtitle = named.subtitle.clone();
 
         // Chronicle: digest the finished town into a dossier (name, colours,
         // biomes, roads, trades, families, greens, gates) and have the AI write a
@@ -2128,10 +2198,14 @@ pub async fn generate_town(
             &road_names, &road_network.road_labels, &place_labels, &manor_facts,
             total_buildings, population_count, &harvests, &produces, &mut chronicle_rng,
         );
-        if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
+        report.districts = dossier.districts.iter().map(|d| format!("{} ({})", d.name, d.quarter)).collect();
+        if !options.chronicle || editor.is_offline() {
+            println!("Skipping the AI-written chronicle (live runs write it with --full)");
+        } else if let Err(e) = crate::generator::chronicle::generate_chronicle(&*editor, &dossier).await {
             log::warn!("Chronicle generation failed: {e}");
         }
     }
+    report.lap(&mut stage_t, "naming_chronicle");
 
     // Scatter free-floating ships onto the settlement's water districts, then crew the
     // afloat ones (a captain at the helm + sailors on deck) from the town roster — the same
@@ -2139,6 +2213,7 @@ pub async fn generate_town(
     let (ships, crew_scenes) =
         crate::generator::ships::fleet::scatter_ships(editor, &data, seed).await;
     println!("Placed {} ships across water districts", ships);
+    report.ships = ships;
     if !crew_scenes.is_empty() {
         match crate::generator::ships::crew::staff_crew(
             editor, crew_scenes, culture, &data, &mut id_alloc, &mut rng,
@@ -2150,7 +2225,11 @@ pub async fn generate_town(
         }
     }
 
+    report.lap(&mut stage_t, "ships");
+
     editor.flush_buffer().await;
+    report.lap(&mut stage_t, "flush");
+    report
 }
 
 /// Scan the claim map for every placed workplace (urban shop or rural gather
@@ -2179,7 +2258,7 @@ fn discover_worker_slots(
             scan_cells.extend(sd.data.points_2d.iter().copied());
         }
     }
-    let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::new();
+    let mut footprints: HashMap<u32, (String, Vec<Point2D>)> = HashMap::default();
     for &p in &scan_cells {
         if let Some(BuildClaim::Structure(id)) = editor.world().get_claim(p) {
             footprints
@@ -2240,7 +2319,7 @@ fn discover_worker_slots(
         }
 
         let mut candidates: Vec<Point2D> = Vec::new();
-        let mut seen: HashSet<Point2D> = HashSet::new();
+        let mut seen: HashSet<Point2D> = HashSet::default();
         for &fc in cells {
             for d in crate::geometry::CARDINALS_2D {
                 let c = fc + d;

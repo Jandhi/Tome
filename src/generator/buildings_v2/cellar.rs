@@ -13,7 +13,8 @@
 //! into existing terrain. Eligibility is therefore gated on both size class and
 //! a terrain-dryness check so we never open a cellar into a lake or lava.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -489,7 +490,7 @@ async fn furnish_cellar(
     .await;
 
     // Anchors for whoever works the cellar (a vintner at the racks, …).
-    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut claimed: HashSet<(i32, i32, i32)> = HashSet::default();
     let mut scenes: Vec<AnchorScene> = Vec::new();
     harvest_anchors(&placed, &constraints, floor_y, &mut claimed, &mut scenes);
     scenes

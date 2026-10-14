@@ -14,7 +14,7 @@
 //! The suffix (Street/Lane/Close/…) comes from the road's tier + culture; names
 //! are de-duplicated.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use serde_derive::Deserialize;
 
@@ -142,21 +142,21 @@ pub fn name_roads_layered(
         Ok(c) => c,
         Err(e) => {
             log::warn!("road_names.yaml failed to load ({e}); roads stay numbered");
-            return HashMap::new();
+            return HashMap::default();
         }
     };
 
     // Invert: road id -> its cells.
-    let mut cells_of: HashMap<u32, Vec<Point2D>> = HashMap::new();
+    let mut cells_of: HashMap<u32, Vec<Point2D>> = HashMap::default();
     for (&c, &rid) in road_labels {
         cells_of.entry(rid).or_default().push(c);
     }
     if cells_of.is_empty() {
-        return HashMap::new();
+        return HashMap::default();
     }
 
     // Tier per road: the highest priority among paths whose cells it contains.
-    let mut tier_of: HashMap<u32, PathPriority> = HashMap::new();
+    let mut tier_of: HashMap<u32, PathPriority> = HashMap::default();
     for path in paths {
         for p in path.points() {
             if let Some(&rid) = road_labels.get(&p.drop_y()) {
@@ -170,7 +170,7 @@ pub fn name_roads_layered(
 
     // Gate road ids: the road number at (or nearest to) each gate, with its
     // cardinal — so the road can be named after the gate.
-    let mut gate_dir: HashMap<u32, Cardinal> = HashMap::new();
+    let mut gate_dir: HashMap<u32, Cardinal> = HashMap::default();
     // The road runs through the gate, so it's at/right beside the gate cell —
     // a tight radius avoids tagging a road that merely passes nearby.
     for (pos, card) in gates {
@@ -203,7 +203,7 @@ pub fn name_roads_layered(
     // One road per trade: the road that fronts a trade most keeps it as a
     // landmark; the rest fall through to the next layer (often generic). This is
     // what kills the "Smith Lane / Smith Walk / Old Smith Lane" pile-up.
-    let mut owner_of_trade: HashMap<String, (u32, usize)> = HashMap::new();
+    let mut owner_of_trade: HashMap<String, (u32, usize)> = HashMap::default();
     for (&rid, cells) in &cells_of {
         if let Some((stem, count)) = frontage_trade(world, cells, &cfg) {
             let e = owner_of_trade.entry(stem).or_insert((rid, 0));
@@ -226,8 +226,8 @@ pub fn name_roads_layered(
         owners.into_iter().map(|(stem, rid, _)| (rid, stem)).collect();
 
     // Build names, most-specific layer first, de-duplicating as we go.
-    let mut names: HashMap<u32, String> = HashMap::new();
-    let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut names: HashMap<u32, String> = HashMap::default();
+    let mut used: crate::util::HashSet<String> = crate::util::HashSet::default();
     let mut counts = [0usize; 4]; // landmark, gate, centre, generic
 
     let mut ids: Vec<u32> = cells_of.keys().copied().collect();
@@ -283,7 +283,7 @@ pub fn name_roads_layered(
 /// fronts it most, so the same building doesn't name several roads.
 fn frontage_trade(world: &World, cells: &[Point2D], cfg: &RoadNamesCfg) -> Option<(String, usize)> {
     let r = cfg.frontage_radius;
-    let mut tally: HashMap<String, usize> = HashMap::new();
+    let mut tally: HashMap<String, usize> = HashMap::default();
     for &c in cells {
         for dx in -r..=r {
             for dz in -r..=r {
@@ -316,7 +316,7 @@ fn generic_name(
     rid: u32,
     suffix: &str,
     flav: &str,
-    used: &mut std::collections::HashSet<String>,
+    used: &mut crate::util::HashSet<String>,
 ) -> String {
     if pool.is_empty() {
         return dedup(used, &format!("{flav}Road"), suffix);
@@ -348,7 +348,7 @@ fn flavour(cfg: &RoadNamesCfg, rng: &mut RNG) -> &'static str {
 /// Combine `stem` + `suffix` into a unique name, prefixing Old/New/etc. (or
 /// finally a number) on collision.
 fn dedup(
-    used: &mut std::collections::HashSet<String>,
+    used: &mut crate::util::HashSet<String>,
     stem: &str,
     suffix: &str,
 ) -> String {

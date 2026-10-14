@@ -6,10 +6,10 @@
 //! road's id at its centroid, and optionally overlays the abstract road graph
 //! (MST + shortcut edges with numbered nodes). Written to `output/town.svg`.
 //!
-//! Shared by the placement test and the live `generate_town` pipeline so there's
+//! Shared by the placement test and the live `generate_settlement` pipeline so there's
 //! a single town-map renderer.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::editor::World;
@@ -75,62 +75,81 @@ pub fn render_town_map(
     );
 
     // Base layer: water / footprints / wall / alleys (roads drawn on top).
+    // Horizontal runs of one fill become a single wide rect to keep the SVG small.
     for z in minz..=maxz {
-        for x in minx..=maxx {
+        // Current run: (start x, fill), flushed when the fill changes or breaks.
+        let mut run: Option<(i32, &str)> = None;
+        for x in minx..=maxx + 1 {
             let c = Point2D::new(x, z);
-            if !world.is_in_bounds_2d(c) {
-                continue;
-            }
-            let fill = if alleys.contains(&c) {
-                "#b8b8b8"
+            let fill = if x > maxx || !world.is_in_bounds_2d(c) {
+                None
+            } else if alleys.contains(&c) {
+                Some("#b8b8b8")
             } else {
                 match world.get_claim(c) {
-                    Some(BuildClaim::Wall) => "#3a3a3a",
-                    Some(BuildClaim::Gate) => "#6a6a6a",
-                    Some(BuildClaim::Building(_) | BuildClaim::Structure(_)) => "#d9cfa3",
+                    Some(BuildClaim::Wall) => Some("#3a3a3a"),
+                    Some(BuildClaim::Gate) => Some("#6a6a6a"),
+                    Some(BuildClaim::Building(_) | BuildClaim::Structure(_)) => Some("#d9cfa3"),
                     // Pavement: named roads get recoloured on top; this keeps
                     // discarded (unnamed) short roads visible as grey.
-                    Some(BuildClaim::Path(_)) => "#c4c4c4",
-                    _ if world.is_water(c) => "#4a6fb0",
-                    _ => continue,
+                    Some(BuildClaim::Path(_)) => Some("#c4c4c4"),
+                    _ if world.is_water(c) => Some("#4a6fb0"),
+                    _ => None,
                 }
             };
-            let _ = write!(
-                svg,
-                "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                x - minx,
-                z - minz,
-                fill
-            );
+            if let Some((start, run_fill)) = run {
+                if fill == Some(run_fill) {
+                    continue;
+                }
+                let _ = write!(
+                    svg,
+                    "<rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"1\" fill=\"{}\"/>\n",
+                    start - minx,
+                    z - minz,
+                    x - start,
+                    run_fill
+                );
+            }
+            run = fill.map(|f| (x, f));
         }
     }
 
     // Road layer: paint each path's full paved width with the geometric road
     // number of its underlying centreline cell, so a colour = one continuous
     // physical road. Centroids (from centreline cells only) anchor the labels.
-    let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::new(); // rid -> (sumx, sumz, count)
+    let mut centroid: HashMap<u32, (i64, i64, i64)> = HashMap::default(); // rid -> (sumx, sumz, count)
+    // Swaths overlap heavily (every centreline cell repaints its neighbours), so
+    // record each cell's last-painted colour and emit it once, in first-paint
+    // order: the rects are opaque, so the raster is the same as painting them all.
+    let mut road_fill: HashMap<Point2D, &str> = HashMap::default();
+    let mut road_order: Vec<Point2D> = Vec::new();
     for path in paths {
         let widen = path.width().saturating_sub(1);
         for p in path.points() {
             let centre = p.drop_y();
             let Some(&rid) = road_labels.get(&centre) else { continue };
             // The centreline cell plus its paved shoulder, all this road's colour.
-            let mut swath = get_surrounding_set(&HashSet::from([centre]), widen);
+            let mut swath = get_surrounding_set(&HashSet::from_iter([centre]), widen);
             swath.insert(centre);
             for c in swath {
-                let _ = write!(
-                    svg,
-                    "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
-                    c.x - minx,
-                    c.y - minz,
-                    ROAD_SVG[rid as usize % ROAD_SVG.len()]
-                );
+                if road_fill.insert(c, ROAD_SVG[rid as usize % ROAD_SVG.len()]).is_none() {
+                    road_order.push(c);
+                }
             }
             let e = centroid.entry(rid).or_insert((0, 0, 0));
             e.0 += (centre.x - minx) as i64;
             e.1 += (centre.y - minz) as i64;
             e.2 += 1;
         }
+    }
+    for c in road_order {
+        let _ = write!(
+            svg,
+            "<rect x=\"{}\" y=\"{}\" width=\"1\" height=\"1\" fill=\"{}\"/>\n",
+            c.x - minx,
+            c.y - minz,
+            road_fill[&c]
+        );
     }
 
     // Abstract graph overlay: the MST + shortcut edges as straight thin lines

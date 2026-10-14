@@ -1,4 +1,5 @@
-use std::{collections::HashMap, env, fs::{read_dir, File}, path::Path};
+use std::{env, fs::{read_dir, File}, path::Path};
+use crate::util::HashMap;
 
 use log::{debug, info};
 use serde::de::DeserializeOwned;
@@ -12,7 +13,7 @@ pub trait Loadable<'de, TItem, TKey>
     fn load() -> anyhow::Result<HashMap<TKey, TItem>> {
         let path = env::current_dir()?.join("data").join(Self::path());
         info!("Loading items from {:?}", DATA_PATH);
-        let mut items = HashMap::new();
+        let mut items = HashMap::default();
         Self::load_all_in(&path, &mut items)?;
         Self::post_load(&mut items)?;
         Ok(items)
@@ -81,7 +82,7 @@ pub fn load_yaml<T: DeserializeOwned>(relative_path: &str) -> anyhow::Result<T> 
 pub fn load_yaml_dir<V: DeserializeOwned>(relative_dir: &str) -> anyhow::Result<HashMap<String, V>> {
     let dir = env::current_dir()?.join("data").join(relative_dir);
     info!("Loading YAML dir {:?}", dir);
-    let mut merged = HashMap::new();
+    let mut merged = HashMap::default();
     for entry in read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();

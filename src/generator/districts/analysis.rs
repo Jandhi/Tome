@@ -1,12 +1,11 @@
 
 
 use crate::editor::Editor;
-use crate::geometry::CARDINALS_2D;
-use crate::geometry::DOWN;
 use crate::minecraft::Biome;
 use crate::minecraft::BlockID;
-use std::collections::HashMap;
+use crate::util::HashMap;
 
+pub use super::analysis_cache::AnalysisCache;
 use super::data::HasParcelData;
 use super::ParcelData;
 
@@ -32,7 +31,7 @@ impl ParcelAnalysis {
             roughness: 0.0,
             water_percentage: 0.0,
             forested_percentage: 0.0,
-            surface_block_count: HashMap::new(),
+            surface_block_count: HashMap::default(),
             biome_count,
             gradient: 0.0,
         }
@@ -79,7 +78,20 @@ impl ParcelAnalysis {
     }
 }
 
-pub async fn analyze_parcel<'a, TID : 'a>(area: &ParcelData<TID>, editor: &Editor) -> ParcelAnalysis {
+/// Bump `id`'s count in a first-occurrence-ordered tally (`slot[id]` = its index in `tally`).
+fn bump(tally: &mut Vec<(u32, u32)>, slot: &mut Vec<u32>, id: u32) {
+    let id = id as usize;
+    if id >= slot.len() {
+        slot.resize(id + 1, u32::MAX);
+    }
+    if slot[id] == u32::MAX {
+        slot[id] = tally.len() as u32;
+        tally.push((id as u32, 0));
+    }
+    tally[slot[id] as usize].1 += 1;
+}
+
+pub fn analyze_parcel<'a, TID : 'a>(area: &ParcelData<TID>, editor: &Editor, cache: &mut AnalysisCache) -> ParcelAnalysis {
     let average = area.average();
     let average_height = average.y;
     let number_of_points = area.points().len() as f32;
@@ -89,41 +101,41 @@ pub async fn analyze_parcel<'a, TID : 'a>(area: &ParcelData<TID>, editor: &Edito
     let mut neighbour_height_sum = 0.0;
     let mut root_mean_square_height = 0.0;
 
-    let mut biome_count: HashMap<Biome, u32> = HashMap::new();
-    let mut surface_block_count: HashMap<BlockID, u32> = HashMap::new();
-
+    // Tallies in first-occurrence order, turned into the HashMaps at the end by inserting
+    // the keys in that same order — so the maps are laid out exactly as if built by
+    // per-point `entry(..) += 1` (which is what this loop used to do).
+    let (mut biome_tally, mut biome_slot) = (Vec::new(), Vec::new());
+    let (mut block_tally, mut block_slot) = (Vec::new(), Vec::new());
 
     for point in area.points() {
-        let Some(biome) = editor.world().get_surface_biome_at(point.drop_y()) else { continue; };
-        let block = editor.get_block(*point + DOWN);
-        let is_water = block.id.is_water();
-        let Some(leaf_height) = editor.world().get_motion_blocking_height_at(point.drop_y()) else { continue; };
+        let cell = cache.get(*point, editor);
+        let Some(biome) = cell.biome else { continue; };
+        let Some(leaf_height) = cell.leaf_height else { continue; };
 
         root_mean_square_height += ((point.y - average_height) as f32).powi(2);
 
-        let Some(height) = editor.world().get_non_tree_height(point.drop_y()) else { continue; };
-        let average_neighbour_height = CARDINALS_2D.iter()
-            .filter_map(|cardinal| {
-                let neighbour = point.drop_y() + *cardinal;
-                if editor.world().is_in_bounds_2d(neighbour) {
-                    editor.world().get_non_tree_height(neighbour).map(|nh| (height - nh).abs())
-                } else {
-                    Some(0)
-                }
-            })
-            .sum::<i32>() as f32 / 4.0;
+        let Some(average_neighbour_height) = cell.neighbour_step else { continue; };
 
         neighbour_height_sum += average_neighbour_height;
 
-        *biome_count.entry(biome).or_insert(0) += 1;
-        *surface_block_count.entry(block.id).or_insert(0) += 1;
+        bump(&mut biome_tally, &mut biome_slot, biome);
+        bump(&mut block_tally, &mut block_slot, cell.block);
 
-        if is_water {
+        if cell.is_water {
             water_blocks += 1;
         }
         if point.y < leaf_height {
             leaf_blocks += 1;
         }
+    }
+
+    let mut biome_count: HashMap<Biome, u32> = HashMap::default();
+    for (id, count) in biome_tally {
+        biome_count.insert(cache.biomes[id as usize].clone(), count);
+    }
+    let mut surface_block_count: HashMap<BlockID, u32> = HashMap::default();
+    for (id, count) in block_tally {
+        surface_block_count.insert(cache.blocks[id as usize].clone(), count);
     }
 
     let num_points = if number_of_points == 0.0 { 1.0 } else { number_of_points };

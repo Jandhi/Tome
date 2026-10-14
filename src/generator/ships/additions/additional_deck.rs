@@ -7,7 +7,8 @@
 //! **open holes**. A new deck floor caps each level — and is the base the next level
 //! stacks on. Heights vary; larger ships may carry a second level.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
@@ -155,7 +156,7 @@ async fn build_level(
     let gun_r = 2;
     let band = (length / 8)..(length * 7 / 8);
     let mut ports: Vec<(Point3D, ShipDir)> = Vec::new();
-    let mut port_set: HashSet<Point3D> = HashSet::new();
+    let mut port_set: HashSet<Point3D> = HashSet::default();
     let mut x = band.start;
     while x < band.end {
         let h = half_at(gun_r, x);

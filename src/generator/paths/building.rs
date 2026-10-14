@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::{editor::Editor, generator::{BuildClaim, data::LoadedData, materials::{MaterialId, MaterialPlacer, Placer}, paths::path::{Path, PathPriority}}, geometry::{DOWN, Point2D, Point3D, UP, get_surrounding_set}, minecraft::BlockForm, noise::RNG, util::MeanExt};
 
@@ -177,7 +177,7 @@ pub async fn build_paths_merged(
     paths: &[Path],
     rng: &mut RNG,
 ) -> HashSet<Point3D> {
-    let mut slab_cells: HashSet<Point3D> = HashSet::new();
+    let mut slab_cells: HashSet<Point3D> = HashSet::default();
     if paths.is_empty() {
         return slab_cells;
     }
@@ -190,9 +190,9 @@ pub async fn build_paths_merged(
 
     // Centreline cells: height (lower wins on overlap) + the highest-priority
     // covering path's material.
-    let mut height_by_point: HashMap<Point2D, f32> = HashMap::new();
-    let mut material_by_point: HashMap<Point2D, MaterialId> = HashMap::new();
-    let mut rank_by_point: HashMap<Point2D, u8> = HashMap::new();
+    let mut height_by_point: HashMap<Point2D, f32> = HashMap::default();
+    let mut material_by_point: HashMap<Point2D, MaterialId> = HashMap::default();
+    let mut rank_by_point: HashMap<Point2D, u8> = HashMap::default();
     for path in paths {
         let r = rank(path.priority());
         for p in path.points() {

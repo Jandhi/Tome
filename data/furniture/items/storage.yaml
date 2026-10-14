@@ -58,7 +58,7 @@ elevated_chest:
     - block: "minecraft:hay_block"
       offset: [0, 0, 0]
       layer: ground
-    - block: "minecraft:chest"
+    - block: "minecraft:chest[facing=south]"
       offset: [0, 1, 0]
       layer: ground
       loot: storage

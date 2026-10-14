@@ -12,6 +12,7 @@ pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod showcase;
 pub mod style;
 pub mod walls;
 
@@ -190,6 +191,11 @@ pub struct BuildingContext {
     /// enough and silently no-ops when ineligible, so it's safe to set true to
     /// request the style; only Japanese buildings honour it (see `build_house`).
     pub engawa: bool,
+    /// Show a band of knee wall between the top windows and the eaves (2+ floors,
+    /// pitched roofs). See `Frame::knee`.
+    pub knee_wall: bool,
+    /// Halls and Manors only: a 4-block-high top floor. See `Frame::top_floor_extra`.
+    pub tall_top_floor: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
@@ -208,6 +214,8 @@ impl BuildingContext {
             timber_pattern: None,
             jetty: false,
             engawa: false,
+            knee_wall: false,
+            tall_top_floor: false,
             base_y_override: None,
         }
     }

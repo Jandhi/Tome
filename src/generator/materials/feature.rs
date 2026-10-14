@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 use serde_derive::{Serialize, Deserialize};
 
 use crate::generator::materials::{Material, MaterialId};

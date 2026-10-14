@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #ecf0f4; font: 13px/1.45 system-ui, sans-serif; color: #1d2228; }
+  canvas { display: block; }
+  .box { position: fixed; background: rgba(255,255,255,.86); border-radius: 6px; padding: 8px 10px; box-shadow: 0 1px 4px rgba(0,0,0,.15); }
+  #hud { top: 10px; left: 10px; pointer-events: none; }
+  #coords { font: 12px/1.5 ui-monospace, Consolas, monospace; white-space: pre; }
+  #panel { top: 10px; right: 10px; display: grid; gap: 6px; min-width: 190px; }
+  #panel label { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+  #panel input[type=range] { width: 110px; }
+  button { font: inherit; padding: 4px 8px; cursor: pointer; }
+  #hint { bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(20,24,28,.6); color: #fff; white-space: nowrap; }
+  #cross { position: fixed; left: 50%; top: 50%; width: 10px; height: 10px; margin: -6px; border: 1px solid rgba(0,0,0,.55); border-radius: 50%; pointer-events: none; display: none; }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #ecf0f4; font-size: 16px; z-index: 10; }
+</style>
+</head>
+<body>
+<div id="loading">Decoding town…</div>
+<div id="hud" class="box"><div id="coords"></div></div>
+<div id="panel" class="box">
+  <label>Speed <span id="speedv"></span> <input id="speed" type="range" min="0" max="100" value="45"></label>
+  <label>Walk on ground (F) <input id="walk" type="checkbox"></label>
+  <label>Fog <input id="fog" type="checkbox" checked></label>
+  <button id="shot">Screenshot (P)</button>
+  <button id="copytp">Copy /tp command</button>
+  <button id="home">Back to start (R)</button>
+</div>
+<div id="cross"></div>
+<div id="hint" class="box">Click to look around · WASD move · Space/Shift up/down · F fly/walk · P screenshot · wheel = speed · Esc releases the mouse</div>
+<script id="meta" type="application/json">__META__</script>
+<script id="data" type="application/octet-stream">__DATA__</script>
+<!--@if textured-->
+<script id="tex" type="application/octet-stream">__TEX__</script>
+<script id="atlas" type="application/octet-stream">__ATLAS__</script>
+<!--@end-->
+<!--@if lit-->
+<script id="light" type="application/octet-stream">__LIGHT__</script>
+<!--@end-->
+<script type="module">
+const THREE_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.module.min.js';
+const $ = id => document.getElementById(id);
+
+async function main() {
+  let THREE;
+  try {
+    THREE = await import(THREE_URL);
+  } catch (e) {
+    $('loading').textContent = 'Could not load three.js from cdnjs (offline?): ' + e;
+    return;
+  }
+  THREE.ColorManagement.enabled = false;
+
+  const meta = JSON.parse($('meta').textContent);
+  const [ox, oy, oz] = meta.origin;
+  const [nx, ny, nz] = meta.size;
+  const bg = new THREE.Color(meta.background[0] / 255, meta.background[1] / 255, meta.background[2] / 255);
+<!--@if lit-->
+  const lightLine = document.createElement('div');
+  lightLine.textContent = meta.lighting.label;
+  $('hud').appendChild(lightLine);
+<!--@end-->
+
+<!--@if textured-->
+  // ---- decode the face buffers: base64 -> gzip -> records (layouts in src/render/viewer.rs) ----
+  const inflate = async id => {
+    const bin = atob($(id).textContent.trim());
+    const packed = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) packed[i] = bin.charCodeAt(i);
+    return meta.encoding === 'gzip'
+      ? await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+      : packed.buffer;
+  };
+  const buf = await inflate('data');                      // flat-colour faces, 16 bytes each
+  const u8 = new Uint8Array(buf), i16 = new Int16Array(buf);
+  const N = buf.byteLength / 16;
+  const tbuf = await inflate('tex');                      // textured faces: NA axis-aligned records, then NR rotated ones
+  const tu8 = new Uint8Array(tbuf), tu16 = new Uint16Array(tbuf), ti16 = new Int16Array(tbuf), tf32 = new Float32Array(tbuf);
+  const NA = meta.tex.a, NR = meta.tex.r, R_OFF = NA * 16, R_BYTES = 52;
+<!--@if lit-->
+  // Baked light: 4 corners x rgb (x255) per face in corner order, flat faces first, then A, then R.
+  const lt = new Uint8Array(await inflate('light'));
+  let lface = 0;
+<!--@end-->
+  // Face keys: atlas cell (x, y, size, size), uv rect in texture fractions, tiling period, orientation, tint, flags.
+  const KEYS = meta.tex.keys.map(k => ({
+    cell: [k[0], k[1], k[2], k[2]], uv: [k[3] / 16, k[4] / 16, k[5] / 16, k[6] / 16], pa: k[7], pb: k[8],
+    swap: (k[9] & 1) !== 0, flipS: (k[9] & 2) !== 0, flipT: (k[9] & 4) !== 0,
+    tint: [k[10], k[11], k[12]], shade: (k[13] & 1) !== 0, translucent: (k[13] & 2) !== 0,
+  }));
+  const atlasImg = new Image();
+  atlasImg.src = 'data:image/png;base64,' + $('atlas').textContent.trim();
+  await atlasImg.decode();
+
+  const DIR = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const AXES = [[2, 1], [2, 1], [0, 2], [0, 2], [0, 1], [0, 1]]; // in-plane (u, v) per dir
+  const SHADE = [0.64, 0.64, 1.0, 0.5, 0.8, 0.8];               // east/west, up, down, south/north
+  // Winding: flip the quad when (u x v) points against the face normal so the
+  // front side faces outward.
+  const FLIP = DIR.map((n, d) => {
+    const U = [0, 0, 0], V = [0, 0, 0];
+    U[AXES[d][0]] = 1; V[AXES[d][1]] = 1;
+    const c = [U[1] * V[2] - U[2] * V[1], U[2] * V[0] - U[0] * V[2], U[0] * V[1] - U[1] * V[0]];
+    return c[0] * n[0] + c[1] * n[1] + c[2] * n[2] < 0;
+  });
+
+  // ---- group faces into 64-block chunks (frustum culling) and by material kind ----
+  const CHUNK_SHIFT = 10; // sixteenths -> 64-block chunks
+  const FLAT = 0, FLAT_T = 1, TEX = 2, TEX_D = 3, TEX_T = 4; // flat opaque / translucent, textured cut-out (single / double-sided), textured translucent
+  const groups = new Map();
+  const gkey = (x, z, kind) => (((x >> CHUNK_SHIFT) * 4096 + (z >> CHUNK_SHIFT)) * 8) + kind;
+  const flatKey = i => gkey(i16[i * 8], i16[i * 8 + 2], u8[i * 16 + 15] < 255 ? FLAT_T : FLAT);
+  const texKind = (key, flags) => KEYS[key].translucent ? TEX_T : (flags & 1) ? TEX_D : TEX;
+  const aKey = i => gkey(ti16[i * 8], ti16[i * 8 + 2], texKind(tu16[i * 8 + 6], tu8[i * 16 + 11]));
+  const rAt = i => R_OFF + i * R_BYTES;
+  const rKey = i => { const o = rAt(i); return gkey(Math.floor(tf32[o / 4] * 16), Math.floor(tf32[o / 4 + 2] * 16), texKind(tu16[(o + 48) / 2], tu8[o + 51])); };
+  const count = k => { const g = groups.get(k); if (g) g.count++; else groups.set(k, { count: 1, n: 0, kind: k & 7 }); };
+  for (let i = 0; i < N; i++) count(flatKey(i));
+  for (let i = 0; i < NA; i++) count(aKey(i));
+  for (let i = 0; i < NR; i++) count(rKey(i));
+  for (const g of groups.values()) {
+    g.pos = new Float32Array(g.count * 12);
+    g.col = new Uint8Array(g.count * 16);
+    g.idx = new Uint32Array(g.count * 6);
+    if (g.kind >= TEX) { g.uv = new Float32Array(g.count * 8); g.cell = new Uint16Array(g.count * 16); }
+  }
+  const corner = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const PQ = [[0, 0], [1, 0], [1, 1], [0, 1]]; // in-plane corner offsets as fractions of (w, h)
+  const indices = g => {
+    const v0 = g.n * 4, io = g.n * 6;
+    g.idx[io] = v0; g.idx[io + 1] = v0 + 1; g.idx[io + 2] = v0 + 2;
+    g.idx[io + 3] = v0; g.idx[io + 4] = v0 + 2; g.idx[io + 5] = v0 + 3;
+    g.n++;
+  };
+  // One axis-aligned quad: min corner p and extents w, h in blocks; key null for a flat face.
+  const quad = (g, p, w, h, dir, rgb, a, key) => {
+    const [ua, va] = AXES[dir];
+    const order = FLIP[dir] ? [0, 3, 2, 1] : [0, 1, 2, 3];
+    const v0 = g.n * 4;
+    for (let c = 0; c < 4; c++) {
+      const ci = order[c], q = corner[ci], o = (v0 + c) * 3;
+      q[0] = p[0]; q[1] = p[1]; q[2] = p[2]; q[ua] += PQ[ci][0] * w; q[va] += PQ[ci][1] * h;
+      g.pos[o] = q[0]; g.pos[o + 1] = q[1]; g.pos[o + 2] = q[2];
+      const co = (v0 + c) * 4;
+      g.col[co] = rgb[0]; g.col[co + 1] = rgb[1]; g.col[co + 2] = rgb[2]; g.col[co + 3] = a;
+<!--@if lit-->
+      { const lo = (lface * 4 + ci) * 3; g.col[co] = rgb[0] * lt[lo] / 255; g.col[co + 1] = rgb[1] * lt[lo + 1] / 255; g.col[co + 2] = rgb[2] * lt[lo + 2] / 255; }
+<!--@end-->
+      if (key) {
+        // Texture coordinates in repeats: s along the key's u, t along its v, measured
+        // in sixteenths from the face corner the texture starts at; fract() tiles them.
+        const W = w * 16, H = h * 16;
+        let s = key.swap ? PQ[ci][1] * H : PQ[ci][0] * W, t = key.swap ? PQ[ci][0] * W : PQ[ci][1] * H;
+        if (key.flipS) s = (key.swap ? H : W) - s;
+        if (key.flipT) t = (key.swap ? W : H) - t;
+        const uo = (v0 + c) * 2;
+        g.uv[uo] = key.uv[0] + s / key.pa * (key.uv[2] - key.uv[0]);
+        g.uv[uo + 1] = key.uv[1] + t / key.pb * (key.uv[3] - key.uv[1]);
+        g.cell.set(key.cell, (v0 + c) * 4);
+      }
+    }
+    indices(g);
+  };
+  const shaded = (key, dir) => { const s = key.shade ? SHADE[dir] : 1; return [key.tint[0] * s, key.tint[1] * s, key.tint[2] * s]; };
+  const p = [0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    const r = i * 8, b = i * 16, dir = u8[b + 10], s = SHADE[dir];
+    p[0] = i16[r] / 16; p[1] = i16[r + 1] / 16; p[2] = i16[r + 2] / 16;
+<!--@if lit-->
+    lface = i;
+<!--@end-->
+    quad(groups.get(flatKey(i)), p, i16[r + 3] / 16, i16[r + 4] / 16, dir, [u8[b + 12] * s, u8[b + 13] * s, u8[b + 14] * s], u8[b + 15], null);
+  }
+  for (let i = 0; i < NA; i++) {
+    const r = i * 8, dir = tu8[i * 16 + 10], key = KEYS[tu16[r + 6]];
+    p[0] = ti16[r] / 16; p[1] = ti16[r + 1] / 16; p[2] = ti16[r + 2] / 16;
+<!--@if lit-->
+    lface = N + i;
+<!--@end-->
+    quad(groups.get(aKey(i)), p, ti16[r + 3] / 16, ti16[r + 4] / 16, dir, shaded(key, dir), 255, key);
+  }
+  const RUV = [[0, 1], [0, 3], [2, 3], [2, 1]]; // uv rect indices per corner: (u0,v0) (u0,v1) (u1,v1) (u1,v0)
+  for (let i = 0; i < NR; i++) {
+    const o = rAt(i), f = o / 4, key = KEYS[tu16[(o + 48) / 2]], dir = tu8[o + 50];
+    const g = groups.get(rKey(i)), v0 = g.n * 4, rgb = shaded(key, dir);
+    for (let c = 0; c < 4; c++) {
+      const po = (v0 + c) * 3;
+      g.pos[po] = tf32[f + c * 3]; g.pos[po + 1] = tf32[f + c * 3 + 1]; g.pos[po + 2] = tf32[f + c * 3 + 2];
+      const co = (v0 + c) * 4;
+      g.col[co] = rgb[0]; g.col[co + 1] = rgb[1]; g.col[co + 2] = rgb[2]; g.col[co + 3] = 255;
+<!--@if lit-->
+      { const lo = ((N + NA + i) * 4 + c) * 3; g.col[co] = rgb[0] * lt[lo] / 255; g.col[co + 1] = rgb[1] * lt[lo + 1] / 255; g.col[co + 2] = rgb[2] * lt[lo + 2] / 255; }
+<!--@end-->
+      const uo = (v0 + c) * 2;
+      g.uv[uo] = key.uv[RUV[c][0]]; g.uv[uo + 1] = key.uv[RUV[c][1]];
+      g.cell.set(key.cell, (v0 + c) * 4);
+    }
+    indices(g);
+  }
+
+  // ---- per-column list of walkable top heights (for walk mode) ----
+  // Top faces at least half a block wide count, flat or textured; flowers and fence posts don't.
+  const cols = nx * nz;
+  const colCount = new Int32Array(cols + 1);
+  const forEachTop = fn => {
+    for (const [b8, b16, n] of [[u8, i16, N], [tu8, ti16, NA]]) for (let i = 0; i < n; i++) {
+      const r = i * 8;
+      if (b8[i * 16 + 10] !== 2 || b16[r + 3] < 8 || b16[r + 4] < 8) continue;
+      const x0 = b16[r] >> 4, z0 = b16[r + 2] >> 4;
+      const x1 = Math.min(nx, (b16[r] + b16[r + 3] + 15) >> 4), z1 = Math.min(nz, (b16[r + 2] + b16[r + 4] + 15) >> 4);
+      fn(x0, z0, x1, z1, b16[r + 1] / 16);
+    }
+  };
+  forEachTop((x0, z0, x1, z1) => { for (let x = x0; x < x1; x++) for (let z = z0; z < z1; z++) colCount[x * nz + z + 1]++; });
+  for (let c = 0; c < cols; c++) colCount[c + 1] += colCount[c];
+  const colTops = new Float32Array(colCount[cols]);
+  const fill = new Int32Array(cols);
+  forEachTop((x0, z0, x1, z1, y) => {
+    for (let x = x0; x < x1; x++) for (let z = z0; z < z1; z++) { const c = x * nz + z; colTops[colCount[c] + fill[c]++] = y; }
+  });
+  for (let c = 0; c < cols; c++) colTops.subarray(colCount[c], colCount[c + 1]).sort();
+  /** Highest walkable top in column (x, z) that is <= maxY; null when none. */
+  const groundBelow = (x, z, maxY) => {
+    const cx = Math.floor(x), cz = Math.floor(z);
+    if (cx < 0 || cz < 0 || cx >= nx || cz >= nz) return null;
+    const c = cx * nz + cz;
+    let best = null;
+    for (let i = colCount[c]; i < colCount[c + 1]; i++) {
+      if (colTops[i] <= maxY) best = colTops[i]; else break;
+    }
+    return best;
+  };
+
+  // ---- three.js scene ----
+  const scene = new THREE.Scene();
+  scene.background = bg;
+  const extent = Math.max(nx, nz);
+  const fog = new THREE.Fog(bg, extent * 1.2, extent * 3.2);
+  scene.fog = fog;
+  const atlas = new THREE.Texture(atlasImg);
+  atlas.magFilter = THREE.NearestFilter; atlas.minFilter = THREE.NearestFilter;
+  atlas.generateMipmaps = false; atlas.flipY = false; atlas.needsUpdate = true;
+  // Textured faces carry their atlas cell per vertex and uv in texture repeats, so a
+  // merged quad tiles its texture with fract() instead of GPU wrapping (which an
+  // atlas cannot do). Colour = directional shade x biome tint; alpha from the texel.
+  const VERT = `
+    attribute vec4 cell;
+    attribute vec4 col;
+    varying vec2 vUv;
+    varying vec4 vCell;
+    varying vec4 vCol;
+    #include <fog_pars_vertex>
+    void main() {
+      vUv = uv; vCell = cell; vCol = col;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      gl_Position = projectionMatrix * mvPosition;
+      #include <fog_vertex>
+    }`;
+  const FRAG = `
+    uniform sampler2D atlas;
+    uniform vec2 atlasSize;
+    uniform float alphaCut;
+    varying vec2 vUv;
+    varying vec4 vCell;
+    varying vec4 vCol;
+    #include <fog_pars_fragment>
+    void main() {
+      vec2 t = (vCell.xy + fract(vUv) * vCell.zw) / atlasSize;
+      vec4 c = texture2D(atlas, t);
+      if (c.a < alphaCut) discard;
+      gl_FragColor = vec4(c.rgb * vCol.rgb, c.a * vCol.a);
+      #include <fog_fragment>
+    }`;
+  const texMat = (alphaCut, extra) => {
+    const m = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
+        atlas: { value: null },
+        atlasSize: { value: new THREE.Vector2(meta.tex.atlas[0], meta.tex.atlas[1]) },
+        alphaCut: { value: alphaCut },
+      }]),
+      vertexShader: VERT, fragmentShader: FRAG, fog: true, ...extra,
+    });
+    m.uniforms.atlas.value = atlas;
+    return m;
+  };
+  const materials = [
+    new THREE.MeshBasicMaterial({ vertexColors: true }),
+    new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+    texMat(0.5, {}),
+    texMat(0.5, { side: THREE.DoubleSide }),
+    texMat(0.01, { transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+  ];
+  let triangles = 0;
+  for (const g of groups.values()) {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(g.pos, 3));
+    if (g.uv) {
+      geom.setAttribute('col', new THREE.BufferAttribute(g.col, 4, true));
+      geom.setAttribute('uv', new THREE.BufferAttribute(g.uv, 2));
+      geom.setAttribute('cell', new THREE.BufferAttribute(g.cell, 4));
+    } else {
+      geom.setAttribute('color', new THREE.BufferAttribute(g.col, 4, true));
+    }
+    geom.setIndex(new THREE.BufferAttribute(g.idx, 1));
+    geom.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geom, materials[g.kind]);
+    mesh.frustumCulled = true;
+    if (g.kind === FLAT_T || g.kind === TEX_T) mesh.renderOrder = 1;
+    scene.add(mesh);
+    triangles += g.count * 2;
+  }
+<!--@else-->
+  // ---- decode the face buffer: base64 -> gzip -> records (layout in src/render/viewer.rs) ----
+  const bin = atob($('data').textContent.trim());
+  const packed = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) packed[i] = bin.charCodeAt(i);
+  const buf = meta.encoding === 'gzip'
+    ? await new Response(new Blob([packed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
+    : packed.buffer;
+  const u8 = new Uint8Array(buf);
+  const i16 = new Int16Array(buf);
+  const N = buf.byteLength / 16;
+<!--@if lit-->
+  // Baked light: 4 corners x rgb (x255) per face in corner order (src/render/viewer.rs).
+  const lbin = atob($('light').textContent.trim());
+  const lpacked = new Uint8Array(lbin.length);
+  for (let i = 0; i < lbin.length; i++) lpacked[i] = lbin.charCodeAt(i);
+  const lt = new Uint8Array(await new Response(new Blob([lpacked]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+<!--@end-->
+
+  const DIR = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  const AXES = [[2, 1], [2, 1], [0, 2], [0, 2], [0, 1], [0, 1]]; // in-plane (u, v) per dir
+  const SHADE = [0.64, 0.64, 1.0, 0.5, 0.8, 0.8];               // east/west, up, down, south/north
+  // Winding: flip the quad when (u x v) points against the face normal so the
+  // front side faces outward.
+  const FLIP = DIR.map((n, d) => {
+    const U = [0, 0, 0], V = [0, 0, 0];
+    U[AXES[d][0]] = 1; V[AXES[d][1]] = 1;
+    const c = [U[1] * V[2] - U[2] * V[1], U[2] * V[0] - U[0] * V[2], U[0] * V[1] - U[1] * V[0]];
+    return c[0] * n[0] + c[1] * n[1] + c[2] * n[2] < 0;
+  });
+
+  // ---- group faces into 64-block chunks (frustum culling) and opaque/translucent ----
+  const CHUNK_SHIFT = 10; // sixteenths -> 64-block chunks
+  const groups = new Map();
+  const keyOf = i => {
+    const x = i16[i * 8], z = i16[i * 8 + 2], a = u8[i * 16 + 15];
+    return (((x >> CHUNK_SHIFT) * 4096 + (z >> CHUNK_SHIFT)) << 1) | (a < 255 ? 1 : 0);
+  };
+  for (let i = 0; i < N; i++) {
+    const k = keyOf(i);
+    const g = groups.get(k);
+    if (g) g.count++; else groups.set(k, { count: 1, n: 0, translucent: (k & 1) === 1 });
+  }
+  for (const g of groups.values()) {
+    g.pos = new Float32Array(g.count * 12);
+    g.col = new Uint8Array(g.count * 16);
+    g.idx = new Uint32Array(g.count * 6);
+  }
+  const corner = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = 0; i < N; i++) {
+    const g = groups.get(keyOf(i));
+    const r = i * 8, b = i * 16;
+    const x = i16[r] / 16, y = i16[r + 1] / 16, z = i16[r + 2] / 16, w = i16[r + 3] / 16, h = i16[r + 4] / 16;
+    const dir = u8[b + 10], [ua, va] = AXES[dir], s = SHADE[dir];
+    const p = [x, y, z];
+    for (let c = 0; c < 4; c++) {
+      corner[c][0] = p[0]; corner[c][1] = p[1]; corner[c][2] = p[2];
+    }
+    corner[1][ua] += w; corner[2][ua] += w; corner[2][va] += h; corner[3][va] += h;
+    const order = FLIP[dir] ? [0, 3, 2, 1] : [0, 1, 2, 3];
+    const v0 = g.n * 4;
+    for (let c = 0; c < 4; c++) {
+      const q = corner[order[c]], o = (v0 + c) * 3;
+      g.pos[o] = q[0]; g.pos[o + 1] = q[1]; g.pos[o + 2] = q[2];
+      const co = (v0 + c) * 4;
+      g.col[co] = u8[b + 12] * s; g.col[co + 1] = u8[b + 13] * s; g.col[co + 2] = u8[b + 14] * s; g.col[co + 3] = u8[b + 15];
+<!--@if lit-->
+      { const lo = (i * 4 + order[c]) * 3; g.col[co] = u8[b + 12] * s * lt[lo] / 255; g.col[co + 1] = u8[b + 13] * s * lt[lo + 1] / 255; g.col[co + 2] = u8[b + 14] * s * lt[lo + 2] / 255; }
+<!--@end-->
+    }
+    const io = g.n * 6;
+    g.idx[io] = v0; g.idx[io + 1] = v0 + 1; g.idx[io + 2] = v0 + 2;
+    g.idx[io + 3] = v0; g.idx[io + 4] = v0 + 2; g.idx[io + 5] = v0 + 3;
+    g.n++;
+  }
+
+  // ---- per-column list of walkable top heights (for walk mode) ----
+  // Top faces at least half a block wide count; flowers and fence posts don't.
+  const cols = nx * nz;
+  const colCount = new Int32Array(cols + 1);
+  const topFace = i => u8[i * 16 + 10] === 2 && i16[i * 8 + 3] >= 8 && i16[i * 8 + 4] >= 8;
+  const colSpan = i => {
+    const r = i * 8;
+    const x0 = i16[r] >> 4, z0 = i16[r + 2] >> 4;
+    const x1 = Math.min(nx, (i16[r] + i16[r + 3] + 15) >> 4), z1 = Math.min(nz, (i16[r + 2] + i16[r + 4] + 15) >> 4);
+    return [x0, z0, x1, z1];
+  };
+  for (let i = 0; i < N; i++) {
+    if (!topFace(i)) continue;
+    const [x0, z0, x1, z1] = colSpan(i);
+    for (let x = x0; x < x1; x++) for (let z = z0; z < z1; z++) colCount[x * nz + z + 1]++;
+  }
+  for (let c = 0; c < cols; c++) colCount[c + 1] += colCount[c];
+  const colTops = new Float32Array(colCount[cols]);
+  const fill = new Int32Array(cols);
+  for (let i = 0; i < N; i++) {
+    if (!topFace(i)) continue;
+    const y = i16[i * 8 + 1] / 16;
+    const [x0, z0, x1, z1] = colSpan(i);
+    for (let x = x0; x < x1; x++) for (let z = z0; z < z1; z++) {
+      const c = x * nz + z;
+      colTops[colCount[c] + fill[c]++] = y;
+    }
+  }
+  for (let c = 0; c < cols; c++) colTops.subarray(colCount[c], colCount[c + 1]).sort();
+  /** Highest walkable top in column (x, z) that is <= maxY; null when none. */
+  const groundBelow = (x, z, maxY) => {
+    const cx = Math.floor(x), cz = Math.floor(z);
+    if (cx < 0 || cz < 0 || cx >= nx || cz >= nz) return null;
+    const c = cx * nz + cz;
+    let best = null;
+    for (let i = colCount[c]; i < colCount[c + 1]; i++) {
+      if (colTops[i] <= maxY) best = colTops[i]; else break;
+    }
+    return best;
+  };
+
+  // ---- three.js scene ----
+  const scene = new THREE.Scene();
+  scene.background = bg;
+  const extent = Math.max(nx, nz);
+  const fog = new THREE.Fog(bg, extent * 1.2, extent * 3.2);
+  scene.fog = fog;
+  const matOpaque = new THREE.MeshBasicMaterial({ vertexColors: true });
+  const matTrans = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false, side: THREE.DoubleSide });
+  let triangles = 0;
+  for (const g of groups.values()) {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(g.pos, 3));
+    geom.setAttribute('color', new THREE.BufferAttribute(g.col, 4, true));
+    geom.setIndex(new THREE.BufferAttribute(g.idx, 1));
+    geom.computeBoundingSphere();
+    const mesh = new THREE.Mesh(geom, g.translucent ? matTrans : matOpaque);
+    mesh.frustumCulled = true;
+    if (g.translucent) mesh.renderOrder = 1;
+    scene.add(mesh);
+    triangles += g.count * 2;
+  }
+<!--@end-->
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+  renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
+  const canvas = renderer.domElement;
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, Math.max(2000, extent * 6));
+  camera.rotation.order = 'YXZ';
+
+  // ---- camera state ----
+  const EYE = 1.62, STEP = 1.25;
+  const pos = new THREE.Vector3();
+  let yaw = 0, pitch = 0, feet = 0;
+  let walk = false;
+  const start = () => {
+    const cx = nx / 2, cz = nz / 2;
+    const top = groundBelow(cx, cz, 1e9);
+    const mid = top === null ? ny / 2 : top;
+    const dist = extent * 0.75, height = extent * 0.45;
+    pos.set(cx, mid + height, cz + dist);
+    yaw = 0;
+    pitch = -Math.atan2(height, dist);
+    walk = false; $('walk').checked = false;
+  };
+  start();
+
+  // ---- controls ----
+  const keys = new Set();
+  const speedSlider = $('speed');
+  const sliderToSpeed = v => 1.5 * Math.pow(100, v / 100);     // 1.5 .. 150 blocks/s
+  const speedToSlider = s => 100 * Math.log(s / 1.5) / Math.log(100);
+  const showSpeed = () => { $('speedv').textContent = sliderToSpeed(+speedSlider.value).toFixed(1) + ' b/s'; };
+  showSpeed();
+  speedSlider.addEventListener('input', showSpeed);
+  canvas.addEventListener('click', () => {
+    const p = canvas.requestPointerLock();
+    if (p && p.catch) p.catch(() => {}); // refused (e.g. headless, or Esc mid-request): just keep the cursor
+  });
+  document.addEventListener('pointerlockchange', () => { $('cross').style.display = document.pointerLockElement === canvas ? 'block' : 'none'; });
+  document.addEventListener('mousemove', e => {
+    if (document.pointerLockElement !== canvas) return;
+    yaw -= e.movementX * 0.0022;
+    pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, pitch - e.movementY * 0.0022));
+  });
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const s = Math.min(150, Math.max(1.5, sliderToSpeed(+speedSlider.value) * Math.pow(1.15, -e.deltaY / 100)));
+    speedSlider.value = speedToSlider(s);
+    showSpeed();
+  }, { passive: false });
+  const setWalk = on => {
+    walk = on; $('walk').checked = on;
+    if (walk) {
+      const g = groundBelow(pos.x, pos.z, pos.y);
+      feet = g === null ? pos.y - EYE : g;
+    }
+  };
+  $('walk').addEventListener('change', e => setWalk(e.target.checked));
+  $('fog').addEventListener('change', e => { scene.fog = e.target.checked ? fog : null; });
+  $('home').addEventListener('click', start);
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') e.preventDefault();
+    keys.add(e.code);
+    if (e.repeat) return;
+    if (e.code === 'KeyP') screenshot();
+    if (e.code === 'KeyF') setWalk(!walk);
+    if (e.code === 'KeyR') start();
+  });
+  document.addEventListener('keyup', e => keys.delete(e.code));
+  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  // ---- coordinates: absolute world = grid origin + local ----
+  const world = () => ({ x: ox + pos.x, y: oy + pos.y, z: oz + pos.z });
+  const mcYaw = () => { let d = 180 - yaw * 180 / Math.PI; d = ((d + 180) % 360 + 360) % 360 - 180; return d; };
+  const tpCommand = () => {
+    const w = world();
+    return `/tp @s ${w.x.toFixed(1)} ${(w.y - EYE).toFixed(1)} ${w.z.toFixed(1)} ${mcYaw().toFixed(0)} ${(-pitch * 180 / Math.PI).toFixed(0)}`;
+  };
+  const facing = () => {
+    const d = mcYaw();
+    return d > -45 && d <= 45 ? 'south' : d > 45 && d <= 135 ? 'west' : d > -135 && d <= -45 ? 'east' : 'north';
+  };
+  $('copytp').addEventListener('click', () => {
+    const cmd = tpCommand();
+    (navigator.clipboard ? navigator.clipboard.writeText(cmd) : Promise.reject()).catch(() => window.prompt('Copy:', cmd));
+  });
+
+  // ---- screenshot ----
+  let shots = 0;
+  function screenshot() {
+    shots++;
+    renderer.render(scene, camera);
+    const w = world();
+    const name = `tome_${(meta.scene_meta && meta.scene_meta.seed) || 'town'}_${w.x.toFixed(0)}_${w.y.toFixed(0)}_${w.z.toFixed(0)}.png`;
+    canvas.toBlob(blob => {
+      if (!blob) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }, 'image/png');
+  }
+  $('shot').addEventListener('click', screenshot);
+
+  // ---- scripting handle (devtools console): same coordinates as the HUD's /tp line ----
+  window.tome = {
+    /** Eye position and look direction in absolute world coords (yaw/pitch in Minecraft degrees). */
+    get state() {
+      const w = world();
+      return { x: w.x, y: w.y, z: w.z, yaw: mcYaw(), pitch: -pitch * 180 / Math.PI, walking: walk,
+               faces: meta.faces, triangles, draws: renderer.info.render.calls, shots };
+    },
+    /** Jump like `/tp x y z [yaw pitch]`: feet position, Minecraft yaw (0 = south) and pitch (down > 0). */
+    tp(x, y, z, yawDeg, pitchDeg) {
+      pos.set(x - ox, y + EYE - oy, z - oz);
+      feet = y - oy;
+      if (yawDeg !== undefined) yaw = (180 - yawDeg) * Math.PI / 180;
+      if (pitchDeg !== undefined) pitch = -pitchDeg * Math.PI / 180;
+    },
+    walk: setWalk,
+    screenshot,
+  };
+
+  // ---- main loop ----
+  const fwd = new THREE.Vector3(), right = new THREE.Vector3(), move = new THREE.Vector3();
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    const speed = sliderToSpeed(+speedSlider.value);
+    fwd.set(-Math.sin(yaw), 0, -Math.cos(yaw));
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
+    move.set(0, 0, 0);
+    const f = (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0);
+    const r = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+    const u = (keys.has('Space') ? 1 : 0) - ((keys.has('ShiftLeft') || keys.has('ShiftRight')) ? 1 : 0);
+    if (walk) {
+      move.addScaledVector(fwd, f).addScaledVector(right, r);
+      if (move.lengthSq() > 0) move.normalize().multiplyScalar(speed * dt);
+      // Step onto anything at most STEP higher; otherwise slide along the obstacle.
+      const tryMove = (dx, dz) => {
+        const g = groundBelow(pos.x + dx, pos.z + dz, feet + STEP);
+        if (g === null) return false;
+        pos.x += dx; pos.z += dz;
+        return true;
+      };
+      if (!tryMove(move.x, move.z)) { if (!tryMove(move.x, 0)) tryMove(0, move.z); }
+      const g = groundBelow(pos.x, pos.z, feet + STEP);
+      if (g !== null) feet += (g - feet) * Math.min(1, dt * 14);
+      pos.y = feet + EYE;
+    } else {
+      fwd.set(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch));
+      move.addScaledVector(fwd, f).addScaledVector(right, r);
+      move.y += u;
+      if (move.lengthSq() > 0) pos.add(move.normalize().multiplyScalar(speed * dt));
+    }
+    camera.position.copy(pos);
+    camera.rotation.set(pitch, yaw, 0);
+    renderer.render(scene, camera);
+    const w = world();
+    $('coords').textContent =
+      `X ${w.x.toFixed(1)}  Y ${w.y.toFixed(1)}  Z ${w.z.toFixed(1)}  (eye)   facing ${facing()}\n` +
+      `${tpCommand()}\n` +
+      `${walk ? 'walking' : 'flying'} · ${meta.faces.toLocaleString()} faces · ${triangles.toLocaleString()} tris · ${renderer.info.render.calls} draws`;
+    requestAnimationFrame(frame);
+  }
+  $('loading').remove();
+  requestAnimationFrame(frame);
+}
+
+main();
+</script>
+</body>
+</html>

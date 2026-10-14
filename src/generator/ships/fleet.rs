@@ -11,7 +11,9 @@
 //! Geometry reused unchanged: [`build_ship`] does all the hull/rig/interior work; this
 //! module only chooses *where*, *which way*, and *how big*.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::HashSet;
 
 use crate::editor::{Editor, World};
 use crate::generator::BuildClaim;
@@ -97,7 +99,7 @@ pub async fn scatter_ships(
     // The wood palettes a ship can be built from — one is rolled per ship for variety.
     // The loader skips malformed/absent JSON *silently* (the load still succeeds), so a
     // requested id can be missing: collect only the palettes that actually loaded, and bail
-    // gracefully if none did. This is the **last** pass in `generate_town`, so a panic here
+    // gracefully if none did. This is the **last** pass in `generate_settlement`, so a panic here
     // would throw away a fully-generated settlement (and skip its final flush).
     let palettes: Vec<Palette> = SHIP_PALETTES
         .iter()
@@ -109,7 +111,7 @@ pub async fn scatter_ships(
     }
 
     let mut rng = RNG::new(seed).derive();
-    let mut placed_cells: HashSet<Point2D> = HashSet::new();
+    let mut placed_cells: HashSet<Point2D> = HashSet::default();
     let mut total = 0usize;
     let mut crew: Vec<AnchorScene> = Vec::new();
 

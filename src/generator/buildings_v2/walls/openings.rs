@@ -3,7 +3,8 @@
 //! `place_openings`, which renders the planned openings as actual door, glass,
 //! trapdoor, fence, and arch blocks.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -301,20 +302,20 @@ pub async fn place_openings(
         .get_material(MaterialRole::PrimaryWood)
         .expect("No primary wood material")
         .clone();
-    let wall_material = palette
-        .get_material(MaterialRole::PrimaryWall)
-        .unwrap_or_else(|| palette.get_material(MaterialRole::PrimaryStone).expect("No wall or stone material"))
-        .clone();
+
+    // Arched window tops are stair blocks. The wall infill (wool, concrete)
+    // has no stairs form, so the arch is cut from the frame wood instead, a
+    // timber arch over the window, and only when that material can supply
+    // one; otherwise the top row is filled like the rest of the window.
+    let arch_stairs_ok = data
+        .materials
+        .get(&wood_material)
+        .map_or(false, |m| m.has_form(&BlockForm::Stairs));
 
     let mut placer_rng = rng.derive();
     let mut placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut placer_rng),
         wood_material,
-    );
-    let mut wall_placer_rng = rng.derive();
-    let mut wall_placer = MaterialPlacer::new(
-        Placer::new(&data.materials, &mut wall_placer_rng),
-        wall_material,
     );
 
     for seg in &wall_segs.segments {
@@ -421,7 +422,7 @@ pub async fn place_openings(
                             let y = seg.base_y + opening.y_offset as i32 + dy as i32;
                             let pos = Point3D::new(cell.x, y, cell.y);
 
-                            if is_arched && dy == top_dy {
+                            if is_arched && dy == top_dy && arch_stairs_ok {
                                 let stair_facing = match style {
                                     WindowStyle::Arched => {
                                         let walk_dir = match seg.facing {
@@ -438,7 +439,7 @@ pub async fn place_openings(
                                     ("facing".to_string(), stair_facing.to_string()),
                                     ("half".to_string(), "top".to_string()),
                                 ]);
-                                wall_placer.place_block_forced(
+                                placer.place_block_forced(
                                     editor, pos, BlockForm::Stairs,
                                     Some(&state), None,
                                 ).await;

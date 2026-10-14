@@ -1,7 +1,7 @@
 //! Block-level transforms: wall-relative offset/facing resolution, block-string
 //! parsing, rotation, and palette substitution applied to furniture blocks.
 
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use crate::generator::materials::{Material, MaterialId, MaterialRole, Palette};
 use crate::geometry::{Cardinal, Point2D};
@@ -139,6 +139,17 @@ pub(super) fn rotate_block(block: &Block, dir: Cardinal) -> Block {
                     Cardinal::West => orig.rotate_right().rotate_right().rotate_right(),
                 };
                 state.insert("facing".into(), rotated.to_string());
+            }
+        }
+        // A quarter turn swaps a horizontal axis (logs, hay, chains).
+        if matches!(dir, Cardinal::East | Cardinal::West) {
+            let swapped = match state.get("axis").map(String::as_str) {
+                Some("x") => Some("z"),
+                Some("z") => Some("x"),
+                _ => None,
+            };
+            if let Some(axis) = swapped {
+                state.insert("axis".into(), axis.into());
             }
         }
     }

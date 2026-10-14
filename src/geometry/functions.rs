@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::geometry::{Cardinal, Point2D, ALL_8, CARDINALS_2D};
 
@@ -135,7 +135,7 @@ pub fn is_point_surrounded_by_points(
 
 pub fn get_surrounding_set(points: &HashSet<Point2D>, distance: u32) -> HashSet<Point2D> {
     if distance == 0 {
-        return HashSet::new();
+        return HashSet::default();
     }
 
     let surrounding = points.iter()

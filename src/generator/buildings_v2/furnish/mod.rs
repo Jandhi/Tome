@@ -15,6 +15,7 @@ pub mod data;
 mod block;
 mod loot;
 mod placement;
+pub mod preview;
 mod room;
 mod roof;
 mod types;

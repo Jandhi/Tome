@@ -1,4 +1,5 @@
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
+use crate::util::{HashMap, HashSet};
 
 use lerp::num_traits::clamp;
 
@@ -116,6 +117,71 @@ pub struct RouteContext<'a> {
     pub blocked: Option<&'a HashSet<Point2D>>,
 }
 
+/// A* search state for [`route_path_with`]. A node's y is clamped to ±max_grade
+/// of its predecessor, so the same cell reached two ways can sit at different
+/// heights — y is part of the key. `dir` (the incoming step delta) is what the
+/// turn penalty scores against; it's `None` only at the start.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct State {
+    cell: Point2D,
+    y: i32,
+    dir: Option<Point3D>,
+}
+impl State {
+    fn pos(&self) -> Point3D {
+        Point3D { x: self.cell.x, y: self.y, z: self.cell.y }
+    }
+}
+
+/// Min-heap entry by f = g + h (lazy deletion: stale pops filtered via the record's `g`).
+struct HeapEntry {
+    f: u64,
+    g: u64,
+    state: State,
+}
+impl PartialEq for HeapEntry {
+    fn eq(&self, other: &Self) -> bool { self.f == other.f }
+}
+impl Eq for HeapEntry {}
+impl Ord for HeapEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.f.cmp(&other.f).reverse()
+    }
+}
+impl PartialOrd for HeapEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// `CellInfo::flags` bits and the "no value" sentinel for its heights.
+const KNOWN: u8 = 1;
+const ENTERABLE: u8 = 2; // in region, not blocked, has a height
+const ON_ROAD: u8 = 4;
+const WATER: u8 = 8;
+const NONE: i32 = i32::MIN;
+/// Everything a neighbour probe reads about a cell, filled lazily on first probe
+/// (the world and `ctx` are fixed for the whole search). A cell is probed once per
+/// (y, incoming dir) state that reaches it, so this turns the per-probe lookups
+/// (region / blocked / road / wall maps, heights, water) into one array read.
+#[derive(Clone, Copy)]
+struct CellInfo {
+    flags: u8,
+    height: i32,
+    road_height: i32,
+    wall_dist: i32,
+}
+
+/// Per-state search record: best g so far, the parent it was reached from, and
+/// whether it has been settled (popped). One map instead of separate
+/// g_score / came_from / closed maps.
+#[derive(Clone, Copy)]
+struct Record {
+    g: u64,
+    parent: Option<State>,
+    closed: bool,
+}
+
 pub async fn get_path(
     editor: &Editor,
     start: Point3D,
@@ -207,43 +273,6 @@ pub async fn route_path_with(
     // pick its way up rough ground instead of stepping over it blind.
     let neighbour_factors = [params.step, (params.step / 2).max(1)];
 
-    // A node's y is clamped to ±max_grade of its predecessor, so the same cell
-    // reached two ways can sit at different heights — y is part of the key.
-    // `dir` (the incoming step delta) is what the turn penalty scores against;
-    // it's `None` only at the start.
-    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-    struct State {
-        cell: Point2D,
-        y: i32,
-        dir: Option<Point3D>,
-    }
-    impl State {
-        fn pos(&self) -> Point3D {
-            Point3D { x: self.cell.x, y: self.y, z: self.cell.y }
-        }
-    }
-
-    // Min-heap by f = g + h (lazy deletion: stale pops filtered via `g_score`).
-    struct HeapEntry {
-        f: u64,
-        g: u64,
-        state: State,
-    }
-    impl PartialEq for HeapEntry {
-        fn eq(&self, other: &Self) -> bool { self.f == other.f }
-    }
-    impl Eq for HeapEntry {}
-    impl Ord for HeapEntry {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            self.f.cmp(&other.f).reverse()
-        }
-    }
-    impl PartialOrd for HeapEntry {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
     let start_cell = new_start.drop_y();
     let heuristic = |pos: Point3D| pos.distance(new_end) as u64 * HEURISTIC_WEIGHT;
     let is_end = |cell: Point2D, y: i32| {
@@ -257,21 +286,56 @@ pub async fn route_path_with(
 
     let start_state = State { cell: start_cell, y: new_start.y, dir: None };
 
-    let mut open: BinaryHeap<HeapEntry> = BinaryHeap::new();
-    let mut g_score: HashMap<State, u64> = HashMap::new();
-    let mut came_from: HashMap<State, State> = HashMap::new();
-    let mut closed: HashSet<State> = HashSet::new();
+    let world = editor.world();
+    let size_x = world.build_area.size.x;
+    let size_z = world.build_area.size.z;
+    let mut cells = vec![CellInfo { flags: 0, height: 0, road_height: NONE, wall_dist: NONE }; (size_x.max(0) as usize) * (size_z.max(0) as usize)];
+    // `None` = out of bounds (never enterable).
+    let mut cell_info = |cell: Point2D| -> Option<CellInfo> {
+        if cell.x < 0 || cell.y < 0 || cell.x >= size_x || cell.y >= size_z {
+            return None;
+        }
+        let info = &mut cells[cell.x as usize * size_z as usize + cell.y as usize];
+        if info.flags & KNOWN == 0 {
+            info.flags = KNOWN;
+            let in_region = ctx.region.map_or(true, |region| region.contains(&cell));
+            let blocked = ctx.blocked.is_some_and(|blocked| blocked.contains(&cell));
+            if in_region && !blocked {
+                if let Some(height) = world.get_height_at(cell) {
+                    info.flags |= ENTERABLE;
+                    info.height = height;
+                }
+            }
+            if ctx.road_cells.is_some_and(|rc| rc.contains(&cell)) {
+                info.flags |= ON_ROAD;
+                if let Some(&ry) = ctx.road_height.and_then(|rh| rh.get(&cell)) {
+                    info.road_height = ry;
+                }
+            }
+            if world.is_water(cell) {
+                info.flags |= WATER;
+            }
+            if let Some(&d) = ctx.wall_dist.and_then(|wd| wd.get(&cell)) {
+                info.wall_dist = d;
+            }
+        }
+        Some(*info)
+    };
 
-    g_score.insert(start_state, 0);
+    let mut open: BinaryHeap<HeapEntry> = BinaryHeap::new();
+    let mut records: HashMap<State, Record> = HashMap::default();
+
+    records.insert(start_state, Record { g: 0, parent: None, closed: false });
     open.push(HeapEntry { f: heuristic(new_start), g: 0, state: start_state });
 
     while let Some(HeapEntry { g, state, .. }) = open.pop() {
-        // Stale heap entry: a cheaper route to this state was already settled.
-        if g_score.get(&state).is_some_and(|&best| g > best) {
-            continue;
-        }
-        if !closed.insert(state) {
-            continue;
+        {
+            let record = records.get_mut(&state).expect("pushed states have a record");
+            // Stale heap entry: a cheaper route to this state was already settled.
+            if g > record.g || record.closed {
+                continue;
+            }
+            record.closed = true;
         }
 
         let current = state.pos();
@@ -281,7 +345,7 @@ pub async fn route_path_with(
             // Walk the parent chain back to the start, then reverse.
             let mut path = vec![current];
             let mut node = state;
-            while let Some(&parent) = came_from.get(&node) {
+            while let Some(parent) = records.get(&node).and_then(|r| r.parent) {
                 path.push(parent.pos());
                 node = parent;
             }
@@ -291,60 +355,42 @@ pub async fn route_path_with(
 
         for direction in ALL_8 {
             // Longest hop in this direction whose raw terrain slope is walkable
-            // (≤1:1); fall back to the half-hop on steep ground.
-            let mut chosen: Option<Point3D> = None;
+            // (<=1:1); fall back to the half-hop on steep ground. Cells outside the
+            // bounds or the region, or blocked by a building footprint (or its
+            // margin), are never entered: keeping the centreline out of the margin
+            // also keeps the widened road shoulder off the footprint.
+            let mut chosen: Option<(Point3D, CellInfo)> = None;
             for &factor in &neighbour_factors {
                 let neighbour_2d = state.cell + direction * factor;
-
-                if !editor.world().is_in_bounds_2d(neighbour_2d) {
+                let Some(info) = cell_info(neighbour_2d) else { continue; };
+                if info.flags & ENTERABLE == 0 {
                     continue;
                 }
-
-                // Hard region constraint: never route outside the allowed cells
-                // (e.g. urban area) so roads can't clip through the wall/edge.
-                if let Some(region) = ctx.region {
-                    if !region.contains(&neighbour_2d) {
-                        continue;
-                    }
-                }
-
-                // Hard barrier: never route through a placed building footprint
-                // (or its margin). Keeping the centreline out of the margin also
-                // keeps the widened road shoulder off the footprint, so the road
-                // can't graze a building.
-                if let Some(blocked) = ctx.blocked {
-                    if blocked.contains(&neighbour_2d) {
-                        continue;
-                    }
-                }
-
-                let Some(raw) = editor.world().add_height(neighbour_2d) else { continue; };
-                if (raw.y.abs_diff(state.y) as i32) <= factor {
-                    let y = clamp(raw.y, state.y - params.max_grade, state.y + params.max_grade);
-                    chosen = Some(Point3D { x: neighbour_2d.x, y, z: neighbour_2d.y });
+                if (info.height.abs_diff(state.y) as i32) <= factor {
+                    let y = clamp(info.height, state.y - params.max_grade, state.y + params.max_grade);
+                    chosen = Some((Point3D { x: neighbour_2d.x, y, z: neighbour_2d.y }, info));
                     break;
                 }
             }
-            let Some(mut neighbour) = chosen else { continue; };
+            let Some((mut neighbour, info)) = chosen else { continue; };
 
             // If this cell is already paved, merge onto it: snap to the road's
             // height (flush, not stepped) and treat the step as nearly free so
             // the route runs along the existing road instead of beside it.
-            let on_road = ctx.road_cells.is_some_and(|rc| rc.contains(&neighbour.drop_y()));
-            if on_road {
-                if let Some(&ry) = ctx.road_height.and_then(|rh| rh.get(&neighbour.drop_y())) {
-                    neighbour.y = ry;
-                }
+            let on_road = info.flags & ON_ROAD != 0;
+            if on_road && info.road_height != NONE {
+                neighbour.y = info.road_height;
             }
 
             let delta = neighbour - current;
             let next = State { cell: neighbour.drop_y(), y: neighbour.y, dir: Some(delta) };
-            if closed.contains(&next) {
+            let existing = records.get(&next).copied();
+            if existing.is_some_and(|r| r.closed) {
                 continue;
             }
 
             // Edge cost: a flat discount on paved cells (so routes merge),
-            // otherwise the terrain cost — travel distance, a turn penalty
+            // otherwise the terrain cost: travel distance, a turn penalty
             // against the incoming direction, a burrow penalty for cutting
             // below the surface, a pull toward the goal height, and water.
             let step_cost = if on_road {
@@ -357,28 +403,24 @@ pub async fn route_path_with(
                 if let Some(in_dir) = state.dir {
                     c += delta.distance(in_dir) as u64 * params.turn_weight;
                 }
-                let Some(surface_y) = editor.world().get_height_at(neighbour.drop_y()) else { continue; };
-                let burrow = surface_y.abs_diff(neighbour.y) as u64;
+                let burrow = info.height.abs_diff(neighbour.y) as u64;
                 c += burrow * params.burrow_weight;
                 c += neighbour.y.abs_diff(new_end.y) as u64 * params.goal_height_weight;
-                if editor.world().is_water(neighbour.drop_y()) {
+                if info.flags & WATER != 0 {
                     c += params.water_cost;
                 }
                 // Push the route off the wall: cells within `wall_clearance` of a
                 // wall cell pay a penalty that ramps up as they approach, so the
                 // road only hugs/crosses the wall where it has no choice (gates).
-                if let Some(&d) = ctx.wall_dist.and_then(|wd| wd.get(&neighbour.drop_y())) {
-                    if d < params.wall_clearance {
-                        c += (params.wall_clearance - d) as u64 * params.wall_weight;
-                    }
+                if info.wall_dist != NONE && info.wall_dist < params.wall_clearance {
+                    c += (params.wall_clearance - info.wall_dist) as u64 * params.wall_weight;
                 }
                 c
             };
 
             let tentative = g + step_cost;
-            if g_score.get(&next).map_or(true, |&best| tentative < best) {
-                g_score.insert(next, tentative);
-                came_from.insert(next, state);
+            if existing.map_or(true, |r| tentative < r.g) {
+                records.insert(next, Record { g: tentative, parent: Some(state), closed: false });
                 let f = tentative + heuristic(neighbour);
                 open.push(HeapEntry { f, g: tentative, state: next });
             }

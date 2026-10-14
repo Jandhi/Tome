@@ -2,7 +2,7 @@
 //! of the pipeline to catch wall-slot, stair-overlap, and connectivity
 //! regressions before the blueprint is trusted.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::geometry::Rect2D;
 
@@ -17,7 +17,7 @@ use super::plan::{RoomPlan, RoomRole};
 /// Gather all wall cells for a given floor: exterior walls from the building
 /// outline plus interior boundary walls from `find_boundaries`.
 pub(super) fn wall_cells_on_floor(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
-    let mut cells = HashSet::new();
+    let mut cells = HashSet::default();
     let outline = frame.outline_at_floor(floor);
     let n = outline.len();
     for i in 0..n {
@@ -75,7 +75,7 @@ pub fn check_building_invariants(
     const NEIGHBORS: [(i32, i32); 4] = [(0, -1), (1, 0), (0, 1), (-1, 0)];
 
     // Cache wall cells per floor
-    let mut walls_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::new();
+    let mut walls_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::default();
 
     for room in &room_plan.rooms {
         let interior = room.interior;

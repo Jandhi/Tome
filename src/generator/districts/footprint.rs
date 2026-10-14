@@ -15,7 +15,7 @@
 //! it is never an `OffLimits` (steep/rough) or water cell. This keeps walls hugging real
 //! cliffs and rivers — only soft organic noise gets smoothed.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use log::info;
 
@@ -87,7 +87,7 @@ fn fill_holes(set: &HashSet<Point2D>, world: &World) -> HashSet<Point2D> {
 
     // Flood-fill the "outside": every in-bounds non-footprint cell reachable from the
     // border. Anything in-bounds and not in the footprint but not reached is enclosed.
-    let mut outside: HashSet<Point2D> = HashSet::new();
+    let mut outside: HashSet<Point2D> = HashSet::default();
     let mut stack: Vec<Point2D> = Vec::new();
     for x in 0..rect.size.x {
         for &point in &[Point2D::new(x, 0), Point2D::new(x, rect.size.y - 1)] {
@@ -158,7 +158,7 @@ fn outline_metrics(region: &HashSet<Point2D>) -> (usize, usize, usize) {
 /// connected component → fill enclosed holes. All additive steps are terrain-clipped.
 pub fn regularize_urban_footprint(world: &World, raw_urban: &HashSet<Point2D>) -> HashSet<Point2D> {
     if raw_urban.is_empty() {
-        return HashSet::new();
+        return HashSet::default();
     }
 
     let allowed = |p: Point2D| is_buildable(world, p);
@@ -284,7 +284,7 @@ mod tests {
 
     /// A solid axis-aligned rectangle of cells [x0,x1) × [z0,z1).
     fn filled_rect(x0: i32, z0: i32, x1: i32, z1: i32) -> HashSet<Point2D> {
-        let mut set = HashSet::new();
+        let mut set = HashSet::default();
         for x in x0..x1 {
             for z in z0..z1 {
                 set.insert(Point2D::new(x, z));
@@ -369,7 +369,7 @@ mod tests {
     fn reconcile_revotes_against_footprint() {
         let footprint = filled_rect(0, 0, 20, 20);
 
-        let mut districts = HashMap::new();
+        let mut districts = HashMap::default();
         // Fully inside the footprint but currently Rural -> should flip Urban.
         districts.insert(DistrictID(0), district(0, filled_rect(2, 2, 8, 8), ParcelType::Rural));
         // Fully outside the footprint but currently Urban -> should flip Rural.

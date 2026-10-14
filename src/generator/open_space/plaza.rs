@@ -7,7 +7,7 @@
 //! little greenery in the corners. The roomier types need a bigger open centre;
 //! a cramped plaza falls back to the single-cell monument.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
@@ -206,7 +206,7 @@ async fn furnish_plaza_inner(
         put_forced(editor, c.x, s, c.y, mat).await;
     }
 
-    let mut used: HashSet<Point2D> = HashSet::new();
+    let mut used: HashSet<Point2D> = HashSet::default();
     // NPC scenes this plaza offers, staffed later by the population pass.
     let mut scenes: Vec<AnchorScene> = Vec::new();
 

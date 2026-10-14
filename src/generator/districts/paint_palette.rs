@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use crate::util::HashMap;
 
 use serde::Deserialize;
 
@@ -24,7 +24,7 @@ impl PaintPalette {
     /// block_dict maps index into block_list to relative weight.
     pub fn to_weighted_blocks(&self) -> (HashMap<usize, f32>, Vec<Block>) {
         let mut block_list: Vec<Block> = Vec::new();
-        let mut block_dict: HashMap<usize, f32> = HashMap::new();
+        let mut block_dict: HashMap<usize, f32> = HashMap::default();
         for (block_str, &weight) in &self.palette {
             let block = string_to_block(block_str)
                 .unwrap_or_else(|| block_str.as_str().into());

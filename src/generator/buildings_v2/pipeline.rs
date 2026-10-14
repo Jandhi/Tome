@@ -6,13 +6,13 @@
 //! including the non-linear walls↔rooms back-edge, where windows can only be
 //! placed after room partitioning reveals which wall cells are interior.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
 use crate::generator::materials::Palette;
 use crate::generator::population::AnchorScene;
-use crate::geometry::{Point2D, Rect2D};
+use crate::geometry::{Point2D, Point3D, Rect2D};
 use crate::noise::RNG;
 
 use super::cellar;
@@ -77,6 +77,9 @@ pub struct HouseOutput {
     pub door_entrances: Vec<Point2D>,
     pub has_attic: bool,
     pub has_cellar: bool,
+    /// Every build-area-local cell the roof stage placed (surface, fill,
+    /// gable walls, chimney), so a cutaway can leave the roof out.
+    pub roof_cells: Vec<Point3D>,
     /// Cellar descending-stair cells (position 0 is the cellar landing), if a
     /// cellar was built. Surfaced for blueprint/debug inspection.
     pub cellar_stair: Option<Vec<Point2D>>,
@@ -136,6 +139,13 @@ pub async fn build_house(
     } else {
         frame
     };
+    // Vertical variants (both off by default, leaving the frame untouched).
+    let multi_storey = frame.max_floors() >= 2;
+    let top_floor_extra = u32::from(
+        bctx.tall_top_floor && multi_storey && matches!(size_class, SizeClass::Hall | SizeClass::Manor),
+    );
+    let knee = if bctx.knee_wall && multi_storey { knee_rows(roof_style) } else { 0 };
+    let frame = frame.with_vertical_options(top_floor_extra, knee);
 
     let mut wall_segs = build_segments(&frame);
     let footprint_area = building_footprint.filled_points().len() as i32;
@@ -178,7 +188,9 @@ pub async fn build_house(
         TimberPattern::pick(size_class, max_seg_len, &mut timber_rng)
     });
     place_frame(ctx, &frame, &timber_pattern).await;
+    ctx.editor.start_recording();
     let (gable_doorways, roof_heightmaps) = place_roof(ctx, &frame, roof_style).await;
+    let roof_cells = ctx.editor.stop_recording();
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
     }
@@ -302,6 +314,7 @@ pub async fn build_house(
         door_entrances,
         has_attic,
         has_cellar,
+        roof_cells,
         cellar_stair,
         roof_style,
         size_class,
@@ -310,13 +323,30 @@ pub async fn build_house(
     })
 }
 
+/// Knee-wall rows that leave one visible block of framed infill between the
+/// top floor's ceiling beam and the eave. Slab-pitched eaves already sit one
+/// row above the ceiling, so one row does it; stair-pitched eaves (and the
+/// irimoya, which uses the Stairs surface) hang down onto the ceiling row and
+/// would hide a single row, so they lift two (the upper one sits behind the
+/// eave). Flat roofs take none: their deck is the top floor's ceiling.
+fn knee_rows(roof_style: RoofStyle) -> u32 {
+    use super::roof::hipped::HippedPitch;
+    match roof_style {
+        RoofStyle::Flat => 0,
+        RoofStyle::Gable(GablePitch::Slab) | RoofStyle::Hipped(HippedPitch::Slab) => 1,
+        RoofStyle::Gable(GablePitch::Stairs | GablePitch::Double)
+        | RoofStyle::Hipped(HippedPitch::Stairs)
+        | RoofStyle::Irimoya => 2,
+    }
+}
+
 /// `(floor_base_y, cell)` pairs that NPC anchors must avoid: the interior step
 /// and the exterior step of every door. `seg.facing` is the wall's INWARD normal
 /// (see `WallSegment::facing`), so the interior side is `door_cell + facing` and
 /// the exterior side is `door_cell - facing`. Floor-aware so an upper-room cell
 /// directly above a ground-floor door is still eligible.
 fn door_keepout_cells(wall_segs: &WallSegments) -> HashSet<(i32, Point2D)> {
-    let mut out = HashSet::new();
+    let mut out = HashSet::default();
     for (seg, opening) in wall_segs.doors() {
         let seg_cells = segment_cells(seg);
         let inward: Point2D = seg.facing.into();

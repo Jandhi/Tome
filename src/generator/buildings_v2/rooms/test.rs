@@ -318,7 +318,7 @@ fn hall_study_one_wing() {
         );
         let rooms = test_assign_types(&frame, SizeClass::Hall, false, &mut r);
         // Study should not appear in more wing rects than there are wings
-        let study_wing_rects: std::collections::HashSet<usize> = rooms.iter()
+        let study_wing_rects: crate::util::HashSet<usize> = rooms.iter()
             .filter(|(idx, _, rt)| *idx != 0 && *rt == RoomType::Study)
             .map(|(idx, _, _)| *idx)
             .collect();
@@ -1006,6 +1006,11 @@ async fn run_furnished_houses_pipeline_jettied(
         let roof_style = roof_styles[i % roof_styles.len()];
         let mut bctx = BuildingContext::new(culture, size_class, roof_style);
         bctx.jetty = force_jetty;
+        // Opt-in sweep of the vertical variants without new test copies:
+        // TOME_TEST_VARIANT=knee | tall | both (unset = defaults).
+        let variant = std::env::var("TOME_TEST_VARIANT").unwrap_or_default();
+        bctx.knee_wall = matches!(variant.as_str(), "knee" | "both");
+        bctx.tall_top_floor = matches!(variant.as_str(), "tall" | "both");
         let house = build_house(&mut ctx, footprint, &bctx, bounds)
             .await
             .unwrap_or_else(|msg| panic!("Seed {} building {} violated invariant: {}", seed, i, msg));

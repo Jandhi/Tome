@@ -5,7 +5,7 @@
 //! material. Run *after* all roads and buildings are placed, so the goal network
 //! is complete and the route can steer around every footprint.
 
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;

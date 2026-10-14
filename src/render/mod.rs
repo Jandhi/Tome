@@ -1,0 +1,184 @@
+//! Software voxel renderer: turns a [`Scene`] (terrain + placed blocks) into
+//! PNG images that can be inspected without opening Minecraft.
+//!
+//! Views: top-down (height-shaded), isometric, and the four side elevations.
+//! Output goes under an `out_dir`; see [`render_all`] and [`render_views`].
+//! Each call also writes an `index.txt` describing every image. With
+//! [`RenderOptions::lighting`] set, every view is lit by the grid's
+//! Minecraft-style light map (see [`light`] and [`lit`]); unlit output is
+//! byte-identical to what it was before lighting existed.
+
+pub mod assets;
+pub mod colors;
+pub mod diff;
+pub mod elevation;
+mod entity;
+pub mod grid;
+pub mod iso;
+pub mod light;
+pub mod lit;
+pub mod perspective;
+pub mod scene;
+pub mod shape;
+pub mod texel;
+pub mod topdown;
+pub mod viewer;
+
+#[cfg(test)]
+mod test;
+
+pub use scene::Scene;
+
+use std::fmt::Write as _;
+use std::path::{Path, PathBuf};
+
+use resvg::tiny_skia::Pixmap;
+
+use crate::geometry::Rect3D;
+use elevation::ElevationSide;
+use grid::VoxelGrid;
+use iso::IsoCamera;
+use light::{LightMap, Lighting};
+use lit::Lit;
+
+#[derive(Debug, Clone, Copy)]
+pub struct RenderOptions {
+    /// Pixels per block for the top-down and elevation views.
+    pub px: u32,
+    /// Isometric tile width in pixels (snapped to a multiple of 4).
+    pub iso_tile: u32,
+    /// Absolute-coordinate sub-box to render (e.g. one building). `None` = whole scene.
+    pub region: Option<Rect3D>,
+    /// Light every view by the grid's sky and block light under this
+    /// lighting (one [`LightMap`] per call); `None` renders unlit.
+    pub lighting: Option<Lighting>,
+}
+
+impl Default for RenderOptions {
+    fn default() -> Self {
+        RenderOptions { px: 4, iso_tile: 8, region: None, lighting: None }
+    }
+}
+
+/// Render every standard view of `scene` into `out_dir` and return the paths
+/// written. Never panics on an empty scene; returns `Ok(vec![])` instead.
+pub fn render_all(scene: &Scene, out_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    render_views(scene, &RenderOptions::default(), out_dir, "")
+}
+
+/// Render `<prefix>top.png`, `<prefix>iso_se.png`, `<prefix>iso_nw.png` and
+/// `<prefix>elev_{south,north,east,west}.png` plus `<prefix>index.txt` into
+/// `out_dir`. Returns the PNG paths (empty when nothing visible is in range).
+pub fn render_views(scene: &Scene, opts: &RenderOptions, out_dir: &Path, prefix: &str) -> anyhow::Result<Vec<PathBuf>> {
+    let Some(g) = VoxelGrid::from_scene(scene, opts.region) else {
+        log::info!("render: nothing visible to render into {}", out_dir.display());
+        return Ok(Vec::new());
+    };
+    let light_map = opts.lighting.map(|l| {
+        let t = std::time::Instant::now();
+        let map = LightMap::new(&g);
+        log::info!(
+            "render: light map ({}) of {}x{}x{} cells, {} emitters, in {:.1?}",
+            l.tag(), g.nx, g.ny, g.nz, map.emitters, t.elapsed()
+        );
+        map
+    });
+    render_grid_views(scene, &g, light_map.as_ref(), opts, out_dir, prefix)
+}
+
+/// [`render_views`] from a grid (and, when `opts.lighting` is set, its light
+/// map) the caller already built, so several renders of one scene share
+/// them. `g` must come from `scene` (`opts.region` was applied when it was
+/// built and is not read here); `light_map` must be `LightMap::new(g)`.
+pub fn render_grid_views(
+    scene: &Scene,
+    g: &VoxelGrid,
+    light_map: Option<&LightMap>,
+    opts: &RenderOptions,
+    out_dir: &Path,
+    prefix: &str,
+) -> anyhow::Result<Vec<PathBuf>> {
+    log_unknown_blocks(scene);
+    std::fs::create_dir_all(out_dir)?;
+    let lit = light_map.zip(opts.lighting).map(|(map, l)| Lit::new(g, map, l));
+    let lit = lit.as_ref();
+
+    let lo = g.origin;
+    let hi = (lo.x + g.nx - 1, lo.y + g.ny - 1, lo.z + g.nz - 1);
+    let mut index = format!(
+        "Renders of x {}..{}, y {}..{}, z {}..{} (absolute world coords, {}x{}x{} blocks).\n\
+         Coordinates: +X east, +Y up, +Z south.\n\n",
+        lo.x, hi.0, lo.y, hi.1, lo.z, hi.2, g.nx, g.ny, g.nz
+    );
+    let mut paths = Vec::new();
+    let lit_desc = match opts.lighting {
+        Some(l) => format!(", lit ({}: sky light at daylight {:.2}, lamps)", l.tag(), l.daylight),
+        None => String::new(),
+    };
+    let mut save = |name: String, desc: String, pm: Pixmap| -> anyhow::Result<()> {
+        let path = out_dir.join(&name);
+        pm.save_png(&path)?;
+        writeln!(index, "{name} ({}x{} px): {desc}{lit_desc}", pm.width(), pm.height())?;
+        paths.push(path);
+        Ok(())
+    };
+
+    save(
+        format!("{prefix}top.png"),
+        format!(
+            "top-down orthographic, north up, east right, {} px/block, 1-block margin, hill-shaded (light from NW), water bluer with depth",
+            opts.px.max(1)
+        ),
+        timed("top", || topdown::render_topdown_with(g, opts.px, lit))?,
+    )?;
+    for (cam, desc) in [
+        (IsoCamera::SouthEast, "camera at the south-east corner; south and east facades visible, north-west corner at the top"),
+        (IsoCamera::NorthWest, "camera at the north-west corner; north and west facades visible, south-east corner at the top"),
+    ] {
+        save(
+            format!("{prefix}iso_{}.png", cam.tag()),
+            format!("2:1 isometric, {desc}, tile width {} px", iso::tile_width(opts.iso_tile)),
+            timed(&format!("iso_{}", cam.tag()), || iso::render_iso_with(g, cam, opts.iso_tile, lit))?,
+        )?;
+    }
+    for side in ElevationSide::ALL {
+        save(
+            format!("{prefix}elev_{}.png", side.name()),
+            format!(
+                "orthographic elevation {}, {} px/block, nearer blocks brighter (depth fog)",
+                side.describe(),
+                opts.px.max(1)
+            ),
+            timed(&format!("elev_{}", side.name()), || elevation::render_elevation_with(g, side, opts.px, lit))?,
+        )?;
+    }
+
+    std::fs::write(out_dir.join(format!("{prefix}index.txt")), index)?;
+    Ok(paths)
+}
+
+/// Run one view's renderer and log how long it took at info.
+fn timed(view: &str, render: impl FnOnce() -> anyhow::Result<Pixmap>) -> anyhow::Result<Pixmap> {
+    let t = std::time::Instant::now();
+    let pm = render()?;
+    log::info!("render: {view} ({}x{} px) drawn in {:.1?}", pm.width(), pm.height(), t.elapsed());
+    Ok(pm)
+}
+
+/// Warn once per render about block ids this scene uses that fell through to
+/// the hash-colour fallback.
+fn log_unknown_blocks(scene: &Scene) {
+    let unknown = colors::unknown_ids();
+    let mut used: Vec<&str> = scene
+        .palette
+        .iter()
+        .map(|s| Scene::strip_state(s))
+        .map(|id| id.strip_prefix("minecraft:").unwrap_or(id))
+        .filter(|id| unknown.iter().any(|u| u == id))
+        .collect();
+    used.sort_unstable();
+    used.dedup();
+    if !used.is_empty() {
+        log::warn!("render: {} block id(s) have no colour, using fallback: {}", used.len(), used.join(", "));
+    }
+}

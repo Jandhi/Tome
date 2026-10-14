@@ -10,7 +10,9 @@
 //! - Stairs — reuses the shared [`super::blocks::place_roof_blocks`] with
 //!   `GablePitch::Stairs`, giving the steeper full-block stair-step variant.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+use std::collections::HashMap;
 
 use crate::editor::Editor;
 use crate::generator::data::LoadedData;
@@ -128,8 +130,8 @@ pub(super) async fn place_hipped_blocks(
         material_id,
     );
 
-    let bottom_slab_state = HashMap::from([("type".to_string(), "bottom".to_string())]);
-    let top_slab_state = HashMap::from([("type".to_string(), "top".to_string())]);
+    let bottom_slab_state = HashMap::from_iter([("type".to_string(), "bottom".to_string())]);
+    let top_slab_state = HashMap::from_iter([("type".to_string(), "top".to_string())]);
 
     for x in hm.min_x()..=hm.max_x() {
         for z in hm.min_z()..=hm.max_z() {

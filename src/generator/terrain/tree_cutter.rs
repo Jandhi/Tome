@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::{
     editor::Editor, geometry::{Point2D, Point3D, ALL_8}
@@ -40,13 +40,13 @@ pub fn group_trees(cells: &HashSet<Point2D>, editor: &Editor) -> Vec<TreeGroup> 
         .collect();
 
     // 2. Merge adjacent trunk columns into trunk groups (8-connected flood fill).
-    let mut visited: HashSet<Point2D> = HashSet::new();
+    let mut visited: HashSet<Point2D> = HashSet::default();
     let mut trees: Vec<TreeGroup> = Vec::new();
     for &start in &trunk_cells {
         if !visited.insert(start) {
             continue;
         }
-        let mut group: HashSet<Point2D> = HashSet::new();
+        let mut group: HashSet<Point2D> = HashSet::default();
         let mut stack = vec![start];
         while let Some(p) = stack.pop() {
             group.insert(p);
@@ -131,7 +131,7 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
     const LOG_BRIDGE: i32 = 1;
 
     let mut columns: HashSet<Point2D> = points.clone();
-    let mut visited_logs: HashSet<Point3D> = HashSet::new();
+    let mut visited_logs: HashSet<Point3D> = HashSet::default();
     let mut stack: Vec<Point3D> = Vec::new();
 
     // 1. Seed from every log in each input column (full-depth scan, no window).
@@ -144,8 +144,8 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
             // `try_get_block`, not `get_block`: the deep scan can run past the world
             // floor (low column, ravine), where `get_block` would panic. None means
             // out of bounds below — nothing deeper to find, so stop this column.
-            let Some(block) = editor.try_get_block(pos) else { break; };
-            if block.id.is_log() && visited_logs.insert(pos) {
+            let Some(id) = editor.try_get_block_id(pos) else { break; };
+            if id.is_log() && visited_logs.insert(pos) {
                 stack.push(pos);
             }
         }
@@ -164,7 +164,7 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
                     let n = Point3D::new(pos.x + dx, pos.y + dy, pos.z + dz);
                     // `try_get_block`: a neighbour can fall outside the build area
                     // (edge column) or below the world floor; None is simply not a log.
-                    if editor.try_get_block(n).map_or(false, |b| b.id.is_log())
+                    if editor.try_get_block_id(n).map_or(false, |id| id.is_log())
                         && visited_logs.insert(n)
                     {
                         stack.push(n);
@@ -189,8 +189,8 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
         for y in (top - MAX_SCAN_DEPTH..=top).rev() {
             let pos = Point3D::new(point.x, y, point.y);
             // `try_get_block`: stop at the world floor rather than panicking below it.
-            let Some(block) = editor.try_get_block(pos) else { break; };
-            if block.id.is_tree() {
+            let Some(id) = editor.try_get_block_id(pos) else { break; };
+            if id.is_tree() {
                 editor.place_block(&"air".into(), pos).await;
                 lowest_cleared = Some(y);
             }
@@ -231,18 +231,18 @@ pub async fn clear_floating_logs(editor: &Editor, points: &HashSet<Point2D>) -> 
         };
         // Seed from the surface block (one under `ground`, the first-air height).
         let mut below_is_air = editor
-            .try_get_block(Point3D::new(point.x, ground - 1, point.y))
-            .map_or(true, |b| b.id == "air".into());
+            .try_get_block_id(Point3D::new(point.x, ground - 1, point.y))
+            .map_or(true, |id| id == "air".into());
         for y in ground..=(ground + SCAN_HEIGHT) {
             let pos = Point3D::new(point.x, y, point.y);
-            let Some(block) = editor.try_get_block(pos) else { break; };
-            below_is_air = if block.id.is_log() && below_is_air {
+            let Some(id) = editor.try_get_block_id(pos) else { break; };
+            below_is_air = if id.is_log() && below_is_air {
                 // Only air below — fell it, leaving any log resting on top floating.
                 editor.place_block(&"air".into(), pos).await;
                 removed += 1;
                 true
             } else {
-                block.id == "air".into()
+                id == "air".into()
             };
         }
     }

@@ -3,7 +3,7 @@
 //! with stair, door, and ceiling cells. Non-attic room types are assigned here;
 //! attic types are deferred until the roof and ladders are in place.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -195,7 +195,7 @@ pub async fn build_rooms(
         // Compute perimeter cells so interior walls don't overwrite exterior walls
         let outline = frame.outline_at_floor(floor);
         let n = outline.len();
-        let mut perimeter: HashSet<(i32, i32)> = HashSet::new();
+        let mut perimeter: HashSet<(i32, i32)> = HashSet::default();
         for i in 0..n {
             let start = outline[i];
             let end = outline[(i + 1) % n];
@@ -214,7 +214,7 @@ pub async fn build_rooms(
             }
 
             let base_y = frame.floor_y(floor);
-            let height = frame.wall_height();
+            let height = frame.wall_height_at(floor);
 
             // Filter out cells that overlap the exterior perimeter
             let interior_cells: Vec<&Point2D> = boundary.wall_cells.iter()
@@ -258,7 +258,7 @@ pub async fn build_rooms(
         // boundary.
         let active_rects: Vec<Rect2D> = active.iter().map(|&i| floor_rects[i]).collect();
         let base_y = frame.floor_y(floor);
-        let height = frame.wall_height();
+        let height = frame.wall_height_at(floor);
         for cell in phantom_wall_cells(&active_rects) {
             if perimeter.contains(&(cell.x, cell.y)) { continue; }
             for ry in 0..height {
@@ -276,7 +276,7 @@ pub async fn build_rooms(
     // Cache per-floor stair-cell sets so a stairwell only affects the floor
     // it actually starts on. Using the global set here would incorrectly mark
     // attic-stair cells as Blocked on floor 0 (and vice versa).
-    let mut stair_cells_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::new();
+    let mut stair_cells_by_floor: HashMap<u32, HashSet<(i32, i32)>> = HashMap::default();
     let stair_bottoms = &floor_plan.stair_bottoms;
     let stair_tops = &floor_plan.stair_tops;
 

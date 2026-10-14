@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::generator::population::{Occupant, SceneKind, SlotRole};
 use crate::geometry::Rect2D;
@@ -44,7 +44,7 @@ impl ConstraintMap {
             origin: (interior.min().x, interior.min().y),
             ground: vec![vec![CellState::Empty; h]; w],
             ceiling: vec![vec![false; h]; w],
-            stairs: HashSet::new(),
+            stairs: HashSet::default(),
         }
     }
 

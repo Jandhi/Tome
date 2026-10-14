@@ -6,7 +6,7 @@
 //! built. Tasteful by design: most houses get one or two props, never blocking
 //! a door, a road, or another building.
 
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::BuildClaim;
@@ -131,7 +131,7 @@ pub async fn place_manor_sign(editor: &Editor, site: &ManorSignSite, name: &str)
         sign_text(""),
     );
     let data = format!("{{front_text:{face},back_text:{face}}}");
-    let mut state = HashMap::new();
+    let mut state = std::collections::HashMap::new();
     state.insert("rotation".to_string(), site.rotation.to_string());
     // Attached = hangs rigidly from the block above (the bracket) on two chains.
     state.insert("attached".to_string(), "true".to_string());
@@ -218,7 +218,7 @@ pub async fn decorate_exterior_walls(
     }
 
     // Cells just outside each door (plus the approach cell) — keep entrances clear.
-    let mut avoid: HashSet<Point2D> = HashSet::new();
+    let mut avoid: HashSet<Point2D> = HashSet::default();
     for (seg, opening) in wall_segs.doors() {
         let cells = segment_cells(seg);
         // `seg.facing` is the wall's INWARD normal, so the *outside* of the door
@@ -234,7 +234,7 @@ pub async fn decorate_exterior_walls(
 
     // The exterior ring: cells one step out from the footprint.
     let filled: HashSet<Point2D> = footprint.filled_points().into_iter().collect();
-    let mut ring: HashSet<Point2D> = HashSet::new();
+    let mut ring: HashSet<Point2D> = HashSet::default();
     for &c in &filled {
         for d in CARDINALS_2D {
             let ext = c + d;

@@ -47,7 +47,7 @@ pub struct DossierDistrict {
 
 /// Everything the chronicle needs to write a guide to the town. Scalars describe
 /// what the place *is*; `landmarks` is what's *in* it. Assembled once at the end
-/// of `generate_town`, where every source is still in scope, and handed to
+/// of `generate_settlement`, where every source is still in scope, and handed to
 /// [`generate_chronicle`]. Serializable so a run can dump it to inspect the exact
 /// facts the model was given.
 #[derive(Debug, Clone, Serialize)]
@@ -209,7 +209,7 @@ pub fn build_instruction(d: &CityDossier) -> String {
              time, weaving together what each one holds.\n\n",
         );
     }
-    let known: std::collections::HashSet<&str> =
+    let known: crate::util::HashSet<&str> =
         d.districts.iter().map(|x| x.name.as_str()).collect();
     for dist in &d.districts {
         let marks: Vec<&Landmark> =
@@ -446,7 +446,7 @@ fn split_name(comp: &serde_json::Value, text: &str, name: &str) -> Vec<serde_jso
 fn link_components(
     comps: Vec<serde_json::Value>,
     links: &[LandmarkLink],
-    linked: &mut std::collections::HashSet<String>,
+    linked: &mut crate::util::HashSet<String>,
 ) -> Vec<serde_json::Value> {
     let mut out = Vec::with_capacity(comps.len());
     for comp in comps {
@@ -464,7 +464,7 @@ fn split_links(
     comp: &serde_json::Value,
     text: &str,
     links: &[LandmarkLink],
-    linked: &mut std::collections::HashSet<String>,
+    linked: &mut crate::util::HashSet<String>,
 ) -> Vec<serde_json::Value> {
     let mut out = Vec::new();
     let mut rest = text;
@@ -522,7 +522,7 @@ async fn give_player_book(
     let book: Book = write_book(instruction).await?;
 
     // First mention of each landmark across the whole book becomes the link.
-    let mut linked: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut linked: crate::util::HashSet<String> = crate::util::HashSet::default();
     let pages: Vec<String> = book.pages.iter().map(|page| {
             // Wrap every component under a NEUTRAL empty root, so each keeps its
             // own formatting. (If we promoted the first component to the root, its
@@ -696,7 +696,7 @@ mod tests {
         let comps = vec![serde_json::json!({
             "text": "Visit the mill and the Blackwell Manor, then the mill again."
         })];
-        let mut linked = std::collections::HashSet::new();
+        let mut linked = crate::util::HashSet::default();
         let out = link_components(comps, &links, &mut linked);
 
         // The mill span is linked with a run_command /tp to its coords.

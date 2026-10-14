@@ -272,7 +272,7 @@ pub fn plan_door_ramps(
 /// landing directly outside. Used to start door→road connector paths from the
 /// real entrance instead of guessing.
 pub fn door_entrances(wall_segs: &WallSegments, ramps: &[DoorRamp]) -> Vec<Point2D> {
-    use std::collections::HashMap;
+    use crate::util::HashMap;
     let ramp_by_door: HashMap<Point2D, &DoorRamp> =
         ramps.iter().map(|r| (r.door_cell, r)).collect();
 

@@ -146,7 +146,7 @@ fn render_topdown(hm: &RoofHeightmap) -> String {
 fn gable_heightmap_values_pitch_1() {
     // 8-wide rect (x:0-7), 12-long (z:0-11), ridge along Z
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
 
     // Heights along X at any Z inside rect (all Z give same profile)
     // x: -1  0  1  2  3  4  5  6  7  8
@@ -170,7 +170,7 @@ fn gable_heightmap_values_pitch_1() {
 #[test]
 fn gable_heightmap_values_pitch_half() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Slab, RidgeAxis::Z);
 
     // x: -1   0    1    2    3    4    5    6    7    8
     // h: -0.5 0.0  0.5  1.0  1.5  1.5  1.0  0.5  0.0 -0.5
@@ -188,7 +188,7 @@ fn gable_heightmap_values_pitch_half() {
 #[test]
 fn gable_heightmap_values_pitch_double() {
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 11));
-    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Double, RidgeAxis::Z);
 
     // x: -1  0  1  2  3  4  5  6  7  8
     // h: -2  0  2  4  6  6  4  2  0 -2
@@ -207,7 +207,7 @@ fn gable_ridge_along_x() {
     // 6-wide (x:0-5), 10-long (z:0-9). Width > length so ridge along Z.
     // But if we force ridge along X, slopes fall in Z.
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(9, 5));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::X);
 
     // Heights along Z at x=5 (any x inside gives same profile since ridge along X)
     // z: -1  0  1  2  3  4  5  6
@@ -231,8 +231,8 @@ fn merge_l_shape_heightmaps() {
     // Wing: 6x4 at (10,0)-(15,3), ridge along X (longer)
     let wing = Rect2D::from_points(Point2D::new(10, 0), Point2D::new(15, 3));
 
-    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X, (false, false));
-    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X, (false, false));
+    let hm_core = gable_heightmap(&core, GablePitch::Stairs, RidgeAxis::X);
+    let hm_wing = gable_heightmap(&wing, GablePitch::Stairs, RidgeAxis::X);
 
     // Merge into combined heightmap
     let combined_min_x = hm_core.min_x().min(hm_wing.min_x());
@@ -269,7 +269,7 @@ fn merge_l_shape_heightmaps() {
 fn odd_width_single_peak() {
     // 7-wide rect: should have a single peak at center
     let rect = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(6, 9));
-    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z, (false, false));
+    let hm = gable_heightmap(&rect, GablePitch::Stairs, RidgeAxis::Z);
 
     // x: -1  0  1  2  3  4  5  6  7
     // h: -1  0  1  2  3  2  1  0 -1
@@ -404,4 +404,65 @@ async fn compare_three_pitches() {
 
     editor.flush_buffer().await;
     println!("Done — 3 buildings with different pitches");
+}
+
+// --- Gable-end overhang clearing (gable_roof::clear_covered_gable_overhang) ---
+
+/// Per-rect heightmap for rect `i` with its gable-end overhang cleared where
+/// another same-height rect lies beyond the end.
+fn cleared_heightmap(i: usize, roof_rects: &[Rect2D], rects: &[Rect2D], axes: &[RidgeAxis]) -> RoofHeightmap {
+    let roof_ys = vec![10; rects.len()];
+    let mut hm = gable_heightmap(&roof_rects[i], GablePitch::Stairs, axes[i]);
+    super::gable_roof::clear_covered_gable_overhang(&mut hm, i, &roof_rects[i], axes[i], rects, &roof_ys);
+    hm
+}
+
+/// One rect's gable overhang after clearing: `cleared` cells are gone (covered by
+/// another rect), `kept` cells keep their height.
+struct JunctionCase {
+    name: &'static str,
+    rects: [Rect2D; 2],
+    roof_rects: [Rect2D; 2],
+    axes: [RidgeAxis; 2],
+    rect: usize,
+    cleared: Vec<(i32, i32)>,
+    kept: Vec<(i32, i32, f32)>,
+}
+
+#[test]
+fn gable_junctions_clear_only_the_covered_overhang() {
+    let r = |x0, z0, x1, z1| Rect2D::from_points(Point2D::new(x0, z0), Point2D::new(x1, z1));
+    // End to end: core 11x7 (ridge X) with a 7x5 wing on its east end, ridges
+    // facing each other. Each loses its overhang over the other, so the
+    // junction takes the wing's lower profile.
+    let (core, wing) = (r(0, 0, 10, 6), r(11, 1, 17, 5));
+    let end_to_end = |rect, cleared, kept| JunctionCase {
+        name: "end to end", rects: [core, wing], roof_rects: [core, wing], axes: [RidgeAxis::X, RidgeAxis::X], rect, cleared, kept,
+    };
+    // T and L: core 15x7 (ridge X), wing 5 wide to the south (ridge Z) with its
+    // roof extended north to the core's ridge line; the L wing is flush west.
+    let core = r(0, 0, 14, 6);
+    let cases = [
+        end_to_end(0, (1..=5).map(|z| (11, z)).collect(), vec![(11, 0, 0.0), (11, 6, 0.0), (11, -1, -1.0), (-1, 3, 3.0), (10, 3, 3.0)]),
+        end_to_end(1, (0..=6).map(|z| (10, z)).collect(), vec![(18, 3, 2.0), (11, 3, 2.0), (11, 1, 0.0)]),
+        JunctionCase {
+            name: "T", rects: [core, r(4, 7, 8, 11)], roof_rects: [core, r(4, 3, 8, 11)], axes: [RidgeAxis::X, RidgeAxis::Z], rect: 1,
+            cleared: (3..=9).map(|x| (x, 2)).collect(),
+            kept: vec![(6, 3, 2.0), (3, 8, -1.0), (6, 12, 2.0)],
+        },
+        JunctionCase {
+            name: "L", rects: [core, r(0, 7, 4, 11)], roof_rects: [core, r(0, 3, 4, 11)], axes: [RidgeAxis::X, RidgeAxis::Z], rect: 1,
+            cleared: (0..=5).map(|x| (x, 2)).collect(),
+            kept: vec![(-1, 2, -1.0)],
+        },
+    ];
+    for case in &cases {
+        let hm = cleared_heightmap(case.rect, &case.roof_rects, &case.rects, &case.axes);
+        for &(x, z) in &case.cleared {
+            assert_eq!(hm.get(x, z), f32::NEG_INFINITY, "{} rect {}: ({x}, {z}) should be cleared", case.name, case.rect);
+        }
+        for &(x, z, h) in &case.kept {
+            assert_eq!(hm.get(x, z), h, "{} rect {}: ({x}, {z}) should keep its height", case.name, case.rect);
+        }
+    }
 }

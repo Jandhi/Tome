@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use crate::util::{HashMap, HashSet};
 use std::hash::Hash;
 use std::env;
 use std::fs::File;
@@ -233,7 +233,7 @@ impl ResourceRegistry {
             produced_by,
             raw_cost,
             biome_resources,
-            production_painters: HashMap::new(),
+            production_painters: HashMap::default(),
             animal_names: Vec::new(),
             animal_name_prefixes: Vec::new(),
             animal_name_suffixes: Vec::new(),
@@ -312,7 +312,7 @@ impl ResourceRegistry {
         let mut missing: Vec<String> = Vec::new();
         let mut misplaced: Vec<(String, String)> = Vec::new();
 
-        let mut seen: HashSet<&str> = HashSet::new();
+        let mut seen: HashSet<&str> = HashSet::default();
         for recipe in self.recipes.values() {
             if !seen.insert(recipe.building.as_str()) {
                 continue;
@@ -408,7 +408,7 @@ impl ResourceRegistry {
 
         let chains: Vec<ChainSelection> = chains_with_jitter.into_iter().map(|(c, _)| c).collect();
 
-        let mut building_run_cost: HashMap<String, f32> = HashMap::new();
+        let mut building_run_cost: HashMap<String, f32> = HashMap::default();
         for chain in &chains {
             for (building, runs) in &chain.building_run_cost {
                 *building_run_cost.entry(building.clone()).or_insert(0.0) += runs;
@@ -424,16 +424,16 @@ impl ResourceRegistry {
     /// actually satisfy — e.g. the coal smelting path when no wood was gathered.
     fn trace_chain(&self, finished_good: &str, producible: &HashSet<String>) -> ChainSelection {
         let mut recipe_ids: Vec<String> = Vec::new();
-        let mut raw_inputs: HashSet<String> = HashSet::new();
+        let mut raw_inputs: HashSet<String> = HashSet::default();
 
         self.trace_resource(finished_good, producible, &mut recipe_ids, &mut raw_inputs);
 
         // Compute buildings needed per 1 unit of finished good, accounting for
         // recipe batch sizes (e.g. 1 arrow run → 8 arrows = 0.125 buildings per arrow).
-        let mut recipe_runs: HashMap<String, f32> = HashMap::new();
+        let mut recipe_runs: HashMap<String, f32> = HashMap::default();
         self.compute_recipe_runs(finished_good, 1.0, producible, &mut recipe_runs);
 
-        let mut building_run_cost: HashMap<String, f32> = HashMap::new();
+        let mut building_run_cost: HashMap<String, f32> = HashMap::default();
         for (recipe_id, runs) in &recipe_runs {
             let building = &self.recipes[recipe_id].building;
             *building_run_cost.entry(building.clone()).or_insert(0.0) += runs;
@@ -568,19 +568,19 @@ impl ResourceRegistry {
         // survives (e.g. plains collapsing entirely to wool). Instead we cap the *number
         // of parcels* assigned to each resource, never below 1, so every biome-supported
         // resource keeps at least one parcel while overproduction is still reined in.
-        let mut quota: HashMap<String, usize> = HashMap::new();
+        let mut quota: HashMap<String, usize> = HashMap::default();
         for _ in 0..10 {
             let trial_assignments = self.assign_parcel_resources_quota(&base_options, &quota, &ruggedness, seatable, false, &mut rng.derive());
 
             // Compute trial supply, crediting all gather recipe outputs (handles multi-output
             // recipes like gather_bees which produces both honey and beeswax).
-            let mut trial_supply: HashMap<String, u32> = HashMap::new();
+            let mut trial_supply: HashMap<String, u32> = HashMap::default();
             for (_, a) in &trial_assignments {
                 self.credit_gather_supply(&a.primary_resource, &mut trial_supply);
             }
 
             // How many parcels each resource currently occupies — the basis for scaling quotas.
-            let mut trial_counts: HashMap<String, usize> = HashMap::new();
+            let mut trial_counts: HashMap<String, usize> = HashMap::default();
             for a in trial_assignments.values() {
                 *trial_counts.entry(a.primary_resource.clone()).or_insert(0) += 1;
             }
@@ -593,7 +593,7 @@ impl ResourceRegistry {
                 .map(|(k, &v)| (k.clone(), v as f32))
                 .collect();
             let mut trial_finished: Vec<(String, u32)> = Vec::new();
-            let mut trial_intermediate_pool: HashMap<String, u32> = HashMap::new();
+            let mut trial_intermediate_pool: HashMap<String, u32> = HashMap::default();
 
             for chain in &trial_plan.chains {
                 let (finished_qty, intermediates, _) = self.execute_chain(chain, &mut trial_remaining);
@@ -664,9 +664,9 @@ impl ResourceRegistry {
         // for each over-represented resource we keep the lowest-ID districts and drop
         // the excess (those districts simply go unproduced). This is a *hard* cap the
         // quota system alone can't guarantee, since its diversity floor may overshoot.
-        let mut fallback_assignments: HashMap<String, Vec<(DistrictID, ParcelResourceAssignment)>> = HashMap::new();
+        let mut fallback_assignments: HashMap<String, Vec<(DistrictID, ParcelResourceAssignment)>> = HashMap::default();
         if COMPETITION_HARD_CAPS {
-            let mut by_resource: HashMap<String, Vec<DistrictID>> = HashMap::new();
+            let mut by_resource: HashMap<String, Vec<DistrictID>> = HashMap::default();
             for (id, a) in &parcel_assignments {
                 by_resource.entry(a.primary_resource.clone()).or_default().push(*id);
             }
@@ -698,8 +698,8 @@ impl ResourceRegistry {
             }
         }
 
-        let mut supply: HashMap<String, u32> = HashMap::new();
-        let mut gather_buildings: HashMap<String, u32> = HashMap::new();
+        let mut supply: HashMap<String, u32> = HashMap::default();
+        let mut gather_buildings: HashMap<String, u32> = HashMap::default();
         for (_, a) in &parcel_assignments {
             self.credit_gather_supply(&a.primary_resource, &mut supply);
             *gather_buildings.entry(a.building.clone()).or_insert(0) += 1;
@@ -718,8 +718,8 @@ impl ResourceRegistry {
             .map(|(k, &v)| (k.clone(), v as f32))
             .collect();
         let mut finished_goods: Vec<(String, u32)> = Vec::new();
-        let mut processing_buildings: HashMap<String, u32> = HashMap::new();
-        let mut intermediate_pool: HashMap<String, u32> = HashMap::new();
+        let mut processing_buildings: HashMap<String, u32> = HashMap::default();
+        let mut intermediate_pool: HashMap<String, u32> = HashMap::default();
 
         for chain in &plan.chains {
             let (finished_qty, intermediates, buildings) = self.execute_chain(chain, &mut remaining);
@@ -807,7 +807,7 @@ impl ResourceRegistry {
         options: &HashMap<ID, Vec<String>>,
         rng: &mut RNG,
     ) -> HashMap<ID, ParcelResourceAssignment> {
-        self.assign_parcel_resources_quota(options, &HashMap::new(), &HashMap::new(), None, false, rng)
+        self.assign_parcel_resources_quota(options, &HashMap::default(), &HashMap::default(), None, false, rng)
     }
 
     /// Like [`assign_parcel_resources`], but caps how many parcels may be assigned each
@@ -865,9 +865,9 @@ impl ResourceRegistry {
             .collect();
         parcels.sort_by_key(|(_, candidates, _, _)| candidates.len());
 
-        let mut assigned_set: HashSet<String> = HashSet::new();
-        let mut assigned_count: HashMap<String, usize> = HashMap::new();
-        let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::new();
+        let mut assigned_set: HashSet<String> = HashSet::default();
+        let mut assigned_count: HashMap<String, usize> = HashMap::default();
+        let mut result: HashMap<ID, ParcelResourceAssignment> = HashMap::default();
 
         for (id, candidates, excluded_terrain, excluded_footprint) in parcels {
             let parcel_rugged = ruggedness.get(&id).copied().unwrap_or(0.0);
@@ -1161,7 +1161,7 @@ impl ResourceRegistry {
         // Use the chain's own availability-aware cost (matching the recipe variants it
         // will fire below), not the registry's canonical first-recipe cost.
         if chain.raw_cost.is_empty() {
-            return (0, HashMap::new(), HashMap::new());
+            return (0, HashMap::default(), HashMap::default());
         }
         let cost = chain.raw_cost.clone();
 
@@ -1170,7 +1170,7 @@ impl ResourceRegistry {
             .map(|(raw, per)| remaining.get(raw).copied().unwrap_or(0.0) / per)
             .fold(f32::INFINITY, f32::min);
         if !raw_units_f.is_finite() || raw_units_f <= 0.0 {
-            return (0, HashMap::new(), HashMap::new());
+            return (0, HashMap::default(), HashMap::default());
         }
 
         // Carve the chain's raw allocation out of the shared `remaining` pool.
@@ -1183,7 +1183,7 @@ impl ResourceRegistry {
 
         // Fire each recipe in topological order. Inputs deplete fractionally,
         // outputs are floored before being added to local stock.
-        let mut buildings: HashMap<String, u32> = HashMap::new();
+        let mut buildings: HashMap<String, u32> = HashMap::default();
         for recipe_id in &chain.recipe_ids {
             let recipe = &self.recipes[recipe_id];
             if recipe.inputs.is_empty() { continue; }
@@ -1207,7 +1207,7 @@ impl ResourceRegistry {
         let finished_qty = local.get(&chain.finished_good).copied().unwrap_or(0.0).floor() as u32;
 
         // Tier-1 stock that survived the chain run = intermediate leftover.
-        let mut intermediates: HashMap<String, u32> = HashMap::new();
+        let mut intermediates: HashMap<String, u32> = HashMap::default();
         for (id, qty) in &local {
             if id == &chain.finished_good { continue; }
             if self.resources.get(id).map(|r| r.tier == 1).unwrap_or(false) {
@@ -1279,14 +1279,14 @@ impl ResourceRegistry {
     fn chain_raw_cost(&self, resource_id: &str, producible: &HashSet<String>) -> HashMap<String, f32> {
         match self.choose_producer(resource_id, producible) {
             // Raw input (no producer) or gather recipe (no inputs): cost is itself.
-            None => HashMap::from([(resource_id.to_string(), 1.0)]),
+            None => HashMap::from_iter([(resource_id.to_string(), 1.0)]),
             Some(recipe_id) if self.recipes[recipe_id].inputs.is_empty() => {
-                HashMap::from([(resource_id.to_string(), 1.0)])
+                HashMap::from_iter([(resource_id.to_string(), 1.0)])
             }
             Some(recipe_id) => {
                 let recipe = &self.recipes[recipe_id];
                 let output_qty = recipe.outputs[resource_id] as f32;
-                let mut total: HashMap<String, f32> = HashMap::new();
+                let mut total: HashMap<String, f32> = HashMap::default();
                 for (input_id, &input_qty) in &recipe.inputs {
                     let scale = input_qty as f32 / output_qty;
                     for (raw, qty) in self.chain_raw_cost(input_id, producible) {
@@ -1334,7 +1334,7 @@ fn validate_recipe_references(
 /// Maps each output resource to all recipe IDs that produce it, sorted for determinism.
 /// Multiple producers are allowed (e.g. charcoal and coal variants of the same recipe).
 fn build_produced_by(recipes: &HashMap<String, RecipeDef>) -> anyhow::Result<HashMap<String, Vec<String>>> {
-    let mut produced_by: HashMap<String, Vec<String>> = HashMap::new();
+    let mut produced_by: HashMap<String, Vec<String>> = HashMap::default();
     for (recipe_id, recipe) in recipes {
         for output_id in recipe.outputs.keys() {
             produced_by.entry(output_id.clone()).or_default().push(recipe_id.clone());
@@ -1351,7 +1351,7 @@ fn detect_cycles(
     produced_by: &HashMap<String, Vec<String>>,
     recipes: &HashMap<String, RecipeDef>,
 ) -> anyhow::Result<()> {
-    let mut visited: HashSet<String> = HashSet::new();
+    let mut visited: HashSet<String> = HashSet::default();
     let mut path: Vec<String> = vec![];
 
     for resource_id in resources.keys() {
@@ -1402,7 +1402,7 @@ fn compute_all_raw_costs(
     produced_by: &HashMap<String, Vec<String>>,
     recipes: &HashMap<String, RecipeDef>,
 ) -> HashMap<String, HashMap<String, f32>> {
-    let mut memo: HashMap<String, HashMap<String, f32>> = HashMap::new();
+    let mut memo: HashMap<String, HashMap<String, f32>> = HashMap::default();
     for resource_id in resources.keys() {
         compute_raw_cost_for(resource_id, produced_by, recipes, &mut memo);
     }
@@ -1423,7 +1423,7 @@ fn compute_raw_cost_for(
     // For charcoal/coal pairs the charcoal recipe sorts first, so charcoal is the default.
     let cost = match produced_by.get(resource_id).and_then(|v| v.first()) {
         None => {
-            let mut m = HashMap::new();
+            let mut m = HashMap::default();
             m.insert(resource_id.to_string(), 1.0);
             m
         }
@@ -1431,12 +1431,12 @@ fn compute_raw_cost_for(
             let recipe = &recipes[recipe_id];
             if recipe.inputs.is_empty() {
                 // Gather recipe: the resource is its own raw cost
-                let mut m = HashMap::new();
+                let mut m = HashMap::default();
                 m.insert(resource_id.to_string(), 1.0);
                 m
             } else {
                 let output_qty = recipe.outputs[resource_id] as f32;
-                let mut total: HashMap<String, f32> = HashMap::new();
+                let mut total: HashMap<String, f32> = HashMap::default();
                 for (input_id, &input_qty) in &recipe.inputs {
                     let input_cost = compute_raw_cost_for(input_id, produced_by, recipes, memo);
                     let scale = input_qty as f32 / output_qty;

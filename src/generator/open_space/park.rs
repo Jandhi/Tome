@@ -18,7 +18,9 @@
 //! scaffolding (interior / perimeter / seat) and finish with benches against the
 //! buildings and lantern posts on the ring.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
@@ -221,7 +223,7 @@ async fn flatten_region(editor: &mut Editor, region: &Region, theme: &Theme) {
     let depth = edge_depth(&cells);
 
     // Blend each cell from natural (edge) toward the flat target (interior).
-    let mut points: HashSet<Point3D> = HashSet::new();
+    let mut points: HashSet<Point3D> = HashSet::default();
     for &c in &region.cells {
         // Never flatten ground a building stands on.
         if is_building(editor.world().get_claim(c).as_ref()) {
@@ -336,7 +338,7 @@ pub async fn furnish_park(
         }
     }
 
-    let mut used: HashSet<Point2D> = HashSet::new();
+    let mut used: HashSet<Point2D> = HashSet::default();
 
     match park_type {
         ParkType::Wooded => {
@@ -845,8 +847,8 @@ fn carve_maze(area: &HashSet<Point2D>, rng: &mut RNG) -> HashSet<Point2D> {
     rooms.sort_by_key(|c| (c.x, c.y)); // deterministic start order
 
     const STEPS: [(i32, i32); 4] = [(2, 0), (-2, 0), (0, 2), (0, -2)];
-    let mut passages: HashSet<Point2D> = HashSet::new();
-    let mut visited: HashSet<Point2D> = HashSet::new();
+    let mut passages: HashSet<Point2D> = HashSet::default();
+    let mut visited: HashSet<Point2D> = HashSet::default();
 
     for start in rooms {
         if visited.contains(&start) {
@@ -1113,7 +1115,7 @@ async fn carve_pond(
     };
     let mut pond: Vec<(Point2D, i32)> = Vec::new();
     let mut queue: VecDeque<Point2D> = VecDeque::new();
-    let mut seen: HashSet<Point2D> = HashSet::new();
+    let mut seen: HashSet<Point2D> = HashSet::default();
     queue.push_back(seed);
     seen.insert(seed);
     while let Some(c) = queue.pop_front() {

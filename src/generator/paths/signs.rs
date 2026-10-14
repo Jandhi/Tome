@@ -8,7 +8,9 @@
 //! *before* the open-space pass — the post cell is claimed as a path so
 //! plazas/nooks/parks/yards treat it as road and never furnish over it.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
+
+use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::BuildClaim;
@@ -127,7 +129,7 @@ fn cluster(junctions: &[(Point2D, BTreeSet<u32>)]) -> Vec<(Point2D, BTreeSet<u32
     let ids_at: HashMap<Point2D, &BTreeSet<u32>> =
         junctions.iter().map(|(c, ids)| (*c, ids)).collect();
 
-    let mut seen: HashSet<Point2D> = HashSet::new();
+    let mut seen: HashSet<Point2D> = HashSet::default();
     let mut out: Vec<(Point2D, BTreeSet<u32>)> = Vec::new();
     for (start, _) in junctions {
         if !seen.insert(*start) {
@@ -165,7 +167,7 @@ fn cluster(junctions: &[(Point2D, BTreeSet<u32>)]) -> Vec<(Point2D, BTreeSet<u32
 /// The widened paved footprint of `paths`, mirroring the shoulder pass in
 /// `build_paths_merged` (same as the lights module) so signs stay off the road.
 fn paved_cells(paths: &[Path]) -> HashSet<Point2D> {
-    let mut paved: HashSet<Point2D> = HashSet::new();
+    let mut paved: HashSet<Point2D> = HashSet::default();
     for path in paths {
         let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
         paved.extend(get_surrounding_set(&centre, path.width().saturating_sub(1)));
@@ -317,7 +319,7 @@ fn standing_sign_block(name: &str, rotation: u8, arrow: &str) -> Block {
         )
     };
     let data = format!("{{front_text:{},back_text:{}}}", face(arrow), face(back_arrow));
-    let mut state = HashMap::new();
+    let mut state = std::collections::HashMap::new();
     state.insert("rotation".to_string(), rotation.to_string());
     Block::new("oak_sign".into(), Some(state), Some(data))
 }

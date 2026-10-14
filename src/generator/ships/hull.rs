@@ -10,7 +10,8 @@
 //!
 //! **Blocks only for now** — slab/stair smoothing of the shell comes later.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::generator::materials::{MaterialPlacer, Placer};
 use crate::geometry::Point3D;
@@ -159,8 +160,8 @@ pub fn build_hull_model(
     // of it that must stay a solid full block. That backing keeps the interior a clean
     // wall (no stair backs showing inside) and seals the flare ledge so you can't see
     // through it (the bug the bare stairs left).
-    let mut bevel_set: HashSet<(i32, i32, i32)> = HashSet::new();
-    let mut backing: HashSet<(i32, i32, i32)> = HashSet::new();
+    let mut bevel_set: HashSet<(i32, i32, i32)> = HashSet::default();
+    let mut backing: HashSet<(i32, i32, i32)> = HashSet::default();
     for y in 1..=depth {
         for x in 0..length {
             let h = half_at(x, y);

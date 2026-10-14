@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::BuildClaim;
@@ -143,7 +143,7 @@ fn ring_at_distance(
 
 /// Expand a point set by `radius` in all 4+diagonal directions (Chebyshev).
 fn expand(points: &HashSet<Point2D>, radius: i32) -> HashSet<Point2D> {
-    let mut result = HashSet::new();
+    let mut result = HashSet::default();
     for &p in points {
         for dx in -radius..=radius {
             for dz in -radius..=radius {

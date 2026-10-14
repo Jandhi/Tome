@@ -3,6 +3,7 @@ mod district;
 mod test;
 mod adjacency;
 mod analysis;
+mod analysis_cache;
 mod merge;
 mod constants;
 mod data;

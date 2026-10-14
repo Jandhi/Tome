@@ -5,7 +5,8 @@
 //! `select_stairwells` picks positions for inter-floor transitions + optional
 //! attic entry; `place_stair_blocks` renders the chosen stairwells.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use crate::util::HashSet;
 
 use crate::editor::Editor;
 use crate::generator::materials::{MaterialPlacer, MaterialRole, Placer};
@@ -180,7 +181,7 @@ pub(super) fn select_stairwells(
     rng: &mut RNG,
 ) -> Vec<Stairwell> {
     let mut stairwells: Vec<Stairwell> = Vec::new();
-    let mut occupied: HashSet<(i32, i32)> = HashSet::new();
+    let mut occupied: HashSet<(i32, i32)> = HashSet::default();
 
     for floor in 0..frame.max_floors().saturating_sub(1) {
         // A flight on `floor` has its steps here and emerges onto `floor + 1`,
@@ -238,7 +239,7 @@ pub(super) fn select_stairwells(
 /// player stands on to use the door. A stair landing or step here walls the
 /// door off, so these are excluded from every candidate's footprint.
 fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i32)> {
-    let mut cells = HashSet::new();
+    let mut cells = HashSet::default();
     for seg in wall_segs.segments_on_floor(floor) {
         // `seg.facing` is the wall's INWARD normal (points toward the interior),
         // so the cell a player stands on to use the door is `door_cell + facing`.
@@ -268,7 +269,7 @@ fn door_cells_on_floor(wall_segs: &WallSegments, floor: u32) -> HashSet<(i32, i3
 /// open to land.
 fn boundary_approach_cells(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
     use super::super::footprint::find_boundaries;
-    let mut cells = HashSet::new();
+    let mut cells = HashSet::default();
     // A flight on `floor` emerges onto `floor + 1`; both floors' boundary lanes
     // matter, just like doorways.
     let ground = frame.footprint().rects();
@@ -331,7 +332,8 @@ fn try_stack_on_previous(
     // The stair must fit in both floors it spans. Jetty only grows upward, so
     // the lower floor (`floor`) is the binding extent — use its rect.
     let core = frame.rect_at(0, floor)?;
-    let run = (frame.wall_height() + 1) as i32;
+    // Rise = one storey (a tall top floor makes its flight longer).
+    let run = frame.floor_y(floor + 1) - frame.floor_y(floor);
     let dir = prev.direction;
     // Start the new flight at the previous flight's top step: its landing lands
     // one block above that step, and the steps continue past it. The two runs
@@ -421,7 +423,7 @@ fn base_reachable_from_below(
 
     // Flood-fill from the emergence cell (the flight-below top step, which the
     // player stands on at this floor's level) into adjacent walkable cells.
-    let mut seen: HashSet<(i32, i32)> = HashSet::from([emerge]);
+    let mut seen: HashSet<(i32, i32)> = HashSet::from_iter([emerge]);
     let mut stack = vec![emerge];
     while let Some(c) = stack.pop() {
         for (dx, dy) in [(0, 1), (0, -1), (1, 0), (-1, 0)] {
@@ -452,7 +454,7 @@ fn pick_stair_for_floor(
     below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let run = (frame.wall_height() + 1) as i32;
+    let run = frame.floor_y(floor + 1) - frame.floor_y(floor);
 
     // Stairs only in core rect — wings are too small and architecturally odd.
     // Constrain to the lower floor's extent (jetty grows upward, so the lower
@@ -469,7 +471,7 @@ fn pick_stair_for_floor(
         return None;
     }
 
-    let mut door_facings: HashSet<Cardinal> = HashSet::new();
+    let mut door_facings: HashSet<Cardinal> = HashSet::default();
     for seg in wall_segs.segments_on_floor(floor) {
         if seg.openings.iter().any(|o| matches!(o.kind, OpeningKind::Door(_))) {
             // `wall_facing` (below) names the geometric *outward* side a stair
@@ -482,7 +484,7 @@ fn pick_stair_for_floor(
 
     // Interior facings: sides of the core with adjacent wing rects on this
     // floor. Adjacency is computed at `floor` so jettied geometry stays in sync.
-    let mut interior_facings: HashSet<Cardinal> = HashSet::new();
+    let mut interior_facings: HashSet<Cardinal> = HashSet::default();
     let core_at_floor = frame.rect_at(0, floor)?;
     for i in 1..frame.rect_count() {
         let Some(wing) = frame.rect_at(i, floor) else { continue; };
@@ -677,7 +679,7 @@ fn find_ladder_cell(
         // Don't get stranded by the flight-below hole (empty blocked set: the
         // ladder cell itself is walkable).
         if let Some(b) = below {
-            if !base_reachable_from_below(frame, floor, cell, &HashSet::new(), b) {
+            if !base_reachable_from_below(frame, floor, cell, &HashSet::default(), b) {
                 continue;
             }
         }
@@ -698,10 +700,10 @@ fn pick_attic_stair(
     below: Option<&Stairwell>,
     rng: &mut RNG,
 ) -> Option<(StairKind, Vec<Point2D>, Cardinal)> {
-    let run = (frame.wall_height() + 1) as i32;
     // Attic stairs connect the top regular floor to the attic above it; both
     // share the top-floor extent (jettied if jetty is enabled).
     let top_floor = frame.max_floors().checked_sub(1)?;
+    let run = frame.floor_y(top_floor + 1) - frame.floor_y(top_floor);
     let rect_owned = frame.rect_at(0, top_floor)?;
     let rect = &rect_owned;
 
@@ -1025,7 +1027,7 @@ mod test {
         let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(20, 8));
         let frame = frame_with_core(core, 3);
         let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
-        let doors = HashSet::new();
+        let doors = HashSet::default();
 
         let (kind, positions, dir) =
             try_stack_on_previous(&prev, &frame, 1, &doors).expect("should stack on a long core");
@@ -1059,7 +1061,7 @@ mod test {
             Point2D::new(4, 4), Point2D::new(4, 5),
         ]);
         assert!(base_reachable_from_below(
-            &frame, 1, Point2D::new(6, 3), &HashSet::new(), &below,
+            &frame, 1, Point2D::new(6, 3), &HashSet::default(), &below,
         ));
     }
 
@@ -1072,7 +1074,7 @@ mod test {
             Point2D::new(2, 1), Point2D::new(1, 2), Point2D::new(7, 7),
         ]);
         assert!(!base_reachable_from_below(
-            &frame, 1, Point2D::new(1, 1), &HashSet::new(), &below,
+            &frame, 1, Point2D::new(1, 1), &HashSet::default(), &below,
         ));
     }
 
@@ -1087,7 +1089,7 @@ mod test {
         ]);
         // Base == the flight-below top step.
         assert!(base_reachable_from_below(
-            &frame, 1, Point2D::new(5, 4), &HashSet::new(), &below,
+            &frame, 1, Point2D::new(5, 4), &HashSet::default(), &below,
         ));
     }
 
@@ -1098,7 +1100,7 @@ mod test {
         let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(7, 8));
         let frame = frame_with_core(core, 3);
         let prev = straight_flight(Point2D::new(1, 4), Cardinal::East, 4, 0);
-        let doors = HashSet::new();
+        let doors = HashSet::default();
 
         assert!(try_stack_on_previous(&prev, &frame, 1, &doors).is_none());
     }
