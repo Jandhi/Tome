@@ -462,6 +462,10 @@ pub struct TownOptions {
     /// Ask OpenAI to write the chronicle book at the end (live runs only; it
     /// costs an API call). Off by default; `cargo run -- --full` turns it on.
     pub chronicle: bool,
+    /// House specs for the town to build, `(name, spec)` (`--spec <file>`):
+    /// each goes on the first road slot where it fits, before the ordinary
+    /// houses take it, turned so its front faces the road (see the house loop).
+    pub house_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)>,
 }
 
 pub async fn generate_town(
@@ -539,6 +543,24 @@ pub async fn generate_town_with(
 
     
     let data = LoadedData::load().expect("Failed to load data");
+
+    // `--spec` houses, checked now that the culture is known: one that can't
+    // build anywhere is dropped (and reported) before any lot is tried.
+    let mut pending_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)> = Vec::new();
+    for (name, spec) in &options.house_specs {
+        match crate::generator::buildings_v2::spec::check_for_town(spec, culture, &data) {
+            Ok(notes) => {
+                for note in notes {
+                    println!("{name}: note: {note}");
+                }
+                pending_specs.push((name.clone(), spec.clone()));
+            }
+            Err(e) => {
+                println!("{name}: refused: {e:#}");
+                report.specs_unplaced.push(name.clone());
+            }
+        }
+    }
 
     // ── Resource chain over rural districts ──────────────────────────────
     let rural_analysis: HashMap<_, _> = editor.world().district_analysis_data.iter()
@@ -1086,10 +1108,11 @@ pub async fn generate_town_with(
     // placed against the arterial claim the prime frontage and later tiers
     // can't overlap them. Size gradient: houses on roads, cottages on lanes.
     use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, HouseSeed, build_house};
-    use crate::generator::buildings_v2::spec::HouseSpec;
-    use crate::generator::buildings_v2::footprint::SizeClass;
+    use crate::generator::buildings_v2::spec::{resolve, rotate_footprint, HouseSpec};
+    use crate::geometry::{Cardinal, Rect2D};
+    use crate::generator::buildings_v2::footprint::{merge::outline_from_rects, Footprint, SizeClass};
     use crate::generator::city_houses::{
-        frontage_from_roads, plot_from_block, rect_from_frontage,
+        frontage_from_roads, plot_from_block, rect_from_frontage, seat_footprint,
         synthetic_plot_bounds, SIDE_BUFFER_CELLS,
     };
     use crate::generator::materials::PaletteId;
@@ -1395,25 +1418,61 @@ pub async fn generate_town_with(
                     // (or whether it is built at all), the next one is unmoved.
                     // Every decision below draws from a named stream of it.
                     let house_seed = HouseSeed::draw(&mut rng);
-                    // A scanned manor forces its size + slice; everything else
-                    // rolls a size from the tier pool and the deepest fitting depth.
-                    let size_class = match manor_here {
-                        Some(_) => SizeClass::Manor,
-                        None => *house_seed.stream("size").choose(pool),
+                    // A pending `--spec` house takes the slot if it can: one
+                    // with a fixed footprint where that footprint, turned to
+                    // face the road, seats here; one without at any slot. Its
+                    // own seed, when it has one, replaces the drawn one.
+                    let spec_here: Option<(usize, Option<Vec<Rect2D>>)> = if manor_here.is_some() {
+                        None
+                    } else {
+                        pending_specs.iter().enumerate().find_map(|(k, (_, s))| match &s.footprint {
+                            None => Some((k, None)),
+                            Some(fp) => {
+                                let turned: Vec<Rect2D> = rotate_footprint(fp, s.front(), frontage.outward)
+                                    .iter()
+                                    .map(|r| Rect2D::new(P2::new(r.x, r.z), P2::new(r.w, r.h)))
+                                    .collect();
+                                seat_footprint(&turned, &frontage, cursor, &plot).map(|seated| (k, Some(seated)))
+                            }
+                        })
                     };
+                    let spec_k: Option<usize> = spec_here.as_ref().map(|(k, _)| *k);
+                    let spec: Option<HouseSpec> = spec_k.map(|k| pending_specs[k].1.clone());
+                    let seated: Option<Vec<Rect2D>> = spec_here.and_then(|(_, r)| r);
+                    let house_seed = spec.as_ref().and_then(|s| s.seed).map(HouseSeed).unwrap_or(house_seed);
+                    // A scanned manor forces its size + slice; a spec may pin
+                    // its size; everything else rolls a size from the tier
+                    // pool and the deepest fitting depth.
+                    let size_class = match (manor_here, spec.as_ref().and_then(|s| s.size)) {
+                        (Some(_), _) => SizeClass::Manor,
+                        (None, Some(s)) => s,
+                        (None, None) => *house_seed.stream("size").choose(pool),
+                    };
+                    // A seated footprint's bounds: (width along the road,
+                    // depth). They stand in for the core rect below: the
+                    // slice they front, the verge in front of them.
+                    let seated_core = seated.as_ref().map(|r| {
+                        let b = Footprint::new(outline_from_rects(r), r.to_vec()).bounds();
+                        match frontage.outward {
+                            Cardinal::North | Cardinal::South => (b.size.x, b.size.y),
+                            Cardinal::East | Cardinal::West => (b.size.y, b.size.x),
+                        }
+                    });
                     let mut core_rng = house_seed.stream("core");
-                    let fw = match manor_here {
-                        Some(c) => c.fw,
-                        None => core_rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
+                    let fw = match (manor_here, seated_core) {
+                        (Some(c), _) => c.fw,
+                        (None, Some((fw, _))) => fw,
+                        (None, None) => core_rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
                     };
                     if cursor + fw > chain_len {
                         if manor_here.is_some() { break; }
                         cursor += 1; continue;
                     }
                     let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
-                    let depth = match manor_here {
-                        Some(c) => c.depth,
-                        None => {
+                    let depth = match (manor_here, seated_core) {
+                        (Some(c), _) => c.depth,
+                        (None, Some((_, depth))) => depth,
+                        (None, None) => {
                             // Square-frontage bias: with the culture's square chance,
                             // make the house a square (depth = front width) if it fits,
                             // so it gets a dome. Guarded so a 0 bias never draws RNG.
@@ -1450,7 +1509,7 @@ pub async fn generate_town_with(
                         .and_then(|id| district_schemes.get(&id))
                         .unwrap_or(&style_scheme);
                     let mut palette_rng = house_seed.stream("palette");
-                    let (mut palette, palette_picks) = scheme
+                    let (mut palette, mut palette_picks) = scheme
                         .next_style(&mut palette_rng)
                         .roll_palette_picks(&mut palette_rng, &data, local_wood.as_ref());
                     // Apply the town colour identity: a manor flies its unique
@@ -1458,7 +1517,7 @@ pub async fn generate_town_with(
                     // town scheme. This `primary_color` then tints the building's
                     // dyed accents (banners, beds, carpets) via the recolour pass.
                     let family_color: Option<Color> = if size_class == SizeClass::Manor {
-                        color_scheme.manor.get(manors_placed).copied()
+                        spec.as_ref().and_then(|s| s.colour).or_else(|| color_scheme.manor.get(manors_placed).copied())
                     } else {
                         None
                     };
@@ -1486,10 +1545,13 @@ pub async fn generate_town_with(
                     // Roof style weighted by culture + size (irimoya skews to the
                     // grander buildings; see `roof_styles_for`).
                     let roof_styles = culture.roof_styles_for(size_class);
-                    let roof_style = roof_styles[house_seed.stream("roof").rand_i32_range(0, roof_styles.len() as i32) as usize];
-                    let footprint = crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
-                        &mut house_seed.stream("footprint"), &plot, rect, frontage.outward, &size_class, culture.square_bias(),
-                    );
+                    let mut roof_style = roof_styles[house_seed.stream("roof").rand_i32_range(0, roof_styles.len() as i32) as usize];
+                    let mut footprint = match &seated {
+                        Some(rects) => Footprint::new(outline_from_rects(rects), rects.to_vec()),
+                        None => crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
+                            &mut house_seed.stream("footprint"), &plot, rect, frontage.outward, &size_class, culture.square_bias(),
+                        ),
+                    };
                     // Door scoring needs the full footprint bounds, not just
                     // the core rect, so a wing extending rearward doesn't
                     // misreport the back wall's distance to the plot edge.
@@ -1537,16 +1599,58 @@ pub async fn generate_town_with(
                     // (jetty is medieval-only, engawa Japanese-only).
                     let (jn, jd) = culture.jetty_chance();
                     bctx.jetty = jd > 0 && house_seed.stream("jetty").rand_i32_range(0, jd as i32) < jn as i32;
+                    // A spec house: the slot's footprint and, where the spec
+                    // leaves them open, its palette and colour go into the
+                    // spec, and the resolved spec decides the rest. Draws only
+                    // on the house's own streams, as above.
+                    if let (Some(spec), Some(k)) = (&spec, spec_k) {
+                        let filled = spec.seated_in_town(
+                            culture, size_class, footprint.rects(), plot_bounds, &palette_picks, palette.primary_color,
+                        );
+                        match resolve(&filled, house_seed, plot_bounds, &data) {
+                            Ok(Some(resolved)) => {
+                                let banner = palette.banner_data.take();
+                                palette = resolved.palette;
+                                palette.banner_data = banner;
+                                palette_picks = resolved.picks;
+                                footprint = resolved.footprint;
+                                bctx = resolved.bctx;
+                                bctx.base_y_override = base_lvl;
+                                roof_style = bctx.roof_style;
+                            }
+                            Ok(None) => { cursor += 1; continue; }
+                            Err(e) => {
+                                let (name, _) = pending_specs.remove(k);
+                                println!("{name}: refused on its lot: {e:#}");
+                                report.specs_unplaced.push(name);
+                                cursor += 1;
+                                continue;
+                            }
+                        }
+                    }
                     // `bctx.seed` is set, so `build_house` leaves the town stream alone.
                     let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                     match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                         Ok(output) => {
                             // Record the house's decisions, footprint relative
                             // to its own bounds (reads only, draws nothing).
-                            report.house_specs.push(HouseSpec::resolved(
+                            let built_spec = HouseSpec::resolved(
                                 &bctx, &output, &palette, &palette_picks,
                                 output.footprint.bounds().min(), bctx_editor.editor.world().build_area.origin,
-                            ));
+                            );
+                            if let Some(k) = spec_k {
+                                let (name, asked) = pending_specs.remove(k);
+                                if let Some(note) = crate::generator::buildings_v2::spec::dropped_cellar(&asked, &built_spec) {
+                                    println!("{name}: note: {note}");
+                                }
+                                let site = built_spec.site.clone().unwrap_or_default();
+                                let front_door = site.front_door.map(|c| c.to_string()).unwrap_or_default();
+                                let origin = site.origin.unwrap_or_default();
+                                let house = report.house_specs.len();
+                                println!("{name}: built as house_{house:03} at {},{} facing {front_door}", origin[0], origin[1]);
+                                report.spec_houses.push(crate::generator::report::SpecPlacement { spec: name, house, origin, front_door });
+                            }
+                            report.house_specs.push(built_spec);
                             // A manor flies its family colour: banners flanking
                             // the front door so the street reads the household
                             // before you step inside. Other buildings carry their
@@ -1652,6 +1756,10 @@ pub async fn generate_town_with(
                 }
             }
         }
+    }
+    for (name, _) in pending_specs.drain(..) {
+        println!("{name}: no lot had room for it; not built");
+        report.specs_unplaced.push(name);
     }
     println!("Placed {} buildings across {} lots", total_buildings, sub_blocks.len());
     report.buildings_total = total_buildings;

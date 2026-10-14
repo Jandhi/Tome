@@ -108,7 +108,7 @@ fn random_seed() -> i64 {
         .unwrap_or(12345)
 }
 
-async fn run_generation_once(full: bool, seed_override: Option<i64>, out: crate::outputs::Outputs) {
+async fn run_generation_once(full: bool, seed_override: Option<i64>, specs: TownSpecs, out: crate::outputs::Outputs) {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     // Random per-run seed so each interactive run is a different town; printed so
@@ -127,7 +127,7 @@ async fn run_generation_once(full: bool, seed_override: Option<i64>, out: crate:
     let mut editor = world.get_editor();
     println!("Generating town with seed {}", seed.0);
     // None → auto-select the culture from the build area's climate.
-    let options = crate::generator::settlement::TownOptions { chronicle: full };
+    let options = crate::generator::settlement::TownOptions { chronicle: full, house_specs: specs };
     let mut report = crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
 
     if let Err(e) = save_and_render_town(&editor, seed.0, "live", &run_dir, &mut report, out) {
@@ -197,10 +197,27 @@ fn save_and_render_town(
     Ok(())
 }
 
+/// House specs a town run builds, `(file name, spec)`.
+type TownSpecs = Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)>;
+
+/// Every `--spec <file>` of a town run (repeatable), read and parsed up front so
+/// a typo fails before anything is generated. The town checks the rest once it
+/// knows its culture, and seats each on the first road slot it fits.
+fn town_specs(args: &[String]) -> anyhow::Result<TownSpecs> {
+    args.windows(2)
+        .filter(|w| w[0] == "--spec")
+        .map(|w| {
+            let path = std::path::Path::new(&w[1]);
+            let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| w[1].clone());
+            Ok((name, crate::generator::buildings_v2::spec::HouseSpec::load(path)?))
+        })
+        .collect()
+}
+
 /// `--offline <fixture> [seed]`: build a town from a saved terrain fixture with
 /// no server at all, then save and render it exactly like a live run, under
 /// `output/runs/offline-<seed>/`.
-async fn run_offline(fixture_path: &str, seed_arg: Option<&str>, out: crate::outputs::Outputs) -> anyhow::Result<()> {
+async fn run_offline(fixture_path: &str, seed_arg: Option<&str>, specs: TownSpecs, out: crate::outputs::Outputs) -> anyhow::Result<()> {
     let t0 = std::time::Instant::now();
     let fixture = crate::editor::fixture::TerrainFixture::load(fixture_path)?;
     let world = World::from_fixture(fixture);
@@ -212,7 +229,7 @@ async fn run_offline(fixture_path: &str, seed_arg: Option<&str>, out: crate::out
     let mut editor = world.get_offline_editor();
     println!("Generating town offline with seed {}", seed.0);
     let t1 = std::time::Instant::now();
-    let options = crate::generator::settlement::TownOptions::default();
+    let options = crate::generator::settlement::TownOptions { house_specs: specs, ..Default::default() };
     let mut report = crate::generator::settlement::generate_town_with(&mut editor, seed, None, &options).await;
     println!("Generated in {:.1?}", t1.elapsed());
     let dir = std::path::PathBuf::from("output/runs").join(format!("offline-{}", seed.0));
@@ -477,6 +494,13 @@ async fn main() {
         }
         return;
     }
+    let specs = match town_specs(&args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
     if args.iter().any(|a| a == "--offline") {
         let Some(fixture_path) = arg_after("--offline", 1) else {
             eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");
@@ -484,7 +508,7 @@ async fn main() {
         };
         // The seed is optional, so a flag right after the fixture is not it.
         let seed = arg_after("--offline", 2).filter(|s| !s.starts_with("--"));
-        if let Err(e) = run_offline(fixture_path, seed, out).await {
+        if let Err(e) = run_offline(fixture_path, seed, specs, out).await {
             eprintln!("Offline run failed: {e:#}");
             std::process::exit(1);
         }
@@ -582,6 +606,6 @@ async fn main() {
     }
 
     if !use_visualizer {
-        run_generation_once(full, seed_arg, out).await;
+        run_generation_once(full, seed_arg, specs, out).await;
     }
 }

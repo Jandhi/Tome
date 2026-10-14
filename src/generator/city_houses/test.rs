@@ -254,3 +254,29 @@ async fn settlement_with_city_houses() {
         total_buildings, city_blocks.len(),
     );
 }
+
+/// A fixed footprint seats with the front of its bounds on the frontage, a
+/// wing ahead of the core included, and not where a rect would leave the lot.
+#[test]
+fn seat_footprint_fronts_the_road() {
+    use crate::generator::city_houses::{seat_footprint, Frontage};
+    use crate::geometry::Rect2D;
+    // A 20x12 lot, road along its north edge (z = -1).
+    let lot = make_block_rect(0, 0, 20, 12);
+    let plot = plot_from_block(&lot).unwrap();
+    let frontage = Frontage { cells: (0..20).map(|x| Point2D::new(x, 0)).collect(), outward: Cardinal::North };
+    // Already facing north: a 2x2 wing ahead (north) of a 6x4 core.
+    let rects = [
+        Rect2D::new(Point2D::new(0, 2), Point2D::new(6, 4)),
+        Rect2D::new(Point2D::new(1, 0), Point2D::new(2, 2)),
+    ];
+    let seated = seat_footprint(&rects, &frontage, 3, &plot).unwrap();
+    let at = |r: &Rect2D| (r.min(), r.size);
+    assert_eq!(at(&seated[0]), (Point2D::new(3, 2), Point2D::new(6, 4)));
+    assert_eq!(at(&seated[1]), (Point2D::new(4, 0), Point2D::new(2, 2)));
+    // Runs off the chain's end.
+    assert!(seat_footprint(&rects, &frontage, 15, &plot).is_none());
+    // Too deep for the lot.
+    let deep = [Rect2D::new(Point2D::new(0, 0), Point2D::new(4, 13))];
+    assert!(seat_footprint(&deep, &frontage, 0, &plot).is_none());
+}

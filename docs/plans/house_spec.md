@@ -107,6 +107,21 @@ palette, timber or roof.
   - `site` is ignored on input except the new `site.plot` (plot size, written by `--houses`):
     the front door goes on the side nearest the plot edge, so the same plot puts it back.
   - Examples: `docs/examples/house_specs/fixed_shape.yaml`, `fixed_style.yaml`.
+- **Town lots take specs** (phase 5, first part): `--spec <file>` on a town run (live or
+  `--offline`). Each spec is checked once the culture is known (`check_for_town`), then
+  tried at every road slot in the normal walk order (manor lots first, arterial before
+  collector before alley) before that slot's ordinary house: a pinned footprint is turned
+  in quarter turns so its front (`site.front_door`, else south) faces the road
+  (`rotate_footprint`) and seated with its bounds flush to the frontage
+  (`city_houses::seat_footprint`, all rects on usable lot cells); an open footprint grows
+  from the slot's core as a town house does. Open `size` draws from the tier pool, and for
+  a house of the town's culture an open `palette` / `colour` take what the district drew
+  for the slot (`HouseSpec::seated_in_town`); a manor's pinned colour is its family colour.
+  The spec's `seed`, if any, is the house seed; the town stream still draws one per slot,
+  so a town without specs is block-identical to before. A pinned cellar the site refuses
+  (wet ground, no stair room) is printed as a note. Placement goes to `metrics.json`
+  (`spec_houses`, `specs_unplaced`). A spec bigger than any lot (the `fixed_shape` manor
+  on lakeside) is reported as not built.
 - **Phase 4 done**: unknown keys are refused at parse time (`deny_unknown_fields`, a
   hand-read `cellar` naming the stray key); `resolve` lists every problem in one error
   (`N problems:` then one line each), adds `engawa: true` off a Japanese house as an
@@ -139,8 +154,8 @@ palette, timber or roof.
 4. **Validation.** Errors that name the field: rects overlapping, disconnected
    or outside the plot, room lists that don't match rects/floors, unknown
    names (listing the valid ones). Aimed at an LLM fixing its own spec.
-5. **Later.** Settlement lots taking a spec (hand-placed landmark houses), a
-   schema reference doc for LLM authoring.
+5. **Later.** ~~Settlement lots taking a spec~~ (done, see Status), a schema
+   reference doc for LLM authoring, placing a spec at a chosen spot.
 
 ## Decisions (2026-10-10)
 

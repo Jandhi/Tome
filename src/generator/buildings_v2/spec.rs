@@ -8,7 +8,8 @@
 //! (`<house>.spec.yaml` beside each `--houses` house,
 //! `output/runs/<seed>/houses/house_<n>.spec.yaml` per town house), and
 //! `--houses --spec <file>` builds from one ([`resolve`], then
-//! [`ResolvedHouse::build`]).
+//! [`ResolvedHouse::build`]). A town run's `--spec` seats one on a road slot
+//! ([`rotate_footprint`], [`HouseSpec::seated_in_town`], then [`resolve`]).
 //!
 //! **Resolution.** A pinned field is used as written; an open one is drawn
 //! from its own named stream of the house seed (see `seed`), with the same
@@ -182,6 +183,20 @@ pub struct PaletteSpec {
     pub accent: Option<PaletteId>,
 }
 
+impl PaletteSpec {
+    /// Every pick pinned: the style (by key, `default` for none) and its materials.
+    pub fn pinned(picks: &PalettePicks) -> Self {
+        PaletteSpec {
+            style: Some(picks.style.as_deref().map(style_key).unwrap_or_else(|| DEFAULT_STYLE.to_string())),
+            base: Some(picks.base.clone()),
+            wood: picks.wood.clone(),
+            stone: picks.stone.clone(),
+            roof: picks.roof.clone(),
+            accent: picks.accent.clone(),
+        }
+    }
+}
+
 /// One footprint rect, plot-relative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -290,14 +305,7 @@ impl HouseSpec {
             seed: Some(house.seed.0),
             culture: Some(bctx.culture),
             size: Some(house.size_class),
-            palette: Some(PaletteSpec {
-                style: Some(picks.style.as_deref().map(style_key).unwrap_or_else(|| DEFAULT_STYLE.to_string())),
-                base: Some(picks.base.clone()),
-                wood: picks.wood.clone(),
-                stone: picks.stone.clone(),
-                roof: picks.roof.clone(),
-                accent: picks.accent.clone(),
-            }),
+            palette: Some(PaletteSpec::pinned(picks)),
             colour: palette.primary_color,
             roof: Some(house.roof_style),
             footprint: Some(footprint),
@@ -344,6 +352,50 @@ impl HouseSpec {
         ext
     }
 
+    /// The side the house fronts: `site.front_door` when written, else south.
+    /// A town turns a pinned footprint so this side faces its road.
+    pub fn front(&self) -> Cardinal {
+        self.site.as_ref().and_then(|s| s.front_door).unwrap_or(Cardinal::South)
+    }
+
+    /// This spec as a town lot builds it: `culture` and `size` filled in, the
+    /// footprint as seated on the lot (`rects` build-area local, relative to
+    /// `plot_bounds` in the result, pinned floors kept by rect), and, for a
+    /// house of the town's own culture, the palette and colour the town drew
+    /// for the slot where the spec leaves them open, so it fits its district.
+    /// Everything else stays as written, for [`resolve`] to draw.
+    pub fn seated_in_town(
+        &self,
+        town_culture: Culture,
+        size: SizeClass,
+        rects: &[Rect2D],
+        plot_bounds: Rect2D,
+        picks: &PalettePicks,
+        colour: Option<Color>,
+    ) -> HouseSpec {
+        let culture = self.culture.unwrap_or(town_culture);
+        let origin = plot_bounds.min();
+        let floors = |i: usize| self.footprint.as_ref().and_then(|fp| fp.get(i)).and_then(|r| r.floors);
+        let footprint = rects
+            .iter()
+            .enumerate()
+            .map(|(i, r)| RectSpec { x: r.min().x - origin.x, z: r.min().y - origin.y, w: r.size.x, h: r.size.y, floors: floors(i) })
+            .collect();
+        let own = culture == town_culture;
+        HouseSpec {
+            culture: Some(culture),
+            size: Some(size),
+            footprint: Some(footprint),
+            palette: match &self.palette {
+                None if own => Some(PaletteSpec::pinned(picks)),
+                p => p.clone(),
+            },
+            colour: self.colour.or(if own { colour } else { None }),
+            site: None,
+            ..self.clone()
+        }
+    }
+
     /// Write the spec as YAML under a short comment saying how to read it.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
         let header = "# House spec (docs/plans/house_spec.md). footprint: rects relative to the plot, core first.\n\
@@ -352,6 +404,51 @@ impl HouseSpec {
         std::fs::write(path, format!("{header}{}", self.to_yaml()?))?;
         Ok(())
     }
+}
+
+/// A pinned cellar the house `built` (its resolved spec) went without: the
+/// build skips one where the ground is wet or there is no room for its stair.
+/// (`jetty` and `engawa` are recorded as asked, so a dropped one can't be
+/// read back here.)
+pub fn dropped_cellar(asked: &HouseSpec, built: &HouseSpec) -> Option<String> {
+    let has_cellar = |c: &Option<CellarSpec>| !matches!(c, None | Some(CellarSpec::Built(false)));
+    (has_cellar(&asked.cellar) && !has_cellar(&built.cellar))
+        .then(|| "cellar: pinned, but not built (the ground here is wet or has no room for its stair)".to_string())
+}
+
+/// Check a spec a town is to build before it tries any lot: everything
+/// [`resolve`] checks, an open `culture` taken as the town's and a pinned
+/// footprint in a plot just its size (whether it fits a lot is found when it
+/// is seated). Returns the notes for out-of-character pins.
+pub fn check_for_town(spec: &HouseSpec, town_culture: Culture, data: &LoadedData) -> anyhow::Result<Vec<String>> {
+    let mut spec = spec.clone();
+    spec.culture.get_or_insert(town_culture);
+    let extent = spec.plot_extent().unwrap_or(Point2D::new(64, 64));
+    let seed = HouseSeed(spec.seed.unwrap_or(0));
+    Ok(resolve(&spec, seed, Rect2D::new(Point2D::new(0, 0), extent), data)?.map(|r| r.warnings).unwrap_or_default())
+}
+
+/// `footprint` turned in quarter turns so its side facing `from` faces `to`,
+/// moved back to start at x 0, z 0. Rect order and floors are kept, so the
+/// core stays first and pinned rooms still line up.
+pub fn rotate_footprint(fp: &[RectSpec], from: Cardinal, to: Cardinal) -> Vec<RectSpec> {
+    let mut out = fp.to_vec();
+    let mut facing = from;
+    while facing != to {
+        // A quarter turn clockwise seen from above (north -> east): cell
+        // (x, z) goes to (-z, x).
+        for r in &mut out {
+            *r = RectSpec { x: -(r.z + r.h - 1), z: r.x, w: r.h, h: r.w, floors: r.floors };
+        }
+        facing = facing.rotate_right();
+    }
+    let min_x = out.iter().map(|r| r.x).min().unwrap_or(0);
+    let min_z = out.iter().map(|r| r.z).min().unwrap_or(0);
+    for r in &mut out {
+        r.x -= min_x;
+        r.z -= min_z;
+    }
+    out
 }
 
 /// Whether a house with this roof has an attic (the pipeline's rule).
@@ -762,6 +859,40 @@ mod tests {
         let picks = PalettePicks::base(culture.palette_id());
         let spec = HouseSpec::resolved(&bctx, &house, &palette, &picks, plot_bounds().min(), world_origin);
         Some((house, spec))
+    }
+
+    #[test]
+    fn footprints_turn_to_face_the_road() {
+        // An L: 4x3 core, a 2x2 wing south of its east end, front south.
+        let fp = [
+            RectSpec { x: 0, z: 0, w: 4, h: 3, floors: Some(2) },
+            RectSpec { x: 2, z: 3, w: 2, h: 2, floors: Some(1) },
+        ];
+        assert_eq!(rotate_footprint(&fp, Cardinal::South, Cardinal::South), fp.to_vec());
+        // A quarter turn clockwise: south faces west, the wing goes west of
+        // the core's south end; floors stay with their rect.
+        assert_eq!(
+            rotate_footprint(&fp, Cardinal::South, Cardinal::West),
+            vec![
+                RectSpec { x: 2, z: 0, w: 3, h: 4, floors: Some(2) },
+                RectSpec { x: 0, z: 2, w: 2, h: 2, floors: Some(1) },
+            ],
+        );
+        // Turned all the way round, then back again.
+        let north = rotate_footprint(&fp, Cardinal::South, Cardinal::North);
+        assert_eq!(north[1], RectSpec { x: 0, z: 0, w: 2, h: 2, floors: Some(1) });
+        assert_eq!(north[0], RectSpec { x: 0, z: 2, w: 4, h: 3, floors: Some(2) });
+        assert_eq!(rotate_footprint(&north, Cardinal::North, Cardinal::South), fp.to_vec());
+    }
+
+    #[test]
+    fn a_dropped_cellar_is_noted() {
+        let asked = HouseSpec { cellar: Some(CellarSpec::Themed { theme: "wine".into() }), ..Default::default() };
+        let without = HouseSpec { cellar: Some(CellarSpec::Built(false)), ..Default::default() };
+        let with = HouseSpec { cellar: Some(CellarSpec::Themed { theme: "wine".into() }), ..Default::default() };
+        assert!(dropped_cellar(&asked, &without).is_some());
+        assert!(dropped_cellar(&asked, &with).is_none());
+        assert!(dropped_cellar(&HouseSpec::default(), &without).is_none());
     }
 
     #[test]
