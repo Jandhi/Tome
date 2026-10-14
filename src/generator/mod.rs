@@ -24,4 +24,4 @@ pub mod population;
 pub mod welcome;
 
 pub use build_claim::BuildClaim;
-pub use settlement::generate_town;
+pub use settlement::generate_settlement;

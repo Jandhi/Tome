@@ -209,7 +209,7 @@ mod tests {
     /// of `*=`): with the broken mixing, the *first* draw from consecutive seeds
     /// clustered in the low half of the range, so weighted picks (e.g. settlement
     /// culture) almost always chose the first option regardless of the weights.
-    /// Keyed exactly like `generate_town`'s culture selection; asserts the first
+    /// Keyed exactly like `generate_settlement`'s culture selection; asserts the first
     /// draw across sequential seeds fills every decile of the range.
     #[test]
     fn first_draw_across_sequential_seeds_is_spread_out() {

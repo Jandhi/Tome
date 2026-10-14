@@ -1186,7 +1186,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
-        crate::generator::settlement::generate_town(
+        crate::generator::settlement::generate_settlement(
             &mut editor,
             Seed(12345),
             Some(crate::generator::buildings_v2::Culture::Medieval),
@@ -1203,7 +1203,7 @@ mod tests {
         let provider = GDMCHTTPProvider::new();
         let world = World::new(&provider).await.expect("Failed to create world");
         let mut editor = world.get_editor();
-        crate::generator::settlement::generate_town(
+        crate::generator::settlement::generate_settlement(
             &mut editor,
             Seed(12345),
             Some(crate::generator::buildings_v2::Culture::Desert),

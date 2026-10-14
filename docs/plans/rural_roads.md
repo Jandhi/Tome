@@ -38,7 +38,7 @@ These came out of the design discussion and are not open:
 
 ## Ordering — three phases
 
-The current `generate_town` loop (`settlement.rs:81-107`) interleaves *place rural
+The current `generate_settlement` loop (`settlement.rs:81-107`) interleaves *place rural
 building* with *paint production area* per district. We split it:
 
 ```
@@ -132,7 +132,7 @@ Steps:
 - **Blocked**: building footprints (+ small margin, like `IND_MARGIN`), wall cells,
   and existing claims — same construction as `settlement.rs:151-158`.
 
-### Wiring into `generate_town`
+### Wiring into `generate_settlement`
 
 Split the existing rural loop. Today (`settlement.rs:78-107`) it does, per district:
 `place_rural_building` → `paint_production_area`. Becomes:
@@ -219,7 +219,7 @@ buildings just get a door connector straight to the gate spine.
   `network::mst_edges` was made `pub(crate)` for potential reuse (the v1 network
   uses a nearest-gate star with cost-coupling rather than an MST, so it isn't
   called yet — kept exposed for a future multi-destination rural trunk).
-- `settlement::generate_town` — rural flow is now three phases: place all rural
+- `settlement::generate_settlement` — rural flow is now three phases: place all rural
   buildings → `build_rural_road_network` + realize + claim `Path` → paint all
   production areas via `paint_production_area_for`.
 - **Door scan / live-server cache fix.** The door scan reads back blocks placed

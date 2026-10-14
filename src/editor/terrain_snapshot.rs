@@ -1,8 +1,8 @@
 //! Saved terrain: the raw inputs `World::new` receives from the GDMC server
 //! (chunks + three heightmaps), so a World can be rebuilt without a server via
-//! [`World::from_fixture`](super::World::from_fixture).
+//! [`World::from_snapshot`](super::World::from_snapshot).
 //!
-//! Chunk sections outside the terrain band ([`TerrainFixture::kept_y_range`])
+//! Chunk sections outside the terrain band ([`TerrainSnapshot::kept_y_range`])
 //! are dropped to keep the file small, so a rebuilt World's `get_block`
 //! returns `None` for points outside that band (deep underground, high sky).
 //! Everything inside the band behaves exactly like the live World.
@@ -23,7 +23,7 @@ use crate::{geometry::Rect3D, minecraft::Chunk};
 const BAND_MARGIN: i32 = 16;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TerrainFixture {
+pub struct TerrainSnapshot {
     pub build_area: Rect3D,
     /// Chunk sections intersecting `kept_y_range` only.
     pub chunks: Vec<Chunk>,
@@ -37,7 +37,7 @@ pub struct TerrainFixture {
     pub motion_blocking_map: Vec<Vec<i32>>,
 }
 
-impl TerrainFixture {
+impl TerrainSnapshot {
     /// Build a fixture from raw server data, dropping chunk sections whose
     /// 16-block band lies outside `[min ocean floor - 16, max motion-blocking + 16]`.
     pub fn new(
@@ -46,14 +46,14 @@ impl TerrainFixture {
         ground_map: Vec<Vec<i32>>,
         ocean_map: Vec<Vec<i32>>,
         motion_blocking_map: Vec<Vec<i32>>,
-    ) -> TerrainFixture {
+    ) -> TerrainSnapshot {
         let lo = ocean_map.iter().flatten().copied().min().unwrap_or(build_area.origin.y) - BAND_MARGIN;
         let hi = motion_blocking_map.iter().flatten().copied().max().unwrap_or(build_area.max().y) + BAND_MARGIN;
         for chunk in &mut chunks {
             chunk.sections.retain(|s| s.y * 16 <= hi && s.y * 16 + 15 >= lo);
         }
         chunks.sort_by_key(|c| (c.x_pos, c.z_pos));
-        TerrainFixture { build_area, chunks, kept_y_range: (lo, hi), ground_map, ocean_map, motion_blocking_map }
+        TerrainSnapshot { build_area, chunks, kept_y_range: (lo, hi), ground_map, ocean_map, motion_blocking_map }
     }
 
     pub fn save(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
@@ -69,7 +69,7 @@ impl TerrainFixture {
         Ok(())
     }
 
-    pub fn load(path: impl AsRef<Path>) -> anyhow::Result<TerrainFixture> {
+    pub fn load(path: impl AsRef<Path>) -> anyhow::Result<TerrainSnapshot> {
         let path = path.as_ref();
         let file = std::fs::File::open(path).with_context(|| format!("open {}", path.display()))?;
         let mut bytes = Vec::new();

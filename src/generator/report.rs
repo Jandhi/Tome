@@ -1,5 +1,5 @@
-//! [`TownReport`]: the facts a town run prints, captured as data so a run can be
-//! saved as `metrics.json` next to its `town.scene` and compared with another.
+//! [`SettlementReport`]: the facts a town run prints, captured as data so a run can be
+//! saved as `metrics.json` next to its `settlement.scene` and compared with another.
 
 use std::path::Path;
 use std::time::Instant;
@@ -7,11 +7,11 @@ use std::time::Instant;
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
-/// What [`generate_town_with`](super::settlement::generate_town_with) built.
+/// What [`generate_settlement_with`](super::settlement::generate_settlement_with) built.
 /// Counts mirror the `println!` summaries of the same run. Lists of pairs keep
 /// a stable order (sorted by name) so two reports diff cleanly.
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
-pub struct TownReport {
+pub struct SettlementReport {
     pub seed: i64,
     /// `live` | `offline`, filled in by the caller that saves the report.
     pub source: String,
@@ -85,7 +85,7 @@ pub struct SpecPlacement {
     pub front_door: String,
 }
 
-impl TownReport {
+impl SettlementReport {
     /// Record the time since `*t` as stage `name` and restart the clock.
     pub fn lap(&mut self, t: &mut Instant, name: &str) {
         self.timings_ms.push((name.to_string(), t.elapsed().as_millis() as u64));
@@ -101,7 +101,7 @@ impl TownReport {
         std::fs::write(path, json).with_context(|| format!("write {}", path.display()))
     }
 
-    pub fn load(path: impl AsRef<Path>) -> anyhow::Result<TownReport> {
+    pub fn load(path: impl AsRef<Path>) -> anyhow::Result<SettlementReport> {
         let path = path.as_ref();
         let text = std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         Ok(serde_json::from_str(&text)?)
@@ -120,8 +120,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn town_report_roundtrips_through_json() {
-        let r = TownReport {
+    fn settlement_report_roundtrips_through_json() {
+        let r = SettlementReport {
             seed: -42,
             source: "offline".into(),
             culture: "Medieval".into(),
@@ -137,7 +137,7 @@ mod tests {
         };
         let path = std::env::temp_dir().join("tome_report_test").join("metrics.json");
         r.save(&path).unwrap();
-        let l = TownReport::load(&path).unwrap();
+        let l = SettlementReport::load(&path).unwrap();
         assert_eq!(serde_json::to_value(&l).unwrap(), serde_json::to_value(&r).unwrap());
         assert_eq!(l.timings_ms[1], ("roads".to_string(), 45));
         assert_eq!(l.build_area_origin, [-100, 60, 20]);

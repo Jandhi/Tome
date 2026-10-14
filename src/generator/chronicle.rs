@@ -47,7 +47,7 @@ pub struct DossierDistrict {
 
 /// Everything the chronicle needs to write a guide to the town. Scalars describe
 /// what the place *is*; `landmarks` is what's *in* it. Assembled once at the end
-/// of `generate_town`, where every source is still in scope, and handed to
+/// of `generate_settlement`, where every source is still in scope, and handed to
 /// [`generate_chronicle`]. Serializable so a run can dump it to inspect the exact
 /// facts the model was given.
 #[derive(Debug, Clone, Serialize)]

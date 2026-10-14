@@ -1,10 +1,10 @@
-//! Offline tests for `Editor::capture_scene` and `TerrainFixture`.
+//! Offline tests for `Editor::capture_scene` and `TerrainSnapshot`.
 
 use crate::util::HashMap;
 
 use fastnbt::LongArray;
 
-use super::fixture::TerrainFixture;
+use super::terrain_snapshot::TerrainSnapshot;
 use super::World;
 use crate::geometry::{Point2D, Point3D, Rect3D};
 use crate::minecraft::chunk::{BlockStates, ChunkSection, HeightMaps};
@@ -63,7 +63,7 @@ fn heightmaps(size_x: usize, size_z: usize, f: impl Fn(usize, usize) -> i32) -> 
 #[test]
 fn terrain_fixture_round_trips() {
     let area = Rect3D { origin: Point3D::new(-40, -64, 20), size: Point3D::new(4, 384, 3) };
-    let fixture = TerrainFixture::new(
+    let fixture = TerrainSnapshot::new(
         area,
         Vec::new(),
         heightmaps(4, 3, |x, z| 60 + x as i32 + 2 * z as i32),
@@ -73,7 +73,7 @@ fn terrain_fixture_round_trips() {
     assert_eq!(fixture.kept_y_range, (58 - 16, 65 + 6 + 16));
     let path = temp_path("terrain.fixture.nbt.gz");
     fixture.save(&path).unwrap();
-    let loaded = TerrainFixture::load(&path).unwrap();
+    let loaded = TerrainSnapshot::load(&path).unwrap();
 
     let direct = World::from_parts(
         area,
@@ -82,7 +82,7 @@ fn terrain_fixture_round_trips() {
         fixture.ocean_map.clone(),
         fixture.motion_blocking_map.clone(),
     );
-    let world = World::from_fixture(loaded);
+    let world = World::from_snapshot(loaded);
     assert_eq!(world.build_area.origin, area.origin);
     for x in 0..4 {
         for z in 0..3 {
@@ -93,8 +93,8 @@ fn terrain_fixture_round_trips() {
             assert_eq!(world.get_motion_blocking_height_at(p), direct.get_motion_blocking_height_at(p));
         }
     }
-    // to_fixture restores the absolute heights.
-    assert_eq!(world.to_fixture().ground_map, fixture.ground_map);
+    // to_snapshot restores the absolute heights.
+    assert_eq!(world.to_snapshot().ground_map, fixture.ground_map);
 }
 
 /// Chunks hold fastnbt `LongArray`s, whose serde form is a special token map;
@@ -133,7 +133,7 @@ fn terrain_fixture_round_trips_chunk_data() {
         block_entities: Some(vec![fastnbt::Value::String("chest".into())]),
     };
     let area = Rect3D { origin: Point3D::new(0, 64, 0), size: Point3D::new(2, 16, 2) };
-    let fixture = TerrainFixture::new(
+    let fixture = TerrainSnapshot::new(
         area,
         vec![chunk],
         heightmaps(2, 2, |_, _| 65),
@@ -144,11 +144,11 @@ fn terrain_fixture_round_trips_chunk_data() {
     assert_eq!(fixture.chunks[0].sections.iter().map(|s| s.y).collect::<Vec<_>>(), vec![4]);
     let path = temp_path("chunk.fixture.nbt.gz");
     fixture.save(&path).unwrap();
-    let loaded = TerrainFixture::load(&path).unwrap();
+    let loaded = TerrainSnapshot::load(&path).unwrap();
     assert_eq!(loaded.kept_y_range, (49, 81));
     assert_eq!(loaded.chunks[0].heightmaps.world_surface_wg.as_ref().map(|l| l.len()), Some(37));
     assert!(loaded.chunks[0].heightmaps.ocean_floor_wg.is_none());
-    let world = World::from_fixture(loaded);
+    let world = World::from_snapshot(loaded);
     assert_eq!(world.get_block(Point3D::new(0, 0, 0)).map(|b| b.id), Some("minecraft:stone".into()));
     assert_eq!(world.get_block(Point3D::new(1, 0, 0)).map(|b| b.id), Some("minecraft:air".into()));
     assert_eq!(world.get_ground_block(Point2D::new(0, 0)).map(|b| b.id.as_str()), Some("minecraft:stone"));
@@ -159,28 +159,28 @@ fn terrain_fixture_round_trips_chunk_data() {
 /// leaking into RNG draws). Slow (two full towns), hence `#[ignore]`:
 ///
 /// ```text
-/// TOME_FIXTURE=output/runs/<seed>/terrain.fixture.nbt.gz cargo test offline_town_is_deterministic -- --ignored --nocapture
+/// TOME_FIXTURE=output/runs/<seed>/terrain.fixture.nbt.gz cargo test offline_settlement_is_deterministic -- --ignored --nocapture
 /// ```
 ///
 /// std `RandomState` re-keys every new map, so a stray std map feeding the RNG
 /// shows up here even within one process.
 #[tokio::test]
 #[ignore]
-async fn offline_town_is_deterministic() {
+async fn offline_settlement_is_deterministic() {
     let Ok(path) = std::env::var("TOME_FIXTURE") else {
-        eprintln!("offline_town_is_deterministic: TOME_FIXTURE not set, skipping");
+        eprintln!("offline_settlement_is_deterministic: TOME_FIXTURE not set, skipping");
         return;
     };
-    // generate_town ends with the AI chronicle (a written book, no blocks),
+    // generate_settlement ends with the AI chronicle (a written book, no blocks),
     // which reads OPENAI_KEY from .env like main does.
     dotenv::dotenv().ok();
     let seed = crate::noise::Seed(1791494029742476500);
 
     let mut towns = Vec::new();
     for _ in 0..2 {
-        let fixture = TerrainFixture::load(&path).expect("load fixture");
-        let mut editor = World::from_fixture(fixture).get_offline_editor();
-        crate::generator::settlement::generate_town(&mut editor, seed, None).await;
+        let fixture = TerrainSnapshot::load(&path).expect("load fixture");
+        let mut editor = World::from_snapshot(fixture).get_offline_editor();
+        crate::generator::settlement::generate_settlement(&mut editor, seed, None).await;
         let scene = editor.capture_scene();
         let blocks: HashMap<Point3D, String> = scene.iter().map(|(p, s)| (p, s.to_string())).collect();
         towns.push(blocks);

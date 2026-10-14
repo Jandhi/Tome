@@ -117,6 +117,71 @@ pub struct RouteContext<'a> {
     pub blocked: Option<&'a HashSet<Point2D>>,
 }
 
+/// A* search state for [`route_path_with`]. A node's y is clamped to ±max_grade
+/// of its predecessor, so the same cell reached two ways can sit at different
+/// heights — y is part of the key. `dir` (the incoming step delta) is what the
+/// turn penalty scores against; it's `None` only at the start.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct State {
+    cell: Point2D,
+    y: i32,
+    dir: Option<Point3D>,
+}
+impl State {
+    fn pos(&self) -> Point3D {
+        Point3D { x: self.cell.x, y: self.y, z: self.cell.y }
+    }
+}
+
+/// Min-heap entry by f = g + h (lazy deletion: stale pops filtered via the record's `g`).
+struct HeapEntry {
+    f: u64,
+    g: u64,
+    state: State,
+}
+impl PartialEq for HeapEntry {
+    fn eq(&self, other: &Self) -> bool { self.f == other.f }
+}
+impl Eq for HeapEntry {}
+impl Ord for HeapEntry {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.f.cmp(&other.f).reverse()
+    }
+}
+impl PartialOrd for HeapEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+// `CellInfo::flags` bits and the "no value" sentinel for its heights.
+const KNOWN: u8 = 1;
+const ENTERABLE: u8 = 2; // in region, not blocked, has a height
+const ON_ROAD: u8 = 4;
+const WATER: u8 = 8;
+const NONE: i32 = i32::MIN;
+/// Everything a neighbour probe reads about a cell, filled lazily on first probe
+/// (the world and `ctx` are fixed for the whole search). A cell is probed once per
+/// (y, incoming dir) state that reaches it, so this turns the per-probe lookups
+/// (region / blocked / road / wall maps, heights, water) into one array read.
+#[derive(Clone, Copy)]
+struct CellInfo {
+    flags: u8,
+    height: i32,
+    road_height: i32,
+    wall_dist: i32,
+}
+
+/// Per-state search record: best g so far, the parent it was reached from, and
+/// whether it has been settled (popped). One map instead of separate
+/// g_score / came_from / closed maps.
+#[derive(Clone, Copy)]
+struct Record {
+    g: u64,
+    parent: Option<State>,
+    closed: bool,
+}
+
 pub async fn get_path(
     editor: &Editor,
     start: Point3D,
@@ -208,43 +273,6 @@ pub async fn route_path_with(
     // pick its way up rough ground instead of stepping over it blind.
     let neighbour_factors = [params.step, (params.step / 2).max(1)];
 
-    // A node's y is clamped to ±max_grade of its predecessor, so the same cell
-    // reached two ways can sit at different heights — y is part of the key.
-    // `dir` (the incoming step delta) is what the turn penalty scores against;
-    // it's `None` only at the start.
-    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-    struct State {
-        cell: Point2D,
-        y: i32,
-        dir: Option<Point3D>,
-    }
-    impl State {
-        fn pos(&self) -> Point3D {
-            Point3D { x: self.cell.x, y: self.y, z: self.cell.y }
-        }
-    }
-
-    // Min-heap by f = g + h (lazy deletion: stale pops filtered via `g_score`).
-    struct HeapEntry {
-        f: u64,
-        g: u64,
-        state: State,
-    }
-    impl PartialEq for HeapEntry {
-        fn eq(&self, other: &Self) -> bool { self.f == other.f }
-    }
-    impl Eq for HeapEntry {}
-    impl Ord for HeapEntry {
-        fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-            self.f.cmp(&other.f).reverse()
-        }
-    }
-    impl PartialOrd for HeapEntry {
-        fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-            Some(self.cmp(other))
-        }
-    }
-
     let start_cell = new_start.drop_y();
     let heuristic = |pos: Point3D| pos.distance(new_end) as u64 * HEURISTIC_WEIGHT;
     let is_end = |cell: Point2D, y: i32| {
@@ -258,22 +286,6 @@ pub async fn route_path_with(
 
     let start_state = State { cell: start_cell, y: new_start.y, dir: None };
 
-    // Everything a neighbour probe reads about a cell, filled lazily on first probe
-    // (the world and `ctx` are fixed for the whole search). A cell is probed once per
-    // (y, incoming dir) state that reaches it, so this turns the per-probe lookups
-    // (region / blocked / road / wall maps, heights, water) into one array read.
-    const KNOWN: u8 = 1;
-    const ENTERABLE: u8 = 2; // in region, not blocked, has a height
-    const ON_ROAD: u8 = 4;
-    const WATER: u8 = 8;
-    const NONE: i32 = i32::MIN;
-    #[derive(Clone, Copy)]
-    struct CellInfo {
-        flags: u8,
-        height: i32,
-        road_height: i32,
-        wall_dist: i32,
-    }
     let world = editor.world();
     let size_x = world.build_area.size.x;
     let size_z = world.build_area.size.z;
@@ -309,16 +321,6 @@ pub async fn route_path_with(
         }
         Some(*info)
     };
-
-    // Per-state search record: best g so far, the parent it was reached from, and
-    // whether it has been settled (popped). One map instead of separate
-    // g_score / came_from / closed maps.
-    #[derive(Clone, Copy)]
-    struct Record {
-        g: u64,
-        parent: Option<State>,
-        closed: bool,
-    }
 
     let mut open: BinaryHeap<HeapEntry> = BinaryHeap::new();
     let mut records: HashMap<State, Record> = HashMap::default();

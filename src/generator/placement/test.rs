@@ -1131,7 +1131,7 @@ mod tests {
         // the named road network coloured per road (same 16-hue palette as the
         // in-world wool labels), with each road's id printed at its centroid.
         {
-            // Shared renderer (also used by the live generate_town pipeline).
+            // Shared renderer (also used by the live generate_settlement pipeline).
             let svg = crate::generator::paths::render_town_map(
                 editor.world(), &urban, &all_paths, &road_network.road_labels,
                 &crate::util::HashMap::default(), &full_alleys, Some(&road_network), &[], &[],

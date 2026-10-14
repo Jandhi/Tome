@@ -14,7 +14,7 @@ use crate::generator::terrain::{clear_floating_logs, drain_liquids, flatten_urba
 use crate::geometry::{Point2D, Point3D};
 use crate::minecraft::{Block, Color};
 use crate::noise::{Seed, RNG};
-use crate::generator::report::{sorted_counts, TownReport};
+use crate::generator::report::{sorted_counts, SettlementReport};
 
 /// Full town-generation pipeline: feathered urban flatten + tiered A* road
 /// network, then hierarchical house placement.
@@ -216,7 +216,7 @@ pub fn dominant_biome(world: &crate::editor::World) -> Option<crate::minecraft::
 }
 
 /// Assemble the chronicle's [`CityDossier`] from the final settlement state. All
-/// inputs are locals still in scope at the end of [`generate_town`]; this does the
+/// inputs are locals still in scope at the end of [`generate_settlement`]; this does the
 /// id→name / colour→word / coords→quarter conversion so the LLM sees only
 /// human-readable, relational facts. Roads are emitted first because they are the
 /// `near` vocabulary every other landmark anchors to.
@@ -458,7 +458,7 @@ fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &Loaded
 
 /// Per-run switches that are not part of the town itself.
 #[derive(Debug, Clone, Default)]
-pub struct TownOptions {
+pub struct SettlementOptions {
     /// Ask OpenAI to write the chronicle book at the end (live runs only; it
     /// costs an API call). Off by default; `cargo run -- --full` turns it on.
     pub chronicle: bool,
@@ -468,23 +468,23 @@ pub struct TownOptions {
     pub house_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)>,
 }
 
-pub async fn generate_town(
+pub async fn generate_settlement(
     editor: &mut Editor,
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
 ) {
-    generate_town_with(editor, seed, culture, &TownOptions::default()).await;
+    generate_settlement_with(editor, seed, culture, &SettlementOptions::default()).await;
 }
 
-pub async fn generate_town_with(
+pub async fn generate_settlement_with(
     editor: &mut Editor,
     seed: Seed,
     culture: Option<crate::generator::buildings_v2::Culture>,
-    options: &TownOptions,
-) -> TownReport {
+    options: &SettlementOptions,
+) -> SettlementReport {
     let mut rng = RNG::new(seed);
     let mut rng2 = RNG::new(seed);
-    let mut report = TownReport { seed: seed.0, ..Default::default() };
+    let mut report = SettlementReport { seed: seed.0, ..Default::default() };
     {
         let b = editor.world().build_area;
         report.build_area_origin = [b.origin.x, b.origin.y, b.origin.z];

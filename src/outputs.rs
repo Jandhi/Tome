@@ -1,4 +1,4 @@
-//! Which artifacts a run writes, from `--out`. Town runs (`cargo run`,
+//! Which artifacts a run writes, from `--out`. Settlement runs (`cargo run`,
 //! `cargo offline`) and `--houses` each have their own defaults; `--out` either
 //! replaces them with a list (`--out scene,renders`) or adjusts them with
 //! `+`/`-` (`--out +specs,-renders`). `all` and `none` work as list items.
@@ -8,13 +8,13 @@
 /// One kind of artifact a run can write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Artifact {
-    /// `terrain.fixture.nbt.gz`, the untouched terrain (live runs only).
-    Fixture,
-    /// `town.scene`, every placed block.
+    /// `terrain.fixture.nbt.gz`, the untouched terrain snapshot (live runs only).
+    Snapshot,
+    /// `settlement.scene`, every placed block.
     Scene,
     /// The PNG views (top, iso, elevations). `--houses` always renders.
     Renders,
-    /// `metrics.json` for towns, `houses.json` for `--houses`.
+    /// `metrics.json` for settlements, `houses.json` for `--houses`.
     Metrics,
     /// One `*.spec.yaml` per house.
     Specs,
@@ -24,11 +24,11 @@ pub enum Artifact {
 
 impl Artifact {
     pub const ALL: [Artifact; 6] =
-        [Artifact::Fixture, Artifact::Scene, Artifact::Renders, Artifact::Metrics, Artifact::Specs, Artifact::Viewer];
+        [Artifact::Snapshot, Artifact::Scene, Artifact::Renders, Artifact::Metrics, Artifact::Specs, Artifact::Viewer];
 
     pub fn name(self) -> &'static str {
         match self {
-            Artifact::Fixture => "fixture",
+            Artifact::Snapshot => "snapshot",
             Artifact::Scene => "scene",
             Artifact::Renders => "renders",
             Artifact::Metrics => "metrics",
@@ -38,6 +38,8 @@ impl Artifact {
     }
 
     fn parse(s: &str) -> anyhow::Result<Artifact> {
+        // `fixture` is the snapshot's old name.
+        let s = if s == "fixture" { "snapshot" } else { s };
         Artifact::ALL.into_iter().find(|a| a.name() == s).ok_or_else(|| {
             let names: Vec<&str> = Artifact::ALL.iter().map(|a| a.name()).collect();
             anyhow::anyhow!("--out: unknown artifact `{s}` (valid: {}, all, none)", names.join(", "))
@@ -60,9 +62,9 @@ impl Outputs {
         Outputs(artifacts.iter().fold(0, |m, a| m | a.bit()))
     }
 
-    /// What a town run writes without `--out`: everything but specs and the viewer.
-    pub fn town_default() -> Outputs {
-        Outputs::of(&[Artifact::Fixture, Artifact::Scene, Artifact::Renders, Artifact::Metrics])
+    /// What a settlement run writes without `--out`: everything but specs and the viewer.
+    pub fn settlement_default() -> Outputs {
+        Outputs::of(&[Artifact::Snapshot, Artifact::Scene, Artifact::Renders, Artifact::Metrics])
     }
 
     /// What `--houses` writes without `--out`: everything but the viewer.
@@ -126,13 +128,13 @@ mod tests {
 
     #[test]
     fn out_lists_replace_and_signs_adjust_the_defaults() {
-        let d = Outputs::town_default();
+        let d = Outputs::settlement_default();
         assert_eq!(Outputs::parse(None, d).unwrap(), d);
         assert_eq!(Outputs::parse(Some("scene,renders"), d).unwrap(), Outputs::of(&[Scene, Renders]));
-        assert_eq!(Outputs::parse(Some("+specs"), d).unwrap(), Outputs::of(&[Fixture, Scene, Renders, Metrics, Specs]));
+        assert_eq!(Outputs::parse(Some("+specs"), d).unwrap(), Outputs::of(&[Snapshot, Scene, Renders, Metrics, Specs]));
         assert_eq!(Outputs::parse(Some("-renders,-fixture"), d).unwrap(), Outputs::of(&[Scene, Metrics]));
         assert_eq!(Outputs::parse(Some("none"), d).unwrap(), Outputs::NONE);
-        assert_eq!(Outputs::parse(Some("all,-viewer"), d).unwrap(), Outputs::of(&[Fixture, Scene, Renders, Metrics, Specs]));
+        assert_eq!(Outputs::parse(Some("all,-viewer"), d).unwrap(), Outputs::of(&[Snapshot, Scene, Renders, Metrics, Specs]));
         let err = Outputs::parse(Some("scene,pngs"), d).unwrap_err().to_string();
         assert!(err.contains("pngs") && err.contains("renders"), "{err}");
         assert!(Outputs::parse(Some(""), d).is_err());

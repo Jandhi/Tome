@@ -417,82 +417,52 @@ fn cleared_heightmap(i: usize, roof_rects: &[Rect2D], rects: &[Rect2D], axes: &[
     hm
 }
 
-#[test]
-fn end_to_end_gables_keep_the_narrower_roof_profile_at_the_junction() {
-    // Core 11x7 (z 0..6, ridge X) with a 7x5 wing (z 1..5) on its east end, both
-    // ridges along X: the two gables face each other.
-    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(10, 6));
-    let wing = Rect2D::from_points(Point2D::new(11, 1), Point2D::new(17, 5));
-    let rects = [core, wing];
-    let axes = [RidgeAxis::X, RidgeAxis::X];
-
-    let hm_core = cleared_heightmap(0, &rects, &rects, &axes);
-    // The core's east overhang is cleared over the wing's columns only ...
-    for z in 1..=5 {
-        assert_eq!(hm_core.get(11, z), f32::NEG_INFINITY, "core overhang over the wing at z={z}");
-    }
-    // ... and kept beside it (eave corners and the uncovered columns), and at
-    // the free west end.
-    assert_eq!(hm_core.get(11, 0), 0.0);
-    assert_eq!(hm_core.get(11, 6), 0.0);
-    assert_eq!(hm_core.get(11, -1), -1.0);
-    assert_eq!(hm_core.get(-1, 3), 3.0);
-
-    let hm_wing = cleared_heightmap(1, &rects, &rects, &axes);
-    // The wing's west overhang lies entirely inside the core and goes; its
-    // east overhang stays.
-    for z in 0..=6 {
-        assert_eq!(hm_wing.get(10, z), f32::NEG_INFINITY, "wing overhang inside the core at z={z}");
-    }
-    assert_eq!(hm_wing.get(18, 3), 2.0);
-
-    // Merged, the junction column takes the wing's (lower) profile, so the
-    // wing's roof butts into the core's gable wall instead of the core's
-    // overhang floating over it.
-    let mut merged = RoofHeightmap::new(-1, -1, 21, 9);
-    merged.merge_max(&hm_core);
-    merged.merge_max(&hm_wing);
-    assert_eq!(merged.get(10, 3), 3.0);
-    assert_eq!(merged.get(11, 3), 2.0);
-    assert_eq!(merged.get(11, 1), 0.0);
+/// One rect's gable overhang after clearing: `cleared` cells are gone (covered by
+/// another rect), `kept` cells keep their height.
+struct JunctionCase {
+    name: &'static str,
+    rects: [Rect2D; 2],
+    roof_rects: [Rect2D; 2],
+    axes: [RidgeAxis; 2],
+    rect: usize,
+    cleared: Vec<(i32, i32)>,
+    kept: Vec<(i32, i32, f32)>,
 }
 
 #[test]
-fn t_junction_wing_roof_still_stops_at_the_core_ridge() {
-    // Core 15x7 (ridge X, centre z=3); wing 5 wide south of it (ridge Z),
-    // extended north to the ridge line for the roof.
-    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(14, 6));
-    let wing = Rect2D::from_points(Point2D::new(4, 7), Point2D::new(8, 11));
-    let wing_roof = Rect2D::from_points(Point2D::new(4, 3), Point2D::new(8, 11));
-    let rects = [core, wing];
-    let roof_rects = [core, wing_roof];
-    let axes = [RidgeAxis::X, RidgeAxis::Z];
-
-    let hm = cleared_heightmap(1, &roof_rects, &rects, &axes);
-    // The whole row past the extended end (corners included) is inside the core.
-    for x in 3..=9 {
-        assert_eq!(hm.get(x, 2), f32::NEG_INFINITY, "extended end overhang at x={x}");
+fn gable_junctions_clear_only_the_covered_overhang() {
+    let r = |x0, z0, x1, z1| Rect2D::from_points(Point2D::new(x0, z0), Point2D::new(x1, z1));
+    // End to end: core 11x7 (ridge X) with a 7x5 wing on its east end, ridges
+    // facing each other. Each loses its overhang over the other, so the
+    // junction takes the wing's lower profile.
+    let (core, wing) = (r(0, 0, 10, 6), r(11, 1, 17, 5));
+    let end_to_end = |rect, cleared, kept| JunctionCase {
+        name: "end to end", rects: [core, wing], roof_rects: [core, wing], axes: [RidgeAxis::X, RidgeAxis::X], rect, cleared, kept,
+    };
+    // T and L: core 15x7 (ridge X), wing 5 wide to the south (ridge Z) with its
+    // roof extended north to the core's ridge line; the L wing is flush west.
+    let core = r(0, 0, 14, 6);
+    let cases = [
+        end_to_end(0, (1..=5).map(|z| (11, z)).collect(), vec![(11, 0, 0.0), (11, 6, 0.0), (11, -1, -1.0), (-1, 3, 3.0), (10, 3, 3.0)]),
+        end_to_end(1, (0..=6).map(|z| (10, z)).collect(), vec![(18, 3, 2.0), (11, 3, 2.0), (11, 1, 0.0)]),
+        JunctionCase {
+            name: "T", rects: [core, r(4, 7, 8, 11)], roof_rects: [core, r(4, 3, 8, 11)], axes: [RidgeAxis::X, RidgeAxis::Z], rect: 1,
+            cleared: (3..=9).map(|x| (x, 2)).collect(),
+            kept: vec![(6, 3, 2.0), (3, 8, -1.0), (6, 12, 2.0)],
+        },
+        JunctionCase {
+            name: "L", rects: [core, r(0, 7, 4, 11)], roof_rects: [core, r(0, 3, 4, 11)], axes: [RidgeAxis::X, RidgeAxis::Z], rect: 1,
+            cleared: (0..=5).map(|x| (x, 2)).collect(),
+            kept: vec![(-1, 2, -1.0)],
+        },
+    ];
+    for case in &cases {
+        let hm = cleared_heightmap(case.rect, &case.roof_rects, &case.rects, &case.axes);
+        for &(x, z) in &case.cleared {
+            assert_eq!(hm.get(x, z), f32::NEG_INFINITY, "{} rect {}: ({x}, {z}) should be cleared", case.name, case.rect);
+        }
+        for &(x, z, h) in &case.kept {
+            assert_eq!(hm.get(x, z), h, "{} rect {}: ({x}, {z}) should keep its height", case.name, case.rect);
+        }
     }
-    // The ridge line itself, the eave overhang and the outward end keep their heights.
-    assert_eq!(hm.get(6, 3), 2.0);
-    assert_eq!(hm.get(3, 8), -1.0);
-    assert_eq!(hm.get(6, 12), 2.0);
-}
-
-#[test]
-fn l_junction_wing_ridge_no_longer_pokes_past_the_core_ridge() {
-    // Same as the T-junction but the wing is flush with the core's west edge.
-    let core = Rect2D::from_points(Point2D::new(0, 0), Point2D::new(14, 6));
-    let wing = Rect2D::from_points(Point2D::new(0, 7), Point2D::new(4, 11));
-    let wing_roof = Rect2D::from_points(Point2D::new(0, 3), Point2D::new(4, 11));
-    let rects = [core, wing];
-    let roof_rects = [core, wing_roof];
-    let axes = [RidgeAxis::X, RidgeAxis::Z];
-
-    let hm = cleared_heightmap(1, &roof_rects, &rects, &axes);
-    for x in 0..=5 {
-        assert_eq!(hm.get(x, 2), f32::NEG_INFINITY, "extended end overhang at x={x}");
-    }
-    // The corner cell outside the core is the only one of that row left.
-    assert_eq!(hm.get(-1, 2), -1.0);
 }
