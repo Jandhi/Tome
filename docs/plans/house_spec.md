@@ -1,5 +1,8 @@
 # House spec
 
+Authoring reference (every field, its values, errors, examples):
+[../house_spec_schema.md](../house_spec_schema.md). This page is the design and its history.
+
 A YAML file holding the high-level decisions of one buildings_v2 house. The
 generator writes one for every house it builds; `--spec` builds from one.
 Every field is optional: a pinned field is used as written, an open field is
@@ -154,8 +157,9 @@ palette, timber or roof.
 4. **Validation.** Errors that name the field: rects overlapping, disconnected
    or outside the plot, room lists that don't match rects/floors, unknown
    names (listing the valid ones). Aimed at an LLM fixing its own spec.
-5. **Later.** ~~Settlement lots taking a spec~~ (done, see Status), a schema
-   reference doc for LLM authoring, placing a spec at a chosen spot.
+5. **Later.** ~~Settlement lots taking a spec~~ (done, see Status), ~~a schema
+   reference doc for LLM authoring~~ (done: [../house_spec_schema.md](../house_spec_schema.md)),
+   placing a spec at a chosen spot.
 
 ## Decisions (2026-10-10)
 

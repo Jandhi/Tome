@@ -1,5 +1,6 @@
 //! House spec: the high-level decisions of one buildings_v2 house as a YAML
-//! file (see `docs/plans/house_spec.md`).
+//! file (field reference: `docs/house_spec_schema.md`; design:
+//! `docs/plans/house_spec.md`).
 //!
 //! Every field is optional. A spec written by the generator
 //! ([`HouseSpec::resolved`]) has every decision filled in with what the house
