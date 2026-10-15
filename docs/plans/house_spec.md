@@ -125,6 +125,22 @@ palette, timber or roof.
   (wet ground, no stair room) is printed as a note. Placement goes to `metrics.json`
   (`spec_houses`, `specs_unplaced`). A spec bigger than any lot (the `fixed_shape` manor
   on lakeside) is reported as not built.
+- **Anchored specs** (phase 5, last part): a spec whose `site.origin` lies in the build area
+  is anchored (`HouseSpec::anchor`: the footprint's middle as placed, or the origin when the
+  footprint is open). Before any house is built the settlement scans every road slot on the
+  empty lots for the nearest one it fits (pinned footprint: turned and seated; open: the
+  widest core of its size at the walk's shallowest depth), then builds the anchored specs in
+  a first pass of the lot walk and the ordinary walk second, the lot plots shared between
+  them. One that can't build at its slot falls back to first fit with a note; an origin
+  outside the build area (the flat-world origins `--houses` writes) is a note too. Without
+  anchored specs the first pass touches nothing, so such towns are block-identical. On the
+  lakeside town a settlement's own specs go back where they stood.
+- **Door fallback**: `place_doors` skipped every outer wall an interior wall meets, so an L
+  or T whose road side is all joined wall got its door round the corner. A joined wall may
+  now take the front door off to one side of the joint (door and a cell either side clear of
+  boundary cells, two in from the ends), only when strictly nearer the plot edge than every
+  clear wall. Changes the door side of 3 of the 30 lakeside seed-7 houses, each onto its
+  road.
 - **Phase 4 done**: unknown keys are refused at parse time (`deny_unknown_fields`, a
   hand-read `cellar` naming the stray key); `resolve` lists every problem in one error
   (`N problems:` then one line each), adds `engawa: true` off a Japanese house as an
@@ -159,7 +175,7 @@ palette, timber or roof.
    names (listing the valid ones). Aimed at an LLM fixing its own spec.
 5. **Later.** ~~Settlement lots taking a spec~~ (done, see Status), ~~a schema
    reference doc for LLM authoring~~ (done: [../house_spec_schema.md](../house_spec_schema.md)),
-   placing a spec at a chosen spot.
+   ~~placing a spec at a chosen spot~~ (done: `site.origin`, see Status).
 
 ## Decisions (2026-10-10)
 

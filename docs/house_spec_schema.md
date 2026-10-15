@@ -53,10 +53,12 @@ With `--houses`, the flags `--culture`, `--size`, `--jetty`, `--knee-wall`,
 `--tall-top` and `--rects` fill fields the spec leaves open.
 
 In a settlement, each spec takes the first road slot where it fits, before an
-ordinary house gets it, turned so its front faces the road. Open `palette` and
-`colour` take the district's, so the house fits its street. A spec too big for
-every lot is reported as not built; see `spec_houses` / `specs_unplaced` in
-`metrics.json`.
+ordinary house gets it, turned so its front faces the road. To put it at a
+chosen spot instead, give it `site: { origin: [x, z] }` with a world position
+in the build area: it takes the road slot nearest there that fits (see
+[site](#site)). Open `palette` and `colour` take the district's, so the house
+fits its street. A spec too big for every lot is reported as not built; see
+`spec_houses` / `specs_unplaced` in `metrics.json`.
 
 ## Fields
 
@@ -77,7 +79,7 @@ every lot is reported as not built; see `spec_houses` / `specs_unplaced` in
 | `attic` | `true`, `false` | follows `roof` (see below) |
 | `knee_wall` | `true`, `false` | off |
 | `tall_top_floor` | `true`, `false` | off |
-| `site` | written by the generator | read back only (see below) |
+| `site` | `{ origin: [x, z], front_door }`, mostly written by the generator | where the house stood; `origin` places it in a settlement (see below) |
 
 ### culture
 
@@ -266,7 +268,7 @@ one (a settlement run prints a note when that happens).
 
 ### site
 
-Written by the generator into every resolved spec, ignored when building:
+Written by the generator into every resolved spec:
 
 ```yaml
 site:
@@ -276,9 +278,30 @@ site:
   plot: [24, 20]           # --houses only: the plot size
 ```
 
-Two parts are read back: `front_door` tells a settlement which side to turn
-toward the road, and `plot` (in `--houses`) sizes the plot so the door lands
-on the same side again. A hand-written spec can leave `site` out.
+Three parts are read back when building:
+
+- `origin` places the house in a settlement. When it lies inside the build
+  area, the house goes on the road slot nearest that spot where it fits
+  (nearest by the footprint's middle), built before any other house, so a
+  spec taken from a settlement's own `houses/` folder goes back where it stood
+  (same seed and terrain). An origin outside the build area, like the
+  flat-world ones `--houses` writes, is a note and the house goes on the first
+  slot it fits. If even the nearest slot can't take it, it also falls back
+  to the first that does.
+- `front_door` tells a settlement which side to turn toward the road (south
+  when missing).
+- `plot` (in `--houses`) sizes the plot so the door lands on the same side
+  again.
+
+`base_y` is only ever read back: the ground floor follows the terrain. A
+hand-written spec can leave `site` out, or give just `origin` (and
+`front_door`) to place a landmark:
+
+```yaml
+size: manor
+roof: { gable: double }
+site: { origin: [-9250, -3480], front_door: south }
+```
 
 ## When it says no
 

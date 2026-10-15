@@ -97,13 +97,39 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
 
     scored.sort_by_key(|&(_, dist)| dist);
 
-    if scored.is_empty() {
-        return None;
-    }
+    // A wall an interior wall meets can still take the front door, off to one
+    // side of the joint: the door and one cell either side clear of boundary
+    // cells, two cells in from either end, as near the middle as that allows,
+    // scored by the door's own distance to the plot edge. Only taken when it
+    // is strictly nearer the edge than every clear wall: an L or T whose road
+    // side is all joined walls otherwise gets its door round the corner.
+    let joint = wall_segs
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| s.floor == 0 && s.length >= min_segment_len && is_on_boundary(*i))
+        .filter_map(|(i, s)| {
+            let cells = segment_cells(s);
+            let w = door_width as usize;
+            if cells.len() < w + 4 {
+                return None;
+            }
+            let centre = (cells.len() - w) / 2;
+            (2..=cells.len() - 2 - w)
+                .filter(|&o| !cells[o - 1..o + w + 1].iter().any(|c| boundary_cells.contains(c)))
+                .min_by_key(|&o| o.abs_diff(centre))
+                .map(|o| (i, o as u32, distance_to_plot_edge(cells[o], plot_bounds)))
+        })
+        .min_by_key(|&(_, _, dist)| dist)
+        .filter(|&(_, _, dist)| scored.first().map_or(true, |&(_, best)| dist < best));
+
+    let (primary_idx, primary_offset) = match (joint, scored.first()) {
+        (Some((i, offset, _)), _) => (i, offset),
+        (None, Some(&(i, _))) => (i, (wall_segs.segments[i].length as u32 - door_width) / 2),
+        (None, None) => return None,
+    };
 
     // Place primary door on the closest segment
-    let primary_idx = scored[0].0;
-    let primary_offset = (wall_segs.segments[primary_idx].length as u32 - door_width) / 2;
     wall_segs.segments[primary_idx].openings.push(Opening {
         kind: OpeningKind::Door(door_style),
         offset: primary_offset,

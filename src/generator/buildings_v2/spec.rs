@@ -35,10 +35,13 @@
 //! Every pin skips or overrides only its own draw: a stream that draws
 //! several things (the frame's floors, the cellar's roll and stair) still
 //! makes every draw and replaces the pinned one, so pinning a field to the
-//! value it drew changes nothing. `site` is ignored on input except
-//! `site.plot`, which sizes the plot: the front door goes on the side nearest
-//! the plot's edge, so the same plot puts it back where it was. The ground
-//! floor's height comes from the plot's terrain.
+//! value it drew changes nothing. Of `site`, a build reads three parts:
+//! `site.plot` sizes a `--houses` plot (the front door goes on the side
+//! nearest the plot's edge, so the same plot puts it back where it was);
+//! `site.front_door` says which side a settlement turns toward its road; and
+//! `site.origin`, when it lies in a settlement's build area, anchors the house
+//! to the road slot nearest that spot ([`HouseSpec::anchor`]). The ground
+//! floor's height always comes from the terrain.
 //!
 //! **Checks.** Parsing refuses unknown keys and words, listing the valid
 //! ones, so a typo never drops a pin silently. [`resolve`] then refuses a
@@ -150,8 +153,8 @@ pub struct HouseSpec {
     /// room. The layout inside (walls, doors, furniture) stays computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rooms: Option<Vec<Vec<RoomType>>>,
-    /// Where the house stood. Read back for reference only: a build from the
-    /// spec takes these from its plot and road and ignores them.
+    /// Where the house stood. Mostly read back for reference; a build reads
+    /// `plot`, `front_door` and (in a settlement) `origin`, see [`SiteSpec`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<SiteSpec>,
 }
@@ -244,21 +247,25 @@ impl<'de> Deserialize<'de> for CellarSpec {
     }
 }
 
-/// Where a house stood (read-only; see [`HouseSpec::site`]).
+/// Where a house stood. `base_y` is only ever read back; see each field for
+/// what a build does with the others.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SiteSpec {
-    /// Absolute world `[x, z]` of the corner the footprint is relative to.
+    /// Absolute world `[x, z]` of the corner the footprint is relative to. In
+    /// a settlement whose build area holds it, the house goes on the road slot
+    /// nearest that spot ([`HouseSpec::anchor`]); elsewhere it is a note.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<[i32; 2]>,
-    /// The side the front door opens out of.
+    /// The side the front door opens out of. A settlement turns a pinned
+    /// footprint so this side faces the road (south when missing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub front_door: Option<Cardinal>,
     /// Absolute y of the ground floor (the front door's sill).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_y: Option<i32>,
-    /// Size `[x, z]` of the plot the footprint sat in (`--houses` only). The
-    /// one site field a build reads: it sizes the plot (grown to fit the
+    /// Size `[x, z]` of the plot the footprint sat in (`--houses` only). A
+    /// `--houses` build reads it to size the plot (grown to fit the
     /// footprint), so the front door lands on the same side again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plot: Option<[i32; 2]>,
@@ -397,11 +404,38 @@ impl HouseSpec {
         }
     }
 
+    /// Where a settlement should seat this house, build-area local: the middle
+    /// of the pinned footprint as `site.origin` places it (just the origin when
+    /// the footprint is open). `None` without an origin; `Err` (a note) when
+    /// the origin lies outside the build area, as `--houses`' flat-world
+    /// origins do, and the house goes on the first slot it fits instead.
+    pub fn anchor(&self, build_area: Rect2D) -> Result<Option<Point2D>, String> {
+        let Some([x, z]) = self.site.as_ref().and_then(|s| s.origin) else { return Ok(None) };
+        let origin = Point2D::new(x, z);
+        if !build_area.contains(origin) {
+            return Err(format!(
+                "site.origin: {x}, {z} is outside the build area ({}, {} to {}, {}); placing it on the first slot it fits",
+                build_area.min().x, build_area.min().y, build_area.max().x, build_area.max().y,
+            ));
+        }
+        let middle = match self.footprint.as_deref() {
+            Some(fp) if !fp.is_empty() => {
+                let x0 = fp.iter().map(|r| r.x).min().unwrap_or(0);
+                let z0 = fp.iter().map(|r| r.z).min().unwrap_or(0);
+                let x1 = fp.iter().map(|r| r.x + r.w).max().unwrap_or(0);
+                let z1 = fp.iter().map(|r| r.z + r.h).max().unwrap_or(0);
+                Point2D::new((x0 + x1) / 2, (z0 + z1) / 2)
+            }
+            _ => Point2D::new(0, 0),
+        };
+        Ok(Some(origin + middle - build_area.min()))
+    }
+
     /// Write the spec as YAML under a short comment saying how to read it.
     pub fn save(&self, path: impl AsRef<std::path::Path>) -> anyhow::Result<()> {
         let header = "# House spec (docs/plans/house_spec.md). footprint: rects relative to the plot, core first.\n\
                       # rooms: per footprint rect, bottom floor first, then its attic room if any.\n\
-                      # site: where the house stood, read back only.\n";
+                      # site: where the house stood; in a settlement, origin anchors it to the nearest road slot.\n";
         std::fs::write(path, format!("{header}{}", self.to_yaml()?))?;
         Ok(())
     }
@@ -884,6 +918,24 @@ mod tests {
         assert_eq!(north[1], RectSpec { x: 0, z: 0, w: 2, h: 2, floors: Some(1) });
         assert_eq!(north[0], RectSpec { x: 0, z: 2, w: 4, h: 3, floors: Some(2) });
         assert_eq!(rotate_footprint(&north, Cardinal::North, Cardinal::South), fp.to_vec());
+    }
+
+    #[test]
+    fn site_origin_anchors_inside_the_build_area_only() {
+        let area = Rect2D::new(Point2D::new(-100, 50), Point2D::new(200, 100));
+        let at = |origin: Option<[i32; 2]>, footprint: Option<Vec<RectSpec>>| HouseSpec {
+            site: origin.map(|o| SiteSpec { origin: Some(o), ..Default::default() }),
+            footprint,
+            ..Default::default()
+        };
+        assert_eq!(at(None, None).anchor(area), Ok(None));
+        // Open footprint: the origin itself, build-area local.
+        assert_eq!(at(Some([-90, 60]), None).anchor(area), Ok(Some(Point2D::new(10, 10))));
+        // Pinned footprint: the middle of its bounds.
+        let fp = vec![RectSpec { x: 0, z: 0, w: 8, h: 6, floors: None }, RectSpec { x: 8, z: 0, w: 4, h: 4, floors: None }];
+        assert_eq!(at(Some([-90, 60]), Some(fp)).anchor(area), Ok(Some(Point2D::new(16, 13))));
+        // `--houses` writes flat-world origins: outside, so a note, not an anchor.
+        assert!(at(Some([102, 6]), None).anchor(area).is_err());
     }
 
     #[test]

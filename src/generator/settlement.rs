@@ -456,6 +456,16 @@ fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &Loaded
     counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
 }
 
+/// The road slot an anchored `--spec` house was given: lot, tier (arterial,
+/// collector, alley), frontage within the tier, and cursor along it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SpecSlot {
+    lot: usize,
+    tier: usize,
+    frontage: usize,
+    cursor: i32,
+}
+
 /// Per-run switches that are not part of the town itself.
 #[derive(Debug, Clone, Default)]
 pub struct SettlementOptions {
@@ -546,14 +556,15 @@ pub async fn generate_settlement_with(
 
     // `--spec` houses, checked now that the culture is known: one that can't
     // build anywhere is dropped (and reported) before any lot is tried.
-    let mut pending_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)> = Vec::new();
+    // Each with the road slot it is anchored to (`site.origin`), once chosen.
+    let mut pending_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec, Option<SpecSlot>)> = Vec::new();
     for (name, spec) in &options.house_specs {
         match crate::generator::buildings_v2::spec::check_for_town(spec, culture, &data) {
             Ok(notes) => {
                 for note in notes {
                     println!("{name}: note: {note}");
                 }
-                pending_specs.push((name.clone(), spec.clone()));
+                pending_specs.push((name.clone(), spec.clone(), None));
             }
             Err(e) => {
                 println!("{name}: refused: {e:#}");
@@ -1354,410 +1365,525 @@ pub async fn generate_settlement_with(
     // the road and each house front, which we pave into a forecourt so the
     // unavoidable set-back on a diagonal reads as a shoulder, not bare grass.
     let mut tier_verge: [HashSet<Point2D>; 2] = Default::default();
-    for lot_idx in lot_order {
-        let lot = &sub_blocks[lot_idx];
-        if lot.is_empty() { continue; }
-        let Some(mut plot) = plot_from_block(lot) else { continue; };
-
-        // On a chosen manor-lot, the manor's tier (arterial when arterials
-        // had eligible frontages; otherwise collector) gets a Manor-only
-        // pool until the cap is reached. Other tiers — and other lots —
-        // stay House+Hall. Alley never hosts Manors.
-        let is_manor_lot = manor_lots.contains(&lot_idx) && manors_placed < MANOR_CAP;
-        let arterial_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 0 {
-            &[SizeClass::Manor]
-        } else {
-            &[SizeClass::House, SizeClass::Hall]
-        };
-        let collector_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 1 {
-            &[SizeClass::Manor]
-        } else {
-            &[SizeClass::House, SizeClass::Hall]
-        };
-        let tiers_local: [(&HashSet<Point2D>, &[SizeClass]); 3] = [
-            (&arterial_band, arterial_pool),
-            (&collector_band, collector_pool),
-            (&alley_band, &[SizeClass::House, SizeClass::Hall]),
-        ];
-
-        'tier_loop: for (ti, (band, pool)) in tiers_local.iter().enumerate() {
-            let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
-            for (fi, frontage) in frontage_from_roads(lot, band).into_iter().enumerate() {
-                tier_cells[ti] += frontage.cells.len();
-                tier_frontage[ti].extend(&frontage.cells);
-                let chain_len = frontage.cells.len() as i32;
-                if chain_len < min_front { tier_short[ti] += 1; continue; }
-                // On a manor lot's manor tier, place the one manor the scan sized
-                // at its chosen slice; skip every other frontage of that tier so
-                // no second, smaller manor gets seated.
-                let manor_here: Option<ManorChoice> = if is_manor_lot && ti == manor_tier_idx {
-                    match manor_choices.get(&lot_idx) {
-                        // Engawa scan picked this lot: build only at its chosen
-                        // slice, skipping the tier's other frontages.
-                        Some(c) if c.frontage_idx == fi => Some(*c),
-                        Some(_) => continue,
-                        // No scan (non-engawa culture): fall through to the
-                        // default random Manor placement on this tier.
-                        None => None,
+    // Shallowest depth we'll accept on a slice that can't take the rolled
+    // depth — lets diagonal frontage (where an axis-aligned rect overruns the
+    // staircased ribbon) still seat a house.
+    const MIN_FIT_DEPTH: i32 = 5;
+    // One plot per lot, shared by both passes below so houses never overlap.
+    let mut plots: Vec<Option<crate::generator::buildings_v2::footprint::Plot>> =
+        sub_blocks.iter().map(|b| if b.is_empty() { None } else { plot_from_block(b) }).collect();
+    // `--spec` houses with a `site.origin` in the build area are anchored: the
+    // road slot nearest that point where the house fits (its footprint seated,
+    // or for an open footprint the frontage cell itself) is chosen now, on the
+    // empty lots, and built in a first pass before any other house.
+    {
+        let b = editor.world().build_area;
+        let area = Rect2D::new(P2::new(b.origin.x, b.origin.z), P2::new(b.size.x, b.size.z));
+        let bands = [&arterial_band, &collector_band, &alley_band];
+        for (name, spec, slot) in pending_specs.iter_mut() {
+            let target = match spec.anchor(area) {
+                Ok(Some(t)) => t,
+                Ok(None) => continue,
+                Err(note) => { println!("{name}: note: {note}"); continue; }
+            };
+            let turned_for = |outward: Cardinal| -> Option<Vec<Rect2D>> {
+                spec.footprint.as_ref().map(|fp| {
+                    rotate_footprint(fp, spec.front(), outward)
+                        .iter()
+                        .map(|r| Rect2D::new(P2::new(r.x, r.z), P2::new(r.w, r.h)))
+                        .collect()
+                })
+            };
+            let mut best: Option<(i64, SpecSlot)> = None;
+            for (lot_idx, plot) in plots.iter().enumerate() {
+                let Some(plot) = plot else { continue };
+                for (ti, band) in bands.iter().enumerate() {
+                    for (fi, frontage) in frontage_from_roads(&sub_blocks[lot_idx], band).into_iter().enumerate() {
+                        let turned = turned_for(frontage.outward);
+                        for cursor in 0..frontage.cells.len() as i32 {
+                            let at = match &turned {
+                                Some(rects) => match seat_footprint(rects, &frontage, cursor, plot) {
+                                    Some(seated) => Footprint::new(outline_from_rects(&seated), seated).bounds().midpoint(),
+                                    None => continue,
+                                },
+                                // Open footprint: a slot the widest core of its
+                                // size (a hall's when open) fits at the walk's
+                                // shallowest depth, so the build there can't run
+                                // off the chain or the lot.
+                                None => {
+                                    let fw = *spec.size.unwrap_or(SizeClass::Hall).front_width_range().end();
+                                    if cursor + fw > frontage.cells.len() as i32 {
+                                        continue;
+                                    }
+                                    let slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
+                                    let core = rect_from_frontage(slice, frontage.outward, MIN_FIT_DEPTH);
+                                    if !plot.is_rect_usable(&core) {
+                                        continue;
+                                    }
+                                    core.midpoint()
+                                }
+                            };
+                            let d = at - target;
+                            let dist = d.x as i64 * d.x as i64 + d.y as i64 * d.y as i64;
+                            if best.map_or(true, |(bd, _)| dist < bd) {
+                                best = Some((dist, SpecSlot { lot: lot_idx, tier: ti, frontage: fi, cursor }));
+                            }
+                        }
                     }
-                } else {
-                    None
-                };
-                let mut cursor: i32 = match manor_here {
-                    Some(c) => c.cursor,
-                    None => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
-                };
-                // Shallowest depth we'll accept on a slice that can't take the
-                // rolled depth — lets diagonal frontage (where an axis-aligned
-                // rect overruns the staircased ribbon) still seat a house.
-                const MIN_FIT_DEPTH: i32 = 5;
-                while cursor + min_front <= chain_len {
-                    // One seed per slot attempt, drawn first and always: the
-                    // frontage walk is the only other draw on the town stream,
-                    // so however many draws this house's own decisions take
-                    // (or whether it is built at all), the next one is unmoved.
-                    // Every decision below draws from a named stream of it.
-                    let house_seed = HouseSeed::draw(&mut rng);
-                    // A pending `--spec` house takes the slot if it can: one
-                    // with a fixed footprint where that footprint, turned to
-                    // face the road, seats here; one without at any slot. Its
-                    // own seed, when it has one, replaces the drawn one.
-                    let spec_here: Option<(usize, Option<Vec<Rect2D>>)> = if manor_here.is_some() {
-                        None
+                }
+            }
+            match best {
+                Some((_, chosen)) => *slot = Some(chosen),
+                None => println!("{name}: note: no road slot fits it near site.origin; placing it on the first slot it fits"),
+            }
+        }
+    }
+    let anchored: Vec<SpecSlot> = pending_specs.iter().filter_map(|(_, _, a)| *a).collect();
+    // Pass one builds only the anchored specs, each at its slot; pass two is
+    // the ordinary walk (an anchored spec its slot could not take after all
+    // goes on the first slot it fits there). Without anchored specs pass one
+    // touches nothing, the town stream included.
+    for anchored_pass in [true, false] {
+        if anchored_pass && anchored.is_empty() { continue; }
+        if !anchored_pass {
+            for (name, _, slot) in pending_specs.iter_mut() {
+                if slot.take().is_some() {
+                    println!("{name}: note: could not build at its anchored slot; placing it on the first slot it fits");
+                }
+            }
+        }
+        for &lot_idx in &lot_order {
+            let lot = &sub_blocks[lot_idx];
+            if lot.is_empty() { continue; }
+            if anchored_pass && !anchored.iter().any(|a| a.lot == lot_idx) { continue; }
+            let Some(plot) = plots[lot_idx].as_mut() else { continue; };
+
+            // On a chosen manor-lot, the manor's tier (arterial when arterials
+            // had eligible frontages; otherwise collector) gets a Manor-only
+            // pool until the cap is reached. Other tiers — and other lots —
+            // stay House+Hall. Alley never hosts Manors.
+            let is_manor_lot = manor_lots.contains(&lot_idx) && manors_placed < MANOR_CAP;
+            let arterial_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 0 {
+                &[SizeClass::Manor]
+            } else {
+                &[SizeClass::House, SizeClass::Hall]
+            };
+            let collector_pool: &[SizeClass] = if is_manor_lot && manor_tier_idx == 1 {
+                &[SizeClass::Manor]
+            } else {
+                &[SizeClass::House, SizeClass::Hall]
+            };
+            let tiers_local: [(&HashSet<Point2D>, &[SizeClass]); 3] = [
+                (&arterial_band, arterial_pool),
+                (&collector_band, collector_pool),
+                (&alley_band, &[SizeClass::House, SizeClass::Hall]),
+            ];
+
+            'tier_loop: for (ti, (band, pool)) in tiers_local.iter().enumerate() {
+                let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
+                for (fi, frontage) in frontage_from_roads(lot, band).into_iter().enumerate() {
+                    // Pass one: only a frontage an anchored spec chose, from its cursor.
+                    let anchor_here: Option<SpecSlot> = if anchored_pass {
+                        match pending_specs.iter().find_map(|(_, _, a)| a.filter(|a| (a.lot, a.tier, a.frontage) == (lot_idx, ti, fi))) {
+                            Some(a) => Some(a),
+                            None => continue,
+                        }
                     } else {
-                        pending_specs.iter().enumerate().find_map(|(k, (_, s))| match &s.footprint {
+                        None
+                    };
+                    let chain_len = frontage.cells.len() as i32;
+                    if !anchored_pass {
+                        tier_cells[ti] += frontage.cells.len();
+                        tier_frontage[ti].extend(&frontage.cells);
+                        if chain_len < min_front { tier_short[ti] += 1; continue; }
+                    }
+                    // On a manor lot's manor tier, place the one manor the scan sized
+                    // at its chosen slice; skip every other frontage of that tier so
+                    // no second, smaller manor gets seated.
+                    let manor_here: Option<ManorChoice> = if anchored_pass {
+                        None
+                    } else if is_manor_lot && ti == manor_tier_idx {
+                        match manor_choices.get(&lot_idx) {
+                            // Engawa scan picked this lot: build only at its chosen
+                            // slice, skipping the tier's other frontages.
+                            Some(c) if c.frontage_idx == fi => Some(*c),
+                            Some(_) => continue,
+                            // No scan (non-engawa culture): fall through to the
+                            // default random Manor placement on this tier.
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
+                    let mut cursor: i32 = match (anchor_here, manor_here) {
+                        (Some(a), _) => a.cursor,
+                        (None, Some(c)) => c.cursor,
+                        (None, None) => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
+                    };
+                    // Pass one makes one attempt, at the anchored cursor.
+                    let mut attempted = false;
+                    while anchored_pass || cursor + min_front <= chain_len {
+                        if anchored_pass {
+                            if attempted { break; }
+                            attempted = true;
+                        }
+                        // One seed per slot attempt, drawn first and always: the
+                        // frontage walk is the only other draw on the town stream,
+                        // so however many draws this house's own decisions take
+                        // (or whether it is built at all), the next one is unmoved.
+                        // Every decision below draws from a named stream of it.
+                        let house_seed = HouseSeed::draw(&mut rng);
+                        // A pending `--spec` house takes the slot if it can: one
+                        // with a fixed footprint where that footprint, turned to
+                        // face the road, seats here; one without at any slot. Its
+                        // own seed, when it has one, replaces the drawn one.
+                        let try_spec = |k: usize, s: &HouseSpec| match &s.footprint {
                             None => Some((k, None)),
                             Some(fp) => {
                                 let turned: Vec<Rect2D> = rotate_footprint(fp, s.front(), frontage.outward)
                                     .iter()
                                     .map(|r| Rect2D::new(P2::new(r.x, r.z), P2::new(r.w, r.h)))
                                     .collect();
-                                seat_footprint(&turned, &frontage, cursor, &plot).map(|seated| (k, Some(seated)))
+                                seat_footprint(&turned, &frontage, cursor, plot).map(|seated| (k, Some(seated)))
                             }
-                        })
-                    };
-                    let spec_k: Option<usize> = spec_here.as_ref().map(|(k, _)| *k);
-                    let spec: Option<HouseSpec> = spec_k.map(|k| pending_specs[k].1.clone());
-                    let seated: Option<Vec<Rect2D>> = spec_here.and_then(|(_, r)| r);
-                    let house_seed = spec.as_ref().and_then(|s| s.seed).map(HouseSeed).unwrap_or(house_seed);
-                    // A scanned manor forces its size + slice; a spec may pin
-                    // its size; everything else rolls a size from the tier
-                    // pool and the deepest fitting depth.
-                    let size_class = match (manor_here, spec.as_ref().and_then(|s| s.size)) {
-                        (Some(_), _) => SizeClass::Manor,
-                        (None, Some(s)) => s,
-                        (None, None) => *house_seed.stream("size").choose(pool),
-                    };
-                    // A seated footprint's bounds: (width along the road,
-                    // depth). They stand in for the core rect below: the
-                    // slice they front, the verge in front of them.
-                    let seated_core = seated.as_ref().map(|r| {
-                        let b = Footprint::new(outline_from_rects(r), r.to_vec()).bounds();
-                        match frontage.outward {
-                            Cardinal::North | Cardinal::South => (b.size.x, b.size.y),
-                            Cardinal::East | Cardinal::West => (b.size.y, b.size.x),
-                        }
-                    });
-                    let mut core_rng = house_seed.stream("core");
-                    let fw = match (manor_here, seated_core) {
-                        (Some(c), _) => c.fw,
-                        (None, Some((fw, _))) => fw,
-                        (None, None) => core_rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
-                    };
-                    if cursor + fw > chain_len {
-                        if manor_here.is_some() { break; }
-                        cursor += 1; continue;
-                    }
-                    let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
-                    let depth = match (manor_here, seated_core) {
-                        (Some(c), _) => c.depth,
-                        (None, Some((_, depth))) => depth,
-                        (None, None) => {
-                            // Square-frontage bias: with the culture's square chance,
-                            // make the house a square (depth = front width) if it fits,
-                            // so it gets a dome. Guarded so a 0 bias never draws RNG.
-                            // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
-                            // that fits, shrinking the house to hug a diagonal ribbon.
-                            let max_depth = core_rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
-                            let want_square = culture.square_bias() > 0
-                                && core_rng.percent(culture.square_bias())
-                                && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
-                            if want_square {
-                                fw
-                            } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
-                                .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
-                            {
-                                d
-                            } else {
-                                tier_unfit[ti] += 1; cursor += 1; continue;
+                        };
+                        // Pass one: the anchored spec or nothing (no ordinary house
+                        // takes an anchored slot ahead of the walk).
+                        let spec_here: Option<(usize, Option<Vec<Rect2D>>)> = if anchored_pass {
+                            let anchor = anchor_here.expect("pass one walks anchored frontages only");
+                            let k = pending_specs.iter().position(|(_, _, a)| *a == Some(anchor));
+                            match k.and_then(|k| try_spec(k, &pending_specs[k].1)) {
+                                Some(found) => Some(found),
+                                None => break,
                             }
+                        } else if manor_here.is_some() {
+                            None
+                        } else {
+                            pending_specs.iter().enumerate().find_map(|(k, (_, s, _))| try_spec(k, s))
+                        };
+                        let spec_k: Option<usize> = spec_here.as_ref().map(|(k, _)| *k);
+                        let spec: Option<HouseSpec> = spec_k.map(|k| pending_specs[k].1.clone());
+                        let seated: Option<Vec<Rect2D>> = spec_here.and_then(|(_, r)| r);
+                        let house_seed = spec.as_ref().and_then(|s| s.seed).map(HouseSeed).unwrap_or(house_seed);
+                        // A scanned manor forces its size + slice; a spec may pin
+                        // its size; everything else rolls a size from the tier
+                        // pool and the deepest fitting depth.
+                        let size_class = match (manor_here, spec.as_ref().and_then(|s| s.size)) {
+                            (Some(_), _) => SizeClass::Manor,
+                            (None, Some(s)) => s,
+                            (None, None) => *house_seed.stream("size").choose(pool),
+                        };
+                        // A seated footprint's bounds: (width along the road,
+                        // depth). They stand in for the core rect below: the
+                        // slice they front, the verge in front of them.
+                        let seated_core = seated.as_ref().map(|r| {
+                            let b = Footprint::new(outline_from_rects(r), r.to_vec()).bounds();
+                            match frontage.outward {
+                                Cardinal::North | Cardinal::South => (b.size.x, b.size.y),
+                                Cardinal::East | Cardinal::West => (b.size.y, b.size.x),
+                            }
+                        });
+                        let mut core_rng = house_seed.stream("core");
+                        let fw = match (manor_here, seated_core) {
+                            (Some(c), _) => c.fw,
+                            (None, Some((fw, _))) => fw,
+                            (None, None) => core_rng.rand_i32_range(*size_class.front_width_range().start(), *size_class.front_width_range().end() + 1),
+                        };
+                        if cursor + fw > chain_len {
+                            if manor_here.is_some() { break; }
+                            cursor += 1; continue;
                         }
-                    };
-                    let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
-                    // The frontage rect becomes the core; try to grow wings
-                    // into the lot's remaining usable cells (away from the
-                    // road). Square_bias = 0 here matches the live town gen —
-                    // domes on wings haven't been wired through yet.
+                        let chain_slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
+                        let depth = match (manor_here, seated_core) {
+                            (Some(c), _) => c.depth,
+                            (None, Some((_, depth))) => depth,
+                            (None, None) => {
+                                // Square-frontage bias: with the culture's square chance,
+                                // make the house a square (depth = front width) if it fits,
+                                // so it gets a dome. Guarded so a 0 bias never draws RNG.
+                                // Otherwise pick the deepest depth (down to MIN_FIT_DEPTH)
+                                // that fits, shrinking the house to hug a diagonal ribbon.
+                                let max_depth = core_rng.rand_i32_range(*size_class.depth_range().start(), *size_class.depth_range().end() + 1);
+                                let want_square = culture.square_bias() > 0
+                                    && core_rng.percent(culture.square_bias())
+                                    && plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, fw));
+                                if want_square {
+                                    fw
+                                } else if let Some(d) = (MIN_FIT_DEPTH..=max_depth).rev()
+                                    .find(|&d| plot.is_rect_usable(&rect_from_frontage(chain_slice, frontage.outward, d)))
+                                {
+                                    d
+                                } else {
+                                    tier_unfit[ti] += 1; cursor += 1; continue;
+                                }
+                            }
+                        };
+                        let rect = rect_from_frontage(chain_slice, frontage.outward, depth);
+                        // The frontage rect becomes the core; try to grow wings
+                        // into the lot's remaining usable cells (away from the
+                        // road). Square_bias = 0 here matches the live town gen —
+                        // domes on wings haven't been wired through yet.
 
-                    // Pick this building's style from its *district's* scheme
-                    // (60% town dominant / 30% district secondary / 10% town
-                    // accent) and roll its palette, leaning on the local wood.
-                    // Falls back to the town scheme for the rare lot whose block
-                    // mapped to no urban district (footprint cells regularized
-                    // beyond raw district coverage).
-                    let scheme = block_district[lot_block[lot_idx]]
-                        .and_then(|id| district_schemes.get(&id))
-                        .unwrap_or(&style_scheme);
-                    let mut palette_rng = house_seed.stream("palette");
-                    let (mut palette, mut palette_picks) = scheme
-                        .next_style(&mut palette_rng)
-                        .roll_palette_picks(&mut palette_rng, &data, local_wood.as_ref());
-                    // Apply the town colour identity: a manor flies its unique
-                    // family colour; every other building draws from the weighted
-                    // town scheme. This `primary_color` then tints the building's
-                    // dyed accents (banners, beds, carpets) via the recolour pass.
-                    let family_color: Option<Color> = if size_class == SizeClass::Manor {
-                        spec.as_ref().and_then(|s| s.colour).or_else(|| color_scheme.manor.get(manors_placed).copied())
-                    } else {
-                        None
-                    };
-                    let mut color_rng = house_seed.stream("colour");
-                    palette.primary_color = Some(
-                        family_color.unwrap_or_else(|| color_scheme.next_color(&mut color_rng)),
-                    );
-                    // A manor family also flies one heraldic banner design on
-                    // every banner it owns (door + interior): the family colour
-                    // is the field, a distinct second colour the charge. Stamped
-                    // via `palette.banner_data` wherever a banner is recoloured.
-                    // The blazon rides along to the household for the chronicle.
-                    palette.banner_data = None;
-                    let mut banner_blazon: Option<String> = None;
-                    if let Some(primary) = family_color {
-                        let secondary = color_scheme.distinct_from(primary, &mut color_rng);
-                        if let Some(b) = crate::generator::heraldry::pick_family_banner(
-                            primary, secondary, &mut color_rng,
-                        ) {
-                            println!("Manor banner: {}", b.blazon);
-                            palette.banner_data = Some(b.data);
-                            banner_blazon = Some(b.blazon);
-                        }
-                    }
-                    // Roof style weighted by culture + size (irimoya skews to the
-                    // grander buildings; see `roof_styles_for`).
-                    let roof_styles = culture.roof_styles_for(size_class);
-                    let mut roof_style = roof_styles[house_seed.stream("roof").rand_i32_range(0, roof_styles.len() as i32) as usize];
-                    let mut footprint = match &seated {
-                        Some(rects) => Footprint::new(outline_from_rects(rects), rects.to_vec()),
-                        None => crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
-                            &mut house_seed.stream("footprint"), &plot, rect, frontage.outward, &size_class, culture.square_bias(),
-                        ),
-                    };
-                    // Door scoring needs the full footprint bounds, not just
-                    // the core rect, so a wing extending rearward doesn't
-                    // misreport the back wall's distance to the plot edge.
-                    let plot_bounds = synthetic_plot_bounds(&footprint.bounds(), frontage.outward);
-                    // Align the main door with the road it faces: pin the floor
-                    // (= door sill) to the height of the *nearest* road cell to
-                    // this frontage. Probe outward from every frontage cell and
-                    // keep the closest road-height hit.
-                    let road_dir = P2::from(frontage.outward);
-                    let base_lvl = {
-                        let mut best: Option<(i32, i32, P2)> = None; // (dist, height, road cell)
-                        for &c in chain_slice {
-                            for step in 1..=RIBBON_DEPTH {
-                                let probe = c + P2::new(road_dir.x * step, road_dir.y * step);
-                                if let Some(&y) = road_h.get(&probe) {
-                                    if best.map_or(true, |(bd, _, _)| step < bd) { best = Some((step, y, probe)); }
-                                    break;
-                                }
-                            }
-                        }
-                        best.map(|(_, y, cell)| {
-                            // If the fronting road cell carries a half-step slab,
-                            // raise the floor one block above the slab so the door
-                            // steps down onto it instead of opening onto a lip.
-                            match slab_y_by_cell.get(&cell) {
-                                Some(&slab_y) => slab_y + 1,
-                                None => y,
-                            }
-                        })
-                    };
-                    let mut bctx = BuildingContext::new(culture, size_class, roof_style);
-                    bctx.seed = Some(house_seed);
-                    bctx.base_y_override = base_lvl;
-                    // Roll the engawa veranda per the culture/size taste (every
-                    // Japanese Manor, a third of Halls; see `engawa_chance`).
-                    // `build_house` / `plan_engawa` still gate on the core rect
-                    // staying large enough and fall back to plain walls otherwise.
-                    let (en, ed) = culture.engawa_chance(size_class);
-                    bctx.engawa = ed > 0 && house_seed.stream("engawa").rand_i32_range(0, ed as i32) < en as i32;
-                    // Roll the jetty per culture taste (medieval timber-frame
-                    // upper-floor overhang; see `jetty_chance`). Frame generation
-                    // gates on shape/floor-count/plot fit and silently no-ops when
-                    // ineligible, so an un-jettiable building just stays flush.
-                    // Engawa wins in the pipeline, but the cultures don't overlap
-                    // (jetty is medieval-only, engawa Japanese-only).
-                    let (jn, jd) = culture.jetty_chance();
-                    bctx.jetty = jd > 0 && house_seed.stream("jetty").rand_i32_range(0, jd as i32) < jn as i32;
-                    // A spec house: the slot's footprint and, where the spec
-                    // leaves them open, its palette and colour go into the
-                    // spec, and the resolved spec decides the rest. Draws only
-                    // on the house's own streams, as above.
-                    if let (Some(spec), Some(k)) = (&spec, spec_k) {
-                        let filled = spec.seated_in_town(
-                            culture, size_class, footprint.rects(), plot_bounds, &palette_picks, palette.primary_color,
+                        // Pick this building's style from its *district's* scheme
+                        // (60% town dominant / 30% district secondary / 10% town
+                        // accent) and roll its palette, leaning on the local wood.
+                        // Falls back to the town scheme for the rare lot whose block
+                        // mapped to no urban district (footprint cells regularized
+                        // beyond raw district coverage).
+                        let scheme = block_district[lot_block[lot_idx]]
+                            .and_then(|id| district_schemes.get(&id))
+                            .unwrap_or(&style_scheme);
+                        let mut palette_rng = house_seed.stream("palette");
+                        let (mut palette, mut palette_picks) = scheme
+                            .next_style(&mut palette_rng)
+                            .roll_palette_picks(&mut palette_rng, &data, local_wood.as_ref());
+                        // Apply the town colour identity: a manor flies its unique
+                        // family colour; every other building draws from the weighted
+                        // town scheme. This `primary_color` then tints the building's
+                        // dyed accents (banners, beds, carpets) via the recolour pass.
+                        let family_color: Option<Color> = if size_class == SizeClass::Manor {
+                            spec.as_ref().and_then(|s| s.colour).or_else(|| color_scheme.manor.get(manors_placed).copied())
+                        } else {
+                            None
+                        };
+                        let mut color_rng = house_seed.stream("colour");
+                        palette.primary_color = Some(
+                            family_color.unwrap_or_else(|| color_scheme.next_color(&mut color_rng)),
                         );
-                        match resolve(&filled, house_seed, plot_bounds, &data) {
-                            Ok(Some(resolved)) => {
-                                let banner = palette.banner_data.take();
-                                palette = resolved.palette;
-                                palette.banner_data = banner;
-                                palette_picks = resolved.picks;
-                                footprint = resolved.footprint;
-                                bctx = resolved.bctx;
-                                bctx.base_y_override = base_lvl;
-                                roof_style = bctx.roof_style;
-                            }
-                            Ok(None) => { cursor += 1; continue; }
-                            Err(e) => {
-                                let (name, _) = pending_specs.remove(k);
-                                println!("{name}: refused on its lot: {e:#}");
-                                report.specs_unplaced.push(name);
-                                cursor += 1;
-                                continue;
+                        // A manor family also flies one heraldic banner design on
+                        // every banner it owns (door + interior): the family colour
+                        // is the field, a distinct second colour the charge. Stamped
+                        // via `palette.banner_data` wherever a banner is recoloured.
+                        // The blazon rides along to the household for the chronicle.
+                        palette.banner_data = None;
+                        let mut banner_blazon: Option<String> = None;
+                        if let Some(primary) = family_color {
+                            let secondary = color_scheme.distinct_from(primary, &mut color_rng);
+                            if let Some(b) = crate::generator::heraldry::pick_family_banner(
+                                primary, secondary, &mut color_rng,
+                            ) {
+                                println!("Manor banner: {}", b.blazon);
+                                palette.banner_data = Some(b.data);
+                                banner_blazon = Some(b.blazon);
                             }
                         }
-                    }
-                    // `bctx.seed` is set, so `build_house` leaves the town stream alone.
-                    let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
-                    match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                        Ok(output) => {
-                            // Record the house's decisions, footprint relative
-                            // to its own bounds (reads only, draws nothing).
-                            let built_spec = HouseSpec::resolved(
-                                &bctx, &output, &palette, &palette_picks,
-                                output.footprint.bounds().min(), bctx_editor.editor.world().build_area.origin,
-                            );
-                            if let Some(k) = spec_k {
-                                let (name, asked) = pending_specs.remove(k);
-                                if let Some(note) = crate::generator::buildings_v2::spec::dropped_cellar(&asked, &built_spec) {
-                                    println!("{name}: note: {note}");
-                                }
-                                let site = built_spec.site.clone().unwrap_or_default();
-                                let front_door = site.front_door.map(|c| c.to_string()).unwrap_or_default();
-                                let origin = site.origin.unwrap_or_default();
-                                let house = report.house_specs.len();
-                                println!("{name}: built as house_{house:03} at {},{} facing {front_door}", origin[0], origin[1]);
-                                report.spec_houses.push(crate::generator::report::SpecPlacement { spec: name, house, origin, front_door });
-                            }
-                            report.house_specs.push(built_spec);
-                            // A manor flies its family colour: banners flanking
-                            // the front door so the street reads the household
-                            // before you step inside. Other buildings carry their
-                            // colour only on interior accents.
-                            if let Some(color) = family_color {
-                                crate::generator::buildings_v2::exterior::place_family_banner(
-                                    &mut bctx_editor, &output.wall_segs, color,
-                                ).await;
-                                // Plan its name sign now the door is known; it gets
-                                // lettered after the population pass names the family.
-                                let mut sign_rng = house_seed.stream("sign");
-                                let designation = MANOR_DESIGNATIONS[
-                                    sign_rng.rand_i32_range(0, MANOR_DESIGNATIONS.len() as i32) as usize
-                                ].to_string();
-                                if let Some(site) = crate::generator::buildings_v2::exterior::plan_manor_sign(
-                                    &output.wall_segs, &palette, &data.materials,
-                                    &mut sign_rng, town_anchors.len(), designation,
-                                ) {
-                                    manor_sign_sites.push(site);
-                                }
-                            }
-                            // Population budget tracks sleeping capacity, not bed
-                            // furniture: a double/canopy bed sleeps two. Each
-                            // bed-tagged item's capacity is its number of
-                            // `part=foot` blocks (the head auto-spawns), min 1.
-                            let beds: usize = output
-                                .room_plan
-                                .rooms
-                                .iter()
-                                .flat_map(|r| &r.furniture)
-                                .filter_map(|f| data.furniture.items.get(&f.name))
-                                .filter(|it| it.tags.iter().any(|t| t == "bed"))
-                                .map(|it| {
-                                    it.blocks
-                                        .iter()
-                                        .filter(|b| b.block.contains("part=foot"))
-                                        .count()
-                                        .max(1)
-                                })
-                                .sum();
-                            // Scale capacity so houses feel lived-in, floored at 1.
-                            let population =
-                                ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
-                            town_anchors.push(crate::generator::population::HouseAnchors {
-                                scenes: output.npc_anchors,
-                                population,
-                                wealth: crate::generator::population::Wealth::from_size_class(size_class),
-                                pos: output.footprint.bounds().midpoint(),
-                                family_color,
-                                banner_blazon,
-                            });
-                            // Mark every rect in the footprint (core + wings)
-                            // as used so subsequent placements on this lot
-                            // can't overlap the wing cells.
-                            for r in output.footprint.rects() {
-                                plot.mark_rect_used(r, SIDE_BUFFER_CELLS);
-                            }
-                            *rect_count_dist.entry(output.footprint.rects().len()).or_insert(0) += 1;
-                            total_buildings += 1;
-                            tier_placed[ti] += 1;
-                            *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
-                            *roof_counts.entry(format!("{:?}", roof_style)).or_insert(0) += 1;
-                            if size_class == SizeClass::Manor {
-                                manors_placed += 1;
-                            }
-                            // Record the verge: from each frontage cell, walk
-                            // into the block (−outward) until we reach the
-                            // house. On a straight slice this is just the
-                            // frontage row; on a diagonal it's the triangular
-                            // set-back we want to pave over.
-                            if ti < 2 {
-                                let road_dir = P2::from(frontage.outward);
-                                let into = P2::new(-road_dir.x, -road_dir.y);
-                                for &c in chain_slice {
-                                    let mut p = c;
-                                    let mut guard = 0;
-                                    while !rect.contains(p) && guard < 32 {
-                                        tier_verge[ti].insert(p);
-                                        p = p + into;
-                                        guard += 1;
+                        // Roof style weighted by culture + size (irimoya skews to the
+                        // grander buildings; see `roof_styles_for`).
+                        let roof_styles = culture.roof_styles_for(size_class);
+                        let mut roof_style = roof_styles[house_seed.stream("roof").rand_i32_range(0, roof_styles.len() as i32) as usize];
+                        let mut footprint = match &seated {
+                            Some(rects) => Footprint::new(outline_from_rects(rects), rects.to_vec()),
+                            None => crate::generator::buildings_v2::footprint::generate::generate_footprint_from_core(
+                                &mut house_seed.stream("footprint"), plot, rect, frontage.outward, &size_class, culture.square_bias(),
+                            ),
+                        };
+                        // Door scoring needs the full footprint bounds, not just
+                        // the core rect, so a wing extending rearward doesn't
+                        // misreport the back wall's distance to the plot edge.
+                        let plot_bounds = synthetic_plot_bounds(&footprint.bounds(), frontage.outward);
+                        // Align the main door with the road it faces: pin the floor
+                        // (= door sill) to the height of the *nearest* road cell to
+                        // this frontage. Probe outward from every frontage cell and
+                        // keep the closest road-height hit.
+                        let road_dir = P2::from(frontage.outward);
+                        let base_lvl = {
+                            let mut best: Option<(i32, i32, P2)> = None; // (dist, height, road cell)
+                            for &c in chain_slice {
+                                for step in 1..=RIBBON_DEPTH {
+                                    let probe = c + P2::new(road_dir.x * step, road_dir.y * step);
+                                    if let Some(&y) = road_h.get(&probe) {
+                                        if best.map_or(true, |(bd, _, _)| step < bd) { best = Some((step, y, probe)); }
+                                        break;
                                     }
                                 }
                             }
-                            // A Manor closes out its lot's manor-tier: skip any
-                            // remaining frontages/cursors here so we don't tile
-                            // additional Manors along the same chain. Other
-                            // tiers (collector/alley) of the lot still process
-                            // normally below.
-                            if size_class == SizeClass::Manor {
-                                continue 'tier_loop;
+                            best.map(|(_, y, cell)| {
+                                // If the fronting road cell carries a half-step slab,
+                                // raise the floor one block above the slab so the door
+                                // steps down onto it instead of opening onto a lip.
+                                match slab_y_by_cell.get(&cell) {
+                                    Some(&slab_y) => slab_y + 1,
+                                    None => y,
+                                }
+                            })
+                        };
+                        let mut bctx = BuildingContext::new(culture, size_class, roof_style);
+                        bctx.seed = Some(house_seed);
+                        bctx.base_y_override = base_lvl;
+                        // Roll the engawa veranda per the culture/size taste (every
+                        // Japanese Manor, a third of Halls; see `engawa_chance`).
+                        // `build_house` / `plan_engawa` still gate on the core rect
+                        // staying large enough and fall back to plain walls otherwise.
+                        let (en, ed) = culture.engawa_chance(size_class);
+                        bctx.engawa = ed > 0 && house_seed.stream("engawa").rand_i32_range(0, ed as i32) < en as i32;
+                        // Roll the jetty per culture taste (medieval timber-frame
+                        // upper-floor overhang; see `jetty_chance`). Frame generation
+                        // gates on shape/floor-count/plot fit and silently no-ops when
+                        // ineligible, so an un-jettiable building just stays flush.
+                        // Engawa wins in the pipeline, but the cultures don't overlap
+                        // (jetty is medieval-only, engawa Japanese-only).
+                        let (jn, jd) = culture.jetty_chance();
+                        bctx.jetty = jd > 0 && house_seed.stream("jetty").rand_i32_range(0, jd as i32) < jn as i32;
+                        // A spec house: the slot's footprint and, where the spec
+                        // leaves them open, its palette and colour go into the
+                        // spec, and the resolved spec decides the rest. Draws only
+                        // on the house's own streams, as above.
+                        if let (Some(spec), Some(k)) = (&spec, spec_k) {
+                            let filled = spec.seated_in_town(
+                                culture, size_class, footprint.rects(), plot_bounds, &palette_picks, palette.primary_color,
+                            );
+                            match resolve(&filled, house_seed, plot_bounds, &data) {
+                                Ok(Some(resolved)) => {
+                                    let banner = palette.banner_data.take();
+                                    palette = resolved.palette;
+                                    palette.banner_data = banner;
+                                    palette_picks = resolved.picks;
+                                    footprint = resolved.footprint;
+                                    bctx = resolved.bctx;
+                                    bctx.base_y_override = base_lvl;
+                                    roof_style = bctx.roof_style;
+                                }
+                                Ok(None) => { cursor += 1; continue; }
+                                Err(e) => {
+                                    let (name, _, _) = pending_specs.remove(k);
+                                    println!("{name}: refused on its lot: {e:#}");
+                                    report.specs_unplaced.push(name);
+                                    cursor += 1;
+                                    continue;
+                                }
                             }
-                            cursor += fw + SIDE_BUFFER_CELLS;
                         }
-                        Err(msg) => {
-                            tier_fail[ti] += 1;
-                            log::warn!("placement build_house failed: {}", msg);
-                            // A scanned manor gets one shot; on failure give up its
-                            // tier rather than retrying the forced size shifted over.
-                            if manor_here.is_some() { continue 'tier_loop; }
-                            cursor += 1;
+                        // `bctx.seed` is set, so `build_house` leaves the town stream alone.
+                        let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
+                        match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
+                            Ok(output) => {
+                                // Record the house's decisions, footprint relative
+                                // to its own bounds (reads only, draws nothing).
+                                let built_spec = HouseSpec::resolved(
+                                    &bctx, &output, &palette, &palette_picks,
+                                    output.footprint.bounds().min(), bctx_editor.editor.world().build_area.origin,
+                                );
+                                if let Some(k) = spec_k {
+                                    let (name, asked, _) = pending_specs.remove(k);
+                                    if let Some(note) = crate::generator::buildings_v2::spec::dropped_cellar(&asked, &built_spec) {
+                                        println!("{name}: note: {note}");
+                                    }
+                                    let site = built_spec.site.clone().unwrap_or_default();
+                                    let front_door = site.front_door.map(|c| c.to_string()).unwrap_or_default();
+                                    let origin = site.origin.unwrap_or_default();
+                                    let house = report.house_specs.len();
+                                    println!("{name}: built as house_{house:03} at {},{} facing {front_door}", origin[0], origin[1]);
+                                    report.spec_houses.push(crate::generator::report::SpecPlacement { spec: name, house, origin, front_door });
+                                }
+                                report.house_specs.push(built_spec);
+                                // A manor flies its family colour: banners flanking
+                                // the front door so the street reads the household
+                                // before you step inside. Other buildings carry their
+                                // colour only on interior accents.
+                                if let Some(color) = family_color {
+                                    crate::generator::buildings_v2::exterior::place_family_banner(
+                                        &mut bctx_editor, &output.wall_segs, color,
+                                    ).await;
+                                    // Plan its name sign now the door is known; it gets
+                                    // lettered after the population pass names the family.
+                                    let mut sign_rng = house_seed.stream("sign");
+                                    let designation = MANOR_DESIGNATIONS[
+                                        sign_rng.rand_i32_range(0, MANOR_DESIGNATIONS.len() as i32) as usize
+                                    ].to_string();
+                                    if let Some(site) = crate::generator::buildings_v2::exterior::plan_manor_sign(
+                                        &output.wall_segs, &palette, &data.materials,
+                                        &mut sign_rng, town_anchors.len(), designation,
+                                    ) {
+                                        manor_sign_sites.push(site);
+                                    }
+                                }
+                                // Population budget tracks sleeping capacity, not bed
+                                // furniture: a double/canopy bed sleeps two. Each
+                                // bed-tagged item's capacity is its number of
+                                // `part=foot` blocks (the head auto-spawns), min 1.
+                                let beds: usize = output
+                                    .room_plan
+                                    .rooms
+                                    .iter()
+                                    .flat_map(|r| &r.furniture)
+                                    .filter_map(|f| data.furniture.items.get(&f.name))
+                                    .filter(|it| it.tags.iter().any(|t| t == "bed"))
+                                    .map(|it| {
+                                        it.blocks
+                                            .iter()
+                                            .filter(|b| b.block.contains("part=foot"))
+                                            .count()
+                                            .max(1)
+                                    })
+                                    .sum();
+                                // Scale capacity so houses feel lived-in, floored at 1.
+                                let population =
+                                    ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
+                                town_anchors.push(crate::generator::population::HouseAnchors {
+                                    scenes: output.npc_anchors,
+                                    population,
+                                    wealth: crate::generator::population::Wealth::from_size_class(size_class),
+                                    pos: output.footprint.bounds().midpoint(),
+                                    family_color,
+                                    banner_blazon,
+                                });
+                                // Mark every rect in the footprint (core + wings)
+                                // as used so subsequent placements on this lot
+                                // can't overlap the wing cells.
+                                for r in output.footprint.rects() {
+                                    plot.mark_rect_used(r, SIDE_BUFFER_CELLS);
+                                }
+                                *rect_count_dist.entry(output.footprint.rects().len()).or_insert(0) += 1;
+                                total_buildings += 1;
+                                tier_placed[ti] += 1;
+                                *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
+                                *roof_counts.entry(format!("{:?}", roof_style)).or_insert(0) += 1;
+                                if size_class == SizeClass::Manor {
+                                    manors_placed += 1;
+                                }
+                                // Record the verge: from each frontage cell, walk
+                                // into the block (−outward) until we reach the
+                                // house. On a straight slice this is just the
+                                // frontage row; on a diagonal it's the triangular
+                                // set-back we want to pave over.
+                                if ti < 2 {
+                                    let road_dir = P2::from(frontage.outward);
+                                    let into = P2::new(-road_dir.x, -road_dir.y);
+                                    for &c in chain_slice {
+                                        let mut p = c;
+                                        let mut guard = 0;
+                                        while !rect.contains(p) && guard < 32 {
+                                            tier_verge[ti].insert(p);
+                                            p = p + into;
+                                            guard += 1;
+                                        }
+                                    }
+                                }
+                                // A Manor closes out its lot's manor-tier: skip any
+                                // remaining frontages/cursors here so we don't tile
+                                // additional Manors along the same chain. Other
+                                // tiers (collector/alley) of the lot still process
+                                // normally below.
+                                if size_class == SizeClass::Manor {
+                                    continue 'tier_loop;
+                                }
+                                cursor += fw + SIDE_BUFFER_CELLS;
+                            }
+                            Err(msg) => {
+                                tier_fail[ti] += 1;
+                                log::warn!("placement build_house failed: {}", msg);
+                                // A scanned manor gets one shot; on failure give up its
+                                // tier rather than retrying the forced size shifted over.
+                                if manor_here.is_some() { continue 'tier_loop; }
+                                cursor += 1;
+                            }
                         }
                     }
                 }
             }
         }
     }
-    for (name, _) in pending_specs.drain(..) {
+    for (name, _, _) in pending_specs.drain(..) {
         println!("{name}: no lot had room for it; not built");
         report.specs_unplaced.push(name);
     }
