@@ -97,12 +97,9 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
 
     scored.sort_by_key(|&(_, dist)| dist);
 
-    // A wall an interior wall meets can still take the front door, off to one
-    // side of the joint: the door and one cell either side clear of boundary
-    // cells, two cells in from either end, as near the middle as that allows,
-    // scored by the door's own distance to the plot edge. Only taken when it
-    // is strictly nearer the edge than every clear wall: an L or T whose road
-    // side is all joined walls otherwise gets its door round the corner.
+    // A wall an interior wall meets may take the door beside the joint, but
+    // only when strictly nearer the edge than every clear wall: otherwise an L
+    // whose road side is all joined wall gets its door round the corner.
     let joint = wall_segs
         .segments
         .iter()

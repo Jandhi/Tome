@@ -271,14 +271,9 @@ pub fn rect_from_frontage(chain_slice: &[Point2D], outward: Cardinal, depth: i32
     }
 }
 
-/// Seat a fixed footprint (rects relative to their own corner, core first,
-/// already turned so the front faces `frontage.outward`) at `cursor` on
-/// `frontage`: the front of its bounds runs along the frontage cells from
-/// `cursor`, as many as the bounds are wide along the road, whichever rect
-/// reaches that front (a wing may stand ahead of the core). Returns the rects
-/// build-area local, or `None` when the slice runs off the chain, doesn't give
-/// bounds of exactly that size (a stepped slice), or any rect leaves the
-/// usable plot.
+/// Seat a fixed footprint, already turned to face `frontage.outward`, with
+/// its bounds flush to the frontage from `cursor`. `None` when it runs off the
+/// chain, the slice is stepped, or a rect leaves the usable plot.
 pub fn seat_footprint(rects: &[Rect2D], frontage: &Frontage, cursor: i32, plot: &Plot) -> Option<Vec<Rect2D>> {
     let min = Point2D::new(rects.iter().map(|r| r.min().x).min()?, rects.iter().map(|r| r.min().y).min()?);
     let max = Point2D::new(rects.iter().map(|r| r.max().x).max()?, rects.iter().map(|r| r.max().y).max()?);

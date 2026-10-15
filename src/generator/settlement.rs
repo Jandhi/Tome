@@ -556,7 +556,6 @@ pub async fn generate_settlement_with(
 
     // `--spec` houses, checked now that the culture is known: one that can't
     // build anywhere is dropped (and reported) before any lot is tried.
-    // Each with the road slot it is anchored to (`site.origin`), once chosen.
     let mut pending_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec, Option<SpecSlot>)> = Vec::new();
     for (name, spec) in &options.house_specs {
         match crate::generator::buildings_v2::spec::check_for_town(spec, culture, &data) {
@@ -1372,10 +1371,8 @@ pub async fn generate_settlement_with(
     // One plot per lot, shared by both passes below so houses never overlap.
     let mut plots: Vec<Option<crate::generator::buildings_v2::footprint::Plot>> =
         sub_blocks.iter().map(|b| if b.is_empty() { None } else { plot_from_block(b) }).collect();
-    // `--spec` houses with a `site.origin` in the build area are anchored: the
-    // road slot nearest that point where the house fits (its footprint seated,
-    // or for an open footprint the frontage cell itself) is chosen now, on the
-    // empty lots, and built in a first pass before any other house.
+    // Anchor every `--spec` house whose `site.origin` is in the build area to
+    // the nearest road slot it fits, chosen now while the lots are empty.
     {
         let b = editor.world().build_area;
         let area = Rect2D::new(P2::new(b.origin.x, b.origin.z), P2::new(b.size.x, b.size.z));
@@ -1406,10 +1403,8 @@ pub async fn generate_settlement_with(
                                     Some(seated) => Footprint::new(outline_from_rects(&seated), seated).bounds().midpoint(),
                                     None => continue,
                                 },
-                                // Open footprint: a slot the widest core of its
-                                // size (a hall's when open) fits at the walk's
-                                // shallowest depth, so the build there can't run
-                                // off the chain or the lot.
+                                // Open footprint: where the widest core of its
+                                // size fits, so the build can't run off the lot.
                                 None => {
                                     let fw = *spec.size.unwrap_or(SizeClass::Hall).front_width_range().end();
                                     if cursor + fw > frontage.cells.len() as i32 {
@@ -1439,10 +1434,9 @@ pub async fn generate_settlement_with(
         }
     }
     let anchored: Vec<SpecSlot> = pending_specs.iter().filter_map(|(_, _, a)| *a).collect();
-    // Pass one builds only the anchored specs, each at its slot; pass two is
-    // the ordinary walk (an anchored spec its slot could not take after all
-    // goes on the first slot it fits there). Without anchored specs pass one
-    // touches nothing, the town stream included.
+    // Pass one builds the anchored specs at their slots, pass two is the
+    // ordinary walk. Without anchored specs pass one draws nothing, so such
+    // towns are unchanged.
     for anchored_pass in [true, false] {
         if anchored_pass && anchored.is_empty() { continue; }
         if !anchored_pass {
@@ -1520,7 +1514,6 @@ pub async fn generate_settlement_with(
                         (None, Some(c)) => c.cursor,
                         (None, None) => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
                     };
-                    // Pass one makes one attempt, at the anchored cursor.
                     let mut attempted = false;
                     while anchored_pass || cursor + min_front <= chain_len {
                         if anchored_pass {

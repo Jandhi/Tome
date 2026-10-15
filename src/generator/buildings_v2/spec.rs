@@ -35,13 +35,8 @@
 //! Every pin skips or overrides only its own draw: a stream that draws
 //! several things (the frame's floors, the cellar's roll and stair) still
 //! makes every draw and replaces the pinned one, so pinning a field to the
-//! value it drew changes nothing. Of `site`, a build reads three parts:
-//! `site.plot` sizes a `--houses` plot (the front door goes on the side
-//! nearest the plot's edge, so the same plot puts it back where it was);
-//! `site.front_door` says which side a settlement turns toward its road; and
-//! `site.origin`, when it lies in a settlement's build area, anchors the house
-//! to the road slot nearest that spot ([`HouseSpec::anchor`]). The ground
-//! floor's height always comes from the terrain.
+//! value it drew changes nothing. What a build reads from `site` is on
+//! [`SiteSpec`]'s fields.
 //!
 //! **Checks.** Parsing refuses unknown keys and words, listing the valid
 //! ones, so a typo never drops a pin silently. [`resolve`] then refuses a
@@ -153,8 +148,7 @@ pub struct HouseSpec {
     /// room. The layout inside (walls, doors, furniture) stays computed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rooms: Option<Vec<Vec<RoomType>>>,
-    /// Where the house stood. Mostly read back for reference; a build reads
-    /// `plot`, `front_door` and (in a settlement) `origin`, see [`SiteSpec`].
+    /// Where the house stood (see [`SiteSpec`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site: Option<SiteSpec>,
 }
@@ -247,8 +241,7 @@ impl<'de> Deserialize<'de> for CellarSpec {
     }
 }
 
-/// Where a house stood. `base_y` is only ever read back; see each field for
-/// what a build does with the others.
+/// Where a house stood.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SiteSpec {
@@ -261,7 +254,8 @@ pub struct SiteSpec {
     /// footprint so this side faces the road (south when missing).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub front_door: Option<Cardinal>,
-    /// Absolute y of the ground floor (the front door's sill).
+    /// Absolute y of the ground floor (the front door's sill). Read back
+    /// only: a build takes the floor from the terrain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_y: Option<i32>,
     /// Size `[x, z]` of the plot the footprint sat in (`--houses` only). A
@@ -360,18 +354,14 @@ impl HouseSpec {
         ext
     }
 
-    /// The side the house fronts: `site.front_door` when written, else south.
-    /// A town turns a pinned footprint so this side faces its road.
+    /// `site.front_door`, else south.
     pub fn front(&self) -> Cardinal {
         self.site.as_ref().and_then(|s| s.front_door).unwrap_or(Cardinal::South)
     }
 
-    /// This spec as a town lot builds it: `culture` and `size` filled in, the
-    /// footprint as seated on the lot (`rects` build-area local, relative to
-    /// `plot_bounds` in the result, pinned floors kept by rect), and, for a
-    /// house of the town's own culture, the palette and colour the town drew
-    /// for the slot where the spec leaves them open, so it fits its district.
-    /// Everything else stays as written, for [`resolve`] to draw.
+    /// This spec as a town lot builds it: culture, size and the seated
+    /// footprint (`rects` build-area local) filled in, plus the district's
+    /// palette and colour where open on a house of the town's own culture.
     pub fn seated_in_town(
         &self,
         town_culture: Culture,
@@ -443,8 +433,6 @@ impl HouseSpec {
 
 /// A pinned cellar the house `built` (its resolved spec) went without: the
 /// build skips one where the ground is wet or there is no room for its stair.
-/// (`jetty` and `engawa` are recorded as asked, so a dropped one can't be
-/// read back here.)
 pub fn dropped_cellar(asked: &HouseSpec, built: &HouseSpec) -> Option<String> {
     let has_cellar = |c: &Option<CellarSpec>| !matches!(c, None | Some(CellarSpec::Built(false)));
     (has_cellar(&asked.cellar) && !has_cellar(&built.cellar))
