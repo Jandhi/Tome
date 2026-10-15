@@ -8,6 +8,7 @@ use crate::minecraft::{Block, BlockForm};
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
+use super::super::HouseSeed;
 use super::dome::{is_dome_eligible, place_dome};
 use super::heightmap::RoofHeightmap;
 use super::top_floor_rects;
@@ -29,6 +30,7 @@ pub enum ParapetStyle {
 /// 1-block-high parapet wall around the perimeter using PrimaryStone.
 pub(super) async fn place_flat_roof(
     ctx: &mut BuildCtx<'_>,
+    seed: HouseSeed,
     frame: &Frame,
 ) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
     let editor: &Editor = &*ctx.editor;
@@ -65,7 +67,7 @@ pub(super) async fn place_flat_roof(
     );
 
     // Pick a parapet style for this building
-    let parapet_style = match rng.rand_i32_range(0, 4) {
+    let parapet_style = match seed.stream("roof.parapet").rand_i32_range(0, 4) {
         0 => ParapetStyle::Crenellated,
         1 => ParapetStyle::CornerPillars,
         2 => ParapetStyle::ThinWalls,

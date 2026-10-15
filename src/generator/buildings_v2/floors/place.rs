@@ -12,6 +12,7 @@ use crate::minecraft::BlockForm;
 use super::super::footprint::merge::{concave_corner_cells, walk_edge_cells};
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
+use super::super::HouseSeed;
 use super::super::walls::WallSegments;
 use super::plan::{FloorPlan, StairKind};
 use super::stairs::{place_stair_blocks, select_stairwells};
@@ -37,15 +38,17 @@ fn perimeter_cells(frame: &Frame, floor: u32) -> HashSet<(i32, i32)> {
 
 /// Place floor slabs, ceilings, and stairs. Returns a FloorPlan with stairwell info.
 /// When `has_attic` is true, an extra stairwell is placed from the top floor
-/// into the attic space under a double-pitch roof.
+/// into the attic space under a double-pitch roof. Stairwells draw from the
+/// house's `stairs` stream; `ctx.rng` only varies the placed blocks.
 pub async fn place_floors(
     ctx: &mut BuildCtx<'_>,
+    seed: HouseSeed,
     frame: &Frame,
     wall_segs: &WallSegments,
     has_attic: bool,
     skip_ceilings: bool,
 ) -> FloorPlan {
-    let stairwells = select_stairwells(frame, wall_segs, has_attic, ctx.rng);
+    let stairwells = select_stairwells(frame, wall_segs, has_attic, &mut seed.stream("stairs"));
 
     // Stairwell openings per Y level — cells to skip when laying floor slabs.
     // A stairwell on floor N needs an opening in the slab of floor N+1.

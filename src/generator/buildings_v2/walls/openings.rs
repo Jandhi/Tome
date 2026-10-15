@@ -61,8 +61,9 @@ fn segment_midpoint(seg: &super::segments::WallSegment) -> Point2D {
 
 /// Place doors on ground-floor segments. Picks the segment closest to the plot
 /// edge (likely road-facing). For large buildings, adds a second door on the
-/// opposite side.
-pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint_area: i32, boundary_cells: &HashSet<Point2D>, _rng: &mut RNG) {
+/// opposite side. Returns the side the front (primary) door faces out of, or
+/// `None` when no segment could take a door.
+pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint_area: i32, boundary_cells: &HashSet<Point2D>, _rng: &mut RNG) -> Option<Cardinal> {
     let door_style = if footprint_area > 150 {
         DoorStyle::Double
     } else {
@@ -96,13 +97,36 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
 
     scored.sort_by_key(|&(_, dist)| dist);
 
-    if scored.is_empty() {
-        return;
-    }
+    // A wall an interior wall meets may take the door beside the joint, but
+    // only when strictly nearer the edge than every clear wall: otherwise an L
+    // whose road side is all joined wall gets its door round the corner.
+    let joint = wall_segs
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(i, s)| s.floor == 0 && s.length >= min_segment_len && is_on_boundary(*i))
+        .filter_map(|(i, s)| {
+            let cells = segment_cells(s);
+            let w = door_width as usize;
+            if cells.len() < w + 4 {
+                return None;
+            }
+            let centre = (cells.len() - w) / 2;
+            (2..=cells.len() - 2 - w)
+                .filter(|&o| !cells[o - 1..o + w + 1].iter().any(|c| boundary_cells.contains(c)))
+                .min_by_key(|&o| o.abs_diff(centre))
+                .map(|o| (i, o as u32, distance_to_plot_edge(cells[o], plot_bounds)))
+        })
+        .min_by_key(|&(_, _, dist)| dist)
+        .filter(|&(_, _, dist)| scored.first().map_or(true, |&(_, best)| dist < best));
+
+    let (primary_idx, primary_offset) = match (joint, scored.first()) {
+        (Some((i, offset, _)), _) => (i, offset),
+        (None, Some(&(i, _))) => (i, (wall_segs.segments[i].length as u32 - door_width) / 2),
+        (None, None) => return None,
+    };
 
     // Place primary door on the closest segment
-    let primary_idx = scored[0].0;
-    let primary_offset = (wall_segs.segments[primary_idx].length as u32 - door_width) / 2;
     wall_segs.segments[primary_idx].openings.push(Opening {
         kind: OpeningKind::Door(door_style),
         offset: primary_offset,
@@ -111,10 +135,12 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
         y_offset: 0,
     });
 
+    // `facing` is the inward normal: the door opens out of the opposite side.
+    let primary_facing = wall_segs.segments[primary_idx].facing;
+
     // For larger buildings, place a second door on the opposite wall.
     // Falls back to any non-adjacent facing if opposite isn't available.
     if footprint_area > 100 {
-        let primary_facing = wall_segs.segments[primary_idx].facing;
         let opposite = -primary_facing;
         if let Some(&(idx, _)) = scored.iter()
             .find(|&&(i, _)| wall_segs.segments[i].facing == opposite)
@@ -132,6 +158,7 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
             });
         }
     }
+    Some(-primary_facing)
 }
 
 /// Collect all interior boundary cells between adjacent rects into a HashSet.

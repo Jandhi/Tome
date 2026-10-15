@@ -6,15 +6,19 @@ use crate::generator::buildings_v2::{
     showcase::{parse_rects, run_showcase, ShowcaseOptions, SizeSpec},
     Culture,
 };
+use crate::outputs::Outputs;
 use crate::render::light::Lighting;
 
 /// `--houses [--culture c] [--seed n] [--count n] [--size s] [--rects "x,z,w,h;..."] [--jetty] [--knee-wall] [--tall-top]
-/// [--variants] [--live] [--px n] [--light day|night|dusk|<0..1>]`: build individual houses and render each one,
-/// under `output/houses/[live-]<culture>-<seed>[...]/`. Offline on a blank flat
+/// [--variants] [--live] [--px n] [--light day|night|dusk|<0..1>] [--spec file.yaml ...]`: build individual houses and render each one,
+/// under `output/houses/[live-]<culture>-<seed>[...]/`. `--spec` (repeatable) builds
+/// house specs instead, under `output/houses/spec-<stem>[+n][-x<count>]/`: one house per
+/// spec, or `--count N` of each (a sweep: only the spec's open fields vary). The flags fill
+/// a spec's open fields (`--culture`, `--size`, `--jetty`, `--knee-wall`, `--tall-top`, `--rects`). Offline on a blank flat
 /// world by default; `--live` builds into the server's build area. `--variants`
 /// builds one row per upper-storey variant (base, knee, tall, both). `--light`
 /// lights the room views with sky light and lamps (the directory gains `-day`, `-night`, ...).
-pub async fn run_houses(args: &[String]) -> anyhow::Result<()> {
+pub async fn run_houses(args: &[String], out: Outputs) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
@@ -32,10 +36,17 @@ pub async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         "manor" => SizeSpec::One(SizeClass::Manor),
         other => anyhow::bail!("unknown --size {other} (cottage|house|hall|manor|mixed)"),
     };
+    // Every `--spec <file>` (repeatable).
+    let specs: Vec<std::path::PathBuf> = args
+        .windows(2)
+        .filter(|w| w[0] == "--spec")
+        .map(|w| std::path::PathBuf::from(&w[1]))
+        .collect();
     let opts = ShowcaseOptions {
         culture,
         seed: arg_after("--seed", 1).map(str::parse).transpose()?.unwrap_or(42),
-        count: arg_after("--count", 1).map(str::parse).transpose()?.unwrap_or(6),
+        // One house per spec unless --count asks for a sweep.
+        count: arg_after("--count", 1).map(str::parse).transpose()?.unwrap_or(if specs.is_empty() { 6 } else { 1 }),
         size,
         jetty: args.iter().any(|a| a == "--jetty"),
         knee_wall: args.iter().any(|a| a == "--knee-wall"),
@@ -45,6 +56,8 @@ pub async fn run_houses(args: &[String]) -> anyhow::Result<()> {
         px: arg_after("--px", 1).map(str::parse).transpose()?.unwrap_or(16),
         rects: arg_after("--rects", 1).map(parse_rects).transpose()?,
         lighting: arg_after("--light", 1).map(Lighting::parse).transpose()?,
+        specs,
+        out,
     };
     run_showcase(&opts).await?;
     Ok(())

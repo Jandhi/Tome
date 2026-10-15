@@ -5,29 +5,34 @@ use crate::generator::settlement::{generate_settlement_with, SettlementOptions};
 use crate::http_mod::GDMCHTTPProvider;
 use crate::noise::Seed;
 
-use super::{random_seed, save_and_render_settlement};
+use crate::outputs::{Artifact, Outputs};
+
+use super::{random_seed, save_and_render_settlement, SettlementSpecs};
 
 /// Generate a settlement on the server, then save the terrain snapshot, scene,
-/// metrics and renders under `output/runs/<seed>/`. `full` turns on the AI
-/// chronicle; `seed_override` pins the seed (default: wall clock).
-pub async fn run_generation_once(full: bool, seed_override: Option<i64>) {
+/// metrics and renders under `output/runs/<seed>/` (what `out` asks for).
+/// `full` turns on the AI chronicle; `seed_override` pins the seed (default:
+/// wall clock); `specs` are house specs to build into the settlement.
+pub async fn run_generation_once(full: bool, seed_override: Option<i64>, specs: SettlementSpecs, out: Outputs) {
     let provider = GDMCHTTPProvider::new();
     let world = World::new(&provider).await.unwrap();
     let seed = Seed(seed_override.unwrap_or_else(random_seed));
     let run_dir = std::path::PathBuf::from("output/runs").join(seed.0.to_string());
     // Save the terrain before generating: generation mutates the World's
     // heightmaps, and the snapshot must hold the server's untouched values.
-    let snapshot_path = run_dir.join("terrain.fixture.nbt.gz");
-    if let Err(e) = world.to_snapshot().save(&snapshot_path) {
-        log::warn!("Failed to save terrain snapshot to {}: {e:#}", snapshot_path.display());
+    if out.has(Artifact::Snapshot) {
+        let snapshot_path = run_dir.join("terrain.fixture.nbt.gz");
+        if let Err(e) = world.to_snapshot().save(&snapshot_path) {
+            log::warn!("Failed to save terrain snapshot to {}: {e:#}", snapshot_path.display());
+        }
     }
     let mut editor = world.get_editor();
     println!("Generating settlement with seed {}", seed.0);
     // None → auto-select the culture from the build area's climate.
-    let options = SettlementOptions { chronicle: full };
+    let options = SettlementOptions { chronicle: full, house_specs: specs };
     let mut report = generate_settlement_with(&mut editor, seed, None, &options).await;
 
-    if let Err(e) = save_and_render_settlement(&editor, seed.0, "live", &run_dir, &mut report) {
+    if let Err(e) = save_and_render_settlement(&editor, seed.0, "live", &run_dir, &mut report, out) {
         log::warn!("Failed to save/render settlement scene in {}: {e:#}", run_dir.display());
     }
 }

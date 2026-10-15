@@ -3,8 +3,7 @@
 # than single crates scattered over the floor. Authored against a north wall:
 # offsets are [along, up, away], `facing=south` faces into the room. Wall
 # pieces keep the row in front walkable (`empty_reachable`) as an aisle.
-# Rooms pick them through the `storage_set` tag; untagged pieces here are
-# drafts that did not read well in `--furniture` previews yet.
+# Rooms pick them through the `storage_set` tag.
 
 # Two tiers of casks lying on their sides, lids to the room, a lantern on
 # the short end of the top tier.
@@ -60,25 +59,6 @@ wood_pile:
     - { offset: [1, 1], constraint: empty_reachable }
     - { offset: [2, 1], constraint: empty_reachable }
 
-# Grain and flour sacks heaped against the wall, the top ones slumped
-# (carpets), one sack pulled out in front.
-sack_heap:
-  blocks:
-    - { block: "minecraft:white_wool", offset: [0, 0, 0], layer: ground }
-    - { block: "minecraft:white_wool", offset: [1, 0, 0], layer: ground }
-    - { block: "minecraft:white_wool", offset: [2, 0, 0], layer: ground }
-    - { block: "minecraft:white_wool", offset: [0, 1, 0], layer: ground }
-    - { block: "minecraft:white_carpet", offset: [1, 1, 0], layer: ground }
-    - { block: "minecraft:white_carpet", offset: [0, 2, 0], layer: ground }
-    - { block: "minecraft:white_carpet", offset: [2, 1, 0], layer: ground }
-  constraints:
-    - { offset: [0, 0], constraint: wall }
-    - { offset: [1, 0], constraint: wall }
-    - { offset: [2, 0], constraint: wall }
-    - { offset: [0, 1], constraint: empty_reachable }
-    - { offset: [1, 1], constraint: empty_reachable }
-    - { offset: [2, 1], constraint: empty_reachable }
-
 # Barrel, chest, barrel under a plank shelf with small wares on it.
 shelving_bay:
   tags: [storage_set]
@@ -113,22 +93,6 @@ crate_stack:
     - { offset: [1, 0], constraint: wall }
     - { offset: [0, 1], constraint: blocked_reachable }
     - { offset: [1, 1], constraint: empty_reachable }
-
-# A packing counter: chest, plank worktop with candles, barrel and lantern.
-packing_bench:
-  blocks:
-    - { block: "minecraft:chest[facing=south]", offset: [0, 0, 0], layer: ground, loot: storage }
-    - { block: "minecraft:spruce_slab[type=top]", offset: [1, 0, 0], layer: ground, swap: wood }
-    - { block: "minecraft:barrel[facing=up]", offset: [2, 0, 0], layer: ground, loot: storage }
-    - { block: "minecraft:candle[candles=2,lit=true]", offset: [1, 1, 0], layer: ground }
-    - { block: "minecraft:lantern[hanging=false]", offset: [2, 1, 0], layer: ground }
-  constraints:
-    - { offset: [0, 0], constraint: wall }
-    - { offset: [1, 0], constraint: wall }
-    - { offset: [2, 0], constraint: wall }
-    - { offset: [0, 1], constraint: empty_reachable }
-    - { offset: [1, 1], constraint: empty_reachable }
-    - { offset: [2, 1], constraint: empty_reachable }
 
 # Freestanding 2x2 cargo heap for the middle of a large storeroom: hay
 # bales and a barrel, a barrel and a chest on top.
