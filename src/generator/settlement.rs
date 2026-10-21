@@ -476,6 +476,9 @@ pub struct SettlementOptions {
     /// each goes on the first road slot where it fits, before the ordinary
     /// houses take it, turned so its front faces the road (see the house loop).
     pub house_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)>,
+    /// Keep every house's build output in the report (`closeup_houses`) and
+    /// tag its blocks with an owner, for close-up renders after the run.
+    pub closeups: bool,
 }
 
 pub async fn generate_settlement(
@@ -1437,6 +1440,9 @@ pub async fn generate_settlement_with(
     // Pass one builds the anchored specs at their slots, pass two is the
     // ordinary walk. Without anchored specs pass one draws nothing, so such
     // towns are unchanged.
+    // Owner id per house attempt, tagging its blocks in the editor so a
+    // close-up of one house can leave its neighbours out.
+    let mut next_owner: u32 = 0;
     for anchored_pass in [true, false] {
         if anchored_pass && anchored.is_empty() { continue; }
         if !anchored_pass {
@@ -1746,10 +1752,13 @@ pub async fn generate_settlement_with(
                                 }
                             }
                         }
+                        let owner = next_owner;
+                        next_owner += 1;
+                        editor.set_owner(options.closeups.then_some(owner));
                         // `bctx.seed` is set, so `build_house` leaves the town stream alone.
                         let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                            Ok(output) => {
+                            Ok(mut output) => {
                                 // Record the house's decisions, footprint relative
                                 // to its own bounds (reads only, draws nothing).
                                 let built_spec = HouseSpec::resolved(
@@ -1790,6 +1799,7 @@ pub async fn generate_settlement_with(
                                         manor_sign_sites.push(site);
                                     }
                                 }
+                                bctx_editor.editor.set_owner(None);
                                 // Population budget tracks sleeping capacity, not bed
                                 // furniture: a double/canopy bed sleeps two. Each
                                 // bed-tagged item's capacity is its number of
@@ -1813,7 +1823,7 @@ pub async fn generate_settlement_with(
                                 let population =
                                     ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
                                 town_anchors.push(crate::generator::population::HouseAnchors {
-                                    scenes: output.npc_anchors,
+                                    scenes: std::mem::take(&mut output.npc_anchors),
                                     population,
                                     wealth: crate::generator::population::Wealth::from_size_class(size_class),
                                     pos: output.footprint.bounds().midpoint(),
@@ -1852,6 +1862,13 @@ pub async fn generate_settlement_with(
                                         }
                                     }
                                 }
+                                if options.closeups {
+                                    report.closeup_houses.push(crate::generator::report::CloseupHouse {
+                                        house: report.house_specs.len() - 1,
+                                        owner,
+                                        output: std::sync::Arc::new(output),
+                                    });
+                                }
                                 // A Manor closes out its lot's manor-tier: skip any
                                 // remaining frontages/cursors here so we don't tile
                                 // additional Manors along the same chain. Other
@@ -1863,6 +1880,7 @@ pub async fn generate_settlement_with(
                                 cursor += fw + SIDE_BUFFER_CELLS;
                             }
                             Err(msg) => {
+                                bctx_editor.editor.set_owner(None);
                                 tier_fail[ti] += 1;
                                 log::warn!("placement build_house failed: {}", msg);
                                 // A scanned manor gets one shot; on failure give up its

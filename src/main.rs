@@ -163,7 +163,7 @@ async fn main() {
     }
     if args.iter().any(|a| a == "--render") {
         let Some(scene_path) = arg_after("--render", 1) else {
-            eprintln!("usage: --render <path.scene> [out_dir] [--light day|night|dusk|<0..1>]");
+            eprintln!("usage: --render <path.scene> [out_dir] [--light day|night|dusk|<0..1>] [--region x,z,w,h] [--px N]");
             std::process::exit(2);
         };
         // The optional out_dir must not be the --light flag itself.
@@ -175,7 +175,21 @@ async fn main() {
                 std::process::exit(2);
             }
         };
-        if let Err(e) = cli::render::render_saved_scene(scene_path, out_dir, lighting) {
+        let region = match arg_after("--region", 1).map(cli::render::parse_region).transpose() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        };
+        let px = match arg_after("--px", 1).map(str::parse::<u32>).transpose() {
+            Ok(px) => px.filter(|&p| p > 0),
+            Err(e) => {
+                eprintln!("--px takes a positive whole number: {e}");
+                std::process::exit(2);
+            }
+        };
+        if let Err(e) = cli::render::render_saved_scene(scene_path, out_dir, lighting, region, px) {
             eprintln!("Render failed: {e:#}");
             std::process::exit(1);
         }
