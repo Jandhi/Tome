@@ -171,12 +171,27 @@ fn is_valid_spot(
     placed.iter().all(|p| p.distance_squared(&cell) >= min_gap_sq)
 }
 
+/// The first free cell above a lamp spot's real ground. The heightmap runs high
+/// where an earlier pass cleared the column without lowering it (a logged tree's
+/// trunk and canopy forced to air), so step down through air and tree blocks.
+fn lamp_ground(editor: &Editor, cell: Point2D) -> Option<Point3D> {
+    let mut ground = editor.world().add_height(cell)?;
+    for _ in 0..32 {
+        let below = ground + DOWN;
+        match editor.current_block_id(below) {
+            Some(id) if id.is_air() || id.is_tree() => ground = below,
+            _ => break,
+        }
+    }
+    Some(ground)
+}
+
 /// Stand a lamp on the verge: a fence post, an arm fence reaching one block
 /// toward the road at the post's top, and `lantern` hung beneath that arm so the
 /// light leans out over the street. `toward_road` is a unit step from the verge
 /// cell back toward the centreline.
 async fn place_lamp(editor: &Editor, cell: Point2D, toward_road: Point2D, lantern: &Block) {
-    let Some(ground) = editor.world().add_height(cell) else { return; };
+    let Some(ground) = lamp_ground(editor, cell) else { return; };
     let fence: Block = "minecraft:oak_fence".into();
 
     // Vertical post.

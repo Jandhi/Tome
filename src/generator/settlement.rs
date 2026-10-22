@@ -600,7 +600,7 @@ pub async fn generate_settlement_with(
             .into_iter()
             .filter(|c| editor.world().is_in_bounds_2d(*c)),
     );
-    log_trees(&*editor, logged_area.clone()).await;
+    log_trees(editor, logged_area.clone()).await;
     println!(
         "Logged {} cells of trees ({} urban + {} apron)",
         logged_area.len(), urban.len(), logged_area.len() - urban.len(),
@@ -754,7 +754,7 @@ pub async fn generate_settlement_with(
             .map(|(c, &y)| Point3D::new(c.x, y, c.y))
             .collect();
         force_height(editor, &corridor_pts, false).await;
-        build_paths_merged(&*editor, &data, &rural_paths, &mut rng).await;
+        build_paths_merged(editor, &data, &rural_paths, &mut rng).await;
         for path in &rural_paths {
             let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
             let mut paved = crate::geometry::get_surrounding_set(&centre, path.width().saturating_sub(1));
@@ -1099,7 +1099,7 @@ pub async fn generate_settlement_with(
     // than reading the placed road back (the editor cache is keyed by local
     // coords while get_block subtracts the build-area origin, so a read here
     // returns world terrain, not the road).
-    let road_slabs: HashSet<Point3D> = build_paths_merged(&*editor, &data, &all_paths, &mut rng).await;
+    let road_slabs: HashSet<Point3D> = build_paths_merged(editor, &data, &all_paths, &mut rng).await;
     let slab_y_by_cell: HashMap<Point2D, i32> =
         road_slabs.iter().map(|p| (p.drop_y(), p.y)).collect();
 
@@ -1950,6 +1950,12 @@ pub async fn generate_settlement_with(
         "minecraft:lantern".into()
     };
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
+    // Claim each post cell as a path (like the street signs below) so the
+    // open-space pass treats it as kerb: unclaimed, a plaza or park would take
+    // the cell into its region and re-grade the ground out from under the post.
+    for &cell in &lamps {
+        editor.world_mut().claim(cell, BuildClaim::Path(crate::generator::paths::PathType::Pavement));
+    }
     println!("Placed {} street lamps", lamps.len());
     report.street_lamps = lamps.len();
 

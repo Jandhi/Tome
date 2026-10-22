@@ -62,6 +62,17 @@ impl BlockID {
             // above, so the tree logger left them floating after stripping the
             // stem. Fold the mushroom blocks in so they're cleared like any tree.
             || self.is_mushroom()
+            // What hangs on a tree goes with it, or felling leaves it in the air.
+            || self.is_tree_hanger()
+    }
+
+    /// What hangs on a tree: vines, cocoa pods and bee nests.
+    pub fn is_tree_hanger(&self) -> bool {
+        matches!(self.name(), "vine" | "cocoa" | "bee_nest")
+    }
+
+    pub fn is_vine(&self) -> bool {
+        self.name() == "vine"
     }
 
     pub fn is_leaves(&self) -> bool {
@@ -109,6 +120,30 @@ impl BlockID {
                     | "ochre_froglight"
                     | "verdant_froglight"
                     | "pearlescent_froglight"
+            )
+    }
+
+    /// Land plants that stand on the surface without blocking motion: grasses,
+    /// ferns, bushes, flowers (one and two blocks tall), saplings, leaf litter and
+    /// small mushrooms. Not the underwater ones (seagrass, kelp).
+    pub fn is_vegetation(&self) -> bool {
+        let name = self.name();
+        if name.contains("sea") || name.contains("kelp") || name.ends_with("_block") {
+            return false;
+        }
+        name.contains("grass")
+            || name.contains("fern")
+            || name.contains("bush")
+            || name.contains("tulip")
+            || name.ends_with("_sapling")
+            || name.ends_with("mushroom")
+            || matches!(
+                name,
+                "dandelion" | "poppy" | "blue_orchid" | "allium" | "azure_bluet" | "oxeye_daisy"
+                    | "cornflower" | "lily_of_the_valley" | "wither_rose" | "torchflower"
+                    | "lilac" | "peony" | "sunflower" | "pitcher_plant" | "pink_petals"
+                    | "wildflowers" | "leaf_litter" | "open_eyeblossom" | "closed_eyeblossom"
+                    | "cactus_flower"
             )
     }
 

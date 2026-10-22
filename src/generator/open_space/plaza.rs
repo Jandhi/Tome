@@ -11,6 +11,7 @@ use crate::util::{HashMap, HashSet};
 
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
+use crate::generator::terrain::clear_stranded_plants;
 use crate::generator::population::{
     yaw_toward, AnchorScene, AnchorSlot, Occupant, SceneKind, SlotRole,
 };
@@ -204,6 +205,7 @@ async fn furnish_plaza_inner(
         }
         let mat = if border_set.contains(&c) { theme.pave_border } else { theme.pave };
         put_forced(editor, c.x, s, c.y, mat).await;
+        clear_stranded_plants(editor, c, base_h, s + 1).await;
     }
 
     let mut used: HashSet<Point2D> = HashSet::default();
