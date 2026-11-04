@@ -97,7 +97,7 @@ pub(super) async fn place_hipped_roof(
             HippedPitch::Stairs => {
                 place_roof_blocks(
                     editor, &combined_hm, roof_y, GablePitch::Stairs,
-                    &group_rects, &higher_rects, data, palette, rng,
+                    &group_rects, &higher_rects, &Default::default(), false, data, palette, rng,
                 ).await;
             }
         }

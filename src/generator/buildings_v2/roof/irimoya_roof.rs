@@ -86,7 +86,7 @@ pub(super) async fn place_irimoya_roof(
 
         // Lower hipped skirt + the long central ridge, rendered as a stepped roof.
         place_roof_blocks(
-            editor, &combined_hm, roof_y, GablePitch::Stairs, &group_rects, &higher_rects,
+            editor, &combined_hm, roof_y, GablePitch::Stairs, &group_rects, &higher_rects, &Default::default(), false,
             data, palette, rng,
         )
         .await;
