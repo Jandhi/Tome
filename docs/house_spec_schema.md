@@ -79,6 +79,8 @@ fits its street. A spec too big for every lot is reported as not built; see
 | `attic` | `true`, `false` | follows `roof` (see below) |
 | `knee_wall` | `true`, `false` | off |
 | `tall_top_floor` | `true`, `false` | off |
+| `dormers` | `true`, `false` | off |
+| `roof_trim` | `true`, `false` | off |
 | `site` | `{ origin: [x, z], front_door }`, mostly written by the generator | where the house stood; `origin` places it in a settlement (see below) |
 
 ### culture
@@ -265,6 +267,15 @@ one (a settlement run prints a note when that happens).
   other cultures). Also a request: a core too small once inset builds plain.
 - `knee_wall`, `tall_top_floor`: alternative upper-storey proportions, off
   unless pinned.
+- `dormers: true` asks for gable dormers (a plastered face with a two-high
+  window under a small pitched roof) on the eaves of `{ gable: stairs }` and
+  `{ gable: double }` roofs, front side first, up to three per eave. A request:
+  a slope only takes one when it is deep enough for the dormer's ridge to stay
+  two rows under the main ridge (stair roofs about 11+ deep, double roofs 7+)
+  and its eave is clear of wings and gable ends, so slab roofs and small
+  houses build without.
+- `roof_trim: true` draws a gable roof's outline (the overhang ring and the
+  ridge, and a dormer's front edge) in the roof palette's `secondary_roof`.
 
 ### site
 

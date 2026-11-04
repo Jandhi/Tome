@@ -27,6 +27,7 @@
 //! | `footprint` | `footprint`, inside the plot; `floors`: the frame's `floors` stream |
 //! | `engawa`, `jetty` | `engawa`, `jetty`: the culture's chances |
 //! | `knee_wall`, `tall_top_floor` | not drawn: off |
+//! | `dormers`, `roof_trim` | not drawn: off (gable roofs only; dormers need a stair or double pitch) |
 //! | `timber` | `timber` (medieval; plain elsewhere) |
 //! | `cellar` | `cellar`: the size class's chance and a uniform theme |
 //! | `rooms` | `rooms` / `attic`: the size class's room rules |
@@ -61,6 +62,8 @@
 //! engawa: false
 //! knee_wall: false
 //! tall_top_floor: false
+//! dormers: false
+//! roof_trim: false
 //! timber: { decorated: { spacing: 3 } }
 //! attic: false
 //! cellar: { theme: wine }
@@ -133,6 +136,14 @@ pub struct HouseSpec {
     pub knee_wall: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tall_top_floor: Option<bool>,
+    /// Gable dormers on the eaves of stair- and double-pitch gable roofs,
+    /// wherever a slope is deep and clear enough (`roof::dormer`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dormers: Option<bool>,
+    /// The roof's outline (eaves, gable verges, ridge) in the palette's
+    /// secondary roof material. Gable roofs only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roof_trim: Option<bool>,
     /// `plain`, or `{ studded|braced|decorated: { spacing: N } }`.
     #[serde(default, skip_serializing_if = "Option::is_none", with = "serde_yaml::with::singleton_map")]
     pub timber: Option<TimberPattern>,
@@ -315,6 +326,8 @@ impl HouseSpec {
             engawa: Some(bctx.engawa),
             knee_wall: Some(bctx.knee_wall),
             tall_top_floor: Some(bctx.tall_top_floor),
+            dormers: Some(bctx.dormers),
+            roof_trim: Some(bctx.roof_trim),
             timber: Some(house.timber_pattern),
             attic: Some(house.has_attic),
             cellar: Some(cellar),
@@ -604,6 +617,8 @@ pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &Lo
     });
     bctx.knee_wall = spec.knee_wall.unwrap_or(false);
     bctx.tall_top_floor = spec.tall_top_floor.unwrap_or(false);
+    bctx.dormers = spec.dormers.unwrap_or(false);
+    bctx.roof_trim = spec.roof_trim.unwrap_or(false);
     bctx.timber_pattern = spec.timber;
     bctx.floors = spec
         .footprint
