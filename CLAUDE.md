@@ -54,6 +54,10 @@ Generation is deterministic in the seed only because generator code imports `cra
 - `BlockedReachable` — not walkable, not placeable, must have a walkable neighbor (furniture approach cells like chest fronts). Check the invariant tests if you're introducing new BR state.
 - `UnblockedReachable` — walkable, not placeable (door entrances, stair landings/approaches, stair tops, attic ladder cells, window ceilings). Use this for cells the player walks *through* or *on*, not cells adjacent to furniture.
 
+## Pull requests
+
+A PR should be a single feature at a time.
+
 ## Layout
 
 - `src/main.rs` — entry point, declares all top-level modules (no `lib.rs`)
