@@ -464,6 +464,10 @@ async fn feather_smooth(
         }
     }
 
+    // Fell the trees first: the heightmap stands on a trunk's top, so grading a
+    // wooded field saws through the trunk and leaves the canopy in the air.
+    log_trees(editor, region.clone()).await;
+
     // Feather spans the border ring plus the neighbour reach, so the field
     // interior reaches full smoothing while the skirt grades to natural.
     feathered_flatten(editor, &region, EDGE_BUFFER + NEIGHBOUR_REACH, smooth_iters, true).await;
@@ -766,14 +770,15 @@ fn beehive_nbt(bee_names: &[String], prefixes: &[String], suffixes: &[String], r
 /// so the hive ends up nestled against the trunk at the underside of the canopy
 /// rather than perched on top of it. A spot qualifies if it is sheltered by a leaf
 /// directly above (the canopy roof) — hanging beneath a leaf is fine even without
-/// neighbouring leaves.
+/// neighbouring leaves. Reads the blocks as this run left them, so a tree an
+/// earlier pass felled (a road, a field) gets no hive hanging in the air.
 fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)> {
     let base_y = editor.world().get_non_tree_height(trunk)?;
 
     // Walk up the trunk's logs to find the top of the stem.
     let mut top_y = base_y;
     let mut y = base_y;
-    while editor.get_block(trunk.add_y(y)).id.is_log() {
+    while editor.current_block_id(trunk.add_y(y)).is_some_and(|id| id.is_log()) {
         top_y = y;
         y += 1;
     }
@@ -781,13 +786,12 @@ fn find_hive_spot(trunk: Point2D, editor: &Editor) -> Option<(Point3D, Point2D)>
     for ly in base_y..=top_y {
         for d in CARDINALS_2D {
             let pos = Point3D::new(trunk.x + d.x, ly, trunk.y + d.y);
-            let here = editor.get_block(pos).id;
+            let Some(here) = editor.current_block_id(pos) else { continue; };
             if !(here.is_air() || here.is_leaves()) {
                 continue; // don't carve into a branch or neighbouring trunk
             }
             // Sheltered by the canopy roof directly overhead.
-            let above = editor.get_block(Point3D::new(pos.x, pos.y + 1, pos.z)).id;
-            if above.is_leaves() {
+            if editor.current_block_id(Point3D::new(pos.x, pos.y + 1, pos.z)).is_some_and(|id| id.is_leaves()) {
                 return Some((pos, d));
             }
         }

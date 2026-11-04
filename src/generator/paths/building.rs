@@ -1,6 +1,6 @@
 use crate::util::{HashMap, HashSet};
 
-use crate::{editor::Editor, generator::{BuildClaim, data::LoadedData, materials::{MaterialId, MaterialPlacer, Placer}, paths::path::{Path, PathPriority}}, geometry::{DOWN, Point2D, Point3D, UP, get_surrounding_set}, minecraft::BlockForm, noise::RNG, util::MeanExt};
+use crate::{editor::Editor, generator::{BuildClaim, data::LoadedData, materials::{MaterialId, MaterialPlacer, Placer}, paths::path::{Path, PathPriority}, terrain::log_trees}, geometry::{DOWN, Point2D, Point3D, UP, get_surrounding_set}, minecraft::BlockForm, noise::RNG, util::MeanExt};
 
 /// A road must never carve *into* a finished building, a placed structure, or
 /// the town wall. When a paved cell coincides with one of those claims we skip
@@ -172,7 +172,7 @@ fn smooth_road_heights(points_2d: &HashSet<Point2D>, height_by_point: &mut HashM
 /// house a block over a fronting slab and to clear stray slab lips at doorways,
 /// without having to read the placed road back out of the editor's block cache.
 pub async fn build_paths_merged(
-    editor: &Editor,
+    editor: &mut Editor,
     data: &LoadedData,
     paths: &[Path],
     rng: &mut RNG,
@@ -224,6 +224,21 @@ pub async fn build_paths_merged(
     }
 
     smooth_road_heights(&points_2d, &mut height_by_point);
+
+    // Fell any tree with wood in a cell's headroom before clearing it: clearing
+    // only the headroom saws through the trunk and leaves the tree above hanging.
+    let trunks: HashSet<Point2D> = points_2d
+        .iter()
+        .copied()
+        .filter(|p| matches!(pave_mode_for_claim(editor, *p), PaveMode::Clear))
+        .filter(|p| {
+            let y = height_by_point[p].floor() as i32;
+            (y..=y + 3).any(|y| editor.current_block_id(Point3D::new(p.x, y, p.y)).is_some_and(|id| id.is_log()))
+        })
+        .collect();
+    if !trunks.is_empty() {
+        log_trees(editor, trunks).await;
+    }
 
     let mut placer = Placer::new(&data.materials, rng);
     let fallback = paths[0].material().clone();

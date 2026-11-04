@@ -275,6 +275,15 @@ impl Editor {
         self.block_cache.borrow().get(&local).cloned()
     }
 
+    /// The block id at **local** `local` as this run has left it: the block
+    /// placed there this run, else the original terrain.
+    pub fn current_block_id(&self, local: Point3D) -> Option<BlockID> {
+        if let Some(block) = self.block_cache.borrow().get(&local) {
+            return Some(block.id.clone());
+        }
+        self.world.get_block_id(local)
+    }
+
     pub async fn flush_buffer(&self) {
         // Drain the buffer first, releasing the borrow before the await
         let buffer: Vec<_> = self.block_buffer.borrow_mut().drain(..).collect();

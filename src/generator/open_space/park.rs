@@ -25,7 +25,7 @@ use crate::util::{HashMap, HashSet};
 use crate::editor::Editor;
 use crate::generator::npc::DialogueVolume;
 use crate::generator::population::{yaw_toward, AnchorScene, Occupant, SlotRole};
-use crate::generator::terrain::{generate_tree_feature, Tree};
+use crate::generator::terrain::{clear_stranded_plants, generate_tree_feature, Tree};
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::minecraft::Biome;
 use crate::noise::RNG;
@@ -251,6 +251,7 @@ async fn flatten_region(editor: &mut Editor, region: &Region, theme: &Theme) {
             put_forced(editor, c.x, surface - 1, c.y, theme.subsoil).await;
         }
         put_forced(editor, c.x, surface, c.y, theme.ground).await;
+        clear_stranded_plants(editor, c, nat_h, tgt).await;
         points.insert(Point3D::new(c.x, tgt, c.y));
     }
 

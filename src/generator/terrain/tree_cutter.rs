@@ -1,7 +1,7 @@
 use crate::util::HashSet;
 
 use crate::{
-    editor::Editor, geometry::{Point2D, Point3D, ALL_8}
+    editor::Editor, geometry::{Point2D, Point3D, ALL_8, CARDINALS_2D}
 };
 
 /// A single tree: its canonical trunk cell (where a stump is placed) and every
@@ -116,7 +116,7 @@ pub async fn log_stems(editor: &Editor, points: HashSet<Point2D>) {
     }
 }
 
-pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
+pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
     /// How far below a column's canopy top we scan. Generous enough to always
     /// pass the whole tree down to the ground — even when a tall neighbouring
     /// canopy overhangs the column and pushes its motion-blocking top far above
@@ -210,6 +210,134 @@ pub async fn log_trees(editor: &Editor, points: HashSet<Point2D>) {
     for &pos in &visited_logs {
         if editor.get_block(pos).id.is_log() {
             editor.place_block(&"air".into(), pos).await;
+        }
+    }
+
+    // 5. Leaves of the felled trees that reach past the cleared columns.
+    decay_orphaned_leaves(editor, &columns).await;
+
+    // 6. The ground heightmap counts logs, so a felled trunk's column still
+    //    reports its old top and anything stood there later (a palisade post, a
+    //    lamp) floats. Lower each column through the air and leftover tree
+    //    blocks to the real ground; a column that ends on liquid keeps its map.
+    let mut lowered: HashSet<Point3D> = HashSet::default();
+    for &point in &columns {
+        let Some(height) = editor.world().get_height_at(point) else { continue; };
+        let mut ground = height;
+        while height - ground < MAX_SCAN_DEPTH {
+            match editor.current_block_id(point.add_y(ground - 1)) {
+                Some(id) if id.is_air() || id.is_tree() => ground -= 1,
+                _ => break,
+            }
+        }
+        let floor_is_liquid = editor.current_block_id(point.add_y(ground - 1)).map_or(true, |id| id.is_liquid());
+        if ground < height && !floor_is_liquid {
+            lowered.insert(Point3D::new(point.x, ground, point.y));
+        }
+    }
+    editor.world_mut().set_heights(&lowered);
+}
+
+/// Drop the leaves a felling left without a tree. [`log_trees`] clears whole
+/// columns, but a canopy reaches past them into columns it was not given, and
+/// those leaves would hang in the air. The game decays a natural leaf more than
+/// six steps (through leaves) from any log; do the same for the uncleared columns
+/// within reach of a cleared one, then drop the vines, cocoa pods and bee nests
+/// left hanging off nothing. Placed and persistent leaves are kept.
+async fn decay_orphaned_leaves(editor: &Editor, cleared: &HashSet<Point2D>) {
+    const DECAY: i32 = 6;
+    const FACES: [(i32, i32, i32); 6] = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
+    let world = editor.world();
+    // Every in-bounds cell within Chebyshev `r` of `cells`, grown ring by ring.
+    let dilate = |cells: &HashSet<Point2D>, r: i32| -> HashSet<Point2D> {
+        let mut out: HashSet<Point2D> = cells.clone();
+        let mut ring: Vec<Point2D> = cells.iter().copied().collect();
+        for _ in 0..r {
+            let mut next = Vec::new();
+            for c in ring {
+                for d in ALL_8 {
+                    let n = c + d;
+                    if world.is_in_bounds_2d(n) && out.insert(n) {
+                        next.push(n);
+                    }
+                }
+            }
+            ring = next;
+        }
+        out
+    };
+
+    // Uncleared columns a felled tree's leaves could reach (only the cleared
+    // area's rim matters: its inside is gone), and the wider band whose logs
+    // and leaves can still hold them up.
+    let rim: HashSet<Point2D> = cleared
+        .iter()
+        .copied()
+        .filter(|c| CARDINALS_2D.iter().any(|d| !cleared.contains(&(*c + *d))))
+        .collect();
+    let candidates: HashSet<Point2D> = dilate(&rim, DECAY + 1).into_iter().filter(|c| !cleared.contains(c)).collect();
+    let reach = dilate(&candidates, DECAY);
+
+    let mut logs: Vec<Point3D> = Vec::new();
+    let mut leaves: HashSet<Point3D> = HashSet::default();
+    let mut hangers: Vec<Point3D> = Vec::new();
+    for &c in &reach {
+        let (Some(ground), Some(top)) = (world.get_height_at(c), world.get_motion_blocking_height_at(c)) else { continue; };
+        for y in ground - 1..top {
+            let p = c.add_y(y);
+            let Some(id) = editor.current_block_id(p) else { continue; };
+            if id.is_log() {
+                logs.push(p);
+            } else if id.is_leaves() {
+                leaves.insert(p);
+            } else if id.is_tree_hanger() {
+                hangers.push(p);
+            }
+        }
+    }
+
+    // Distance from the nearest log through leaves, as the game counts it.
+    let mut held: HashSet<Point3D> = HashSet::default();
+    let mut queue: std::collections::VecDeque<(Point3D, i32)> = logs.into_iter().map(|p| (p, 0)).collect();
+    while let Some((p, d)) = queue.pop_front() {
+        if d == DECAY {
+            continue;
+        }
+        for (dx, dy, dz) in FACES {
+            let n = Point3D::new(p.x + dx, p.y + dy, p.z + dz);
+            if leaves.contains(&n) && held.insert(n) {
+                queue.push_back((n, d + 1));
+            }
+        }
+    }
+
+    for &p in &leaves {
+        let natural = editor.get_cached_block(p).is_none()
+            && world.get_block(p).is_some_and(|b| b.state.as_ref().and_then(|s| s.get("persistent")).map_or(true, |v| v != "true"));
+        if natural && candidates.contains(&p.drop_y()) && !held.contains(&p) {
+            editor.place_block(&"air".into(), p).await;
+        }
+    }
+
+    // What hung on the dropped canopy: anything with only air (or, for a vine,
+    // only the vine below it) left around it falls, repeated until none do.
+    loop {
+        let mut fell = false;
+        for &p in &hangers {
+            if editor.current_block_id(p).is_none_or(|id| id.is_air()) {
+                continue;
+            }
+            let held_up = FACES.iter().any(|&(dx, dy, dz)| {
+                let n = Point3D::new(p.x + dx, p.y + dy, p.z + dz);
+                editor.current_block_id(n).is_some_and(|id| !id.is_air() && !(dy == -1 && id.is_vine()))
+            });
+            if !held_up {
+                editor.place_block(&"air".into(), p).await;
+                fell = true;
+            }
+        }
+        if !fell {
+            break;
         }
     }
 }
