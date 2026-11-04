@@ -52,7 +52,7 @@ pub enum RoofStyle {
 pub struct RoofDetail {
     /// Gable dormers on stair- and double-pitch roofs (see [`dormer`]).
     pub dormers: bool,
-    /// The roof's outline (eaves, gable verges, ridge, dormer edges) in the
+    /// The roof's outline (eaves, gable verges, ridge, a dormer's front edge) in the
     /// palette's secondary roof material.
     pub trim: bool,
     /// The side the front door opens out of: dormers try that eave first.

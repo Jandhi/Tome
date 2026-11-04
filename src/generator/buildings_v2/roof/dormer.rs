@@ -311,9 +311,11 @@ pub async fn place_dormers(
         }
 
         // Roof: ridge slabs over the face, stairs on the cheeks and a side eave
-        // a cell wider, all from the overhang row back.
+        // a cell wider, all from the overhang row back. Only the overhang row
+        // takes the trim (like the main roof's gable verge): a dormer is small
+        // enough that trimming its ridge and side eaves too leaves a ring.
         for s in -1..=dormer.last_s(0) {
-            let placer = if s < 0 || trim { &mut edge } else { &mut roof };
+            let placer = if s < 0 { &mut edge } else { &mut roof };
             placer.place_block(editor, at(dormer.cell(0, s), ridge), BlockForm::Slab, Some(&bottom_slab), None).await;
         }
         for d in [-2i32, -1, 1, 2] {
@@ -327,7 +329,7 @@ pub async fn place_dormers(
             let rel = dormer.roof_h(d);
             let last = if d.abs() == 2 { (0..).take_while(|&s| dormer.main_h(s) < rel).last().unwrap_or(-1) } else { dormer.last_s(d) };
             for s in -1..=last {
-                let placer = if s < 0 || d.abs() == 2 && trim { &mut edge } else { &mut roof };
+                let placer = if s < 0 { &mut edge } else { &mut roof };
                 placer.place_block(editor, at(dormer.cell(d, s), rel), BlockForm::Stairs, Some(&stair), None).await;
             }
             // Only the side eaves get a bracket: under the face's own

@@ -275,7 +275,7 @@ one (a settlement run prints a note when that happens).
   and its eave is clear of wings and gable ends, so slab roofs and small
   houses build without.
 - `roof_trim: true` draws a gable roof's outline (the overhang ring and the
-  ridge, and a dormer's edges) in the roof palette's `secondary_roof`.
+  ridge, and a dormer's front edge) in the roof palette's `secondary_roof`.
 
 ### site
 
