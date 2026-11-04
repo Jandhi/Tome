@@ -9,6 +9,7 @@
 //! byte-identical to what it was before lighting existed.
 
 pub mod assets;
+pub mod banner;
 pub mod colors;
 pub mod diff;
 pub mod elevation;

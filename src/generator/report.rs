@@ -59,6 +59,30 @@ pub struct SettlementReport {
     pub npcs_by_job: Vec<(String, usize)>,
     /// `(stage, milliseconds)` in pipeline order.
     pub timings_ms: Vec<(String, u64)>,
+    /// The resolved spec of every buildings_v2 house the town built, in build
+    /// order. Written as `houses/house_<n>.spec.yaml` beside `metrics.json`,
+    /// not into it.
+    #[serde(skip)]
+    pub house_specs: Vec<crate::generator::buildings_v2::spec::HouseSpec>,
+    /// Houses built from `--spec` files, in build order.
+    #[serde(default)]
+    pub spec_houses: Vec<SpecPlacement>,
+    /// `--spec` files the town did not build: refused, or no lot had room.
+    #[serde(default)]
+    pub specs_unplaced: Vec<String>,
+}
+
+/// Where a town put a house from a `--spec` file.
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+pub struct SpecPlacement {
+    /// The spec's name (its file name).
+    pub spec: String,
+    /// Its index among the town's houses: `houses/house_<n>.spec.yaml`.
+    pub house: usize,
+    /// Absolute world `[x, z]` of the footprint's corner.
+    pub origin: [i32; 2],
+    /// The side the front door opens out of, toward the road.
+    pub front_door: String,
 }
 
 impl SettlementReport {

@@ -507,8 +507,15 @@ impl Drop for Editor {
 pub(crate) fn block_string(block: &Block) -> String {
     let id = block.id.as_str();
     let mut out = if id.contains(':') { id.to_string() } else { format!("minecraft:{id}") };
-    if let Some(state) = block.state.as_ref().filter(|s| !s.is_empty()) {
-        let mut kv: Vec<_> = state.iter().collect();
+    let mut kv: Vec<(&str, String)> = block.state.iter().flatten().map(|(k, v)| (k.as_str(), v.clone())).collect();
+    // A banner's pattern layers ride along as a render-only state (see
+    // `render::banner`), so a saved scene still shows the design.
+    if id.contains("banner") {
+        if let Some(p) = block.data.as_deref().and_then(crate::render::banner::patterns_state) {
+            kv.push(("patterns", p));
+        }
+    }
+    if !kv.is_empty() {
         kv.sort();
         let parts: Vec<String> = kv.into_iter().map(|(k, v)| format!("{k}={v}")).collect();
         out.push('[');

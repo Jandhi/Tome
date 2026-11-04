@@ -25,6 +25,7 @@ use crate::geometry::{Point2D, Rect2D};
 
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
+use super::HouseSeed;
 use gable::GablePitch;
 use heightmap::RoofHeightmap;
 use hipped::HippedPitch;
@@ -32,7 +33,10 @@ use hipped::HippedPitch;
 pub use flat_roof::place_roof_ladder;
 
 /// Top-level roof style. Determines which roof algorithm runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Serialised (house spec) as `flat`, `irimoya`, or a one-key map with the
+/// pitch: `{ gable: stairs }`, `{ hipped: slab }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RoofStyle {
     Gable(GablePitch),
     Hipped(HippedPitch),
@@ -57,15 +61,19 @@ pub(super) fn top_floor_rects(frame: &Frame) -> Vec<Rect2D> {
 /// heightmap of `rects[i]` using the extended-roof bounds, suitable for asking
 /// "what's the roof block y at this (x, z)?" for furnish-time clearance checks
 /// inside attics. For flat roofs the heightmaps are trivial (height 0 everywhere).
+///
+/// `ctx.rng` only varies the placed blocks; the decisions draw from the house's
+/// `roof.ridge`, `roof.chimney` and `roof.parapet` streams of `seed`.
 pub async fn place_roof(
     ctx: &mut BuildCtx<'_>,
+    seed: HouseSeed,
     frame: &Frame,
     style: RoofStyle,
 ) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
     match style {
-        RoofStyle::Gable(pitch) => gable_roof::place_gable_roof(ctx, frame, pitch).await,
+        RoofStyle::Gable(pitch) => gable_roof::place_gable_roof(ctx, seed, frame, pitch).await,
         RoofStyle::Hipped(pitch) => hipped_roof::place_hipped_roof(ctx, frame, pitch).await,
         RoofStyle::Irimoya => irimoya_roof::place_irimoya_roof(ctx, frame).await,
-        RoofStyle::Flat => flat_roof::place_flat_roof(ctx, frame).await,
+        RoofStyle::Flat => flat_roof::place_flat_roof(ctx, seed, frame).await,
     }
 }

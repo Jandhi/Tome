@@ -29,6 +29,7 @@ pub mod config;
 pub mod ai;
 pub mod render;
 pub mod cli;
+pub mod outputs;
 
 #[cfg(feature = "visualizer")]
 pub mod visualizer;
@@ -108,8 +109,20 @@ async fn main() {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
     };
-    if args.iter().any(|a| a == "--houses") {
-        if let Err(e) = cli::houses::run_houses(&args).await {
+    // `--out` picks which artifacts a run writes (see `outputs`); checked
+    // before anything is generated so a typo fails at once.
+    use crate::outputs::Outputs;
+    let houses = args.iter().any(|a| a == "--houses");
+    let defaults = if houses { Outputs::houses_default() } else { Outputs::settlement_default() };
+    let out = match Outputs::parse(arg_after("--out", 1), defaults) {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
+    if houses {
+        if let Err(e) = cli::houses::run_houses(&args, out).await {
             eprintln!("House showcase failed: {e:#}");
             std::process::exit(1);
         }
@@ -126,12 +139,23 @@ async fn main() {
         }
         return;
     }
+    // House specs for a settlement run (`--spec <file>`, repeatable), read up
+    // front so a typo fails before anything is generated.
+    let specs = match cli::settlement_specs(&args) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{e:#}");
+            std::process::exit(2);
+        }
+    };
     if args.iter().any(|a| a == "--offline") {
         let Some(snapshot_path) = arg_after("--offline", 1) else {
             eprintln!("usage: --offline <terrain.fixture.nbt.gz> [seed]");
             std::process::exit(2);
         };
-        if let Err(e) = cli::offline::run_offline(snapshot_path, arg_after("--offline", 2)).await {
+        // The seed is optional, so a flag right after the snapshot is not it.
+        let seed = arg_after("--offline", 2).filter(|s| !s.starts_with("--"));
+        if let Err(e) = cli::offline::run_offline(snapshot_path, seed, specs, out).await {
             eprintln!("Offline run failed: {e:#}");
             std::process::exit(1);
         }
@@ -229,6 +253,6 @@ async fn main() {
     }
 
     if !use_visualizer {
-        cli::live::run_generation_once(full, seed_arg).await;
+        cli::live::run_generation_once(full, seed_arg, specs, out).await;
     }
 }

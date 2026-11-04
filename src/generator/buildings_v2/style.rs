@@ -58,6 +58,17 @@ impl BuildingStyle {
     /// that grows around it. A locked single-entry wood pool ignores the bias,
     /// keeping matched/accent styles intact. Pass `None` for no bias.
     pub fn roll_palette(&self, rng: &mut RNG, data: &LoadedData, local_wood: Option<&PaletteId>) -> Palette {
+        self.roll_palette_picks(rng, data, local_wood).0
+    }
+
+    /// [`BuildingStyle::roll_palette`], also reporting which palette files it
+    /// merged (for the house spec). Draws exactly what `roll_palette` draws.
+    pub fn roll_palette_picks(
+        &self,
+        rng: &mut RNG,
+        data: &LoadedData,
+        local_wood: Option<&PaletteId>,
+    ) -> (Palette, PalettePicks) {
         let fetch = |id: &PaletteId| {
             data.palettes
                 .get(id)
@@ -66,6 +77,7 @@ impl BuildingStyle {
         };
 
         let mut palette = fetch(&self.base);
+        let mut picks = PalettePicks { style: Some(self.name.to_string()), ..PalettePicks::base(self.base.clone()) };
 
         // Wood: biome-biased pick when the pool is variable.
         if !self.woods.is_empty() {
@@ -74,24 +86,53 @@ impl BuildingStyle {
             let local = local_wood.filter(|id| data.palettes.contains_key(*id));
             let wood = pick_wood(rng, &self.woods, local);
             palette = palette.merged_with(&fetch(&wood));
+            picks.wood = Some(wood);
         }
 
         // Stone + roof + accent: uniform picks from the curated pool.
-        for pool in [&self.stones, &self.roofs, &self.accents] {
+        for (pool, pick) in [
+            (&self.stones, &mut picks.stone),
+            (&self.roofs, &mut picks.roof),
+            (&self.accents, &mut picks.accent),
+        ] {
             if pool.is_empty() {
                 continue;
             }
             let id = &pool[rng.rand_i32_range(0, pool.len() as i32) as usize];
             palette = palette.merged_with(&fetch(id));
+            *pick = Some(id.clone());
         }
 
-        palette
+        (palette, picks)
     }
 
     /// Mark this style rare (landmark) — see [`BuildingStyle::rare`].
     fn rare(mut self) -> Self {
         self.rare = true;
         self
+    }
+}
+
+/// Which palette files one [`BuildingStyle::roll_palette_picks`] merged: the
+/// style's name and base palette, then one pick per non-empty pool (`None`
+/// where the style has no such pool and the base's material stands).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PalettePicks {
+    /// The style's catalog name (`"Whitewash Wattle"`); `None` when the
+    /// palette is a culture's default rather than a rolled style.
+    pub style: Option<String>,
+    pub base: PaletteId,
+    pub wood: Option<PaletteId>,
+    pub stone: Option<PaletteId>,
+    pub roof: Option<PaletteId>,
+    pub accent: Option<PaletteId>,
+}
+
+impl PalettePicks {
+    /// Just a base palette, no style and no pool picks (the `--houses`
+    /// showcase builds on the culture's default palette).
+    pub fn base(base: PaletteId) -> Self {
+        Self { style: None, base, wood: None, stone: None, roof: None, accent: None }
     }
 }
 

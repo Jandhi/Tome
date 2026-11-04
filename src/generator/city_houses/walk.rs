@@ -271,6 +271,30 @@ pub fn rect_from_frontage(chain_slice: &[Point2D], outward: Cardinal, depth: i32
     }
 }
 
+/// Seat a fixed footprint, already turned to face `frontage.outward`, with
+/// its bounds flush to the frontage from `cursor`. `None` when it runs off the
+/// chain, the slice is stepped, or a rect leaves the usable plot.
+pub fn seat_footprint(rects: &[Rect2D], frontage: &Frontage, cursor: i32, plot: &Plot) -> Option<Vec<Rect2D>> {
+    let min = Point2D::new(rects.iter().map(|r| r.min().x).min()?, rects.iter().map(|r| r.min().y).min()?);
+    let max = Point2D::new(rects.iter().map(|r| r.max().x).max()?, rects.iter().map(|r| r.max().y).max()?);
+    let bounds = Rect2D::from_points(min, max);
+    let (fw, depth) = match frontage.outward {
+        Cardinal::North | Cardinal::South => (bounds.size.x, bounds.size.y),
+        Cardinal::East | Cardinal::West => (bounds.size.y, bounds.size.x),
+    };
+    if cursor < 0 || cursor + fw > frontage.cells.len() as i32 {
+        return None;
+    }
+    let slice = &frontage.cells[cursor as usize..(cursor + fw) as usize];
+    let seated = rect_from_frontage(slice, frontage.outward, depth);
+    if seated.size != bounds.size {
+        return None;
+    }
+    let shift = seated.min() - bounds.min();
+    let out: Vec<Rect2D> = rects.iter().map(|r| Rect2D::new(r.min() + shift, r.size)).collect();
+    out.iter().all(|r| plot.is_rect_usable(r)).then_some(out)
+}
+
 /// Plot bounds that steer `place_doors` to the road-facing wall: a rectangle
 /// **flush with the building's road-facing edge** but extended `MARGIN` cells on
 /// the other three sides. `distance_to_plot_edge` then reads exactly 0 for the
