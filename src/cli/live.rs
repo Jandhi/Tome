@@ -29,7 +29,7 @@ pub async fn run_generation_once(full: bool, seed_override: Option<i64>, specs: 
     let mut editor = world.get_editor();
     println!("Generating settlement with seed {}", seed.0);
     // None → auto-select the culture from the build area's climate.
-    let options = SettlementOptions { chronicle: full, house_specs: specs };
+    let options = SettlementOptions { chronicle: full, house_specs: specs, closeups: out.has(Artifact::Closeups) };
     let mut report = generate_settlement_with(&mut editor, seed, None, &options).await;
 
     if let Err(e) = save_and_render_settlement(&editor, seed.0, "live", &run_dir, &mut report, out) {
