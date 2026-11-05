@@ -100,13 +100,19 @@ impl Culture {
 
     /// Roof styles to pick from for this culture *and size*, as a weighted bag —
     /// entries repeat to encode probability, so a caller can pick one uniformly.
-    /// Only Japanese is size-sensitive today: the elaborate irimoya (hip-and-
-    /// gable) is reserved for grander buildings, so it weights toward Manor/Hall
-    /// while cottages stay humbly hipped. Other cultures ignore size.
+    /// Japanese reserves the elaborate irimoya (hip-and-gable) for grander
+    /// buildings, so it weights toward Manor/Hall while cottages stay humbly
+    /// hipped. Medieval halls and manors lean steep (room for dormers); smaller
+    /// medieval homes, and desert, ignore size.
     pub fn roof_styles_for(&self, size_class: SizeClass) -> Vec<RoofStyle> {
-        use RoofStyle::{Hipped, Irimoya};
+        use RoofStyle::{Gable, Hipped, Irimoya};
         use HippedPitch::{Slab, Stairs};
         match self {
+            // Hall/Manor: 1/2 double, 1/3 stairs, 1/6 slab.
+            Culture::Medieval if matches!(size_class, SizeClass::Hall | SizeClass::Manor) => vec![
+                Gable(GablePitch::Double), Gable(GablePitch::Double), Gable(GablePitch::Double),
+                Gable(GablePitch::Stairs), Gable(GablePitch::Stairs), Gable(GablePitch::Slab),
+            ],
             Culture::Japanese => match size_class {
                 // Cottage: hipped only — the humblest roof.
                 SizeClass::Cottage => vec![Hipped(Slab), Hipped(Stairs)],
@@ -122,6 +128,13 @@ impl Culture {
             },
             _ => self.roof_styles(),
         }
+    }
+
+    /// Whether this culture's houses get gable dormers and roof trim unless a
+    /// spec says otherwise. Both only take on gable roofs that have room for
+    /// them, so in practice it's medieval halls and manors.
+    pub fn roof_detail(&self) -> bool {
+        matches!(self, Culture::Medieval)
     }
 
     /// Window fill style for this culture.
@@ -202,9 +215,9 @@ pub struct BuildingContext {
     pub knee_wall: bool,
     /// Halls and Manors only: a 4-block-high top floor. See `Frame::top_floor_extra`.
     pub tall_top_floor: bool,
-    /// Gable dormers on stair- and double-pitch gable roofs. See `roof::dormer`.
+    /// Gable dormers on stair- and double-pitch gable roofs. See `roof::dormer`. On by default per `Culture::roof_detail`.
     pub dormers: bool,
-    /// Roof outline (eaves, verges, ridge) in the secondary roof material.
+    /// Roof outline (eaves, verges, ridge) in the secondary roof material. Default as `dormers`.
     pub roof_trim: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
@@ -246,8 +259,8 @@ impl BuildingContext {
             engawa: false,
             knee_wall: false,
             tall_top_floor: false,
-            dormers: false,
-            roof_trim: false,
+            dormers: culture.roof_detail(),
+            roof_trim: culture.roof_detail(),
             base_y_override: None,
             seed: None,
             floors: None,
