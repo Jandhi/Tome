@@ -54,6 +54,10 @@ Generation is deterministic in the seed only because generator code imports `cra
 - `BlockedReachable` — not walkable, not placeable, must have a walkable neighbor (furniture approach cells like chest fronts). Check the invariant tests if you're introducing new BR state.
 - `UnblockedReachable` — walkable, not placeable (door entrances, stair landings/approaches, stair tops, attic ladder cells, window ceilings). Use this for cells the player walks *through* or *on*, not cells adjacent to furniture.
 
+## Pull requests
+
+PRs for visual features carry pictures in the description: the feature itself, or before/afters when it changes something that already exists. Pick views where the change is easy to see, and caption them. `gh` can't upload images, so push the PNGs to the `pr-images` branch (orphan, never merged) under `<pr number>/` and link them as `https://raw.githubusercontent.com/Jandhi/Tome/pr-images/<pr number>/<file>.png`. Don't commit images to feature branches.
+
 ## Layout
 
 - `src/main.rs` — entry point, declares all top-level modules (no `lib.rs`)
