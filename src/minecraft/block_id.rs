@@ -147,6 +147,12 @@ impl BlockID {
             )
     }
 
+    /// What the no-plants heightmap looks through: [`is_vegetation`](Self::is_vegetation)
+    /// plus snow layers.
+    pub fn is_ground_cover(&self) -> bool {
+        self.is_vegetation() || self.name() == "snow"
+    }
+
     pub fn is_air(&self) -> bool {
         matches!(self.name(), "air" | "cave_air" | "void_air")
     }

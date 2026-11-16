@@ -219,14 +219,15 @@ pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
     // 6. The ground heightmap counts logs, so a felled trunk's column still
     //    reports its old top and anything stood there later (a palisade post, a
     //    lamp) floats. Lower each column through the air and leftover tree
-    //    blocks to the real ground; a column that ends on liquid keeps its map.
+    //    blocks (and plants or snow left on it) to the real ground; a column
+    //    that ends on liquid keeps its map.
     let mut lowered: HashSet<Point3D> = HashSet::default();
     for &point in &columns {
         let Some(height) = editor.world().get_height_at(point) else { continue; };
         let mut ground = height;
         while height - ground < MAX_SCAN_DEPTH {
             match editor.current_block_id(point.add_y(ground - 1)) {
-                Some(id) if id.is_air() || id.is_tree() => ground -= 1,
+                Some(id) if id.is_air() || id.is_tree() || id.is_ground_cover() => ground -= 1,
                 _ => break,
             }
         }
@@ -246,6 +247,7 @@ pub async fn log_trees(editor: &mut Editor, points: HashSet<Point2D>) {
 /// left hanging off nothing. Placed and persistent leaves are kept.
 async fn decay_orphaned_leaves(editor: &Editor, cleared: &HashSet<Point2D>) {
     const DECAY: i32 = 6;
+    const MAX_TRUNK: i32 = 64;
     const FACES: [(i32, i32, i32); 6] = [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)];
     let world = editor.world();
     // Every in-bounds cell within Chebyshev `r` of `cells`, grown ring by ring.
@@ -282,7 +284,12 @@ async fn decay_orphaned_leaves(editor: &Editor, cleared: &HashSet<Point2D>) {
     let mut leaves: HashSet<Point3D> = HashSet::default();
     let mut hangers: Vec<Point3D> = Vec::new();
     for &c in &reach {
-        let (Some(ground), Some(top)) = (world.get_height_at(c), world.get_motion_blocking_height_at(c)) else { continue; };
+        let (Some(mut ground), Some(top)) = (world.get_height_at(c), world.get_motion_blocking_height_at(c)) else { continue; };
+        // The ground map counts logs: walk down a standing trunk to its foot so
+        // its lower logs hold leaves too.
+        while top - ground < MAX_TRUNK && editor.current_block_id(c.add_y(ground - 1)).map_or(false, |id| id.is_log()) {
+            ground -= 1;
+        }
         for y in ground - 1..top {
             let p = c.add_y(y);
             let Some(id) = editor.current_block_id(p) else { continue; };

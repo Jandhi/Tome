@@ -173,13 +173,14 @@ fn is_valid_spot(
 
 /// The first free cell above a lamp spot's real ground. The heightmap runs high
 /// where an earlier pass cleared the column without lowering it (a logged tree's
-/// trunk and canopy forced to air), so step down through air and tree blocks.
+/// trunk and canopy forced to air), so step down through air, tree blocks and
+/// plants or snow on the ground.
 fn lamp_ground(editor: &Editor, cell: Point2D) -> Option<Point3D> {
     let mut ground = editor.world().add_height(cell)?;
     for _ in 0..32 {
         let below = ground + DOWN;
         match editor.current_block_id(below) {
-            Some(id) if id.is_air() || id.is_tree() => ground = below,
+            Some(id) if id.is_air() || id.is_tree() || id.is_ground_cover() => ground = below,
             _ => break,
         }
     }
