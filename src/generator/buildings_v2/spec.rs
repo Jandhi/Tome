@@ -21,7 +21,7 @@
 //! |---|---|
 //! | `culture` | not drawn: the `--culture` flag (default medieval) |
 //! | `size` | `size`: uniform over the four classes (a town draws from its lot tier's pool) |
-//! | `roof` | `roof`: the culture's size-weighted bag (`roof_styles_for`), as a town does; narrowed to roofs matching a pinned `attic` |
+//! | `roof` | `roof`: the culture's size-weighted bag (`roof_styles_for`), as a town does; narrowed to roofs matching a pinned `attic` (or, with `attic` open, pinned `rooms` lists one entry longer than the floors) |
 //! | `palette` | `palette`: a uniform style from the culture's catalog, then its pools (a town picks from its district scheme). `style: default` is the culture's plain palette with no pools (what `--houses` builds on); pinned materials replace the style's picks |
 //! | `colour` | `colour`: uniform over the culture's colour pool |
 //! | `footprint` | `footprint`, inside the plot; `floors`: the frame's `floors` stream |
@@ -538,16 +538,20 @@ pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &Lo
             let bag = culture.roof_styles_for(size);
             let mut rng = seed.stream("roof");
             let drawn = bag[rng.rand_i32_range(0, bag.len() as i32) as usize];
-            match spec.attic {
+            // Pinned rooms with an open attic say whether it has one.
+            match spec.attic.or_else(|| attic_from_rooms(spec)) {
                 // A pinned attic the drawn roof disagrees with: draw again,
                 // on the same stream, among the roofs that agree.
                 Some(a) if roof_has_attic(drawn) != a => {
                     let fits: Vec<RoofStyle> = bag.into_iter().filter(|&r| roof_has_attic(r) == a).collect();
                     if fits.is_empty() {
-                        problems.push(format!(
-                            "attic: {a}, but no {} roof {} an attic; pin a roof (only {{ gable: double }} has one)",
-                            label(culture), if a { "has" } else { "lacks" },
-                        ));
+                        // An attic inferred from rooms is reported by `check_rooms`.
+                        if spec.attic.is_some() {
+                            problems.push(format!(
+                                "attic: {a}, but no {} roof {} an attic; pin a roof (only {{ gable: double }} has one)",
+                                label(culture), if a { "has" } else { "lacks" },
+                            ));
+                        }
                         drawn
                     } else {
                         fits[rng.rand_i32_range(0, fits.len() as i32) as usize]
@@ -675,6 +679,18 @@ fn check_footprint(spec: &HouseSpec, plot_bounds: Rect2D, problems: &mut Vec<Str
             problems.push(format!("footprint[{i}].floors: {f} is more than the core's {core}; the core (footprint[0]) has the most floors"));
         }
     }
+}
+
+/// Whether pinned `rooms` want an attic: every rect's list one longer than
+/// its floors (true) or exactly as long (false). `None` when unpinned or mixed.
+fn attic_from_rooms(spec: &HouseSpec) -> Option<bool> {
+    let (rooms, fp) = (spec.rooms.as_ref()?, spec.footprint.as_ref()?);
+    if rooms.len() != fp.len() {
+        return None;
+    }
+    let mut extra = rooms.iter().zip(fp).map(|(list, r)| Some(list.len() as i64 - r.floors? as i64));
+    let first = extra.next()??;
+    (matches!(first, 0 | 1) && extra.all(|e| e == Some(first))).then_some(first == 1)
 }
 
 /// `rooms`: one list per footprint rect, one type per floor plus the attic.

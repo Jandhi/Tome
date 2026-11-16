@@ -369,3 +369,20 @@ async fn offbeat_pins_build_with_notes() {
     let notes = resolve(&spec, HouseSeed(1), plot_bounds(), &data).unwrap().unwrap().warnings.join("\n");
     assert!(notes.contains("footprint[0].floors: 4, but a cottage has 1"), "{notes}");
 }
+
+/// Pinned rooms with roof and attic open resolve on every seed: the list
+/// lengths decide whether the drawn roof has an attic.
+#[test]
+fn pinned_rooms_pick_the_attic() {
+    let data = LoadedData::load().expect("data");
+    let fp = "size: house\nfootprint: [{ x: 0, z: 0, w: 9, h: 7, floors: 2 }, { x: 9, z: 1, w: 5, h: 5, floors: 1 }]\n";
+    for (rooms, attic) in [("[[hearth, bedroom], [kitchen]]", false), ("[[hearth, bedroom, storage], [kitchen, storage]]", true)] {
+        let spec = HouseSpec::from_yaml(&format!("{fp}rooms: {rooms}\n")).unwrap();
+        for s in 0..64 {
+            let house = resolve(&spec, HouseSeed(s), plot_bounds(), &data)
+                .unwrap_or_else(|e| panic!("seed {s}, rooms {rooms}: {e:#}"))
+                .expect("fits");
+            assert_eq!(roof_has_attic(house.bctx.roof_style), attic, "seed {s}, rooms {rooms}");
+        }
+    }
+}

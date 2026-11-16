@@ -188,7 +188,9 @@ rooms:
 | `storage` | chests and barrels; filler |
 
 `rooms` needs a pinned footprint with every rect's `floors` pinned; the list
-lengths must match the floors (plus the attic).
+lengths must match the floors (plus the attic). With `roof` and `attic` open,
+the lengths pick the roof: every list one longer than its floors draws among
+the roofs with an attic, every list exactly as long among those without.
 
 ### palette
 
