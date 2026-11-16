@@ -12,6 +12,7 @@ use crate::geometry::{Point2D, Rect2D};
 use crate::noise::RNG;
 
 /// A rectangular region with a mask indicating which cells are usable for building.
+#[derive(Clone)]
 pub struct Plot {
     /// Bounding rectangle in world coordinates.
     pub bounds: Rect2D,

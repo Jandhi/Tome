@@ -456,6 +456,14 @@ fn dominant_local_wood(biome_map: &[Vec<crate::minecraft::Biome>], data: &Loaded
     counts.into_iter().max_by_key(|(_, n)| *n).map(|(id, _)| id)
 }
 
+/// The cells a set of rects covers, as one rect. (`Footprint::bounds` spans
+/// the outline's corners, one cell wider and deeper.)
+fn cell_bounds(rects: &[crate::geometry::Rect2D]) -> crate::geometry::Rect2D {
+    let min = Point2D::new(rects.iter().map(|r| r.min().x).min().unwrap_or(0), rects.iter().map(|r| r.min().y).min().unwrap_or(0));
+    let max = Point2D::new(rects.iter().map(|r| r.max().x).max().unwrap_or(0), rects.iter().map(|r| r.max().y).max().unwrap_or(0));
+    crate::geometry::Rect2D::from_points(min, max)
+}
+
 /// The road slot an anchored `--spec` house was given: lot, tier (arterial,
 /// collector, alley), frontage within the tier, and cursor along it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1377,6 +1385,8 @@ pub async fn generate_settlement_with(
         let b = editor.world().build_area;
         let area = Rect2D::new(P2::new(b.origin.x, b.origin.z), P2::new(b.size.x, b.size.z));
         let bands = [&arterial_band, &collector_band, &alley_band];
+        // Lots with every chosen slot marked used, so no two specs pick overlapping slots.
+        let mut reserved = plots.clone();
         for (name, spec, slot) in pending_specs.iter_mut() {
             let target = match spec.anchor(area) {
                 Ok(Some(t)) => t,
@@ -1391,16 +1401,16 @@ pub async fn generate_settlement_with(
                         .collect()
                 })
             };
-            let mut best: Option<(i64, SpecSlot)> = None;
-            for (lot_idx, plot) in plots.iter().enumerate() {
+            let mut best: Option<((i64, bool), SpecSlot, Vec<Rect2D>)> = None;
+            for (lot_idx, plot) in reserved.iter().enumerate() {
                 let Some(plot) = plot else { continue };
                 for (ti, band) in bands.iter().enumerate() {
                     for (fi, frontage) in frontage_from_roads(&sub_blocks[lot_idx], band).into_iter().enumerate() {
                         let turned = turned_for(frontage.outward);
                         for cursor in 0..frontage.cells.len() as i32 {
-                            let at = match &turned {
+                            let (at, rects) = match &turned {
                                 Some(rects) => match seat_footprint(rects, &frontage, cursor, plot) {
-                                    Some(seated) => Footprint::new(outline_from_rects(&seated), seated).bounds().midpoint(),
+                                    Some(seated) => (cell_bounds(&seated).midpoint(), seated),
                                     None => continue,
                                 },
                                 // Open footprint: where the widest core of its
@@ -1415,20 +1425,26 @@ pub async fn generate_settlement_with(
                                     if !plot.is_rect_usable(&core) {
                                         continue;
                                     }
-                                    core.midpoint()
+                                    (core.midpoint(), vec![core])
                                 }
                             };
                             let d = at - target;
-                            let dist = d.x as i64 * d.x as i64 + d.y as i64 * d.y as i64;
-                            if best.map_or(true, |(bd, _)| dist < bd) {
-                                best = Some((dist, SpecSlot { lot: lot_idx, tier: ti, frontage: fi, cursor }));
+                            // Ties go to a slot that leaves the house unturned.
+                            let dist = (d.x as i64 * d.x as i64 + d.y as i64 * d.y as i64, frontage.outward != spec.front());
+                            if best.as_ref().map_or(true, |(bd, _, _)| dist < *bd) {
+                                best = Some((dist, SpecSlot { lot: lot_idx, tier: ti, frontage: fi, cursor }, rects));
                             }
                         }
                     }
                 }
             }
             match best {
-                Some((_, chosen)) => *slot = Some(chosen),
+                Some((_, chosen, rects)) => {
+                    if let Some(plot) = reserved[chosen.lot].as_mut() {
+                        for r in &rects { plot.mark_rect_used(r, SIDE_BUFFER_CELLS); }
+                    }
+                    *slot = Some(chosen);
+                }
                 None => println!("{name}: note: no road slot fits it near site.origin; placing it on the first slot it fits"),
             }
         }
@@ -1476,15 +1492,18 @@ pub async fn generate_settlement_with(
             'tier_loop: for (ti, (band, pool)) in tiers_local.iter().enumerate() {
                 let min_front = pool.iter().map(|s| *s.front_width_range().start()).min().unwrap_or(0);
                 for (fi, frontage) in frontage_from_roads(lot, band).into_iter().enumerate() {
-                    // Pass one: only a frontage an anchored spec chose, from its cursor.
-                    let anchor_here: Option<SpecSlot> = if anchored_pass {
-                        match pending_specs.iter().find_map(|(_, _, a)| a.filter(|a| (a.lot, a.tier, a.frontage) == (lot_idx, ti, fi))) {
-                            Some(a) => Some(a),
-                            None => continue,
-                        }
-                    } else {
-                        None
-                    };
+                    // Pass one: only a frontage anchored specs chose, each tried
+                    // once at its cursor, in order along the frontage.
+                    let mut anchors_here: Vec<SpecSlot> = Vec::new();
+                    if anchored_pass {
+                        anchors_here = pending_specs.iter()
+                            .filter_map(|(_, _, a)| a.filter(|a| (a.lot, a.tier, a.frontage) == (lot_idx, ti, fi)))
+                            .collect();
+                        if anchors_here.is_empty() { continue; }
+                        anchors_here.sort_by_key(|a| a.cursor);
+                    }
+                    let mut anchors_left = anchors_here.into_iter();
+                    let mut anchor_here: Option<SpecSlot> = None;
                     let chain_len = frontage.cells.len() as i32;
                     if !anchored_pass {
                         tier_cells[ti] += frontage.cells.len();
@@ -1509,16 +1528,16 @@ pub async fn generate_settlement_with(
                     } else {
                         None
                     };
-                    let mut cursor: i32 = match (anchor_here, manor_here) {
-                        (Some(a), _) => a.cursor,
-                        (None, Some(c)) => c.cursor,
-                        (None, None) => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
+                    let mut cursor: i32 = match manor_here {
+                        _ if anchored_pass => 0,
+                        Some(c) => c.cursor,
+                        None => if min_front > 1 { rng.rand_i32_range(0, min_front) } else { 0 },
                     };
-                    let mut attempted = false;
                     while anchored_pass || cursor + min_front <= chain_len {
                         if anchored_pass {
-                            if attempted { break; }
-                            attempted = true;
+                            let Some(a) = anchors_left.next() else { break };
+                            anchor_here = Some(a);
+                            cursor = a.cursor;
                         }
                         // One seed per slot attempt, drawn first and always: the
                         // frontage walk is the only other draw on the town stream,
@@ -1547,7 +1566,7 @@ pub async fn generate_settlement_with(
                             let k = pending_specs.iter().position(|(_, _, a)| *a == Some(anchor));
                             match k.and_then(|k| try_spec(k, &pending_specs[k].1)) {
                                 Some(found) => Some(found),
-                                None => break,
+                                None => continue,
                             }
                         } else if manor_here.is_some() {
                             None
@@ -1570,7 +1589,7 @@ pub async fn generate_settlement_with(
                         // depth). They stand in for the core rect below: the
                         // slice they front, the verge in front of them.
                         let seated_core = seated.as_ref().map(|r| {
-                            let b = Footprint::new(outline_from_rects(r), r.to_vec()).bounds();
+                            let b = cell_bounds(r);
                             match frontage.outward {
                                 Cardinal::North | Cardinal::South => (b.size.x, b.size.y),
                                 Cardinal::East | Cardinal::West => (b.size.y, b.size.x),
@@ -1857,7 +1876,7 @@ pub async fn generate_settlement_with(
                                 // additional Manors along the same chain. Other
                                 // tiers (collector/alley) of the lot still process
                                 // normally below.
-                                if size_class == SizeClass::Manor {
+                                if size_class == SizeClass::Manor && !anchored_pass {
                                     continue 'tier_loop;
                                 }
                                 cursor += fw + SIDE_BUFFER_CELLS;
