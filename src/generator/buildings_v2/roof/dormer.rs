@@ -143,6 +143,10 @@ pub fn plan_dormers(
     front: Option<Cardinal>,
 ) -> DormerPlan {
     let mut plan = DormerPlan::default();
+    // Slab roofs never take dormers: the depth checks below let a very wide one through.
+    if matches!(pitch, GablePitch::Slab) {
+        return plan;
+    }
     for (i, rect) in rects.iter().enumerate() {
         let axis = axes[i];
         let (along_min, along_max, short_min, short_max) = match axis {
@@ -234,7 +238,7 @@ fn is_clear(dormer: &Dormer, i: usize, rects: &[Rect2D], roof_rects: &[Rect2D], 
 /// Build the dormers planned for one roof height group. The main roof has
 /// already been placed without the owned cells.
 ///
-/// Front face: timber posts at the cheeks, a two-high window between them
+/// Front face: plaster (primary wall) at the cheeks, a two-high window between them
 /// with a row of wall above; cheek walls close the sides back to the main
 /// slope; the roof is a ridge of slabs over cheek stairs, with brackets under
 /// its overhang like the main eaves. Where the main roof had its top-of-wall
@@ -338,5 +342,19 @@ pub async fn place_dormers(
                 edge.place_block(editor, at(dormer.cell(d, -1), rel - 1), BlockForm::Stairs, Some(&bracket), None).await;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A slab roof wide enough to pass the depth checks still gets no dormers.
+    #[test]
+    fn wide_slab_roof_takes_no_dormers() {
+        let rects = [Rect2D::new(Point2D::new(0, 0), Point2D::new(24, 27))];
+        let plan = |pitch| plan_dormers(&rects, &rects, &[RidgeAxis::X], &[70], pitch, None).dormers.len();
+        assert!(plan(GablePitch::Stairs) > 0, "the test rect should take dormers on a stair roof");
+        assert_eq!(plan(GablePitch::Slab), 0);
     }
 }
