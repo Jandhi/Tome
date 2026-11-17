@@ -20,7 +20,8 @@ pub const HIPPED_OVERHANG: i32 = 1;
 /// Surface variant: half-step slab staircase or full-block stair staircase.
 /// Slab is the low-profile kawara-tile look; Stairs is steeper and closer to
 /// a stair-stepped shrine roof.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum HippedPitch {
     Slab,
     Stairs,

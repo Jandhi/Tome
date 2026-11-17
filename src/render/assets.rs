@@ -9,8 +9,9 @@
 //! (animated ones are vertical strips; the first frame is used). A block
 //! resolves to a [`BlockGeometry`]: world-oriented elements with a texture
 //! frame per face, plus average top/side colours for the flat views. Blocks
-//! whose models have no elements (chests, beds, signs, fluids) resolve to
-//! `None` and keep the hand-written shape and colour.
+//! whose models have no elements (fluids) resolve to `None` and keep the
+//! hand-written shape and colour; chests, beds, signs, pots and banners get
+//! models built from their entity sheets (see [`super::entity`]).
 //!
 //! The jar is found through `TOME_MC_JAR`, else the newest release under the
 //! CurseForge or `.minecraft` install; `TOME_NO_TEXTURES=1` disables all of
@@ -42,19 +43,25 @@ impl Texture {
         let size = pm.width().max(1);
         let frame_h = pm.height().min(size);
         let mut rgba = Vec::with_capacity((size * size) as usize);
-        let (mut sum, mut n, mut alpha_sum) = ([0u64; 3], 0u64, 0u64);
         for y in 0..size {
             for x in 0..size {
                 let c = if y < frame_h { pm.pixel(x, y).map(|p| p.demultiply()) } else { None };
-                let c = c.map_or([0, 0, 0, 0], |c| [c.red(), c.green(), c.blue(), c.alpha()]);
-                alpha_sum += c[3] as u64;
-                if c[3] > 0 {
-                    for k in 0..3 {
-                        sum[k] += c[k] as u64;
-                    }
-                    n += 1;
+                rgba.push(c.map_or([0, 0, 0, 0], |c| [c.red(), c.green(), c.blue(), c.alpha()]));
+            }
+        }
+        Some(Texture::from_rgba(size, rgba))
+    }
+
+    /// A texture from `size x size` straight-alpha texels, row by row.
+    pub fn from_rgba(size: u32, rgba: Vec<Rgba>) -> Texture {
+        let (mut sum, mut n, mut alpha_sum) = ([0u64; 3], 0u64, 0u64);
+        for c in &rgba {
+            alpha_sum += c[3] as u64;
+            if c[3] > 0 {
+                for k in 0..3 {
+                    sum[k] += c[k] as u64;
                 }
-                rgba.push(c);
+                n += 1;
             }
         }
         let texels = (size * size) as u64;
@@ -63,7 +70,7 @@ impl Texture {
         } else {
             [(sum[0] / n) as u8, (sum[1] / n) as u8, (sum[2] / n) as u8, (alpha_sum / texels) as u8]
         };
-        Some(Texture { size, rgba, avg })
+        Texture { size, rgba, avg }
     }
 
     /// Nearest texel at texture pixel coordinates (wrapping).
@@ -415,6 +422,8 @@ pub struct Assets {
     models: HashMap<String, RawModel>,
     blockstates: HashMap<String, Value>,
     cache: Mutex<HashMap<String, Option<Arc<BlockGeometry>>>>,
+    /// Baked banner flags by [`super::banner::flag_key`].
+    flags: Mutex<HashMap<String, Option<Arc<Texture>>>>,
 }
 
 static ASSETS: OnceLock<Option<Assets>> = OnceLock::new();
@@ -553,7 +562,7 @@ impl Assets {
             }
         }
         add_entity_models(&textures, &mut models, &mut blockstates);
-        Ok(Assets { jar: jar.to_path_buf(), textures, models, blockstates, cache: Mutex::default() })
+        Ok(Assets { jar: jar.to_path_buf(), textures, models, blockstates, cache: Mutex::default(), flags: Mutex::default() })
     }
 
     /// The resolved geometry of a block string (`minecraft:` prefix and state
@@ -572,9 +581,11 @@ impl Assets {
         let state = self.blockstates.get(id)?;
         let props = self.fill_defaults(state, props);
         let picks = pick_models(state, &props);
+        // A banner's flag shows its own design, baked on demand.
+        let flag = super::banner::flag_key(id, &props).map(|k| ("flag", k));
         let mut elements = Vec::new();
         for pick in picks {
-            self.add_model(id, &pick, &mut elements);
+            self.add_model(id, &pick, flag.as_ref(), &mut elements);
         }
         if elements.is_empty() {
             return None;
@@ -610,8 +621,12 @@ impl Assets {
     }
 
     /// Resolve `pick`'s model chain and append its elements, rotated.
-    fn add_model(&self, id: &str, pick: &Pick, out: &mut Vec<Element>) {
+    /// `texture` binds one texture variable ahead of the models' own.
+    fn add_model(&self, id: &str, pick: &Pick, texture: Option<&(&str, String)>, out: &mut Vec<Element>) {
         let mut textures: BTreeMap<String, String> = BTreeMap::new();
+        if let Some((var, key)) = texture {
+            textures.insert(var.to_string(), key.clone());
+        }
         let mut elements: Option<&Vec<Value>> = None;
         let mut name = Some(pick.model.clone());
         for _ in 0..16 {
@@ -631,6 +646,8 @@ impl Assets {
             for _ in 0..16 {
                 if let Some(key) = r.strip_prefix('#') {
                     r = textures.get(key)?.clone();
+                } else if r.starts_with(super::banner::FLAG_KEY) {
+                    return self.flag(&r);
                 } else {
                     return self.textures.get(strip_ns(&r)).cloned();
                 }
@@ -643,6 +660,18 @@ impl Assets {
                 out.push(e);
             }
         }
+    }
+}
+
+impl Assets {
+    /// The baked banner flag texture for `key`, cached.
+    fn flag(&self, key: &str) -> Option<Arc<Texture>> {
+        if let Some(hit) = self.flags.lock().unwrap().get(key) {
+            return hit.clone();
+        }
+        let built = super::banner::flag_texture(&self.textures, key).map(Arc::new);
+        self.flags.lock().unwrap().insert(key.to_string(), built.clone());
+        built
     }
 }
 
@@ -866,7 +895,8 @@ fn average_colours(elements: &[Element]) -> (Rgba, Rgba) {
 
 /// Entity texture folders read from the jar, for the blocks the game draws
 /// with a block-entity renderer instead of a block model (see [`super::entity`]).
-const ENTITY_TEXTURE_DIRS: [&str; 4] = ["chest/", "decorated_pot/", "bed/", "signs/"];
+/// `banner` takes both `banner/` (the pattern masks) and `banner_base.png`.
+const ENTITY_TEXTURE_DIRS: [&str; 5] = ["chest/", "decorated_pot/", "bed/", "signs/", "banner"];
 
 /// Register the models [`super::entity`] builds for entity-rendered blocks,
 /// replacing the jar's particle-only models and block states for them.

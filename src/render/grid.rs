@@ -228,6 +228,17 @@ impl VoxelGrid {
         self.overhangs.get(&self.index(x, y, z)).map_or(&[], Vec::as_slice)
     }
 
+    /// Every cell some neighbouring model reaches into, as local `[x, y, z]`
+    /// with the blocks reaching in ([`overhangs_into`](Self::overhangs_into)),
+    /// in no particular order. Empty for most scenes.
+    pub fn overhang_cells(&self) -> impl Iterator<Item = ([i32; 3], &[[i32; 3]])> + '_ {
+        let (ny, nz) = (self.ny as usize, self.nz as usize);
+        self.overhangs.iter().map(move |(&i, sources)| {
+            let (y, z, x) = (i % ny, i / ny % nz, i / ny / nz);
+            ([x as i32, y as i32, z as i32], sources.as_slice())
+        })
+    }
+
     /// Whether material `m`'s model reaches past its own cell.
     pub fn overhangs(&self, m: u16) -> bool {
         self.reaches[m as usize]

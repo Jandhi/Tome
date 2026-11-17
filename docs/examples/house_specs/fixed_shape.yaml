@@ -1,0 +1,19 @@
+# Fixed shape, open style: one manor footprint (and its floor counts), with
+# everything else left to the seed. A sweep shows how the generator dresses the
+# same shape: palette style and materials, colour, roof, timber, jetty, cellar,
+# room types and furniture all vary from house to house.
+#
+#   cargo run --profile fast -- --houses --spec docs/examples/house_specs/fixed_shape.yaml --count 8
+#
+# -> output/houses/spec-fixed_shape-x8/ (contact sheet top.png / iso_*.png, and
+# each house's renders and resolved spec). Taken from
+# `--houses --culture medieval --size manor --count 3 --seed 7`, house 0,
+# stripped to culture, size and footprint. No seed: the sweep's base seed comes
+# from --seed (default 42); add `seed: N` to fix it in the file.
+culture: medieval
+size: manor
+footprint:            # relative to the plot's corner, core first
+- { x: 11, z: 15, w: 9, h: 15, floors: 3 }
+- { x: 15, z: 4, w: 5, h: 11, floors: 3 }
+- { x: 20, z: 21, w: 7, h: 9, floors: 3 }
+- { x: 4, z: 21, w: 7, h: 9, floors: 3 }

@@ -1,4 +1,4 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hash;
 use crate::util::HashMap;
 
 use crate::geometry::{Point2D, Point3D};
@@ -29,11 +29,17 @@ impl RNG {
         }
     }
 
+    /// A stream keyed by `seed` and a name. The name is hashed with FNV-1a,
+    /// which never changes between Rust versions, so a saved seed (a house
+    /// spec's, say) draws the same values on every toolchain.
     pub fn from_seed_and_string(seed: Seed, string: &str) -> Self {
-        let mut hasher = DefaultHasher::new();
-        hasher.write(string.as_bytes());
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in string.as_bytes() {
+            hash ^= *b as u64;
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
         Self {
-            seed: Seed(seed.0 ^ hasher.finish() as i64),
+            seed: Seed(seed.0 ^ hash as i64),
             state: 0,
         }
     }
@@ -236,4 +242,16 @@ fn squirrel3(seed : Seed, position : i64) -> i64 {
     noise = noise.wrapping_mul(BIT_NOISE3);
     noise ^= noise >> 8;
     noise
+}
+#[cfg(test)]
+mod keyed_stream_tests {
+    use super::*;
+
+    #[test]
+    fn keyed_streams_are_pinned_across_toolchains() {
+        // FNV-1a("roof") is fixed by its definition. If this changes, every
+        // saved seed and house spec builds something else.
+        assert_eq!(RNG::from_seed_and_string(Seed(0), "roof").seed.0 as u64, 0xa3550b1ff0c47f8f);
+        assert_eq!(RNG::from_seed_and_string(Seed(5), "roof").seed.0 as u64, 0xa3550b1ff0c47f8f ^ 5);
+    }
 }

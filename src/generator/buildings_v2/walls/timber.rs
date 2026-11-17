@@ -42,7 +42,10 @@ pub enum PanelShape {
 /// fills each stud-bounded panel with a single uniform `PanelShape` motif
 /// (one design per wall — never a mix). Braces are placed as contrasting
 /// plank blocks, not logs, so the frame reads as posts + lighter carpentry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Serialised (house spec) as `plain` or `{ braced: { spacing: 4 } }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TimberPattern {
     Plain,
     Studded { spacing: u32 },

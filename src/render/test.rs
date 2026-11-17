@@ -626,11 +626,42 @@ mod tests {
         assert!(a.geometry("minecraft:jungle_wall_sign[facing=east,waterlogged=false]").is_some());
         assert!(a.geometry("minecraft:oak_hanging_sign[attached=false,rotation=0,waterlogged=false]").is_some());
         // Other entity-rendered blocks and bare ids the jar lacks fall back.
-        assert!(a.geometry("minecraft:white_banner[rotation=0]").is_none());
+        assert!(a.geometry("minecraft:water").is_none());
         assert!(a.geometry("minecraft:not_a_block").is_none());
         // Bare generator states resolve through the defaults.
         assert!(a.geometry("minecraft:lantern").is_some());
         assert!(a.geometry("minecraft:oak_trapdoor[facing=north,half=bottom,open=true]").is_some());
+    }
+
+    #[test]
+    fn banners_hang_where_the_game_draws_them() {
+        use crate::render::assets::{assets, Face6};
+        let Some(a) = assets() else {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        };
+        // (lo, hi) over a block string's elements, in sixteenths.
+        let bounds = |b: &str| a.geometry(b).unwrap_or_else(|| panic!("{b} has a model")).bounds();
+        // Standing: pole up from the floor, crossbar at 29.33, flag on the
+        // side the banner faces (rotation 0 south, 4 west).
+        let (lo, hi) = bounds("minecraft:red_banner[rotation=0]");
+        assert!(lo[1].abs() < 1e-3 && (hi[1] - 29.333).abs() < 1e-2, "standing height {lo:?}..{hi:?}");
+        assert!(hi[2] > 9.0 && lo[2] > 7.0, "flag south of the pole: {lo:?}..{hi:?}");
+        let (lo, _) = bounds("minecraft:red_banner[rotation=4]");
+        assert!(lo[0] < 7.0, "rotation 4 faces west: {lo:?}");
+        // Wall: against the wall behind it, flag hanging 13 into the block below.
+        let (lo, hi) = bounds("minecraft:red_wall_banner[facing=south]");
+        assert!(lo[2] < 0.5 && hi[2] < 2.5, "on the north wall: {lo:?}..{hi:?}");
+        assert!((lo[1] + 13.0).abs() < 1e-2 && (hi[1] - 13.667).abs() < 1e-2, "wall height {lo:?}..{hi:?}");
+        let (lo, _) = bounds("minecraft:red_wall_banner[facing=west]");
+        assert!(lo[0] > 13.5, "facing west hangs on the east wall: {lo:?}");
+        // The flag's front shows the design: a red chief over the white base.
+        let g = a.geometry("minecraft:white_wall_banner[facing=south,patterns=stripe_top:red]").unwrap();
+        let (_, front) = g.elements[0].faces.iter().find(|(f, _)| *f == Face6::South).expect("flag front");
+        let top = front.sample_at([8.0, 13.0, 2.333]);
+        let low = front.sample_at([8.0, -8.0, 2.333]);
+        assert!(top[0] > 120 && top[1] < 80, "chief is red: {top:?}");
+        assert!(low[0] > 180 && low[1] > 180 && low[2] > 180, "field is white: {low:?}");
     }
 
     #[test]
@@ -657,6 +688,151 @@ mod tests {
         assert_ne!(c, BACKGROUND, "the neck above the block is drawn");
     }
 
+    /// A stone floor and a north wall (z = 0) three high over x 0..3, the
+    /// wall carrying a south-facing red wall banner at (1, 2, 1) when
+    /// `banner`: its flag hangs 13/16 into the air cell below.
+    fn wall_banner_scene(banner: bool) -> VoxelGrid {
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 4, 3) });
+        for x in 0..3 {
+            for z in 0..3 {
+                s.insert(Point3D::new(x, 0, z), "minecraft:stone");
+            }
+            for y in 1..4 {
+                s.insert(Point3D::new(x, y, 0), "minecraft:stone");
+            }
+        }
+        if banner {
+            s.insert(Point3D::new(1, 2, 1), "minecraft:red_wall_banner[facing=south]");
+        }
+        VoxelGrid::from_scene(&s, None).unwrap()
+    }
+
+    fn rgba_at(pm: &resvg::tiny_skia::Pixmap, x: u32, y: u32) -> [u8; 4] {
+        let p = pm.pixel(x, y).unwrap().demultiply();
+        [p.red(), p.green(), p.blue(), p.alpha()]
+    }
+
+    #[test]
+    fn flat_views_draw_a_wall_banner_flag_below_its_block() {
+        use crate::render::assets::assets;
+        use crate::render::iso::tile_width;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        let (with, without) = (wall_banner_scene(true), wall_banner_scene(false));
+        assert_eq!(with.ny, without.ny, "same grid either way");
+        assert_eq!(with.overhangs_into(1, 1, 1), &[[1, 2, 1]]);
+
+        // Iso from the south-east: the banner's cell projects to the hexagon
+        // under anchor (ax, ay); the flag below it changes pixels further
+        // down than that hexagon reaches, which the clipped model never did.
+        let tw = tile_width(32);
+        let a = render_iso(&with, IsoCamera::SouthEast, 32).unwrap();
+        let b = render_iso(&without, IsoCamera::SouthEast, 32).unwrap();
+        let (u, y, v) = (1, 2, 1);
+        let ax = (u - v) * tw / 2 + with.nz * tw / 2 + tw;
+        let ay = (u + v) * tw / 4 - y * tw / 2 + (with.ny - 1) * tw / 2 + tw;
+        let below = (ay + tw..a.height() as i32)
+            .flat_map(|py| (ax - tw / 2..ax + tw / 2).map(move |px| (px, py)))
+            .filter(|&(px, py)| rgba_at(&a, px as u32, py as u32) != rgba_at(&b, px as u32, py as u32))
+            .count();
+        assert!(below > 20, "the flag is drawn below the banner's cell in iso ({below} px)");
+
+        // South elevation: in the cell below the banner the flag covers the
+        // wall behind it.
+        let px = 16;
+        let (a, b) = (
+            render_elevation(&with, ElevationSide::South, px).unwrap(),
+            render_elevation(&without, ElevationSide::South, px).unwrap(),
+        );
+        let row = (with.ny - 1 - 1 + 1) as u32 * px;
+        let (cx, cy) = (2 * px + px / 2, row + px / 4);
+        assert_ne!(rgba_at(&a, cx, cy), rgba_at(&b, cx, cy), "the flag hangs over the wall in the cell below");
+        // ... and stops 13/16 down: the bottom of that cell shows the wall.
+        assert_eq!(rgba_at(&a, cx, row + px - 1), rgba_at(&b, cx, row + px - 1));
+    }
+
+    #[test]
+    fn flat_views_draw_model_tops_above_their_block() {
+        use crate::render::assets::assets;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        // A decorated pot's neck (16..20) seen from the south, in the layer
+        // above the pot: the bottom quarter of that cell, at its middle.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:decorated_pot");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        let px = 16;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        let row = (g.ny - 1 - 1 + 1) as u32 * px;
+        assert_ne!(rgba_at(&pm, 2 * px + px / 2, row + px - 2), BACKGROUND, "the neck shows above the pot");
+        assert_eq!(rgba_at(&pm, 2 * px + px / 2, row + 2), BACKGROUND, "and ends at 20/16");
+
+        // A standing banner seen from above: its crossbar (y 29.33, z 7.33
+        // to 9.33) tops the column one layer up, beside the pole.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:red_banner[rotation=0]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2);
+        let pm = render_topdown(&g, px).unwrap();
+        let (x0, z0) = (2 * px, 2 * px);
+        assert_ne!(rgba_at(&pm, x0 + 3, z0 + 8), BACKGROUND, "the crossbar is seen from above");
+        assert_ne!(rgba_at(&pm, x0 + 3, z0 + 8), rgba_at(&pm, x0 + 3, z0 + 2), "nothing north of it");
+    }
+
+    /// Pixels of `pm` within `x0..x1`, `y0..y1` that are not the background.
+    fn drawn(pm: &resvg::tiny_skia::Pixmap, (x0, x1): (u32, u32), (y0, y1): (u32, u32)) -> Vec<[u8; 4]> {
+        (y0..y1).flat_map(|y| (x0..x1).map(move |x| (x, y))).map(|(x, y)| rgba_at(pm, x, y)).filter(|&c| c != BACKGROUND).collect()
+    }
+
+    #[test]
+    fn flat_views_texture_rotated_models_and_their_overhangs() {
+        use crate::render::assets::assets;
+        use crate::render::iso::tile_width;
+        if assets().is_none() {
+            println!("no Minecraft client jar found; skipping");
+            return;
+        }
+        // A standing banner turned 45 degrees, its red flag with a white top
+        // stripe: drawn from its rotated model (both colours, not one flat
+        // average) and up into the layer above its block.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:red_banner[rotation=2,patterns=stripe_top:white]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2, "a layer above the banner for its upper half");
+        let whitish = |c: &[u8; 4]| c.iter().take(3).all(|&v| v > 150) && c.iter().take(3).max().unwrap() - c.iter().take(3).min().unwrap() < 30;
+        let reddish = |c: &[u8; 4]| c[0] as u16 > 2 * c[1] as u16 && c[0] as u16 > 2 * c[2] as u16 && c[0] > 60;
+
+        let px = 16;
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        let (cols, upper, lower) = ((2 * px, 3 * px), (px, 2 * px), (2 * px, 3 * px));
+        let up = drawn(&pm, cols, upper);
+        assert!(up.iter().any(whitish), "the white stripe tops the flag in the layer above");
+        assert!(up.iter().chain(&drawn(&pm, cols, lower)).any(reddish), "the red field shows too");
+
+        let tw = tile_width(32);
+        let pm = render_iso(&g, IsoCamera::SouthEast, 32).unwrap();
+        let ax = (1 - 1) * tw / 2 + g.nz * tw / 2 + tw;
+        let ay = (1 + 1) * tw / 4 + (g.ny - 1) * tw / 2 + tw;
+        let span = ((ax - tw / 2) as u32, (ax + tw / 2) as u32);
+        let above = drawn(&pm, span, (0, ay as u32));
+        assert!(above.iter().any(whitish), "iso: the white stripe above the banner's cell");
+        assert!(drawn(&pm, span, (0, pm.height())).iter().any(reddish), "iso: the red field");
+
+        // A standing sign at rotation 1: the board's top (to 17.33) shows in
+        // the bottom of the layer above, from the south.
+        let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 0, 0), size: Point3D::new(3, 3, 3) });
+        s.insert(Point3D::new(1, 0, 1), "minecraft:oak_sign[rotation=1]");
+        let g = VoxelGrid::from_scene(&s, None).unwrap();
+        assert_eq!(g.ny, 2);
+        let pm = render_elevation(&g, ElevationSide::South, px).unwrap();
+        assert!(!drawn(&pm, cols, (2 * px - 1, 2 * px)).is_empty(), "the board's top shows above the sign");
+        assert!(drawn(&pm, cols, (px, px + 4)).is_empty(), "and stops at 17.33");
+    }
+
     #[test]
     fn contact_sheet_tiles_in_rows() {
         use crate::render::perspective::contact_sheet;
@@ -667,7 +843,7 @@ mod tests {
 
     // ---- viewer textures (jd/viewer-textures): textured export of the HTML viewer ----
 
-    /// 2x2 grass, a stair, a poppy, glass and a banner: every export path at once.
+    /// 2x2 grass, a stair, a poppy, glass and lava: every export path at once.
     fn viewer_texture_scene() -> Scene {
         let mut s = Scene::new(Rect3D { origin: Point3D::new(0, 60, 0), size: Point3D::new(8, 8, 8) });
         for (x, z) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
@@ -676,7 +852,7 @@ mod tests {
         s.insert(Point3D::new(4, 61, 1), "minecraft:oak_stairs[facing=east,half=bottom,shape=straight]");
         s.insert(Point3D::new(1, 62, 1), "minecraft:poppy");
         s.insert(Point3D::new(4, 61, 4), "minecraft:glass");
-        s.insert(Point3D::new(6, 61, 6), "minecraft:white_banner[rotation=0]");
+        s.insert(Point3D::new(6, 61, 6), "minecraft:lava");
         s
     }
 
@@ -693,8 +869,8 @@ mod tests {
         let t = e.textured.expect("models give a textured buffer");
         assert_eq!(t.faces.len(), t.a_count * RECORD_BYTES + t.r_count * ROTATED_RECORD_BYTES);
         assert_eq!(e.stats.faces, e.flat.len() / RECORD_BYTES + t.a_count + t.r_count);
-        // The banner has no element model: it stays on the flat path with its hand colour.
-        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "banner faces");
+        // Lava has no element model: it stays on the flat path with its hand colour.
+        assert_eq!(e.flat.len() / RECORD_BYTES, 6, "lava faces");
         // The poppy's cross model is two rotated quads.
         assert_eq!(t.r_count, 2, "rotated faces");
         assert_eq!(e.stats.rotated_faces, 2);
