@@ -174,6 +174,8 @@ async fn pinning_the_drawn_value_changes_nothing() {
             ("engawa", HouseSpec { engawa: r.engawa, ..open.clone() }),
             ("knee_wall", HouseSpec { knee_wall: r.knee_wall, ..open.clone() }),
             ("tall_top_floor", HouseSpec { tall_top_floor: r.tall_top_floor, ..open.clone() }),
+            ("dormers", HouseSpec { dormers: r.dormers, ..open.clone() }),
+            ("roof_trim", HouseSpec { roof_trim: r.roof_trim, ..open.clone() }),
             ("timber", HouseSpec { timber: r.timber, ..open.clone() }),
             ("cellar", HouseSpec { cellar: r.cellar.clone(), ..open.clone() }),
         ];

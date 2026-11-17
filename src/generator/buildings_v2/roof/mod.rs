@@ -11,6 +11,7 @@ mod test;
 
 pub mod blocks;
 pub mod dome;
+pub mod dormer;
 pub mod gable;
 pub mod heightmap;
 pub mod hipped;
@@ -21,7 +22,7 @@ mod gable_roof;
 mod hipped_roof;
 mod irimoya_roof;
 
-use crate::geometry::{Point2D, Rect2D};
+use crate::geometry::{Cardinal, Point2D, Rect2D};
 
 use super::frame::Frame;
 use super::pipeline::BuildCtx;
@@ -45,6 +46,19 @@ pub enum RoofStyle {
     Flat,
 }
 
+/// Optional roof detailing, all off by default (a plain roof is unchanged).
+/// Only gable roofs take it today.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RoofDetail {
+    /// Gable dormers on stair- and double-pitch roofs (see [`dormer`]).
+    pub dormers: bool,
+    /// The roof's outline (eaves, gable verges, ridge, a dormer's front edge) in the
+    /// palette's secondary roof material.
+    pub trim: bool,
+    /// The side the front door opens out of: dormers try that eave first.
+    pub front: Option<Cardinal>,
+}
+
 /// Per-rect extents at each rect's top floor. The roof sits on the topmost
 /// extent of each rect — for jettied buildings this is the grown upper rect,
 /// for un-jettied buildings it equals `footprint().rects()[i]`. Caller indexes
@@ -57,7 +71,7 @@ pub(super) fn top_floor_rects(frame: &Frame) -> Vec<Rect2D> {
 
 /// Place roofs on all rects of a building.
 ///
-/// Returns gable doorways and per-rect heightmaps. Heightmap `i` is the gable
+/// Returns gable doorways, per-rect heightmaps and the number of dormers built. Heightmap `i` is the gable
 /// heightmap of `rects[i]` using the extended-roof bounds, suitable for asking
 /// "what's the roof block y at this (x, z)?" for furnish-time clearance checks
 /// inside attics. For flat roofs the heightmaps are trivial (height 0 everywhere).
@@ -69,11 +83,13 @@ pub async fn place_roof(
     seed: HouseSeed,
     frame: &Frame,
     style: RoofStyle,
-) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
-    match style {
-        RoofStyle::Gable(pitch) => gable_roof::place_gable_roof(ctx, seed, frame, pitch).await,
+    detail: RoofDetail,
+) -> (Vec<Point2D>, Vec<RoofHeightmap>, usize) {
+    let (doorways, heightmaps) = match style {
+        RoofStyle::Gable(pitch) => return gable_roof::place_gable_roof(ctx, seed, frame, pitch, detail).await,
         RoofStyle::Hipped(pitch) => hipped_roof::place_hipped_roof(ctx, frame, pitch).await,
         RoofStyle::Irimoya => irimoya_roof::place_irimoya_roof(ctx, frame).await,
         RoofStyle::Flat => flat_roof::place_flat_roof(ctx, seed, frame).await,
-    }
+    };
+    (doorways, heightmaps, 0)
 }

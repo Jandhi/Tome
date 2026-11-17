@@ -31,7 +31,7 @@ use super::exterior::decorate_exterior_walls;
 use super::{BuildingContext, Culture, HouseSeed};
 use super::roof::RoofStyle;
 use super::roof::gable::GablePitch;
-use super::roof::{place_roof, place_roof_ladder};
+use super::roof::{place_roof, place_roof_ladder, RoofDetail};
 use super::floors::place_room_floors;
 use super::rooms::{
     RoomPlan, assign_attic_types, assign_room_floors, build_rooms,
@@ -98,6 +98,8 @@ pub struct HouseOutput {
     /// Every build-area-local cell the roof stage placed (surface, fill,
     /// gable walls, chimney), so a cutaway can leave the roof out.
     pub roof_cells: Vec<Point3D>,
+    /// Gable dormers built (`BuildingContext::dormers`; 0 when off).
+    pub dormers: usize,
     /// Cellar descending-stair cells (position 0 is the cellar landing), if a
     /// cellar was built. Surfaced for blueprint/debug inspection.
     pub cellar_stair: Option<Vec<Point2D>>,
@@ -214,8 +216,9 @@ pub async fn build_house(
         TimberPattern::pick(size_class, max_seg_len, &mut seed.stream("timber"))
     });
     place_frame(&mut ctx.on(&mut seed.stream("frame.blocks")), &frame, &timber_pattern).await;
+    let roof_detail = RoofDetail { dormers: bctx.dormers, trim: bctx.roof_trim, front: front_door };
     ctx.editor.start_recording();
-    let (gable_doorways, roof_heightmaps) = place_roof(&mut ctx.on(&mut seed.stream("roof.blocks")), seed, &frame, roof_style).await;
+    let (gable_doorways, roof_heightmaps, dormer_count) = place_roof(&mut ctx.on(&mut seed.stream("roof.blocks")), seed, &frame, roof_style, roof_detail).await;
     let roof_cells = ctx.editor.stop_recording();
     if has_attic {
         clear_attic_stair_headroom(ctx, &frame, &floor_plan).await;
@@ -357,6 +360,7 @@ pub async fn build_house(
         has_cellar,
         cellar_theme,
         roof_cells,
+        dormers: dormer_count,
         cellar_stair,
         roof_style,
         size_class,

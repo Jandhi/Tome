@@ -1940,6 +1940,59 @@ async fn pipeline_invariants_property_test_jetty_multirect() {
     );
 }
 
+/// Dormer property test: Halls and Manors with stair and double gable roofs
+/// (the pitches that take dormers), dormers and roof trim on, across many
+/// seeds. `build_house` checks every invariant, so a dormer whose attic nook
+/// or cheek walls break wall or reachability invariants panics here; asserts
+/// some dormers were actually built so the test can't pass vacuously.
+#[tokio::test]
+async fn pipeline_invariants_property_test_dormers() {
+    use crate::editor::World;
+    use crate::geometry::Rect3D;
+    use crate::util::init_logger;
+    use crate::generator::data::LoadedData;
+    use crate::generator::materials::PaletteId;
+    use crate::generator::buildings_v2::roof::RoofStyle;
+    use crate::generator::buildings_v2::roof::gable::GablePitch;
+    use crate::generator::buildings_v2::{BuildCtx, BuildingContext, Culture, build_house};
+
+    init_logger();
+
+    let build_area = Rect3D::from_points(Point3D::new(0, 0, 0), Point3D::new(255, 127, 255));
+    let bounds = Rect2D::from_points(Point2D::new(64, 64), Point2D::new(191, 191));
+    let styles = [RoofStyle::Gable(GablePitch::Double), RoofStyle::Gable(GablePitch::Stairs)];
+
+    let data = LoadedData::load().expect("Failed to load data");
+    let palette_id: PaletteId = "medieval_spruce".into();
+    let palette = data.palettes.get(&palette_id).expect("Palette not found").clone();
+
+    let seeds: [i64; 10] = [1, 7, 13, 42, 99, 123, 256, 777, 1000, 2000];
+    let (mut total, mut dormers) = (0usize, 0usize);
+    for &seed in &seeds {
+        let world = World::synthetic(build_area, 64);
+        let mut editor = world.get_offline_editor();
+        let mut rng = RNG::new(seed);
+        let mut plot = Plot::fully_usable(bounds);
+        let footprints = fill_plot_multi(&mut rng, &mut plot, &[SizeClass::Manor, SizeClass::Hall], 8, 0);
+
+        let mut ctx = BuildCtx::new(&mut editor, &data, &palette, &mut rng);
+        for (i, (footprint, size_class)) in footprints.into_iter().enumerate() {
+            let mut bctx = BuildingContext::new(Culture::Medieval, size_class, styles[i % styles.len()]);
+            bctx.dormers = true;
+            bctx.roof_trim = true;
+            let house = build_house(&mut ctx, footprint, &bctx, bounds)
+                .await
+                .unwrap_or_else(|msg| panic!("seed {} building {} ({:?}) invariant: {}", seed, i, size_class, msg));
+            total += 1;
+            dormers += house.dormers;
+        }
+        ctx.editor.flush_buffer().await;
+    }
+
+    assert!(dormers > 0, "no dormers built across {total} buildings");
+    println!("Dormer property test: {total} buildings, {dormers} dormers across {} seeds, all invariants hold", seeds.len());
+}
+
 /// Engawa property test: run Japanese Cottages/Houses through the offline
 /// pipeline with `bctx.engawa = true` across many seeds. `build_house` applies
 /// the inset/raise/deck/skirt and runs `check_building_invariants` internally,

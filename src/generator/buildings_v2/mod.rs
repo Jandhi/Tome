@@ -202,6 +202,10 @@ pub struct BuildingContext {
     pub knee_wall: bool,
     /// Halls and Manors only: a 4-block-high top floor. See `Frame::top_floor_extra`.
     pub tall_top_floor: bool,
+    /// Gable dormers on stair- and double-pitch gable roofs. See `roof::dormer`.
+    pub dormers: bool,
+    /// Roof outline (eaves, verges, ridge) in the secondary roof material.
+    pub roof_trim: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
@@ -242,6 +246,8 @@ impl BuildingContext {
             engawa: false,
             knee_wall: false,
             tall_top_floor: false,
+            dormers: false,
+            roof_trim: false,
             base_y_override: None,
             seed: None,
             floors: None,
