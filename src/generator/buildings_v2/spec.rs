@@ -27,7 +27,7 @@
 //! | `footprint` | `footprint`, inside the plot; `floors`: the frame's `floors` stream |
 //! | `engawa`, `jetty` | `engawa`, `jetty`: the culture's chances |
 //! | `knee_wall`, `tall_top_floor` | not drawn: off |
-//! | `dormers`, `roof_trim` | not drawn: off (gable roofs only; dormers need a stair or double pitch) |
+//! | `dormers`, `roof_trim` | not drawn: on for medieval, off otherwise (`Culture::roof_detail`; gable roofs only, dormers need a stair or double pitch and a long enough eave) |
 //! | `timber` | `timber` (medieval; plain elsewhere) |
 //! | `cellar` | `cellar`: the size class's chance and a uniform theme |
 //! | `rooms` | `rooms` / `attic`: the size class's room rules |
@@ -62,8 +62,8 @@
 //! engawa: false
 //! knee_wall: false
 //! tall_top_floor: false
-//! dormers: false
-//! roof_trim: false
+//! dormers: true
+//! roof_trim: true
 //! timber: { decorated: { spacing: 3 } }
 //! attic: false
 //! cellar: { theme: wine }
@@ -617,8 +617,8 @@ pub fn resolve(spec: &HouseSpec, seed: HouseSeed, plot_bounds: Rect2D, data: &Lo
     });
     bctx.knee_wall = spec.knee_wall.unwrap_or(false);
     bctx.tall_top_floor = spec.tall_top_floor.unwrap_or(false);
-    bctx.dormers = spec.dormers.unwrap_or(false);
-    bctx.roof_trim = spec.roof_trim.unwrap_or(false);
+    if let Some(d) = spec.dormers { bctx.dormers = d; }
+    if let Some(t) = spec.roof_trim { bctx.roof_trim = t; }
     bctx.timber_pattern = spec.timber;
     bctx.floors = spec
         .footprint

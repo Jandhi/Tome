@@ -79,8 +79,8 @@ fits its street. A spec too big for every lot is reported as not built; see
 | `attic` | `true`, `false` | follows `roof` (see below) |
 | `knee_wall` | `true`, `false` | off |
 | `tall_top_floor` | `true`, `false` | off |
-| `dormers` | `true`, `false` | off |
-| `roof_trim` | `true`, `false` | off |
+| `dormers` | `true`, `false` | on for medieval, off otherwise |
+| `roof_trim` | `true`, `false` | on for medieval, off otherwise |
 | `site` | `{ origin: [x, z], front_door }`, mostly written by the generator | where the house stood; `origin` places it in a settlement (see below) |
 
 ### culture
@@ -97,6 +97,8 @@ or palette is allowed (with a note for the roof).
 
 Open Japanese roofs lean on size: a cottage is always hipped, a house is
 irimoya 1 time in 6, a hall half the time, a manor 3 times in 4.
+Open medieval roofs on halls and manors lean steep: double half the time,
+stairs a third, slab a sixth (smaller houses pick the three evenly).
 
 ### size
 
@@ -267,7 +269,7 @@ one (a settlement run prints a note when that happens).
   other cultures). Also a request: a core too small once inset builds plain.
 - `knee_wall`, `tall_top_floor`: alternative upper-storey proportions, off
   unless pinned.
-- `dormers: true` asks for gable dormers (a plastered face with a two-high
+- `dormers` (on for medieval unless pinned `false`) asks for gable dormers (a plastered face with a two-high
   window under a small pitched roof) on the eaves of `{ gable: stairs }` and
   `{ gable: double }` roofs, front side first, up to three per eave. A request:
   a slope only takes one when it is deep enough for the dormer's ridge to stay
