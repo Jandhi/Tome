@@ -13,6 +13,7 @@ use crate::noise::RNG;
 
 use super::super::frame::Frame;
 use super::super::pipeline::BuildCtx;
+use super::super::HouseSeed;
 use super::blocks::{self, place_roof_blocks};
 use super::gable::{GablePitch, RidgeAxis, gable_heightmap, pick_ridge_axis, place_gable_walls};
 use super::heightmap::RoofHeightmap;
@@ -114,6 +115,7 @@ pub(super) fn clear_covered_gable_overhang(
 
 pub(super) async fn place_gable_roof(
     ctx: &mut BuildCtx<'_>,
+    seed: HouseSeed,
     frame: &Frame,
     pitch: GablePitch,
 ) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
@@ -128,8 +130,9 @@ pub(super) async fn place_gable_roof(
     let overhang = 1;
 
     // Pick ridge axis per rect (store so we don't call RNG twice)
+    let mut ridge_rng = seed.stream("roof.ridge");
     let rect_axes: Vec<RidgeAxis> = (0..rects.len())
-        .map(|i| pick_ridge_axis(&rects[i], rng))
+        .map(|i| pick_ridge_axis(&rects[i], &mut ridge_rng))
         .collect();
 
     let roof_rects = extend_rects_for_roof(rects, &rect_axes);
@@ -218,9 +221,10 @@ pub(super) async fn place_gable_roof(
             _ => max_roof_y,
         };
         // Pick a tallest rect
-        let rect_idx = tallest_indices[rng.rand_i32_range(0, tallest_indices.len() as i32) as usize];
+        let mut chimney_rng = seed.stream("roof.chimney");
+        let rect_idx = tallest_indices[chimney_rng.rand_i32_range(0, tallest_indices.len() as i32) as usize];
         let rect = &rects[rect_idx];
-        place_chimney(editor, rect, &per_rect_heightmaps[rect_idx], roof_y, pitch, data, palette, rng).await;
+        place_chimney(editor, rect, &per_rect_heightmaps[rect_idx], roof_y, pitch, data, palette, &mut chimney_rng).await;
     }
 
     (gable_doorways, per_rect_heightmaps)

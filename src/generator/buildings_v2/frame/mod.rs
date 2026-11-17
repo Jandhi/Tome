@@ -11,6 +11,6 @@ mod generate;
 mod jetty;
 mod model;
 
-pub use generate::generate_frame;
+pub use generate::{generate_frame, generate_frame_pinned};
 pub use jetty::apply_jetty;
 pub use model::{CELLAR_FLOOR, Frame};

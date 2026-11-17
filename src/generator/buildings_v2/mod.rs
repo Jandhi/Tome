@@ -12,12 +12,17 @@ pub mod furnish;
 pub mod pipeline;
 pub mod roof;
 pub mod rooms;
+pub mod seed;
 pub mod showcase;
+pub mod spec;
 pub mod style;
 pub mod walls;
 
 pub use pipeline::{BuildCtx, HouseOutput, build_house};
+pub use seed::HouseSeed;
 pub use self::walls::{TimberPattern, WindowFill};
+
+use serde::{Deserialize, Serialize};
 
 use crate::generator::materials::PaletteId;
 use crate::minecraft::Color;
@@ -32,7 +37,8 @@ pub enum BuildingType {
 }
 
 /// Cultural style that drives palette selection, roof/window/floor defaults.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Culture {
     Medieval,
     Desert,
@@ -199,6 +205,26 @@ pub struct BuildingContext {
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
+    /// The house's seed: every decision `build_house` makes draws from its own
+    /// named stream of it (see `seed`). `None` = `build_house` draws one from
+    /// the caller's `BuildCtx::rng` (exactly one draw per house). Callers that
+    /// roll decisions before `build_house` (size, footprint, engawa, ...) set
+    /// it so those rolls and the build share one seed.
+    pub seed: Option<HouseSeed>,
+    /// Pinned storeys per footprint rect (same order; `None` entries and a
+    /// `None` list are drawn on the `floors` stream as usual). From a house
+    /// spec's `footprint[i].floors`.
+    pub floors: Option<Vec<Option<u32>>>,
+    /// Pinned cellar: `Some(false)` never digs one, `Some(true)` digs one
+    /// whenever it fits (the `cellar` stream still makes its roll, unused, so
+    /// nothing after it moves). `None` = rolled.
+    pub cellar: Option<bool>,
+    /// Pinned cellar theme (a `cellar::CELLAR_THEMES` key); `None` = rolled.
+    pub cellar_theme: Option<&'static str>,
+    /// Pinned room types per footprint rect, bottom floor first, then the
+    /// rect's attic room (a house spec's `rooms`). The layout, interior walls
+    /// and furniture stay computed; only the types are taken from here.
+    pub room_types: Option<Vec<Vec<RoomType>>>,
 }
 
 impl BuildingContext {
@@ -217,11 +243,17 @@ impl BuildingContext {
             knee_wall: false,
             tall_top_floor: false,
             base_y_override: None,
+            seed: None,
+            floors: None,
+            cellar: None,
+            cellar_theme: None,
+            room_types: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum RoomType {
     /// Single-room house: bed, furnace, crafting table, chest.
     Common,

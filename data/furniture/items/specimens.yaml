@@ -25,3 +25,13 @@ specimen_signs:
     - { block: "minecraft:oak_sign[rotation=2]", offset: [4, 0, 1], layer: ground }
     - { block: "minecraft:oak_hanging_sign[rotation=0,attached=false]", offset: [6, 1, 1], layer: ground }
     - { block: "minecraft:spruce_wall_hanging_sign[facing=south]", offset: [0, 2, 2], layer: ground }
+
+# Banners carry their design as a render-only `patterns` state (the editor
+# writes it from the block-entity data). Asymmetric layers on purpose: the
+# red chief must be at the top and the blue pale on the viewer's left.
+specimen_banners:
+  blocks:
+    - { block: "minecraft:white_wall_banner[facing=south,patterns=stripe_top:red+stripe_left:blue]", offset: [0, 2, 0], layer: ground }
+    - { block: "minecraft:yellow_banner[rotation=0,patterns=cross:black+border:red]", offset: [2, 0, 1], layer: ground }
+    - { block: "minecraft:black_banner[rotation=2,patterns=creeper:lime]", offset: [4, 0, 1], layer: ground }
+    - { block: "minecraft:light_blue_banner[rotation=0]", offset: [6, 0, 1], layer: ground }
