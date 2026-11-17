@@ -60,6 +60,7 @@ Generation is deterministic in the seed only because generator code imports `cra
 ## Pull requests
 
 A PR should be a single feature at a time.
+PRs for visual features carry pictures in the description: the feature itself, or before/afters when it changes something that already exists. Pick views where the change is easy to see, and caption them. `gh` can't upload images, so push the PNGs to the `pr-images` branch (orphan, never merged) under `<pr number>/` and link them as `https://raw.githubusercontent.com/Jandhi/Tome/pr-images/<pr number>/<file>.png`. Don't commit images to feature branches.
 
 ## Layout
 
