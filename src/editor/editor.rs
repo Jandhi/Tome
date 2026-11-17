@@ -30,6 +30,11 @@ pub struct Editor {
     /// While `Some`, every placement's build-area-local cell is appended
     /// (see `start_recording` / `stop_recording`).
     recording: RefCell<Option<Vec<Point3D>>>,
+    /// The owner every placement is tagged with while `Some` (a house, so a
+    /// close-up can leave the neighbours out; see `set_owner`).
+    owner: std::cell::Cell<Option<u32>>,
+    /// Build-area-local cell -> owner of the last block placed there.
+    owners: RefCell<HashMap<Point3D, u32>>,
     world: World,
     materials: HashMap<MaterialId, Material>,
     block_form_cache: RefCell<HashMap<BlockID, BlockForm>>,
@@ -56,6 +61,26 @@ impl Editor {
         if let Some(log) = self.recording.borrow_mut().as_mut() {
             log.push(point);
         }
+        match self.owner.get() {
+            Some(id) => {
+                self.owners.borrow_mut().insert(point, id);
+            }
+            None => {
+                self.owners.borrow_mut().remove(&point);
+            }
+        }
+    }
+
+    /// Tag every placement from now on with `owner` (`None` stops tagging).
+    /// The last placement in a cell decides its owner; an untagged one
+    /// clears it.
+    pub fn set_owner(&self, owner: Option<u32>) {
+        self.owner.set(owner);
+    }
+
+    /// Build-area-local cell -> owner of the block placed there last.
+    pub fn owners(&self) -> std::cell::Ref<'_, HashMap<Point3D, u32>> {
+        self.owners.borrow()
     }
 
     pub fn new(build_area: Rect3D, world: World) -> Self {
@@ -67,6 +92,8 @@ impl Editor {
             block_updates: RefCell::new(true),
             block_cache: RefCell::new(HashMap::default()),
             recording: RefCell::new(None),
+            owner: std::cell::Cell::new(None),
+            owners: RefCell::new(HashMap::default()),
             world,
             materials: HashMap::default(),
             block_form_cache: RefCell::new(HashMap::default()),

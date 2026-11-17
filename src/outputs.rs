@@ -20,11 +20,20 @@ pub enum Artifact {
     Specs,
     /// `viewer.html`, the first-person viewer of the scene.
     Viewer,
+    /// Settlement runs: close-up renders of every house into `closeups/`.
+    Closeups,
 }
 
 impl Artifact {
-    pub const ALL: [Artifact; 6] =
-        [Artifact::Snapshot, Artifact::Scene, Artifact::Renders, Artifact::Metrics, Artifact::Specs, Artifact::Viewer];
+    pub const ALL: [Artifact; 7] = [
+        Artifact::Snapshot,
+        Artifact::Scene,
+        Artifact::Renders,
+        Artifact::Metrics,
+        Artifact::Specs,
+        Artifact::Viewer,
+        Artifact::Closeups,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -34,6 +43,7 @@ impl Artifact {
             Artifact::Metrics => "metrics",
             Artifact::Specs => "specs",
             Artifact::Viewer => "viewer",
+            Artifact::Closeups => "closeups",
         }
     }
 
@@ -134,7 +144,7 @@ mod tests {
         assert_eq!(Outputs::parse(Some("+specs"), d).unwrap(), Outputs::of(&[Snapshot, Scene, Renders, Metrics, Specs]));
         assert_eq!(Outputs::parse(Some("-renders,-fixture"), d).unwrap(), Outputs::of(&[Scene, Metrics]));
         assert_eq!(Outputs::parse(Some("none"), d).unwrap(), Outputs::NONE);
-        assert_eq!(Outputs::parse(Some("all,-viewer"), d).unwrap(), Outputs::of(&[Snapshot, Scene, Renders, Metrics, Specs]));
+        assert_eq!(Outputs::parse(Some("all,-viewer"), d).unwrap(), Outputs::of(&[Snapshot, Scene, Renders, Metrics, Specs, Closeups]));
         let err = Outputs::parse(Some("scene,pngs"), d).unwrap_err().to_string();
         assert!(err.contains("pngs") && err.contains("renders"), "{err}");
         assert!(Outputs::parse(Some(""), d).is_err());
