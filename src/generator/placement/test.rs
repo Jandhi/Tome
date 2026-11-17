@@ -336,7 +336,7 @@ mod tests {
         };
         let corridor_pts: HashSet<Point3D> = paths.iter().flat_map(|p| p.points().iter().copied()).collect();
         force_height(&mut editor, &corridor_pts, false).await;
-        build_paths_merged(&editor, &data, &paths, &mut rng).await;
+        build_paths_merged(&mut editor, &data, &paths, &mut rng).await;
         let mut claimed_road: HashSet<Point2D> = HashSet::default();
         for path in &paths {
             for c in paved(path) {
@@ -722,7 +722,7 @@ mod tests {
         // off this set instead of reading the placed road back out of the editor
         // (whose block cache is keyed by local coords while get_block subtracts the
         // build-area origin — reading there returns world terrain, not the road).
-        let road_slabs: HashSet<Point3D> = build_paths_merged(&editor, &data, &all_paths, &mut rng).await;
+        let road_slabs: HashSet<Point3D> = build_paths_merged(&mut editor, &data, &all_paths, &mut rng).await;
         // Per-cell slab height for the alignment probe.
         let slab_y_by_cell: HashMap<Point2D, i32> =
             road_slabs.iter().map(|p| (p.drop_y(), p.y)).collect();
@@ -1084,7 +1084,7 @@ mod tests {
         );
         let alley_pts: Vec<Point3D> = full_alleys.iter().map(|c| editor.world().add_height(*c).expect("test cell in bounds")).collect();
         let alley_path = Path::new(alley_pts, 1, MaterialId::new("sandstone".to_string()), PathPriority::Low);
-        build_paths_merged(&editor, &data, &[alley_path], &mut rng).await;
+        build_paths_merged(&mut editor, &data, &[alley_path], &mut rng).await;
         for c in &full_alleys {
             editor.world_mut().claim(*c, crate::generator::BuildClaim::Path(crate::generator::paths::PathType::Pavement));
         }

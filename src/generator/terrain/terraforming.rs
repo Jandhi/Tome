@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use crate::util::{HashMap, HashSet};
 
 use crate::{editor::Editor, geometry::{average_to_neighbours_5_away_multi, Point2D, Point3D, CARDINALS_2D}, minecraft::Block};
+use super::log_trees;
 
 /// Flatten the urban interior toward a smoothed height field, feathering back to
 /// natural terrain over `feather` cells near the city edge so the settlement
@@ -196,6 +197,25 @@ pub async fn drain_liquids(editor: &mut Editor, area: &HashSet<Point2D>) {
     }
 }
 
+/// Clear plants left hanging when a column is re-graded. A plant stands on the
+/// old surface, in the first-air cell `first_air` (and `first_air + 1` for a
+/// two-tall one such as tall grass or a peony), outside the heightmap, so a cut
+/// down to `new_first_air` or a one-block raise strands it in the air. Only
+/// untouched terrain is cleared, never a block this run placed.
+pub async fn clear_stranded_plants(editor: &Editor, xz: Point2D, first_air: i32, new_first_air: i32) {
+    if new_first_air == first_air {
+        return;
+    }
+    for y in first_air.max(new_first_air)..=first_air + 1 {
+        let p = Point3D::new(xz.x, y, xz.y);
+        if editor.get_cached_block(p).is_none()
+            && editor.world().get_block_id(p).is_some_and(|id| id.is_vegetation())
+        {
+            editor.place_block_forced(&"air".into(), p).await;
+        }
+    }
+}
+
 pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_water : bool) {
     // Terraforming writes many blocks per column over a wide area. The default
     // 32-block buffer flushes an HTTP PUT every 32 placements, so the cost is
@@ -205,6 +225,24 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
     const TERRAFORM_BUFFER: usize = 4096;
     let prev_buffer = editor.buffer_size();
     editor.set_buffer_size(TERRAFORM_BUFFER);
+
+    // The heightmap stands on a trunk's top, so lowering a wooded column would
+    // saw through the trunk and leave the tree above hanging. Fell every tree
+    // with wood in a slice we are about to cut (that also lowers its columns'
+    // heights, so the cut below shrinks to the real ground).
+    let trunks: HashSet<Point2D> = points
+        .iter()
+        .filter(|p| {
+            let xz = p.drop_y();
+            editor.world().get_ocean_floor_height_at(xz).is_some_and(|terrain_y| {
+                (p.y..=terrain_y).any(|y| editor.current_block_id(p.with_y(y)).is_some_and(|id| id.is_log()))
+            })
+        })
+        .map(|p| p.drop_y())
+        .collect();
+    if !trunks.is_empty() {
+        log_trees(editor, trunks).await;
+    }
 
     // Only the points we actually terraform may be written back to the
     // heightmap. Asserting heights for skipped water cells would make the map
@@ -266,6 +304,7 @@ pub async fn force_height(editor: &mut Editor, points: &HashSet<Point3D>, skip_w
             if is_snow {
                 editor.place_block_forced(&surface, point.with_y(target_y)).await;
             }
+            clear_stranded_plants(editor, xz, terrain_y, target_y).await;
         }
 
         // When we're terraforming through liquid (skip_water = false, e.g. the
