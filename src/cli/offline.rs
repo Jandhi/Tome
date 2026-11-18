@@ -23,7 +23,7 @@ pub async fn run_offline(snapshot_path: &str, seed_arg: Option<&str>, specs: Set
     let mut editor = world.get_offline_editor();
     println!("Generating settlement offline with seed {}", seed.0);
     let t1 = std::time::Instant::now();
-    let options = SettlementOptions { house_specs: specs, ..Default::default() };
+    let options = SettlementOptions { house_specs: specs, closeups: out.has(Artifact::Closeups), ..Default::default() };
     let mut report = generate_settlement_with(&mut editor, seed, None, &options).await;
     println!("Generated in {:.1?}", t1.elapsed());
     let dir = std::path::PathBuf::from("output/runs").join(format!("offline-{}", seed.0));

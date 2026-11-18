@@ -23,6 +23,9 @@ pub fn random_seed() -> i64 {
         .unwrap_or(12345)
 }
 
+/// Pixels per block in settlement close-ups (as `--houses` defaults to).
+const CLOSEUP_PX: u32 = 16;
+
 /// House specs a settlement run builds, `(file name, spec)`.
 pub type SettlementSpecs = Vec<(String, HouseSpec)>;
 
@@ -76,7 +79,7 @@ pub fn save_and_render_settlement(
         }
         println!("Saved {} house specs to {}", report.house_specs.len(), houses_dir.display());
     }
-    if [Artifact::Scene, Artifact::Renders, Artifact::Viewer].iter().any(|a| out.has(*a)) {
+    if [Artifact::Scene, Artifact::Renders, Artifact::Viewer, Artifact::Closeups].iter().any(|a| out.has(*a)) {
         let mut scene = editor.capture_scene();
         let b = scene.bounds;
         scene.meta.insert("seed".into(), seed.to_string());
@@ -98,6 +101,19 @@ pub fn save_and_render_settlement(
         }
         if out.has(Artifact::Viewer) {
             view::write_viewer(&scene, &dir.join("viewer.html"))?;
+        }
+        if out.has(Artifact::Closeups) {
+            let t = std::time::Instant::now();
+            let closeups_dir = dir.join("closeups");
+            let n = crate::generator::buildings_v2::showcase::render_settlement_closeups(
+                &scene,
+                &report.closeup_houses,
+                &editor.owners(),
+                editor.world().build_area.origin,
+                &closeups_dir,
+                CLOSEUP_PX,
+            )?;
+            println!("Rendered close-ups of {n} houses into {} in {:.1?}", closeups_dir.display(), t.elapsed());
         }
     }
     println!("Run output in {} ({})", dir.display(), out.names());

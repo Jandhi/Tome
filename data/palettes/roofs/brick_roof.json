@@ -2,5 +2,5 @@
   "id" : "brick_roof",
 
   "primary_roof" : "bricks",
-  "secondary_roof" : "bricks"
+  "secondary_roof" : "dark_oak_planks"
 }

@@ -619,7 +619,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     render_views(&scene, &contact_opts, &out_dir, "")?;
 
     // Light-map cost over every house's interior grid, reported at the end.
-    let (mut light_time, mut light_grids, mut light_cells) = (Duration::ZERO, 0usize, 0usize);
+    let mut light = LightStats::default();
     let mut records = Vec::new();
     for b in &built {
         let (i, house, tag) = (b.i, &b.house, b.variant.tag());
@@ -642,34 +642,7 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         }
         let pad = Point3D::new(CROP_PAD, 0, CROP_PAD);
         let region = Rect3D::from_points(lo - pad, hi + pad + Point3D::new(0, 2, 0));
-        let Some(g) = VoxelGrid::from_scene(&scene, Some(region)) else { continue };
-
         let prefix = &b.prefix;
-        let mut renders = Vec::new();
-        let mut save = |name: String, pm: resvg::tiny_skia::Pixmap| -> anyhow::Result<()> {
-            pm.save_png(out_dir.join(&name))?;
-            renders.push(name);
-            Ok(())
-        };
-        // Exterior views, lit (sky and lamps) like the room views when asked.
-        let exterior_map = opts.lighting.map(|_| {
-            let t = Instant::now();
-            let map = LightMap::new(&g);
-            light_time += t.elapsed();
-            light_grids += 1;
-            light_cells += map.len();
-            map
-        });
-        let exterior_lit = exterior_map.as_ref().zip(opts.lighting).map(|(map, l)| Lit::new(&g, map, l));
-        let exterior_lit = exterior_lit.as_ref();
-        for cam in [IsoCamera::SouthEast, IsoCamera::NorthWest, IsoCamera::SouthWest, IsoCamera::NorthEast] {
-            save(format!("{prefix}_iso_{}.png", cam.tag()), render_iso_with(&g, cam, 2 * px, exterior_lit)?)?;
-        }
-        save(format!("{prefix}_top.png"), render_topdown_with(&g, px, exterior_lit)?)?;
-        for side in ElevationSide::ALL {
-            save(format!("{prefix}_elev_{}.png", side.name()), render_elevation_with(&g, side, px, exterior_lit)?)?;
-        }
-
         // The house's decisions, footprint relative to its plot (`--rects` form).
         let spec_file = opts.out.has(Artifact::Specs).then(|| format!("{prefix}.spec.yaml"));
         if let Some(f) = &spec_file {
@@ -680,266 +653,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         let plan_file = format!("{prefix}_plan.txt");
         std::fs::write(out_dir.join(&plan_file), render_ascii(&blueprint))?;
 
-        // Interior views: a perspective from inside every room (and the cellar
-        // from its landing), each saved on its own and tiled into one sheet.
-        // The grid reaches down to the cellar, which the exterior crop leaves out.
-        let mut rooms_json = Vec::new();
-        let interior_lo_y = if house.has_cellar { house.frame.floor_y(CELLAR_FLOOR) + origin.y - 2 } else { region.min().y };
-        let interior_region = Rect3D::from_points(Point3D::new(region.min().x, interior_lo_y, region.min().z), region.max());
-        let Some(gi) = VoxelGrid::from_scene(&scene, Some(interior_region)) else { continue };
-        let light_map = opts.lighting.map(|_| {
-            let t = Instant::now();
-            let map = LightMap::new(&gi);
-            light_time += t.elapsed();
-            light_grids += 1;
-            light_cells += map.len();
-            map
-        });
-        let room_opts = PerspectiveOptions { lighting: light_map.as_ref().zip(opts.lighting), fog: true };
-        // A player can stand in build-area-local `cell` on walkable level
-        // `floor_y` (absolute) when nothing fills the feet cell and the head
-        // cell is clear; `roomy` also wants the cell above the head clear, so
-        // the camera keeps away from attic eaves and low beams when it can.
-        let clear = |cell: (i32, i32), floor_y: i32, roomy: bool| {
-            let (gx, gz) = (cell.0 + origin.x - gi.origin.x, cell.1 + origin.z - gi.origin.z);
-            let at = |dy: i32| gi.get(gx, floor_y + dy - gi.origin.y, gz);
-            !gi.is_full(at(0)) && at(1) == 0 && (!roomy || at(2) == 0)
-        };
-        // Clear distance (blocks) of a look from `cell` along `(dx, dz)` at
-        // eye and knee height, up to 16.
-        let run = |cell: (i32, i32), floor_y: i32, room: Rect2D, (dx, dz): (f32, f32)| -> f32 {
-            let (mut x, mut z, mut d) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5, 0.0);
-            while d < 16.0 {
-                x += dx * 0.25;
-                z += dz * 0.25;
-                d += 0.25;
-                // Stay inside the room (its walls included): a look down a
-                // doorway into the next room doesn't count.
-                let (ix, iz) = (x.floor() as i32, z.floor() as i32);
-                if ix < room.min().x - 1 || ix > room.max().x + 1 || iz < room.min().y - 1 || iz > room.max().y + 1 {
-                    break;
-                }
-                let (gx, gz) = (ix + origin.x - gi.origin.x, iz + origin.z - gi.origin.z);
-                if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 || gi.is_full(gi.get(gx, floor_y - gi.origin.y, gz)) {
-                    break;
-                }
-            }
-            d
-        };
-        // Furniture at head height in the eight cells around `cell` (inside
-        // `room`; walls don't count, a camera in a corner looks out of it):
-        // anything there fills the edge of a wide-angle frame.
-        let crowd = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> usize {
-            let mut n = 0;
-            for (dx, dz) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
-                let (x, z) = (cell.0 + dx, cell.1 + dz);
-                if x < room.min().x || x > room.max().x || z < room.min().y || z > room.max().y {
-                    continue;
-                }
-                let (gx, gz) = (x + origin.x - gi.origin.x, z + origin.z - gi.origin.z);
-                if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 {
-                    n += 1;
-                }
-            }
-            n
-        };
-        // The best look from `cell` in `room`: the longest clear run among
-        // the direction to the room's middle (preferred when it ties) and
-        // sixteen compass directions, so a camera hemmed in by furniture
-        // turns to face the open part of the room, less a penalty per
-        // crowding neighbour (see `crowd`). Returns the score and the
-        // build-area-local point to look at.
-        let view = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> (f32, (f32, f32)) {
-            let (ex, ez) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
-            let (cx, cz) = ((room.min().x + room.max().x) as f32 / 2.0 + 0.5, (room.min().y + room.max().y) as f32 / 2.0 + 0.5);
-            let mut dirs: Vec<((f32, f32), f32)> = (0..16)
-                .map(|i| {
-                    let a = i as f32 * std::f32::consts::TAU / 16.0;
-                    ((a.cos(), a.sin()), 0.0)
-                })
-                .collect();
-            let (dx, dz) = (cx - ex, cz - ez);
-            let len = (dx * dx + dz * dz).sqrt();
-            if len >= 0.5 {
-                dirs.push(((dx / len, dz / len), 0.5));
-            }
-            let mut best = (0.0f32, (cx, cz));
-            for (dir, bonus) in dirs {
-                let r = run(cell, floor_y, room, dir);
-                if r + bonus > best.0 {
-                    best = (r + bonus, (ex + dir.0 * r.max(2.0), ez + dir.1 * r.max(2.0)));
-                }
-            }
-            (best.0 - CROWD_PENALTY * crowd(cell, floor_y, room) as f32, best.1)
-        };
-        let mut views: Vec<(String, serde_json::Value, PerspectiveCamera)> = Vec::new();
-        for (ri, room) in house.room_plan.rooms.iter().enumerate() {
-            let floor_y = house.frame.floor_y(room.floor) + origin.y;
-            let look = |c: (i32, i32)| view(c, floor_y, room.interior);
-            let cam = room_camera(room, floor_y, origin, |c| clear(c, floor_y, true), look)
-                .or_else(|| room_camera(room, floor_y, origin, |c| clear(c, floor_y, false), look));
-            let Some(cam) = cam else { continue };
-            let level = match room.role {
-                RoomRole::Attic => "attic".to_string(),
-                _ => format!("floor{}", room.floor),
-            };
-            let name = format!("{prefix}_room_{ri:02}_{level}_{}.png", label(room.room_type));
-            let info = serde_json::json!({
-                "index": ri, "level": level, "type": format!("{:?}", room.room_type), "role": format!("{:?}", room.role),
-                "render": name, "eye": cam.eye,
-            });
-            views.push((name, info, cam));
-        }
-        if house.has_cellar {
-            // The cellar is not a room-plan room: stand anywhere free under the core.
-            let floor_y = house.frame.floor_y(CELLAR_FLOOR) + origin.y;
-            let core = house.footprint.rects()[0];
-            let inner = core.shrink(1);
-            let centre = ((inner.min().x + inner.max().x) as f32 / 2.0, (inner.min().y + inner.max().y) as f32 / 2.0);
-            let look = |c: (i32, i32)| view(c, floor_y, inner);
-            let stand = pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, true), look)
-                .or_else(|| pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, false), look));
-            if let Some((stand, look)) = stand {
-                let cam = standing_camera(Point2D::new(stand.0, stand.1), floor_y, look, origin);
-                let name = format!("{prefix}_room_cellar.png");
-                let info = serde_json::json!({ "level": "cellar", "type": "Cellar", "role": "Cellar", "render": name, "eye": cam.eye });
-                views.push((name, info, cam));
-            }
-        }
-        if !views.is_empty() {
-            let mut tiles = Vec::new();
-            for (name, info, cam) in &views {
-                let pm = render_perspective_with(&gi, cam, ROOM_W, ROOM_H, &room_opts)?;
-                pm.save_png(out_dir.join(name))?;
-                tiles.push(pm);
-                rooms_json.push(info.clone());
-            }
-            let cols = (tiles.len() as f64).sqrt().ceil() as usize;
-            let sheet_name = format!("{prefix}_rooms.png");
-            contact_sheet(&tiles, cols, 8)?.save_png(out_dir.join(&sheet_name))?;
-            renders.push(sheet_name);
-        }
-
-        // Cutaways: a top-down view of each storey clipped at its ceiling, so
-        // the walls, doors and furniture of that floor show as placed. One
-        // image per level (cellar, floors, attic) and a sheet of them all.
-        let mut cutaways = Vec::new();
-        // Per level: its name and the slices it is made of, each a rect
-        // (build-area local) with the absolute y band to keep: from the floor
-        // slab up to the storey's top air row, so the ceiling and everything
-        // above are cut off. The roof's own blocks are left out everywhere.
-        // The ground floor keeps its whole surroundings (`None`); upper levels
-        // keep only their own rooms plus one cell of wall, or lower wings'
-        // ceilings would cover the side rooms. Attic rooms over lower wings
-        // sit at their own height, so each attic room is its own slice.
-        let wall_rows = house.frame.wall_height() as i32;
-        let band = |floor_y: i32, rows: i32| (floor_y - 1 + origin.y, floor_y + rows - 1 + origin.y);
-        let mut levels: Vec<(String, Option<Vec<(Rect2D, i32, i32)>>, i32)> = Vec::new();
-        if house.has_cellar {
-            let (lo, hi) = band(house.frame.floor_y(CELLAR_FLOOR), wall_rows);
-            levels.push(("cellar".to_string(), Some(vec![(house.footprint.rects()[0], lo, hi)]), 1));
-        }
-        for f in house.frame.floors() {
-            let (lo, hi) = band(house.frame.floor_y(f), wall_rows);
-            let slices: Vec<(Rect2D, i32, i32)> =
-                house.frame.active_rects(f).iter().filter_map(|&i| house.frame.rect_at(i, f)).map(|r| (r, lo, hi)).collect();
-            levels.push((format!("floor{f}"), (f > 0).then_some(slices), 1));
-        }
-        if house.has_attic {
-            let slices: Vec<(Rect2D, i32, i32)> = house
-                .room_plan
-                .rooms
-                .iter()
-                .filter(|r| r.role == RoomRole::Attic)
-                .map(|r| {
-                    let (lo, hi) = band(house.frame.floor_y(r.floor), wall_rows);
-                    (r.rect, lo, hi)
-                })
-                .collect();
-            levels.push(("attic".to_string(), Some(slices), 1));
-        }
-        for (level, slices, margin) in &levels {
-            let (lo_y, hi_y) = match slices {
-                None => band(house.frame.floor_y(0), wall_rows),
-                Some(sl) => (sl.iter().map(|s| s.1).min().unwrap_or(0), sl.iter().map(|s| s.2).max().unwrap_or(0)),
-            };
-            if slices.as_ref().is_some_and(|sl| sl.is_empty()) {
-                continue;
-            }
-            let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
-            let roof: HashSet<Point3D> = house.roof_cells.iter().map(|p| *p + origin).collect();
-            let masked;
-            let source = match slices {
-                None if roof.is_empty() => &scene,
-                None => {
-                    let mut sub = Scene::new(scene.bounds);
-                    for (p, &i) in &scene.blocks {
-                        if cut.contains(*p) && !roof.contains(p) {
-                            sub.insert(*p, &scene.palette[i as usize]);
-                        }
-                    }
-                    masked = sub;
-                    &masked
-                }
-                Some(sl) => {
-                    let inside = |p: &Point3D| {
-                        let local = Point2D::new(p.x - origin.x, p.z - origin.z);
-                        sl.iter().any(|(r, lo, hi)| {
-                            let (a, b) = (r.min(), r.max());
-                            p.y >= *lo
-                                && p.y <= *hi
-                                && local.x >= a.x - margin
-                                && local.x <= b.x + margin
-                                && local.y >= a.y - margin
-                                && local.y <= b.y + margin
-                        })
-                    };
-                    let mut sub = Scene::new(scene.bounds);
-                    for (p, &i) in &scene.blocks {
-                        if inside(p) && !roof.contains(p) {
-                            sub.insert(*p, &scene.palette[i as usize]);
-                        }
-                    }
-                    masked = sub;
-                    &masked
-                }
-            };
-            let Some(gc) = VoxelGrid::from_scene(source, Some(cut)) else { continue };
-            // Unlit: a light map of the clipped grid would see sky through the missing roof.
-            // A near-top-down perspective: high above, tilted a little toward
-            // the north, narrow field of view (close to orthographic) and no
-            // fog, so walls and furniture keep some depth while the plan stays
-            // readable. The top-down keeps the plan exact.
-            let iso = {
-                let (lo, hi) = (gc.origin, Point3D::new(gc.origin.x + gc.nx, gc.origin.y + gc.ny, gc.origin.z + gc.nz));
-                let centre = [(lo.x + hi.x) as f32 / 2.0, (lo.y + hi.y) as f32 / 2.0, (lo.z + hi.z) as f32 / 2.0];
-                let extent = (gc.nx.max(gc.nz) as f32 + 4.0) * 1.15;
-                let fov: f32 = 25.0;
-                let dist = extent / 2.0 / (fov.to_radians() / 2.0).tan();
-                let tilt: f32 = 22.0f32.to_radians();
-                let eye = [centre[0], centre[1] + dist * tilt.cos(), centre[2] + dist * tilt.sin()];
-                let cam = PerspectiveCamera { eye, target: centre, fov_deg: fov };
-                let w = (extent * px as f32) as u32;
-                let opts = PerspectiveOptions { lighting: None, fog: false };
-                render_perspective_with(&gc, &cam, w, w * 3 / 4, &opts)?
-            };
-            let top = render_topdown_with(&gc, px, None)?;
-            for (suffix, pm) in [("", &iso), ("_top", &top)] {
-                let name = format!("{prefix}_cutaway_{level}{suffix}.png");
-                pm.save_png(out_dir.join(&name))?;
-                renders.push(name);
-            }
-            cutaways.push((iso, top));
-        }
-        if !cutaways.is_empty() {
-            // Sheet: one column per level, iso above its top-down.
-            let n = cutaways.len();
-            let (isos, tops): (Vec<_>, Vec<_>) = cutaways.into_iter().unzip();
-            let tiles: Vec<_> = isos.into_iter().chain(tops).collect();
-            let name = format!("{prefix}_cutaways.png");
-            contact_sheet(&tiles, n, 8)?.save_png(out_dir.join(&name))?;
-            renders.push(name);
-        }
+        let closeup = render_house_closeups(&scene, house, origin, region, prefix, &out_dir, px, opts.lighting, &mut light)?;
+        let (renders, rooms_json) = (closeup.renders, closeup.rooms);
 
         let fp = house.footprint.bounds();
         let style = b.spec.palette.as_ref().and_then(|p| p.style.clone()).unwrap_or_default();
@@ -990,8 +705,8 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
     if let Some(l) = &opts.lighting {
         summary["lighting"] = serde_json::json!({ "daylight": l.daylight, "smooth": l.smooth, "tag": l.tag() });
         println!(
-            "room views lit ({}, daylight {:.2}): light maps for {light_grids} grids, {light_cells} cells, in {:.1?} total",
-            l.tag(), l.daylight, light_time,
+            "room views lit ({}, daylight {:.2}): light maps for {} grids, {} cells, in {:.1?} total",
+            l.tag(), l.daylight, light.grids, light.cells, light.time,
         );
     }
     if opts.out.has(Artifact::Metrics) {
@@ -1002,4 +717,408 @@ pub async fn run_showcase(opts: &ShowcaseOptions) -> anyhow::Result<PathBuf> {
         built.len(), requested, out_dir.display(),
     );
     Ok(out_dir)
+}
+
+/// Light-map cost over the close-ups' grids, for the run's report.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LightStats {
+    pub time: Duration,
+    pub grids: usize,
+    pub cells: usize,
+}
+
+/// What [`render_house_closeups`] wrote: its PNG names and one record per
+/// room view.
+pub struct Closeups {
+    pub renders: Vec<String>,
+    pub rooms: Vec<serde_json::Value>,
+}
+
+/// Render one house's close-ups from `scene` into `out_dir`, names starting
+/// with `prefix`: the four isometric corners, top-down and elevations of
+/// `region` (absolute), a perspective from inside every room and the cellar
+/// with a sheet of them, and a cutaway per storey with a sheet. `origin` is
+/// the build area's, which `house` is local to. Lit when `lighting` is given.
+#[allow(clippy::too_many_arguments)]
+pub fn render_house_closeups(
+    scene: &Scene,
+    house: &HouseOutput,
+    origin: Point3D,
+    region: Rect3D,
+    prefix: &str,
+    out_dir: &std::path::Path,
+    px: u32,
+    lighting: Option<Lighting>,
+    light: &mut LightStats,
+) -> anyhow::Result<Closeups> {
+    let mut rooms_json = Vec::new();
+    let Some(g) = VoxelGrid::from_scene(scene, Some(region)) else {
+        return Ok(Closeups { renders: Vec::new(), rooms: rooms_json });
+    };
+
+    let mut renders = Vec::new();
+    let mut save = |name: String, pm: resvg::tiny_skia::Pixmap| -> anyhow::Result<()> {
+        pm.save_png(out_dir.join(&name))?;
+        renders.push(name);
+        Ok(())
+    };
+    // Exterior views, lit (sky and lamps) like the room views when asked.
+    let exterior_map = lighting.map(|_| {
+        let t = Instant::now();
+        let map = LightMap::new(&g);
+        light.time += t.elapsed();
+        light.grids += 1;
+        light.cells += map.len();
+        map
+    });
+    let exterior_lit = exterior_map.as_ref().zip(lighting).map(|(map, l)| Lit::new(&g, map, l));
+    let exterior_lit = exterior_lit.as_ref();
+    for cam in [IsoCamera::SouthEast, IsoCamera::NorthWest, IsoCamera::SouthWest, IsoCamera::NorthEast] {
+        save(format!("{prefix}_iso_{}.png", cam.tag()), render_iso_with(&g, cam, 2 * px, exterior_lit)?)?;
+    }
+    save(format!("{prefix}_top.png"), render_topdown_with(&g, px, exterior_lit)?)?;
+    for side in ElevationSide::ALL {
+        save(format!("{prefix}_elev_{}.png", side.name()), render_elevation_with(&g, side, px, exterior_lit)?)?;
+    }
+
+    // Interior views: a perspective from inside every room (and the cellar
+    // from its landing), each saved on its own and tiled into one sheet.
+    // The grid reaches down to the cellar, which the exterior crop leaves out.
+    let interior_lo_y = if house.has_cellar { house.frame.floor_y(CELLAR_FLOOR) + origin.y - 2 } else { region.min().y };
+    let interior_region = Rect3D::from_points(Point3D::new(region.min().x, interior_lo_y, region.min().z), region.max());
+    let Some(gi) = VoxelGrid::from_scene(scene, Some(interior_region)) else {
+        return Ok(Closeups { renders, rooms: rooms_json });
+    };
+    let light_map = lighting.map(|_| {
+        let t = Instant::now();
+        let map = LightMap::new(&gi);
+        light.time += t.elapsed();
+        light.grids += 1;
+        light.cells += map.len();
+        map
+    });
+    let room_opts = PerspectiveOptions { lighting: light_map.as_ref().zip(lighting), fog: true };
+    // A player can stand in build-area-local `cell` on walkable level
+    // `floor_y` (absolute) when nothing fills the feet cell and the head
+    // cell is clear; `roomy` also wants the cell above the head clear, so
+    // the camera keeps away from attic eaves and low beams when it can.
+    let clear = |cell: (i32, i32), floor_y: i32, roomy: bool| {
+        let (gx, gz) = (cell.0 + origin.x - gi.origin.x, cell.1 + origin.z - gi.origin.z);
+        let at = |dy: i32| gi.get(gx, floor_y + dy - gi.origin.y, gz);
+        !gi.is_full(at(0)) && at(1) == 0 && (!roomy || at(2) == 0)
+    };
+    // Clear distance (blocks) of a look from `cell` along `(dx, dz)` at
+    // eye and knee height, up to 16.
+    let run = |cell: (i32, i32), floor_y: i32, room: Rect2D, (dx, dz): (f32, f32)| -> f32 {
+        let (mut x, mut z, mut d) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5, 0.0);
+        while d < 16.0 {
+            x += dx * 0.25;
+            z += dz * 0.25;
+            d += 0.25;
+            // Stay inside the room (its walls included): a look down a
+            // doorway into the next room doesn't count.
+            let (ix, iz) = (x.floor() as i32, z.floor() as i32);
+            if ix < room.min().x - 1 || ix > room.max().x + 1 || iz < room.min().y - 1 || iz > room.max().y + 1 {
+                break;
+            }
+            let (gx, gz) = (ix + origin.x - gi.origin.x, iz + origin.z - gi.origin.z);
+            if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 || gi.is_full(gi.get(gx, floor_y - gi.origin.y, gz)) {
+                break;
+            }
+        }
+        d
+    };
+    // Furniture at head height in the eight cells around `cell` (inside
+    // `room`; walls don't count, a camera in a corner looks out of it):
+    // anything there fills the edge of a wide-angle frame.
+    let crowd = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> usize {
+        let mut n = 0;
+        for (dx, dz) in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            let (x, z) = (cell.0 + dx, cell.1 + dz);
+            if x < room.min().x || x > room.max().x || z < room.min().y || z > room.max().y {
+                continue;
+            }
+            let (gx, gz) = (x + origin.x - gi.origin.x, z + origin.z - gi.origin.z);
+            if gi.get(gx, floor_y + 1 - gi.origin.y, gz) != 0 {
+                n += 1;
+            }
+        }
+        n
+    };
+    // The best look from `cell` in `room`: the longest clear run among
+    // the direction to the room's middle (preferred when it ties) and
+    // sixteen compass directions, so a camera hemmed in by furniture
+    // turns to face the open part of the room, less a penalty per
+    // crowding neighbour (see `crowd`). Returns the score and the
+    // build-area-local point to look at.
+    let view = |cell: (i32, i32), floor_y: i32, room: Rect2D| -> (f32, (f32, f32)) {
+        let (ex, ez) = (cell.0 as f32 + 0.5, cell.1 as f32 + 0.5);
+        let (cx, cz) = ((room.min().x + room.max().x) as f32 / 2.0 + 0.5, (room.min().y + room.max().y) as f32 / 2.0 + 0.5);
+        let mut dirs: Vec<((f32, f32), f32)> = (0..16)
+            .map(|i| {
+                let a = i as f32 * std::f32::consts::TAU / 16.0;
+                ((a.cos(), a.sin()), 0.0)
+            })
+            .collect();
+        let (dx, dz) = (cx - ex, cz - ez);
+        let len = (dx * dx + dz * dz).sqrt();
+        if len >= 0.5 {
+            dirs.push(((dx / len, dz / len), 0.5));
+        }
+        let mut best = (0.0f32, (cx, cz));
+        for (dir, bonus) in dirs {
+            let r = run(cell, floor_y, room, dir);
+            if r + bonus > best.0 {
+                best = (r + bonus, (ex + dir.0 * r.max(2.0), ez + dir.1 * r.max(2.0)));
+            }
+        }
+        (best.0 - CROWD_PENALTY * crowd(cell, floor_y, room) as f32, best.1)
+    };
+    let mut views: Vec<(String, serde_json::Value, PerspectiveCamera)> = Vec::new();
+    for (ri, room) in house.room_plan.rooms.iter().enumerate() {
+        let floor_y = house.frame.floor_y(room.floor) + origin.y;
+        let look = |c: (i32, i32)| view(c, floor_y, room.interior);
+        let cam = room_camera(room, floor_y, origin, |c| clear(c, floor_y, true), look)
+            .or_else(|| room_camera(room, floor_y, origin, |c| clear(c, floor_y, false), look));
+        let Some(cam) = cam else { continue };
+        let level = match room.role {
+            RoomRole::Attic => "attic".to_string(),
+            _ => format!("floor{}", room.floor),
+        };
+        let name = format!("{prefix}_room_{ri:02}_{level}_{}.png", label(room.room_type));
+        let info = serde_json::json!({
+            "index": ri, "level": level, "type": format!("{:?}", room.room_type), "role": format!("{:?}", room.role),
+            "render": name, "eye": cam.eye,
+        });
+        views.push((name, info, cam));
+    }
+    if house.has_cellar {
+        // The cellar is not a room-plan room: stand anywhere free under the core.
+        let floor_y = house.frame.floor_y(CELLAR_FLOOR) + origin.y;
+        let core = house.footprint.rects()[0];
+        let inner = core.shrink(1);
+        let centre = ((inner.min().x + inner.max().x) as f32 / 2.0, (inner.min().y + inner.max().y) as f32 / 2.0);
+        let look = |c: (i32, i32)| view(c, floor_y, inner);
+        let stand = pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, true), look)
+            .or_else(|| pick_stand(inner.iter().map(|p| (p.x, p.y)), centre, |c| clear(c, floor_y, false), look));
+        if let Some((stand, look)) = stand {
+            let cam = standing_camera(Point2D::new(stand.0, stand.1), floor_y, look, origin);
+            let name = format!("{prefix}_room_cellar.png");
+            let info = serde_json::json!({ "level": "cellar", "type": "Cellar", "role": "Cellar", "render": name, "eye": cam.eye });
+            views.push((name, info, cam));
+        }
+    }
+    if !views.is_empty() {
+        let mut tiles = Vec::new();
+        for (name, info, cam) in &views {
+            let pm = render_perspective_with(&gi, cam, ROOM_W, ROOM_H, &room_opts)?;
+            pm.save_png(out_dir.join(name))?;
+            tiles.push(pm);
+            rooms_json.push(info.clone());
+        }
+        let cols = (tiles.len() as f64).sqrt().ceil() as usize;
+        let sheet_name = format!("{prefix}_rooms.png");
+        contact_sheet(&tiles, cols, 8)?.save_png(out_dir.join(&sheet_name))?;
+        renders.push(sheet_name);
+    }
+
+    // Cutaways: a top-down view of each storey clipped at its ceiling, so
+    // the walls, doors and furniture of that floor show as placed. One
+    // image per level (cellar, floors, attic) and a sheet of them all.
+    let mut cutaways = Vec::new();
+    // Per level: its name and the slices it is made of, each a rect
+    // (build-area local) with the absolute y band to keep: from the floor
+    // slab up to the storey's top air row, so the ceiling and everything
+    // above are cut off. The roof's own blocks are left out everywhere.
+    // The ground floor keeps its whole surroundings (`None`); upper levels
+    // keep only their own rooms plus one cell of wall, or lower wings'
+    // ceilings would cover the side rooms. Attic rooms over lower wings
+    // sit at their own height, so each attic room is its own slice.
+    let wall_rows = house.frame.wall_height() as i32;
+    let band = |floor_y: i32, rows: i32| (floor_y - 1 + origin.y, floor_y + rows - 1 + origin.y);
+    let mut levels: Vec<(String, Option<Vec<(Rect2D, i32, i32)>>, i32)> = Vec::new();
+    if house.has_cellar {
+        let (lo, hi) = band(house.frame.floor_y(CELLAR_FLOOR), wall_rows);
+        levels.push(("cellar".to_string(), Some(vec![(house.footprint.rects()[0], lo, hi)]), 1));
+    }
+    for f in house.frame.floors() {
+        let (lo, hi) = band(house.frame.floor_y(f), wall_rows);
+        let slices: Vec<(Rect2D, i32, i32)> =
+            house.frame.active_rects(f).iter().filter_map(|&i| house.frame.rect_at(i, f)).map(|r| (r, lo, hi)).collect();
+        levels.push((format!("floor{f}"), (f > 0).then_some(slices), 1));
+    }
+    if house.has_attic {
+        let slices: Vec<(Rect2D, i32, i32)> = house
+            .room_plan
+            .rooms
+            .iter()
+            .filter(|r| r.role == RoomRole::Attic)
+            .map(|r| {
+                let (lo, hi) = band(house.frame.floor_y(r.floor), wall_rows);
+                (r.rect, lo, hi)
+            })
+            .collect();
+        levels.push(("attic".to_string(), Some(slices), 1));
+    }
+    for (level, slices, margin) in &levels {
+        let (lo_y, hi_y) = match slices {
+            None => band(house.frame.floor_y(0), wall_rows),
+            Some(sl) => (sl.iter().map(|s| s.1).min().unwrap_or(0), sl.iter().map(|s| s.2).max().unwrap_or(0)),
+        };
+        if slices.as_ref().is_some_and(|sl| sl.is_empty()) {
+            continue;
+        }
+        let cut = Rect3D::from_points(Point3D::new(region.min().x, lo_y, region.min().z), Point3D::new(region.max().x, hi_y, region.max().z));
+        let roof: HashSet<Point3D> = house.roof_cells.iter().map(|p| *p + origin).collect();
+        let masked;
+        let source = match slices {
+            None if roof.is_empty() => scene,
+            None => {
+                let mut sub = Scene::new(scene.bounds);
+                for (p, &i) in &scene.blocks {
+                    if cut.contains(*p) && !roof.contains(p) {
+                        sub.insert(*p, &scene.palette[i as usize]);
+                    }
+                }
+                masked = sub;
+                &masked
+            }
+            Some(sl) => {
+                let inside = |p: &Point3D| {
+                    let local = Point2D::new(p.x - origin.x, p.z - origin.z);
+                    sl.iter().any(|(r, lo, hi)| {
+                        let (a, b) = (r.min(), r.max());
+                        p.y >= *lo
+                            && p.y <= *hi
+                            && local.x >= a.x - margin
+                            && local.x <= b.x + margin
+                            && local.y >= a.y - margin
+                            && local.y <= b.y + margin
+                    })
+                };
+                let mut sub = Scene::new(scene.bounds);
+                for (p, &i) in &scene.blocks {
+                    if inside(p) && !roof.contains(p) {
+                        sub.insert(*p, &scene.palette[i as usize]);
+                    }
+                }
+                masked = sub;
+                &masked
+            }
+        };
+        let Some(gc) = VoxelGrid::from_scene(source, Some(cut)) else { continue };
+        // Unlit: a light map of the clipped grid would see sky through the missing roof.
+        // A near-top-down perspective: high above, tilted a little toward
+        // the north, narrow field of view (close to orthographic) and no
+        // fog, so walls and furniture keep some depth while the plan stays
+        // readable. The top-down keeps the plan exact.
+        let iso = {
+            let (lo, hi) = (gc.origin, Point3D::new(gc.origin.x + gc.nx, gc.origin.y + gc.ny, gc.origin.z + gc.nz));
+            let centre = [(lo.x + hi.x) as f32 / 2.0, (lo.y + hi.y) as f32 / 2.0, (lo.z + hi.z) as f32 / 2.0];
+            let extent = (gc.nx.max(gc.nz) as f32 + 4.0) * 1.15;
+            let fov: f32 = 25.0;
+            let dist = extent / 2.0 / (fov.to_radians() / 2.0).tan();
+            let tilt: f32 = 22.0f32.to_radians();
+            let eye = [centre[0], centre[1] + dist * tilt.cos(), centre[2] + dist * tilt.sin()];
+            let cam = PerspectiveCamera { eye, target: centre, fov_deg: fov };
+            let w = (extent * px as f32) as u32;
+            let opts = PerspectiveOptions { lighting: None, fog: false };
+            render_perspective_with(&gc, &cam, w, w * 3 / 4, &opts)?
+        };
+        let top = render_topdown_with(&gc, px, None)?;
+        for (suffix, pm) in [("", &iso), ("_top", &top)] {
+            let name = format!("{prefix}_cutaway_{level}{suffix}.png");
+            pm.save_png(out_dir.join(&name))?;
+            renders.push(name);
+        }
+        cutaways.push((iso, top));
+    }
+    if !cutaways.is_empty() {
+        // Sheet: one column per level, iso above its top-down.
+        let n = cutaways.len();
+        let (isos, tops): (Vec<_>, Vec<_>) = cutaways.into_iter().unzip();
+        let tiles: Vec<_> = isos.into_iter().chain(tops).collect();
+        let name = format!("{prefix}_cutaways.png");
+        contact_sheet(&tiles, n, 8)?.save_png(out_dir.join(&name))?;
+        renders.push(name);
+    }
+
+    Ok(Closeups { renders, rooms: rooms_json })
+}
+
+/// Street around a settlement house's close-ups, beyond its own blocks.
+const STREET_PAD: i32 = 4;
+
+/// Close-ups of every house a settlement kept (`SettlementOptions::closeups`)
+/// into `out_dir`, named `house_<n>_*` as in `houses/`. Each is cropped to the
+/// house's own blocks plus [`STREET_PAD`] of street, and every other house's
+/// blocks from its ground floor up are left out, so no neighbour stands in
+/// front of a camera; their foundations stay, so the ground has no holes.
+/// `owners` is the editor's owner map (build-area local), `origin` the build
+/// area's. Returns how many houses were rendered.
+pub fn render_settlement_closeups(
+    scene: &Scene,
+    houses: &[crate::generator::report::CloseupHouse],
+    owners: &crate::util::HashMap<Point3D, u32>,
+    origin: Point3D,
+    out_dir: &std::path::Path,
+    px: u32,
+) -> anyhow::Result<usize> {
+    std::fs::create_dir_all(out_dir)?;
+    // Each house's ground floor (absolute y) and the bounds of its solid
+    // blocks from just under that floor up, by owner.
+    let floor_y: crate::util::HashMap<u32, i32> = houses.iter().map(|h| (h.owner, h.output.base_y + origin.y)).collect();
+    let mut bounds: crate::util::HashMap<u32, (Point3D, Point3D)> = crate::util::HashMap::default();
+    for (local, owner) in owners {
+        let p = *local + origin;
+        let Some(&floor) = floor_y.get(owner) else { continue };
+        if p.y < floor - 1 || !scene.is_solid(p) {
+            continue;
+        }
+        let b = bounds.entry(*owner).or_insert((p, p));
+        b.0 = Point3D::new(b.0.x.min(p.x), b.0.y.min(p.y), b.0.z.min(p.z));
+        b.1 = Point3D::new(b.1.x.max(p.x), b.1.y.max(p.y), b.1.z.max(p.z));
+    }
+    let mut light = LightStats::default();
+    let mut rendered = 0;
+    for h in houses {
+        let prefix = format!("house_{:03}", h.house);
+        let Some(&(lo, hi)) = bounds.get(&h.owner) else {
+            println!("{prefix}: nothing placed above ground, no close-ups");
+            continue;
+        };
+        let pad = Point3D::new(STREET_PAD, 0, STREET_PAD);
+        let floor = floor_y[&h.owner];
+        let (rmin, rmax) = (Point3D::new(lo.x, floor - 2, lo.z) - pad, hi + pad + Point3D::new(0, 2, 0));
+        // The house's own column of the scene, down past a cellar, less the
+        // other houses' blocks from their ground floors up.
+        let mut sub = Scene::new(scene.bounds);
+        // Per column, the top solid block under the floor: the ground there.
+        let mut ground: crate::util::HashMap<(i32, i32), i32> = crate::util::HashMap::default();
+        for (p, &i) in &scene.blocks {
+            if p.x < rmin.x || p.x > rmax.x || p.z < rmin.z || p.z > rmax.z || p.y > rmax.y || p.y < floor - 28 {
+                continue;
+            }
+            if p.y < floor && scene.is_solid(*p) {
+                let top = ground.entry((p.x, p.z)).or_insert(p.y);
+                *top = (*top).max(p.y);
+            }
+            let neighbour = owners
+                .get(&(*p - origin))
+                .filter(|&&o| o != h.owner)
+                .and_then(|o| floor_y.get(o))
+                .is_some_and(|&floor| p.y >= floor);
+            if !neighbour {
+                sub.insert(*p, &scene.palette[i as usize]);
+            }
+        }
+        // Down to the lowest ground in view, so a slope isn't cut off with its
+        // flowers left floating, but at most a dozen blocks under the floor.
+        let lowest = ground.values().copied().min().unwrap_or(floor - 2);
+        let region = Rect3D::from_points(Point3D::new(rmin.x, (lowest - 1).clamp(floor - 12, floor - 2), rmin.z), rmax);
+        let closeups = render_house_closeups(&sub, &h.output, origin, region, &prefix, out_dir, px, None, &mut light)?;
+        println!("{prefix}: {} close-ups, {} room views", closeups.renders.len(), closeups.rooms.len());
+        rendered += 1;
+    }
+    Ok(rendered)
 }

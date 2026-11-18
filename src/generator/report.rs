@@ -64,12 +64,32 @@ pub struct SettlementReport {
     /// not into it.
     #[serde(skip)]
     pub house_specs: Vec<crate::generator::buildings_v2::spec::HouseSpec>,
+    /// Every house's build output and owner id, kept for close-up renders
+    /// when `SettlementOptions::closeups` asks; not written anywhere.
+    #[serde(skip)]
+    pub closeup_houses: Vec<CloseupHouse>,
     /// Houses built from `--spec` files, in build order.
     #[serde(default)]
     pub spec_houses: Vec<SpecPlacement>,
     /// `--spec` files the town did not build: refused, or no lot had room.
     #[serde(default)]
     pub specs_unplaced: Vec<String>,
+}
+
+/// One built house kept for its close-ups: its index among the settlement's
+/// houses (`house_<n>`), the owner id its blocks carry in the editor, and
+/// its build output.
+#[derive(Clone)]
+pub struct CloseupHouse {
+    pub house: usize,
+    pub owner: u32,
+    pub output: std::sync::Arc<crate::generator::buildings_v2::HouseOutput>,
+}
+
+impl std::fmt::Debug for CloseupHouse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CloseupHouse").field("house", &self.house).field("owner", &self.owner).finish_non_exhaustive()
+    }
 }
 
 /// Where a town put a house from a `--spec` file.

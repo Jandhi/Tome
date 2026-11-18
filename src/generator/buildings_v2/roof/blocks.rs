@@ -54,6 +54,7 @@ pub fn is_ridge(hm: &RoofHeightmap, x: i32, z: i32) -> bool {
 /// - Fill blocks below surface inside the footprint.
 /// - Overhang gets only the surface block, no fill.
 /// - Overhang brackets vary by pitch.
+/// - `skip` cells get nothing; `trim` draws the outline in the secondary roof material.
 pub async fn place_roof_blocks(
     editor: &Editor,
     hm: &RoofHeightmap,
@@ -61,6 +62,8 @@ pub async fn place_roof_blocks(
     pitch: GablePitch,
     group_rects: &[&Rect2D],
     higher_rects: &[&Rect2D],
+    skip: &crate::util::HashSet<Point2D>,
+    trim: bool,
     data: &LoadedData,
     palette: &Palette,
     rng: &mut RNG,
@@ -71,10 +74,17 @@ pub async fn place_roof_blocks(
         .clone();
 
     let mut placer_rng = rng.derive();
-    let mut placer = MaterialPlacer::new(
+    let mut main_placer = MaterialPlacer::new(
         Placer::new(&data.materials, &mut placer_rng),
         material_id,
     );
+    // Trim: the roof's outline (eaves, gable verges, ridge) in the secondary
+    // roof material. Only drawn from `rng` when on, so plain roofs are unchanged.
+    let mut trim_rng = if trim { Some(rng.derive()) } else { None };
+    let mut trim_placer = trim_rng.as_mut().and_then(|r| {
+        let id = palette.get_material(MaterialRole::SecondaryRoof)?.clone();
+        Some(MaterialPlacer::new(Placer::new(&data.materials, r), id))
+    });
 
     let slab_state = std::collections::HashMap::from([("type".to_string(), "bottom".to_string())]);
     let top_slab_state = HashMap::from_iter([("type".to_string(), "top".to_string())]);
@@ -88,8 +98,10 @@ pub async fn place_roof_blocks(
 
             let p = Point2D::new(x, z);
 
-            // Wall precedence: skip if inside a higher-floor rect
-            if higher_rects.iter().any(|r| r.contains(p)) {
+            // Wall precedence: skip if inside a higher-floor rect; `skip`
+            // cells are built by someone else (dormers). Both still shape
+            // their neighbours through `hm`.
+            if higher_rects.iter().any(|r| r.contains(p)) || skip.contains(&p) {
                 continue;
             }
 
@@ -97,10 +109,11 @@ pub async fn place_roof_blocks(
             let y_floor = roof_y + h_adj.floor() as i32;
             let frac = h_adj - h_adj.floor();
             let is_overhang = !group_rects.iter().any(|r| r.contains(p));
+            let is_outline = is_overhang || is_ridge(hm, x, z);
 
             // Base row block (only inside footprint, not overhang, not double pitch)
             if !is_overhang && !matches!(pitch, GablePitch::Double) {
-                placer.place_block(
+                main_placer.place_block(
                     editor,
                     Point3D::new(x, roof_y - 1, z),
                     BlockForm::Block,
@@ -108,6 +121,11 @@ pub async fn place_roof_blocks(
                     None,
                 ).await;
             }
+
+            let placer = match trim_placer.as_mut() {
+                Some(t) if is_outline => t,
+                _ => &mut main_placer,
+            };
 
             // Surface block
             if !matches!(pitch, GablePitch::Slab) && is_ridge(hm, x, z) {

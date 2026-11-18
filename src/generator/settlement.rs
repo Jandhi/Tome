@@ -484,6 +484,9 @@ pub struct SettlementOptions {
     /// each goes on the first road slot where it fits, before the ordinary
     /// houses take it, turned so its front faces the road (see the house loop).
     pub house_specs: Vec<(String, crate::generator::buildings_v2::spec::HouseSpec)>,
+    /// Keep every house's build output in the report (`closeup_houses`) and
+    /// tag its blocks with an owner, for close-up renders after the run.
+    pub closeups: bool,
 }
 
 pub async fn generate_settlement(
@@ -608,7 +611,7 @@ pub async fn generate_settlement_with(
             .into_iter()
             .filter(|c| editor.world().is_in_bounds_2d(*c)),
     );
-    log_trees(&*editor, logged_area.clone()).await;
+    log_trees(editor, logged_area.clone()).await;
     println!(
         "Logged {} cells of trees ({} urban + {} apron)",
         logged_area.len(), urban.len(), logged_area.len() - urban.len(),
@@ -762,7 +765,7 @@ pub async fn generate_settlement_with(
             .map(|(c, &y)| Point3D::new(c.x, y, c.y))
             .collect();
         force_height(editor, &corridor_pts, false).await;
-        build_paths_merged(&*editor, &data, &rural_paths, &mut rng).await;
+        build_paths_merged(editor, &data, &rural_paths, &mut rng).await;
         for path in &rural_paths {
             let centre: HashSet<Point2D> = path.points().iter().map(|p| p.drop_y()).collect();
             let mut paved = crate::geometry::get_surrounding_set(&centre, path.width().saturating_sub(1));
@@ -1107,7 +1110,7 @@ pub async fn generate_settlement_with(
     // than reading the placed road back (the editor cache is keyed by local
     // coords while get_block subtracts the build-area origin, so a read here
     // returns world terrain, not the road).
-    let road_slabs: HashSet<Point3D> = build_paths_merged(&*editor, &data, &all_paths, &mut rng).await;
+    let road_slabs: HashSet<Point3D> = build_paths_merged(editor, &data, &all_paths, &mut rng).await;
     let slab_y_by_cell: HashMap<Point2D, i32> =
         road_slabs.iter().map(|p| (p.drop_y(), p.y)).collect();
 
@@ -1453,6 +1456,9 @@ pub async fn generate_settlement_with(
     // Pass one builds the anchored specs at their slots, pass two is the
     // ordinary walk. Without anchored specs pass one draws nothing, so such
     // towns are unchanged.
+    // Owner id per house attempt, tagging its blocks in the editor so a
+    // close-up of one house can leave its neighbours out.
+    let mut next_owner: u32 = 0;
     for anchored_pass in [true, false] {
         if anchored_pass && anchored.is_empty() { continue; }
         if !anchored_pass {
@@ -1765,10 +1771,13 @@ pub async fn generate_settlement_with(
                                 }
                             }
                         }
+                        let owner = next_owner;
+                        next_owner += 1;
+                        editor.set_owner(options.closeups.then_some(owner));
                         // `bctx.seed` is set, so `build_house` leaves the town stream alone.
                         let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
-                            Ok(output) => {
+                            Ok(mut output) => {
                                 // Record the house's decisions, footprint relative
                                 // to its own bounds (reads only, draws nothing).
                                 let built_spec = HouseSpec::resolved(
@@ -1809,6 +1818,7 @@ pub async fn generate_settlement_with(
                                         manor_sign_sites.push(site);
                                     }
                                 }
+                                bctx_editor.editor.set_owner(None);
                                 // Population budget tracks sleeping capacity, not bed
                                 // furniture: a double/canopy bed sleeps two. Each
                                 // bed-tagged item's capacity is its number of
@@ -1832,7 +1842,7 @@ pub async fn generate_settlement_with(
                                 let population =
                                     ((beds as f32 * POPULATION_PER_BED).round() as usize).max(1);
                                 town_anchors.push(crate::generator::population::HouseAnchors {
-                                    scenes: output.npc_anchors,
+                                    scenes: std::mem::take(&mut output.npc_anchors),
                                     population,
                                     wealth: crate::generator::population::Wealth::from_size_class(size_class),
                                     pos: output.footprint.bounds().midpoint(),
@@ -1871,6 +1881,13 @@ pub async fn generate_settlement_with(
                                         }
                                     }
                                 }
+                                if options.closeups {
+                                    report.closeup_houses.push(crate::generator::report::CloseupHouse {
+                                        house: report.house_specs.len() - 1,
+                                        owner,
+                                        output: std::sync::Arc::new(output),
+                                    });
+                                }
                                 // A Manor closes out its lot's manor-tier: skip any
                                 // remaining frontages/cursors here so we don't tile
                                 // additional Manors along the same chain. Other
@@ -1882,6 +1899,7 @@ pub async fn generate_settlement_with(
                                 cursor += fw + SIDE_BUFFER_CELLS;
                             }
                             Err(msg) => {
+                                bctx_editor.editor.set_owner(None);
                                 tier_fail[ti] += 1;
                                 log::warn!("placement build_house failed: {}", msg);
                                 // A scanned manor gets one shot; on failure give up its
@@ -1969,6 +1987,12 @@ pub async fn generate_settlement_with(
         "minecraft:lantern".into()
     };
     let lamps = crate::generator::paths::place_street_lights(&*editor, &all_paths, &street_lantern).await;
+    // Claim each post cell as a path (like the street signs below) so the
+    // open-space pass treats it as kerb: unclaimed, a plaza or park would take
+    // the cell into its region and re-grade the ground out from under the post.
+    for &cell in &lamps {
+        editor.world_mut().claim(cell, BuildClaim::Path(crate::generator::paths::PathType::Pavement));
+    }
     println!("Placed {} street lamps", lamps.len());
     report.street_lamps = lamps.len();
 

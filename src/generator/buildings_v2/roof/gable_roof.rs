@@ -17,7 +17,8 @@ use super::super::HouseSeed;
 use super::blocks::{self, place_roof_blocks};
 use super::gable::{GablePitch, RidgeAxis, gable_heightmap, pick_ridge_axis, place_gable_walls};
 use super::heightmap::RoofHeightmap;
-use super::top_floor_rects;
+use super::dormer::{place_dormers, plan_dormers, DormerPlan};
+use super::{top_floor_rects, RoofDetail};
 
 /// Extend wing rects inward to the core's ridge line for roof heightmap generation.
 /// Only extends wings whose ridge axis is perpendicular to the core's ridge axis.
@@ -118,7 +119,8 @@ pub(super) async fn place_gable_roof(
     seed: HouseSeed,
     frame: &Frame,
     pitch: GablePitch,
-) -> (Vec<Point2D>, Vec<RoofHeightmap>) {
+    detail: RoofDetail,
+) -> (Vec<Point2D>, Vec<RoofHeightmap>, usize) {
     let editor: &Editor = &*ctx.editor;
     let data = ctx.data;
     let palette = ctx.palette;
@@ -149,6 +151,12 @@ pub(super) async fn place_gable_roof(
             hm
         })
         .collect();
+
+    let dormers = if detail.dormers {
+        plan_dormers(rects, &roof_rects, &rect_axes, &roof_ys, pitch, detail.front)
+    } else {
+        DormerPlan::default()
+    };
 
     // Group rects by roof_y (BTreeMap keeps keys sorted)
     let mut groups: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
@@ -184,6 +192,8 @@ pub(super) async fn place_gable_roof(
         for &i in group_indices {
             combined_hm.merge_max(&per_rect_heightmaps[i]);
         }
+        // The dormers on this group build their own cells.
+        let group_dormers: Vec<_> = dormers.dormers.iter().filter(|d| group_indices.contains(&d.rect)).collect();
 
         // Place gable wall triangles using original rects
         let all_rects_with_roof_y: Vec<(&Rect2D, i32, RidgeAxis)> = (0..rects.len())
@@ -200,8 +210,9 @@ pub(super) async fn place_gable_roof(
         // Place roof surface and fill (group_rects uses original rects for overhang detection)
         place_roof_blocks(
             editor, &combined_hm, roof_y, pitch, &group_rects, &higher_rects,
-            data, palette, rng,
+            &dormers.owned, detail.trim, data, palette, rng,
         ).await;
+        place_dormers(editor, &group_dormers, roof_y, detail.trim, data, palette, rng).await;
     }
 
     // For steep (Double) roofs, place hanging lanterns with chains in attic spaces
@@ -224,10 +235,10 @@ pub(super) async fn place_gable_roof(
         let mut chimney_rng = seed.stream("roof.chimney");
         let rect_idx = tallest_indices[chimney_rng.rand_i32_range(0, tallest_indices.len() as i32) as usize];
         let rect = &rects[rect_idx];
-        place_chimney(editor, rect, &per_rect_heightmaps[rect_idx], roof_y, pitch, data, palette, &mut chimney_rng).await;
+        place_chimney(editor, rect, &per_rect_heightmaps[rect_idx], roof_y, pitch, &dormers.owned, data, palette, &mut chimney_rng).await;
     }
 
-    (gable_doorways, per_rect_heightmaps)
+    (gable_doorways, per_rect_heightmaps, dormers.dormers.len())
 }
 
 /// Place a hanging lantern with chains in the center of an attic rect.
@@ -273,6 +284,7 @@ async fn place_chimney(
     hm: &RoofHeightmap,
     roof_y: i32,
     pitch: GablePitch,
+    dormer_cells: &crate::util::HashSet<Point2D>,
     data: &LoadedData,
     palette: &Palette,
     rng: &mut RNG,
@@ -299,6 +311,11 @@ async fn place_chimney(
             }
             // Not on the ridge
             if blocks::is_ridge(hm, x, z) {
+                continue;
+            }
+            // Not on a dormer or within two cells of one
+            let near_dormer = (-2..=2).any(|dx| (-2..=2).any(|dz| dormer_cells.contains(&Point2D::new(x + dx, z + dz))));
+            if near_dormer {
                 continue;
             }
             let h_adj = if matches!(pitch, GablePitch::Slab) { h - 0.5 } else { h };
