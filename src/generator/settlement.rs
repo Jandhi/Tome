@@ -1025,10 +1025,16 @@ pub async fn generate_settlement_with(
     let mut alley_band: HashSet<Point2D> = HashSet::default();
     let mut ribbon_lot_count = 0usize;
     let mut ribbon_cells: HashSet<Point2D> = HashSet::default(); // DEBUG: all reserved ribbon cells
+    // Density falls off from the centre: outer blocks get deeper ribbons and
+    // larger lots (fewer alleys), so their houses have room for gardens.
+    let ring_map = crate::generator::city_houses::plots::RingMap::new(&urban);
+    let block_ring: Vec<crate::generator::city_houses::plots::Ring> =
+        blocks.iter().map(|b| ring_map.ring_of(b)).collect();
     for (block_idx, block) in blocks.iter().enumerate() {
+        let ring = block_ring[block_idx];
         let (mut ribbon_lots, interior) =
-            crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, RIBBON_DEPTH);
-        let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block(&interior, &mut rng, 24);
+            crate::generator::districts::subdivide::reserve_road_ribbon(block, &main_road_cells, ring.ribbon_depth().max(RIBBON_DEPTH));
+        let (subs, alleys) = crate::generator::districts::subdivide::subdivide_block_graded(&interior, &mut rng, &|piece| ring_map.ring_of(piece).max_lot_dim());
 
         // Connect the interior alleys to the main roads by carving through the
         // ribbon, then convert those cells from frontage ribbon to alley.
@@ -1379,6 +1385,10 @@ pub async fn generate_settlement_with(
     // depth — lets diagonal frontage (where an axis-aligned rect overruns the
     // staircased ribbon) still seat a house.
     const MIN_FIT_DEPTH: i32 = 5;
+    // Every town house as placed, for handing out gardens afterwards.
+    let lot_ring: Vec<crate::generator::city_houses::plots::Ring> =
+        sub_blocks.iter().map(|l| ring_map.ring_of(l)).collect();
+    let mut placed_houses: Vec<crate::generator::city_houses::plots::PlacedHouse> = Vec::new();
     // One plot per lot, shared by both passes below so houses never overlap.
     let mut plots: Vec<Option<crate::generator::buildings_v2::footprint::Plot>> =
         sub_blocks.iter().map(|b| if b.is_empty() { None } else { plot_from_block(b) }).collect();
@@ -1771,6 +1781,25 @@ pub async fn generate_settlement_with(
                                 }
                             }
                         }
+                        // A back door onto the garden: outside the core the garden
+                        // behind is reserved; in the core only where two free cells
+                        // lie behind the middle of the back wall, so it never opens
+                        // onto a neighbour.
+                        {
+                            let ring = lot_ring[lot_idx];
+                            let road = P2::from(frontage.outward);
+                            let into = P2::new(-road.x, -road.y);
+                            let b = footprint.bounds();
+                            let mid = b.min() + P2::new(b.size.x / 2, b.size.y / 2);
+                            // Step from the middle out past the back wall.
+                            let mut p = mid;
+                            while footprint.rects().iter().any(|r| r.contains(p)) {
+                                p = p + into;
+                            }
+                            let clear = plot.is_usable(p) && plot.is_usable(p + into) && lot.contains(&p) && lot.contains(&(p + into));
+                            bctx.back_door = manor_here.is_none()
+                                && (ring != crate::generator::city_houses::plots::Ring::Core || clear);
+                        }
                         let owner = next_owner;
                         next_owner += 1;
                         editor.set_owner(options.closeups.then_some(owner));
@@ -1778,6 +1807,7 @@ pub async fn generate_settlement_with(
                         let mut bctx_editor = BuildCtx::new(editor, &data, &palette, &mut rng);
                         match build_house(&mut bctx_editor, footprint, &bctx, plot_bounds).await {
                             Ok(mut output) => {
+                                let (ramp_cells, entrances) = crate::generator::city_houses::plots::door_cells(&output);
                                 // Record the house's decisions, footprint relative
                                 // to its own bounds (reads only, draws nothing).
                                 let built_spec = HouseSpec::resolved(
@@ -1856,6 +1886,40 @@ pub async fn generate_settlement_with(
                                     plot.mark_rect_used(r, SIDE_BUFFER_CELLS);
                                 }
                                 *rect_count_dist.entry(output.footprint.rects().len()).or_insert(0) += 1;
+                                let ring = lot_ring[lot_idx];
+                                let gap = if manor_here.is_some() { 0 } else { ring.side_gap() };
+                                let building = output.building_id;
+                                {
+                                    let end = ((cursor + fw + gap) as usize).min(frontage.cells.len());
+                                    // Outside the core, hold the garden behind the house
+                                    // now, so later houses on this lot leave it free.
+                                    if ring != crate::generator::city_houses::plots::Ring::Core {
+                                        let into = P2::new(-P2::from(frontage.outward).x, -P2::from(frontage.outward).y);
+                                        for &f in &frontage.cells[cursor as usize..end] {
+                                            let mut p = f;
+                                            let mut guard = 0;
+                                            while guard < 64 && editor.world().get_claim(p) == Some(crate::generator::BuildClaim::Building(building)) {
+                                                p = p + into;
+                                                guard += 1;
+                                            }
+                                            for _ in 0..ring.garden_depth() {
+                                                plot.mark_rect_used(&Rect2D::from_points(p, p), 0);
+                                                p = p + into;
+                                            }
+                                        }
+                                    }
+                                    placed_houses.push(crate::generator::city_houses::plots::PlacedHouse {
+                                        front: frontage.cells[cursor as usize..end].to_vec(),
+                                        width: fw as usize,
+                                        depth,
+                                        outward: frontage.outward,
+                                        building,
+                                        ring,
+                                        lot: lot_idx,
+                                        ramp_cells,
+                                        entrances,
+                                    });
+                                }
                                 total_buildings += 1;
                                 tier_placed[ti] += 1;
                                 *size_counts.entry(format!("{:?}", size_class)).or_insert(0) += 1;
@@ -1896,7 +1960,7 @@ pub async fn generate_settlement_with(
                                 if size_class == SizeClass::Manor && !anchored_pass {
                                     continue 'tier_loop;
                                 }
-                                cursor += fw + SIDE_BUFFER_CELLS;
+                                cursor += fw + SIDE_BUFFER_CELLS + lot_ring[lot_idx].side_gap();
                             }
                             Err(msg) => {
                                 bctx_editor.editor.set_owner(None);
@@ -1949,6 +2013,56 @@ pub async fn generate_settlement_with(
         tier_short[1], tier_unfit[1],
         tier_short[2], tier_unfit[2],
     );
+
+    // Back gardens: each town house takes the free ground of its lot behind it
+    // (and its side gap), claimed as its own so the open-space pass and the
+    // street lamps leave it alone, and furnished after the roads are signed.
+    let gardens = crate::generator::city_houses::plots::plan_gardens(editor.world(), &placed_houses, &sub_blocks);
+    for g in &gardens {
+        for &c in &g.cells {
+            editor.world_mut().claim(c, crate::generator::BuildClaim::Building(g.building));
+        }
+    }
+    if std::env::var("TOME_DEBUG_GARDENS").is_ok() {
+        let rows: Vec<String> = gardens.iter().map(|g| {
+            let cs: Vec<String> = g.cells.iter().map(|c| format!("[{},{}]", c.x, c.y)).collect();
+            format!("{{\"ring\":{},\"cells\":[{}]}}", g.ring as usize, cs.join(","))
+        }).collect();
+        let _ = std::fs::write("output/gardens_debug.json", format!("[{}]", rows.join(",")));
+        let cells = |it: &mut dyn Iterator<Item = P2>| it.map(|c| format!("[{},{}]", c.x, c.y)).collect::<Vec<_>>().join(",");
+        // A house's cells: its claim, less its garden (claimed under the same id).
+        let garden_cells: HashSet<P2> = gardens.iter().flat_map(|g| g.cells.iter().copied()).collect();
+        let mut by_id: HashMap<usize, Vec<P2>> = HashMap::default();
+        for &c in urban.iter() {
+            if let Some(crate::generator::BuildClaim::Building(b)) = editor.world().get_claim(c) {
+                if !garden_cells.contains(&c) {
+                    by_id.entry(b.0).or_default().push(c);
+                }
+            }
+        }
+        let houses: Vec<String> = placed_houses.iter().map(|h| {
+            let own = by_id.get(&h.building.0).cloned().unwrap_or_default();
+            format!("{{\"ring\":{},\"cells\":[{}]}}", h.ring as usize, cells(&mut own.into_iter()))
+        }).collect();
+        let _ = std::fs::write(
+            "output/density_debug.json",
+            format!("{{\"urban\":[{}],\"houses\":[{}]}}", cells(&mut urban.iter().copied()), houses.join(",")),
+        );
+    }
+    {
+        let mut by_ring = [0usize; 3];
+        let mut cells_by_ring = [0usize; 3];
+        for g in &gardens {
+            let i = g.ring as usize;
+            by_ring[i] += 1;
+            cells_by_ring[i] += g.cells.len();
+        }
+        println!(
+            "Gardens: {} of {} houses (core {} / {} cells, middle {} / {} cells, outer {} / {} cells)",
+            gardens.len(), placed_houses.len(),
+            by_ring[0], cells_by_ring[0], by_ring[1], cells_by_ring[1], by_ring[2], cells_by_ring[2],
+        );
+    }
 
     // Pave the verge: a forecourt of the road's own material in the gap
     // between each main road and its houses, so the diagonal set-back reads

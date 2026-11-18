@@ -362,6 +362,9 @@ fn tint_for(id: &str) -> Rgba {
         return match id {
             "spruce_leaves" => [97, 153, 97, 255],
             "birch_leaves" => [128, 167, 85, 255],
+            // The game registers no tint for these, although their models
+            // inherit `tintindex` from block/leaves: they keep their own colour.
+            "cherry_leaves" | "azalea_leaves" | "flowering_azalea_leaves" | "pale_oak_leaves" => [255, 255, 255, 255],
             _ => FOLIAGE,
         };
     }

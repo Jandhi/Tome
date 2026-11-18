@@ -209,6 +209,7 @@ pub async fn decorate_exterior_walls(
     ctx: &mut BuildCtx<'_>,
     footprint: &Footprint,
     wall_segs: &WallSegments,
+    building: BuildingID,
 ) {
     let mut rng = ctx.rng.derive();
 
@@ -248,9 +249,9 @@ pub async fn decorate_exterior_walls(
     candidates.sort_by_key(|p| (p.x, p.y));
     shuffle(&mut candidates, &mut rng);
 
-    // Claim placed props as part of this building so a later building or road
-    // never overwrites them (same id the footprint claim uses).
-    let building_idx = ctx.editor.world().buildings.len();
+    // Claim placed props as part of this building (`building`, the id its
+    // footprint is claimed under) so a later building or road never
+    // overwrites them.
 
     let mut placed: Vec<Point2D> = Vec::new();
     for cell in candidates {
@@ -272,7 +273,7 @@ pub async fn decorate_exterior_walls(
         ctx.editor.place_block(&prop, Point3D::new(cell.x, y, cell.y)).await;
         ctx.editor
             .world_mut()
-            .claim(cell, BuildClaim::Building(BuildingID(building_idx)));
+            .claim(cell, BuildClaim::Building(building));
         placed.push(cell);
     }
 }

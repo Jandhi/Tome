@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use log::info;
 use serde_derive::{Deserialize, Serialize};
 
 use crate::minecraft::BlockID;
@@ -67,7 +66,7 @@ pub fn string_to_block(block: &str) -> Option<Block> {
             let value = kv.next()?.trim().to_string();
             Some((key, value))
         }).collect();
-        info!("Parsed block: {:?} with state: {:?} iter {:?} statelist {:?}", id, state, iter, state_list);
+        log::trace!("Parsed block: {:?} with state: {:?} iter {:?} statelist {:?}", id, state, iter, state_list);
         Some(Block {
                     id: id,
                     state: state,

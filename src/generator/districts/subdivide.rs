@@ -231,6 +231,17 @@ pub fn subdivide_block(
     rng: &mut RNG,
     max_dim: i32,
 ) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
+    subdivide_block_graded(cells, rng, &|_| max_dim)
+}
+
+/// [`subdivide_block`] with the largest lot side chosen per piece: `max_dim` is
+/// asked again for every piece as it is cut, so lots can grow with distance
+/// from the town centre.
+pub fn subdivide_block_graded(
+    cells: &HashSet<Point2D>,
+    rng: &mut RNG,
+    max_dim: &dyn Fn(&HashSet<Point2D>) -> i32,
+) -> (Vec<HashSet<Point2D>>, HashSet<Point2D>) {
     let mut alleys = HashSet::default();
     let mut sub_blocks = Vec::new();
     recurse(cells.clone(), rng, max_dim, &mut alleys, &mut sub_blocks);
@@ -240,13 +251,14 @@ pub fn subdivide_block(
 fn recurse(
     cells: HashSet<Point2D>,
     rng: &mut RNG,
-    max_dim: i32,
+    max_dim_of: &dyn Fn(&HashSet<Point2D>) -> i32,
     alleys: &mut HashSet<Point2D>,
     out: &mut Vec<HashSet<Point2D>>,
 ) {
     if cells.is_empty() {
         return;
     }
+    let max_dim = max_dim_of(&cells);
 
     let (min_x, max_x, min_y, max_y) = bounds(&cells);
     let width = max_x - min_x + 1;
@@ -302,10 +314,10 @@ fn recurse(
     }
 
     for component in connected_components(&side_a) {
-        recurse(component, rng, max_dim, alleys, out);
+        recurse(component, rng, max_dim_of, alleys, out);
     }
     for component in connected_components(&side_b) {
-        recurse(component, rng, max_dim, alleys, out);
+        recurse(component, rng, max_dim_of, alleys, out);
     }
 }
 

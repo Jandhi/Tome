@@ -175,7 +175,7 @@ impl Editor {
                 drop(cache); // Release borrow before calling get_block_form again
 
                 if density <= self.get_block_form(&current_block).density() {
-                    info!("Block at {:?} is already placed with a denser block, skipping", point);
+                    log::trace!("Block at {:?} is already placed with a denser block, skipping", point);
                     return;
                 }
             }

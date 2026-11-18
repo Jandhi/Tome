@@ -52,6 +52,9 @@ pub struct World {
     pub parcel_map : Vec<Vec<Option<ParcelID>>>,
     pub district_map : Vec<Vec<Option<DistrictID>>>,
     pub buildings : Vec<BuildingData>,
+    /// The next free building id; every building takes one from
+    /// [`World::new_building_id`], so no two share an id.
+    pub next_building_id : usize,
     pub structures : Vec<StructureID>,
     pub gate_locations : Vec<(Point3D, Cardinal)>,
     /// Walkway guard posts grouped by wall tower: each inner Vec holds the
@@ -163,6 +166,7 @@ impl World {
             parcel_map,
             district_map,
             buildings: Vec::new(),
+            next_building_id: 0,
             structures: Vec::new(),
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
@@ -266,6 +270,7 @@ impl World {
             parcel_map,
             district_map,
             buildings: Vec::new(),
+            next_building_id: 0,
             structures: Vec::new(),
             gate_locations: Vec::new(),
             tower_guard_posts: Vec::new(),
@@ -576,6 +581,13 @@ impl World {
     pub fn is_claimed(&self, point : Point2D) -> bool {
         // Out of bounds cells are unclaimable, so treat them as unclaimed.
         cell_2d(&self.build_claim_map, point).map_or(false, |c| *c != BuildClaim::None)
+    }
+
+    /// A building id no other building has.
+    pub fn new_building_id(&mut self) -> crate::generator::buildings::BuildingID {
+        let id = crate::generator::buildings::BuildingID(self.next_building_id);
+        self.next_building_id += 1;
+        id
     }
 
     pub fn claim(&mut self, point: Point2D, claim: BuildClaim) {

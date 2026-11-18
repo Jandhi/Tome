@@ -46,6 +46,7 @@ Generation is deterministic in the seed only because generator code imports `cra
 
 ### Diagnostics
 
+- Every run tees its log to `output/logs/<date>/run_<time>.log` (`src/util/logging.rs`, level from `RUST_LOG`); old logs are pruned to the newest 500 MB at startup. Keep per-block or per-cell messages at `trace!`.
 - `render_ascii(&Blueprint)` in `src/generator/buildings_v2/blueprint.rs` produces a terminal-friendly per-floor ASCII dump with BR cells (`*`), stairs (arrows + `/`), doors, windows, and furniture (single-character codes). `build_furnished_houses_offline` writes both SVG and `.txt` ASCII per building under `output/`. Use the ASCII dump when diagnosing cell-level layout issues — it's much faster to read than SVG XML.
 - `check_building_invariants(&frame, &room_plan)` in `rooms/mod.rs` asserts that (a) every interior-edge cell has an actual wall block on its outside, and (b) every `BlockedReachable` cell has a walkable neighbor after furnishing. Called by `run_furnished_houses_pipeline` per building.
 - `pipeline_invariants_property_test` runs 12 buildings × 20 seeds through the offline pipeline with invariant checks — the canonical regression guard for furnish/rooms/walls changes. Runs in ~7 seconds.
@@ -96,6 +97,8 @@ SizeClass controls shape: Cottage (small, 1 floor), House (1-2 floors), Hall (2-
 ## Settlement Pipeline
 
 `generate_parcels()` → `get_city_blocks_and_off_limits()` (Voronoi partition of urban area) → per-block building placement. City block inner points become a `Plot` for buildings_v2.
+
+Town density is graded by distance from the town centre (core, middle and outer rings), and every town house gets a plot behind it and a back door onto it; see the module doc of `city_houses/plots.rs`. Every building has its own id (`World::new_building_id`).
 
 ## Palette Merging
 
