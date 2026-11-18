@@ -219,6 +219,10 @@ pub struct BuildingContext {
     pub dormers: bool,
     /// Roof outline (eaves, verges, ridge) in the secondary roof material. Default as `dormers`.
     pub roof_trim: bool,
+    /// A single back door on the wall opposite the front door, whatever the
+    /// house's size (larger houses get one anyway): set by town placement when
+    /// the house has a garden behind it. See `walls::place_back_door`.
+    pub back_door: bool,
     /// Force the ground-floor Y level (e.g. to match an adjacent road) instead
     /// of deriving it from the terrain under the footprint. `None` = derive.
     pub base_y_override: Option<i32>,
@@ -261,6 +265,7 @@ impl BuildingContext {
             tall_top_floor: false,
             dormers: culture.roof_detail(),
             roof_trim: culture.roof_detail(),
+            back_door: false,
             base_y_override: None,
             seed: None,
             floors: None,

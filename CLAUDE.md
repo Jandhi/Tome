@@ -46,6 +46,7 @@ Generation is deterministic in the seed only because generator code imports `cra
 
 ### Diagnostics
 
+- Every run tees its log to `output/logs/<date>/run_<time>.log` (`src/util/logging.rs`, level from `RUST_LOG`, default info). At startup old logs are pruned to the newest 500 MB (the last 5 runs always kept). Keep per-block or per-cell messages at `trace!`: at `info!` they wrote ~40 MB per town run.
 - `render_ascii(&Blueprint)` in `src/generator/buildings_v2/blueprint.rs` produces a terminal-friendly per-floor ASCII dump with BR cells (`*`), stairs (arrows + `/`), doors, windows, and furniture (single-character codes). `build_furnished_houses_offline` writes both SVG and `.txt` ASCII per building under `output/`. Use the ASCII dump when diagnosing cell-level layout issues — it's much faster to read than SVG XML.
 - `check_building_invariants(&frame, &room_plan)` in `rooms/mod.rs` asserts that (a) every interior-edge cell has an actual wall block on its outside, and (b) every `BlockedReachable` cell has a walkable neighbor after furnishing. Called by `run_furnished_houses_pipeline` per building.
 - `pipeline_invariants_property_test` runs 12 buildings × 20 seeds through the offline pipeline with invariant checks — the canonical regression guard for furnish/rooms/walls changes. Runs in ~7 seconds.
@@ -96,6 +97,8 @@ SizeClass controls shape: Cottage (small, 1 floor), House (1-2 floors), Hall (2-
 ## Settlement Pipeline
 
 `generate_parcels()` → `get_city_blocks_and_off_limits()` (Voronoi partition of urban area) → per-block building placement. City block inner points become a `Plot` for buildings_v2.
+
+Town density is graded by distance from the urban centroid (`city_houses/plots.rs`, `Ring`): the nearest 40% of the town's area is the core (24-cell lots, houses side by side, 3-deep back strips), the next 35% the middle ring (32-cell lots, 1-cell side gaps, gardens up to 7 deep) and the rest the outer ring (40-cell lots, 2-cell gaps, yards up to 10 deep that also take the lot's leftover ground). Lots are graded per piece as blocks are cut (`subdivide_block_graded`). Outside the core a house's garden ground is reserved when it is placed; after placement `plan_gardens` gives every town house the strip of its lot behind it (plus its side gap; a one-cell strip of free ground between two gardens goes to the lower-numbered one), claimed as the house's own. Town houses with a garden behind them ask for a back door (`BuildingContext::back_door`, `walls::place_back_door`: the middle of the wall opposite the front), outside the core always, in the core only with two free cells behind; gardens step over door ramps (`plots::door_cells`); what is left over still goes to the open-space pass, so the core and middle ring keep their plazas and nooks. Every building takes its own id from `World::new_building_id` (`HouseOutput.building_id`); a house's footprint, wall props and garden are all claimed under it. `TOME_DEBUG_GARDENS=1` writes every garden's cells and ring to `output/gardens_debug.json` and the urban area plus every house's cells to `output/density_debug.json`.
 
 ## Palette Merging
 

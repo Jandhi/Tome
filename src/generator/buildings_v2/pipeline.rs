@@ -74,6 +74,8 @@ impl<'a> BuildCtx<'a> {
 /// Everything `build_house` produces. Callers use this for blueprint rendering
 /// and stats; the building is already placed in the editor by the time it returns.
 pub struct HouseOutput {
+    /// The id the house's cells are claimed under.
+    pub building_id: BuildingID,
     /// The seed every decision of this house drew from (`bctx.seed`, or the
     /// one drawn from the caller's stream).
     pub seed: HouseSeed,
@@ -180,6 +182,11 @@ pub async fn build_house(
     let footprint_area = building_footprint.filled_points().len() as i32;
     let boundary_cells = boundary_cell_set(building_footprint.rects());
     let front_door = place_doors(&mut wall_segs, &plot_bounds, footprint_area, &boundary_cells, &mut seed.stream("doors"));
+    if bctx.back_door {
+        if let Some(front) = front_door {
+            super::walls::place_back_door(&mut wall_segs, -front, &boundary_cells);
+        }
+    }
 
     let has_attic = matches!(roof_style, RoofStyle::Gable(GablePitch::Double));
     let skip_ceilings = matches!(roof_style, RoofStyle::Flat);
@@ -303,7 +310,9 @@ pub async fn build_house(
 
     // A few sparse props against the outside walls (barrels, pots, …) so the
     // house reads as lived-in. Skips doors, roads, and claimed cells.
-    decorate_exterior_walls(&mut ctx.on(&mut seed.stream("exterior")), &building_footprint, &wall_segs).await;
+    // This house's own id, shared by its footprint claim and its props.
+    let building_id = ctx.editor.world_mut().new_building_id();
+    decorate_exterior_walls(&mut ctx.on(&mut seed.stream("exterior")), &building_footprint, &wall_segs, building_id).await;
 
     check_building_invariants(&frame, &room_plan, &floor_plan, &roof_heightmaps)?;
 
@@ -333,20 +342,20 @@ pub async fn build_house(
     // Claim the structural footprint (the actual house cells, no buffer) so a
     // later building's foundation blend won't raise earth/grass into this house
     // — `blend_terrain` skips Building-claimed cells.
-    let building_idx = ctx.editor.world().buildings.len();
     for p in footprint.filled_points() {
-        ctx.editor.world_mut().claim(p, BuildClaim::Building(BuildingID(building_idx)));
+        ctx.editor.world_mut().claim(p, BuildClaim::Building(building_id));
     }
     // The engawa deck can bump just outside the nominal footprint at junctions;
     // claim those cells too so a neighbour's terrain blend doesn't bury the deck.
     if let Some(plan) = &engawa_plan {
         for &p in &plan.deck_cells {
-            ctx.editor.world_mut().claim(p, BuildClaim::Building(BuildingID(building_idx)));
+            ctx.editor.world_mut().claim(p, BuildClaim::Building(building_id));
         }
     }
 
     Ok(HouseOutput {
         seed,
+        building_id,
         base_y,
         front_door,
         footprint,

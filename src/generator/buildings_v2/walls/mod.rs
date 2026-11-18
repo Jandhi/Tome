@@ -18,7 +18,7 @@ mod timber;
 
 pub use infill::{WallInfill, place_wall_infill};
 pub use openings::{
-    WindowFill, boundary_cell_set, place_doors, place_openings, place_terrace_doors, place_windows,
+    WindowFill, boundary_cell_set, place_back_door, place_doors, place_openings, place_terrace_doors, place_windows,
 };
 pub use segments::{
     DoorStyle, Opening, OpeningKind, WallSegment, WallSegments, WindowStyle, build_segments,

@@ -12,6 +12,7 @@
 
 pub mod frontage;
 pub mod walk;
+pub mod plots;
 #[cfg(test)]
 mod test;
 

@@ -161,6 +161,35 @@ pub fn place_doors(wall_segs: &mut WallSegments, plot_bounds: &Rect2D, footprint
     Some(-primary_facing)
 }
 
+/// Put a single door in the middle of the longest ground-floor wall whose
+/// outside faces `side`, clear of interior joints, unless such a wall already
+/// has a door. Returns whether a door is there now.
+pub fn place_back_door(wall_segs: &mut WallSegments, side: Cardinal, boundary_cells: &HashSet<Point2D>) -> bool {
+    // `facing` is the inward normal, so a wall facing out to `side` has `facing == -side`.
+    let on_side = |s: &super::segments::WallSegment| s.floor == 0 && s.facing == -side;
+    if wall_segs.segments.iter().any(|s| on_side(s) && s.openings.iter().any(|o| matches!(o.kind, OpeningKind::Door(_)))) {
+        return true;
+    }
+    let best = wall_segs
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| on_side(s) && s.length >= 5)
+        .filter(|(_, s)| !segment_cells(s).iter().any(|c| boundary_cells.contains(c)))
+        .max_by_key(|(_, s)| s.length)
+        .map(|(i, _)| i);
+    let Some(i) = best else { return false };
+    let offset = (wall_segs.segments[i].length as u32 - 1) / 2;
+    wall_segs.segments[i].openings.push(Opening {
+        kind: OpeningKind::Door(DoorStyle::Single),
+        offset,
+        width: 1,
+        height: 2,
+        y_offset: 0,
+    });
+    true
+}
+
 /// Collect all interior boundary cells between adjacent rects into a HashSet.
 /// Used to prevent side doors from overlapping with interior archway positions.
 pub fn boundary_cell_set(rects: &[Rect2D]) -> HashSet<Point2D> {

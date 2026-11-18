@@ -8,6 +8,11 @@ use log::{LevelFilter, Metadata, Record};
 /// Directory (relative to the working dir) where per-run log files are written.
 const LOG_DIR: &str = "output/logs";
 
+/// Old logs are pruned at startup down to this many bytes in total, newest kept first...
+const KEEP_BYTES: u64 = 500 * 1024 * 1024;
+/// ...but the newest few runs are always kept, however large.
+const KEEP_RUNS: usize = 5;
+
 /// Ensures the logger is installed exactly once per process. `log` only accepts a single
 /// global logger, and many tests call `init_logger()`; without this guard every later call
 /// would still create (and orphan) a fresh log file before failing to install itself.
@@ -105,6 +110,7 @@ pub fn init_logger() {
 /// Grouping by day keeps the log directory tidy across many runs. Returns `None` (logging
 /// falls back to terminal-only) if the file can't be created.
 fn open_log_file() -> Option<(PathBuf, File)> {
+    prune_old_logs();
     let now = chrono::Local::now();
     let dir = PathBuf::from(LOG_DIR).join(now.format("%Y-%m-%d").to_string());
     if let Err(err) = create_dir_all(&dir) {
@@ -118,6 +124,44 @@ fn open_log_file() -> Option<(PathBuf, File)> {
         Err(err) => {
             println!("Failed to create log file {:?}: {}", path, err);
             None
+        }
+    }
+}
+
+/// Delete the oldest `.log` files under [`LOG_DIR`] (dated folders and loose
+/// files alike) beyond [`KEEP_RUNS`] once the ones kept reach [`KEEP_BYTES`],
+/// then any day folder left empty. Errors are ignored: pruning is best effort.
+fn prune_old_logs() {
+    fn collect(dir: &std::path::Path, out: &mut Vec<(std::time::SystemTime, u64, PathBuf)>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                collect(&path, out);
+            } else if path.extension().is_some_and(|e| e == "log") {
+                let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                out.push((modified, meta.len(), path));
+            }
+        }
+    }
+    let root = PathBuf::from(LOG_DIR);
+    let mut logs = Vec::new();
+    collect(&root, &mut logs);
+    logs.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    let mut kept: u64 = 0;
+    for (i, (_, len, path)) in logs.iter().enumerate() {
+        if i < KEEP_RUNS || kept + len <= KEEP_BYTES {
+            kept += len;
+            continue;
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            if entry.path().is_dir() {
+                let _ = std::fs::remove_dir(entry.path()); // only succeeds when empty
+            }
         }
     }
 }
