@@ -53,7 +53,7 @@ pots:
 
 trees: { shade_trees: false, wood: oak }
 
-# Rare features (pieces in data/gardens/features/), and the percent of
+# Rare features (any name from data/gardens/README.md), and the percent of
 # gardens that get one.
 specials: [fountain, pergola]
 special_chance: 25

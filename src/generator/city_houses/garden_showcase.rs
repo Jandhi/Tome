@@ -15,7 +15,7 @@ use crate::generator::buildings_v2::footprint::{Footprint, SizeClass};
 use crate::generator::buildings_v2::showcase::house_context;
 use crate::generator::buildings_v2::{build_house, BuildCtx, Culture, HouseSeed};
 use crate::generator::data::LoadedData;
-use crate::generator::open_space::{furnish_garden, GardenFeatures, GardenStyle, Theme};
+use crate::generator::open_space::{furnish_garden, GardenKit, GardenStyle, Theme};
 use crate::generator::paths::PathType;
 use crate::generator::BuildClaim;
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D};
@@ -58,7 +58,6 @@ pub async fn run_garden_showcase(
     all_features: bool,
 ) -> anyhow::Result<PathBuf> {
     let data = LoadedData::load()?;
-    let features = GardenFeatures::load()?;
     let rings = [Ring::Core, Ring::Middle, Ring::Outer];
     let count = count.max(1) as i32;
 
@@ -91,6 +90,8 @@ pub async fn run_garden_showcase(
     let mut rng = RNG::new(seed);
 
     let mut houses: Vec<PlacedHouse> = Vec::new();
+    // Each house's palette, by `houses` index: its garden builds from it.
+    let mut house_palettes = Vec::new();
     let mut lots: Vec<HashSet<Point2D>> = Vec::new();
     // Per street (= per lot): its culture, ring, rect and ground height.
     let mut streets: Vec<(Culture, Ring, Rect2D, i32)> = Vec::new();
@@ -154,6 +155,7 @@ pub async fn run_garden_showcase(
                         let (ramp_cells, entrances) = super::plots::door_cells(&out);
                         let gap = ring.side_gap();
                         let front: Vec<Point2D> = (x..(x + fw + gap).min(x_hi + 1)).map(|cx| Point2D::new(cx, front_z)).collect();
+                        house_palettes.push(house_palette.clone());
                         houses.push(PlacedHouse {
                             front,
                             width: fw as usize,
@@ -189,7 +191,7 @@ pub async fn run_garden_showcase(
         let street = houses[g.house].lot;
         let theme = Theme::for_culture(streets[street].0);
         let mut style = GardenStyle::for_culture(streets[street].0)?;
-        style.check(&features)?;
+        style.check()?;
         if all_features {
             style.special_chance = 100;
         }
@@ -198,8 +200,9 @@ pub async fn run_garden_showcase(
         per_street[street] += 1;
         // Every third garden walled, so both boundaries show in each street.
         let walled = per_street[street] % 3 == 0;
+        let kit = GardenKit { palette: &house_palettes[g.house], materials: &data.materials, theme: &theme };
         let (built, special, walled) = furnish_garden(
-            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &features, Some(layout), 0, Some(walled), &mut garden_rng,
+            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &kit, Some(layout), 0, Some(walled), &mut garden_rng,
         )
         .await;
         let wall = if walled { ", walled" } else { "" };

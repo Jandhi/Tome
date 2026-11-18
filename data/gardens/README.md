@@ -27,18 +27,18 @@ Check a change with `cargo run --profile fast -- --gardens --culture <c>` before
 
 ## Features
 
-`features/*.yaml` hold garden features: set pieces a garden places whole, like furniture (a well, a scarecrow, a shrine, the Japanese stone lantern). Files are merged; each key is a feature's name. Every block is checked when the pieces load, so a bad id fails at once.
+Features (`specials`) are built in code (`src/generator/open_space/garden_features.rs`), each from the house's own palette by material role: stone parts from `primary_stone` / `secondary_stone`, wooden ones from `primary_wood`, a shrine's roof from `primary_roof`. So any culture can list any feature and get it in its own materials: a fountain is sandstone in a desert district and stone brick in a medieval one.
 
-A feature is written facing north, toward its house: `x` runs east, `z` south, and heights count up from the ground (`-1` is the ground's top block, `0` the first block above it). When built, it is turned so its north faces the house, and sided block states (`facing`, `axis`, a vine's `north=true`) turn with it.
-
-| Key | What it is |
-|---|---|
-| `radius` | The clear square of bed it needs round its centre: `1` is 3x3, `2` is 5x5 (default 1). |
-| `parts` | Its blocks, placed in order. Each part names cells (`at: [x, z]` or `cells: [[x, z], ...]`) and a `stack` of height -> block. A block is an id, or `{block: id, force: true}` to replace what is there (ground and blocks already placed are kept otherwise). |
-| `chance` | On a part: percent each of its cells is built. |
-| `one_of` | On a part, instead of `stack`: `[{weight, stack}, ...]`, one picked per cell. |
-| `builtin` | A shape built in code: `bamboo_clump` (three to five bamboo stalks four to seven high). |
-
-Ids may use the town's theme: `$wood` (wood family, as in `$wood_fence` or `$wood_stairs[facing=south]`), `$stone`, `$wall`, `$slab` (the theme's own blocks) and `$rock` (one of its rocks, picked per block).
+| Name | What it is | Built from |
+|---|---|---|
+| `well` | Stone ring round a water hole, two posts, a little gable roof | `secondary_stone` (wall, block), `primary_wood` (fence, planks, stairs) |
+| `scarecrow` | Scarecrow in a patch of wheat, looking at the house | `primary_wood` (fence) |
+| `arbour` | Two-seat bench under a flowering arch, roses behind (needs 5x5) | `primary_wood` (stairs, fence) |
+| `fountain` | Sunken basin with a lantern post (needs 5x5) | `primary_stone` (block, chiseled, wall) |
+| `pergola` | Four posts under a slatted roof with vines, a pot in the shade | `primary_wood` (fence, slab), `primary_stone` (floor) |
+| `tsukubai` | Water basin with a bamboo spout, rocks or ferns either side, on moss | the theme's rocks |
+| `shrine` | Small shrine on a plinth facing the house, a candle in front | `primary_stone`, `wood_pillar`, `primary_roof` (stairs) |
+| `bamboo` | Three to five bamboo stalks | — |
+| `stone_lantern` | A lantern on a stone post (the Japanese layouts set one) | `primary_stone` (wall) |
 
 Try every culture's features at once with `cargo run --profile fast -- --gardens --culture all --all-features`.

@@ -55,7 +55,7 @@ pub struct GardenStyle {
     /// their wood (`oak`, `spruce`, `birch`, `dark_oak`, `cherry`), and the
     /// block laid under the trunk (if any).
     pub trees: TreeStyle,
-    /// Rare features (names of `data/gardens/features/` pieces), picked
+    /// Rare features (names from `garden_features::FEATURES`), picked
     /// evenly, and how often a garden gets one (percent).
     #[serde(default)]
     pub specials: Vec<String>,
@@ -199,11 +199,12 @@ impl GardenStyle {
         patches.iter().find_map(|p| p.at(c, salt))
     }
 
-    /// Fail if a rare feature names no feature piece.
-    pub fn check(&self, features: &super::garden_features::GardenFeatures) -> anyhow::Result<()> {
+    /// Fail if a rare feature names no feature.
+    pub fn check(&self) -> anyhow::Result<()> {
         for name in &self.specials {
-            if features.get(name).is_none() {
-                anyhow::bail!("garden style names an unknown feature {name:?} (data/gardens/features/)");
+            if super::garden_features::radius(name).is_none() {
+                let known: Vec<&str> = super::garden_features::FEATURES.iter().map(|(n, _)| *n).collect();
+                anyhow::bail!("garden style names an unknown feature {name:?}; known: {}", known.join(", "));
             }
         }
         Ok(())
