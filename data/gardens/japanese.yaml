@@ -17,11 +17,11 @@ fence:
 
 # Dark stone footing, white plaster between timber posts, a dark tiled coping.
 wall:
-  base: ["minecraft:deepslate_bricks", "minecraft:cracked_deepslate_bricks"]
-  body: ["minecraft:white_concrete", "minecraft:white_concrete"]
-  coping: "minecraft:deepslate_tile_slab"
-  pier: "minecraft:stripped_dark_oak_log"
-  pier_cap: "minecraft:deepslate_tile_slab"
+  base: [{ role: secondary_stone }, "minecraft:cracked_deepslate_bricks"]
+  body: [{ role: primary_wall }, { role: primary_wall }]
+  coping: { role: secondary_roof, form: slab, fallback: "minecraft:deepslate_tile_slab" }
+  pier: { role: wood_pillar }
+  pier_cap: { role: secondary_roof, form: slab, fallback: "minecraft:deepslate_tile_slab" }
 
 # Stepping stones, moss between.
 path: ["minecraft:polished_andesite", "minecraft:moss_block"]
@@ -68,3 +68,10 @@ trees: { shade_trees: true, wood: cherry, soil: "minecraft:moss_block" }
 # gardens that get one.
 specials: [tsukubai, shrine, bamboo]
 special_chance: 25
+
+# The pieces each layout sets, in order (feature names or the groups
+# azalea_shrubs, palms, pots); a layout left out sets its usual ones.
+pieces:
+  zen: [stone_lantern, azalea_shrubs]
+  pond: [stone_lantern, azalea_shrubs]
+  moss: [bamboo, stone_lantern, azalea_shrubs]

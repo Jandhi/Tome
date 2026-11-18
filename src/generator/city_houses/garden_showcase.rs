@@ -48,7 +48,8 @@ const MAX_DEPTH: i32 = 9;
 /// players to look over the first street. `at` shifts the whole grid from the
 /// build area's minimum corner (live only), to build clear of what is there.
 /// `all_features` gives every garden that can take one a rare feature, to
-/// check them all at once. Returns the output directory.
+/// check them all at once; `style_file` gardens every street with that garden
+/// style file instead of each culture's own. Returns the output directory.
 pub async fn run_garden_showcase(
     cultures: &[Culture],
     seed: i64,
@@ -56,7 +57,12 @@ pub async fn run_garden_showcase(
     live: bool,
     at: Point2D,
     all_features: bool,
+    style_file: Option<&str>,
 ) -> anyhow::Result<PathBuf> {
+    let load_style = |culture: Culture| match style_file {
+        Some(path) => GardenStyle::from_path(path),
+        None => GardenStyle::for_culture(culture),
+    };
     let data = LoadedData::load()?;
     let rings = [Ring::Core, Ring::Middle, Ring::Outer];
     let count = count.max(1) as i32;
@@ -194,7 +200,7 @@ pub async fn run_garden_showcase(
     for g in &gardens {
         let street = houses[g.house].lot;
         counts[street] += 1;
-        let always = GardenStyle::for_culture(streets[street].0)?.walled.always;
+        let always = load_style(streets[street].0)?.walled.always;
         walled_by.push(always || counts[street] % 3 == 0);
     }
     let walls = super::plots::plan_walls(&gardens, &owners, &fences, &walled_by);
@@ -202,7 +208,7 @@ pub async fn run_garden_showcase(
     for (i, g) in gardens.iter().enumerate() {
         let street = houses[g.house].lot;
         let theme = Theme::for_culture(streets[street].0);
-        let mut style = GardenStyle::for_culture(streets[street].0)?;
+        let mut style = load_style(streets[street].0)?;
         style.check()?;
         if all_features {
             style.special_chance = 100;

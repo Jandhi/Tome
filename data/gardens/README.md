@@ -7,10 +7,13 @@ culture's gardens are made of and how often each thing happens; the shapes
 (beds, ponds, trees, walls) and where they go stay in code. Unknown keys are
 refused, so a typo fails loudly.
 
+Blocks in `fence` and `wall` are either a plain id (`"minecraft:bamboo_fence"`) or a role from the house's palette: `{role: primary_wood, form: fence}`, with an optional `fallback` id for a palette without that block. Roles are the material roles houses use (`primary_stone`, `secondary_stone`, `primary_wall`, `primary_wood`, `wood_pillar`, `primary_roof`, `secondary_roof`, ...); forms are `block`, `slab`, `stairs`, `wall`, `fence`, `fence_gate`, ... So a garden's fence and wall match its own house.
+
 | Key | What it is |
 |---|---|
 | `layouts` | `[{layout, weight}]`: the layouts gardens are rolled from, in order (one entry: no roll). Layouts: `kitchen`, `flowers`, `orchard`, `work_yard`, `courtyard`, `zen`, `pond`, `moss`. A strip too shallow for beds is always a `work_yard`. |
 | `walled` | When a garden is walled and closed (no gate, no garden path) instead of fenced: `{always: true}`, or `{big_house_area, big, other}` = percent chance behind houses whose frontage x depth is at least `big_house_area`, and behind the rest. |
+| `pieces` | `{layout: [name, ...]}`: what each layout sets, in order. A name is a feature (below) or a group: `azalea_shrubs` (clipped shrubs against the fence), `palms` (date palms at the back), `pots` (pots about the bed, from `pots`). A layout left out sets its usual pieces: zen and pond `[stone_lantern, azalea_shrubs]`, moss `[bamboo, stone_lantern, azalea_shrubs]`, courtyard `[palms, bench, pots]`, the rest none. |
 | `fence` | `{post, gate, corner_lantern_chance}`: an open garden's fence; the gate gets its `facing`; leave the lantern chance out for none. |
 | `wall` | `{base, body, coping, pier, pier_cap, creeper}`: a walled garden's wall. `base`/`body` are `[block, weathered block]` (weathered in patches); piers stand a block taller at corners, ends and every fourth cell; `creeper` is two leaf blocks mixed into climbing patches with vines down the inside (leave out for a bare wall). |
 | `path` | The path from the back door to the gate: one block, or two laid alternately (stepping stones). |
@@ -38,7 +41,8 @@ Features (`specials`) are built in code (`src/generator/open_space/garden_featur
 | `pergola` | Four posts under a slatted roof with vines, a pot in the shade | `primary_wood` (fence, slab), `primary_stone` (floor) |
 | `tsukubai` | Water basin with a bamboo spout, rocks or ferns either side, on moss | the theme's rocks |
 | `shrine` | Small shrine on a plinth facing the house, a candle in front | `primary_stone`, `wood_pillar`, `primary_roof` (stairs) |
-| `bamboo` | Three to five bamboo stalks | — |
+| `bamboo` | Three to five bamboo stalks (set against the back fence, in a corner) | — |
+| `bench` | Two-seat bench looking at the house (set against the back fence, in the middle) | `primary_stone` (stairs) |
 | `stone_lantern` | A lantern on a stone post (the Japanese layouts set one) | `primary_stone` (wall) |
 
-Try every culture's features at once with `cargo run --profile fast -- --gardens --culture all --all-features`.
+Try every culture's features at once with `cargo run --profile fast -- --gardens --culture all --all-features`, and a culture file of your own with `--gardens --culture <c> --culture-file <path>` (every street uses that file).

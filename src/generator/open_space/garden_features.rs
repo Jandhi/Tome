@@ -22,7 +22,7 @@ use super::theme::Theme;
 
 /// Every feature by name, with the clear square of bed it needs round its
 /// centre (`1` is 3x3, `2` is 5x5).
-pub const FEATURES: [(&str, i32); 9] = [
+pub const FEATURES: [(&str, i32); 10] = [
     ("well", 1),
     ("scarecrow", 1),
     ("arbour", 2),
@@ -32,7 +32,44 @@ pub const FEATURES: [(&str, i32); 9] = [
     ("shrine", 1),
     ("bamboo", 1),
     ("stone_lantern", 0),
+    ("bench", 0),
 ];
+
+/// Where a layout sets a feature it lists as a piece.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    /// On clear bed in the open.
+    Open,
+    /// Against the far fence or wall, as near its middle as fits.
+    BackMiddle,
+    /// Against the far fence or wall, as far into a corner as fits.
+    BackEnd,
+}
+
+/// Where a layout sets `name`.
+pub fn placement(name: &str) -> Placement {
+    match name {
+        "bench" => Placement::BackMiddle,
+        "bamboo" => Placement::BackEnd,
+        _ => Placement::Open,
+    }
+}
+
+/// The cells `name` stands on, as offsets from its centre facing north.
+pub fn footprint(name: &str) -> Vec<Point2D> {
+    match name {
+        "bench" => vec![Point2D::new(0, 0), Point2D::new(1, 0)],
+        _ => {
+            let r = radius(name).unwrap_or(0);
+            (-r..=r).flat_map(|x| (-r..=r).map(move |z| Point2D::new(x, z))).collect()
+        }
+    }
+}
+
+/// `offset` (written facing north) turned so north faces `toward_house`.
+pub fn turn(offset: Point2D, toward_house: Point2D) -> Point2D {
+    rotate(offset, turns_from_north(toward_house))
+}
 
 /// The clear radius `name` needs, or `None` if there is no such feature.
 pub fn radius(name: &str) -> Option<i32> {
@@ -225,6 +262,13 @@ pub async fn build(editor: &Editor, name: &str, c: Point2D, h: i32, toward_house
             let around: Vec<Point2D> = (-1..=1).flat_map(|dx| (-1..=1).map(move |dz| c + Point2D::new(dx, dz))).collect();
             let height_at = |q: Point2D| editor.world().get_ocean_floor_height_at(q);
             super::garden::bamboo_clump(editor, c, &around, &height_at, rng).await;
+        }
+        "bench" => {
+            // A two-seat stone bench looking at the house.
+            let seat = kit.block(&[(MaterialRole::PrimaryStone, F::Stairs), (MaterialRole::SecondaryStone, F::Stairs)], "minecraft:stone_brick_stairs", rng);
+            for x in [0, 1] {
+                p.put(x, 0, 0, &format!("{seat}[facing=south]")).await;
+            }
         }
         "stone_lantern" => {
             // A lantern on a stone post (a toro).

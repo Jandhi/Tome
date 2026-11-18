@@ -10,18 +10,19 @@ layouts:
 
 walled: { big_house_area: 90, big: 60, other: 10 }
 
+# Blocks are plain ids or roles from the house's palette ({role, form}).
 fence:
-  post: "minecraft:oak_fence"
-  gate: "minecraft:oak_fence_gate"
+  post: { role: primary_wood, form: fence }
+  gate: { role: primary_wood, form: fence_gate }
   corner_lantern_chance: 40
 
 # A rubble wall with moss in it, stone-brick piers, ivy over the top.
 wall:
-  base: ["minecraft:cobblestone", "minecraft:mossy_cobblestone"]
-  body: ["minecraft:cobblestone", "minecraft:mossy_cobblestone"]
-  coping: "minecraft:stone_brick_slab"
-  pier: "minecraft:stone_bricks"
-  pier_cap: "minecraft:stone_brick_slab"
+  base: [{ role: secondary_stone }, "minecraft:mossy_cobblestone"]
+  body: [{ role: secondary_stone }, "minecraft:mossy_cobblestone"]
+  coping: { role: primary_stone, form: slab }
+  pier: { role: primary_stone }
+  pier_cap: { role: primary_stone, form: slab }
   creeper: ["minecraft:oak_leaves[persistent=true]", "minecraft:dark_oak_leaves[persistent=true]"]
 
 path: ["minecraft:dirt_path"]
