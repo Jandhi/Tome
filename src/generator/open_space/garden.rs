@@ -19,14 +19,14 @@ use crate::generator::BuildClaim;
 use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::noise::RNG;
 
-use super::props::{cardinal_facing, is_path, place_bench, put, put_forced};
+use super::props::{cardinal_facing, is_path, put, put_forced};
 use super::garden_features::{self, Kit};
-use super::garden_style::GardenStyle;
+use super::garden_style::{BlockRef, GardenStyle};
 use super::theme::Theme;
 use serde_derive::Deserialize;
 
 /// What a garden is laid out as (named in `data/gardens/*.yaml` in snake_case).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GardenLayout {
     Kitchen,
@@ -249,17 +249,19 @@ pub async fn furnish_garden(
     // The boundary: a wall (`courtyard_wall`), or a cottage or bamboo fence
     // with its gate and sometimes a lantern on a corner.
     let wall_part: Vec<Point2D> = fence.iter().copied().filter(|c| walls.contains(c)).collect();
-    courtyard_wall(editor, &wall_part, walls, &inner_set, style, salt).await;
+    courtyard_wall(editor, &wall_part, walls, &inner_set, style, kit, salt, rng).await;
+    let post = style.fence.post.resolve(kit, rng);
+    let gate_block = style.fence.gate.resolve(kit, rng);
     let mut lantern_done = style.fence.corner_lantern_chance.map_or(true, |p| !rng.percent(p));
     for &c in fence.iter().filter(|c| !walls.contains(c)) {
         let Some(h) = height_at(c) else { continue; };
         if let Some((_, _, g, d)) = gate {
             if c == g {
-                put(editor, c.x, h, c.y, &format!("{}[facing={}]", style.fence.gate, cardinal_facing(d))).await;
+                put(editor, c.x, h, c.y, &format!("{gate_block}[facing={}]", cardinal_facing(d))).await;
                 continue;
             }
         }
-        put(editor, c.x, h, c.y, &style.fence.post).await;
+        put(editor, c.x, h, c.y, &post).await;
         if !lantern_done {
             let f = |dx: i32, dz: i32| fence_set.contains(&(c + Point2D::new(dx, dz)));
             let corner = (f(1, 0) || f(-1, 0)) && (f(0, 1) || f(0, -1));
@@ -362,10 +364,12 @@ pub async fn furnish_garden(
     if trees_here {
         let (want, spacing) = match layout {
             GardenLayout::Orchard => (usize::MAX, 5),
-            GardenLayout::Pond | GardenLayout::Moss | GardenLayout::Zen => (1, 0),
-            // Elsewhere one shade tree at the back: always in a big garden
-            // (an empty lawn otherwise), sometimes in a smaller one.
-            _ => (if bed.len() > 60 || rng.percent(40) { 1 } else { 0 }, 0),
+            // One tree, and one more per 70 cells of bed, well apart.
+            GardenLayout::Pond | GardenLayout::Moss | GardenLayout::Zen => ((bed.len() / 70).clamp(1, 3), 7),
+            // Elsewhere a shade tree at the back: always in a big garden (an
+            // empty lawn otherwise), sometimes in a smaller one, and another
+            // per 150 cells.
+            _ => (if bed.len() > 60 || rng.percent(40) { (1 + bed.len() / 150).min(3) } else { 0 }, 7),
         };
         for &c in &roomy_spots {
             if big_trees.len() >= want {
@@ -391,6 +395,17 @@ pub async fn furnish_garden(
     // Columns run away from the house: `col` counts across the plot.
     let across = Point2D::new(into.y.abs(), into.x.abs());
     let col = |c: Point2D| c.x * across.x + c.y * across.y;
+    let mut ctx = Pieces { editor, fence: &fence_set, from_wall: &from_wall, into, centre, style, kit, taken: HashSet::default() };
+    // Layouts that fill their whole bed set their pieces first, on clear bed.
+    if matches!(layout, GardenLayout::Kitchen | GardenLayout::Flowers | GardenLayout::Orchard | GardenLayout::WorkYard) {
+        let pieces = style.pieces_for(layout);
+        if !pieces.is_empty() {
+            let free: Vec<Point2D> = bed.iter().copied().filter(|c| !big_trees.iter().any(|&t| near(t, *c, 1))).collect();
+            let taken = place_pieces(&mut ctx, &pieces, &free, rng).await;
+            bed.retain(|c| !taken.contains(c));
+            occupied.extend(taken);
+        }
+    }
 
     match layout {
         GardenLayout::Kitchen => {
@@ -473,78 +488,17 @@ pub async fn furnish_garden(
             }
         }
         GardenLayout::Courtyard => {
-            // Palms at the back, a bench against the back wall, pots about,
-            // the floor paved in patches.
-            let mut palms: Vec<Point2D> = Vec::new();
-            let mut spots: Vec<Point2D> = bed
-                .iter()
-                .copied()
-                .filter(|&c| from_wall.get(&c).is_some_and(|&d| d >= 3) && square_in(&bed_set, c, 1))
-                .collect();
-            rng.shuffle(&mut spots);
-            spots.sort_by_key(|c| std::cmp::Reverse(from_wall.get(c).copied().unwrap_or(0)));
-            let want = (bed.len() / 30).clamp(1, 3);
-            for c in spots {
-                if palms.len() >= want {
-                    break;
-                }
-                if palms.iter().any(|&p| near(p, c, 4)) || occupied.contains(&c) {
-                    continue;
-                }
-                let Some(h) = height_at(c) else { continue; };
-                palm_tree(editor, c, h, rng).await;
-                palms.push(c);
-                occupied.insert(c);
-            }
-            let side = Point2D::new(into.y.abs(), into.x.abs());
-            let seat = bed
-                .iter()
-                .copied()
-                .filter(|&c| {
-                    fence_set.contains(&(c + into))
-                        && bed.contains(&(c + side))
-                        && !occupied.contains(&c)
-                        && !occupied.contains(&(c + side))
-                        && !palms.iter().any(|&p| near(p, c, 1) || near(p, c + side, 1))
-                })
-                .min_by_key(|c| ((col(*c) - col(centre)).abs(), c.x, c.y));
-            if let Some(c) = seat {
-                if let Some(h) = height_at(c) {
-                    place_bench(editor, c, h, -into, "sandstone").await;
-                    occupied.insert(c);
-                    occupied.insert(c + side);
-                }
-            }
-            let mut spots: Vec<Point2D> = bed.iter().copied().filter(|c| !occupied.contains(c)).collect();
-            rng.shuffle(&mut spots);
-            let n = (bed.len() / 10).clamp(1, 5);
-            let mut done: Vec<Point2D> = Vec::new();
-            for c in spots {
-                if done.len() >= n {
-                    break;
-                }
-                if done.iter().chain(palms.iter()).any(|p| near(*p, c, 1)) {
-                    continue;
-                }
-                let Some(h) = height_at(c) else { continue; };
-                if style.pots.is_empty() {
-                    break;
-                }
-                let pot = rng.choose(&style.pots).as_str();
-                if pot == "minecraft:flowering_azalea" {
-                    put_forced(editor, c.x, h - 1, c.y, "minecraft:grass_block").await;
-                }
-                put(editor, c.x, h, c.y, pot).await;
-                occupied.insert(c);
-                done.push(c);
-            }
+            // The culture's pieces (palms, a bench against the back wall,
+            // pots), then the floor paved in patches from the palette.
+            let taken = place_pieces(&mut ctx, &style.pieces_for(layout), &bed, rng).await;
+            let pave = BlockRef::Role { role: crate::generator::materials::MaterialRole::PrimaryStone, form: None, fallback: None }.resolve(kit, rng);
             for &c in &bed {
-                if occupied.contains(&c) || palms.iter().any(|&p| near(p, c, 1)) {
+                if occupied.contains(&c) || taken.contains(&c) {
                     continue;
                 }
                 let Some(h) = height_at(c) else { continue; };
                 if blotch(c, 3, salt ^ 0x21) > 0.45 {
-                    put_forced(editor, c.x, h - 1, c.y, "minecraft:smooth_sandstone").await;
+                    put_forced(editor, c.x, h - 1, c.y, &pave).await;
                 }
             }
             for &c in &bed {
@@ -563,7 +517,7 @@ pub async fn furnish_garden(
             }
             let mut spots: Vec<Point2D> = bed.iter().copied().filter(|&c| square_in(&bed_set, c, 1)).collect();
             rng.shuffle(&mut spots);
-            let want = (bed.len() / 20).clamp(1, 4);
+            let want = (bed.len() / 20).clamp(1, 8);
             let mut rocks: Vec<Point2D> = Vec::new();
             for c in spots {
                 if rocks.len() >= want {
@@ -594,7 +548,7 @@ pub async fn furnish_garden(
                 .copied()
                 .filter(|c| !rocks.iter().chain(big_trees.iter()).any(|&r| near(r, *c, 1)))
                 .collect();
-            japanese_extras(editor, &free, &fence_set, kit, rng, 2).await;
+            place_pieces(&mut ctx, &style.pieces_for(layout), &free, rng).await;
             for &c in &bed {
                 occupied.insert(c);
             }
@@ -629,8 +583,8 @@ pub async fn furnish_garden(
                 .copied()
                 .filter(|c| !water.contains(c) && !occupied.contains(c) && !rim.contains(c) && !big_trees.iter().any(|&t| near(t, *c, 1)))
                 .collect();
-            japanese_extras(editor, &free, &fence_set, kit, rng, 1).await;
-            for &c in &free {
+            let taken = place_pieces(&mut ctx, &style.pieces_for(layout), &free, rng).await;
+            for c in free.iter().copied().filter(|c| !taken.contains(c)) {
                 let Some(h) = height_at(c) else { continue; };
                 if hash01(c.x, c.y, salt ^ 0x45) < 0.15 {
                     put(editor, c.x, h, c.y, "minecraft:fern").await;
@@ -648,22 +602,9 @@ pub async fn furnish_garden(
                     put_forced(editor, c.x, h - 1, c.y, "minecraft:moss_block").await;
                 }
             }
-            let back = bed
-                .iter()
-                .copied()
-                .filter(|&c| fence_set.contains(&(c + into)) && !big_trees.iter().any(|&t| near(t, c, 2)))
-                .max_by_key(|c| ((col(*c) - col(centre)).abs(), c.x, c.y));
-            let mut taken: Vec<Point2D> = Vec::new();
-            if let Some(c) = back {
-                taken = bamboo_clump(editor, c, &bed, &height_at, rng).await;
-            }
-            let free: Vec<Point2D> = bed
-                .iter()
-                .copied()
-                .filter(|c| !taken.iter().any(|&t| near(t, *c, 1)) && !big_trees.iter().any(|&t| near(t, *c, 1)))
-                .collect();
-            japanese_extras(editor, &free, &fence_set, kit, rng, 3).await;
-            for &c in &free {
+            let free: Vec<Point2D> = bed.iter().copied().filter(|c| !big_trees.iter().any(|&t| near(t, *c, 2))).collect();
+            let taken = place_pieces(&mut ctx, &style.pieces_for(layout), &free, rng).await;
+            for c in free.iter().copied().filter(|c| !taken.contains(c)) {
                 let Some(h) = height_at(c) else { continue; };
                 let r = hash01(c.x, c.y, salt ^ 0x33);
                 if r < 0.18 {
@@ -738,10 +679,19 @@ async fn courtyard_wall(
     fence_set: &HashSet<Point2D>,
     inner: &HashSet<Point2D>,
     style: &GardenStyle,
+    kit: &Kit<'_>,
     salt: u32,
+    rng: &mut RNG,
 ) {
     let world = editor.world();
-    let style = &style.wall;
+    let wall = &style.wall;
+    // The wall's blocks, from the house's palette where the style names roles.
+    let pier = wall.pier.resolve(kit, rng);
+    let pier_cap = wall.pier_cap.resolve(kit, rng);
+    let base = (wall.base.0.resolve(kit, rng), wall.base.1.resolve(kit, rng));
+    let body = (wall.body.0.resolve(kit, rng), wall.body.1.resolve(kit, rng));
+    let coping = wall.coping.resolve(kit, rng);
+    let style = wall;
     let f = |c: Point2D, dx: i32, dz: i32| fence_set.contains(&(c + Point2D::new(dx, dz)));
     for &c in fence {
         let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
@@ -751,21 +701,21 @@ async fn courtyard_wall(
         let run = if ew { c.x } else { c.y };
         if corner || links <= 1 || run.rem_euclid(4) == 0 {
             for y in h..=h + 2 {
-                put(editor, c.x, y, c.y, &style.pier).await;
+                put(editor, c.x, y, c.y, &pier).await;
             }
             if corner {
-                put(editor, c.x, h + 3, c.y, &style.pier_cap).await;
+                put(editor, c.x, h + 3, c.y, &pier_cap).await;
             }
             continue;
         }
         let worn = |y: i32| blotch(Point2D::new(c.x + y * 7, c.y), 2, salt ^ 0x71) > 0.6;
-        put(editor, c.x, h, c.y, if worn(0) { &style.base.1 } else { &style.base.0 }).await;
-        put(editor, c.x, h + 1, c.y, if worn(1) { &style.body.1 } else { &style.body.0 }).await;
+        put(editor, c.x, h, c.y, if worn(0) { &base.1 } else { &base.0 }).await;
+        put(editor, c.x, h + 1, c.y, if worn(1) { &body.1 } else { &body.0 }).await;
         // The creeper: broad noise picks the patches, per-cell noise rags
         // their edges and leaves gaps.
         let grow = 0.65 * blotch(c, 4, salt ^ 0x65) + 0.35 * hash01(c.x, c.y, salt ^ 0x67);
         let Some((a, b)) = style.creeper.as_ref().filter(|_| grow > 0.6) else {
-            put(editor, c.x, h + 2, c.y, &style.coping).await;
+            put(editor, c.x, h + 2, c.y, &coping).await;
             continue;
         };
         let leaves = |k: u32| if hash01(c.x, c.y, salt ^ k) < 0.55 { a.as_str() } else { b.as_str() };
@@ -796,63 +746,166 @@ fn square_in(set: &HashSet<Point2D>, c: Point2D, r: i32) -> bool {
     (-r..=r).all(|dx| (-r..=r).all(|dz| set.contains(&(c + Point2D::new(dx, dz)))))
 }
 
-/// A Japanese garden's furniture: a stone lantern in the open and up to
-/// `shrubs` clipped azalea shrubs against the fence, on cells of `free`.
-async fn japanese_extras(
-    editor: &Editor,
-    free: &[Point2D],
-    fence: &HashSet<Point2D>,
-    kit: &Kit<'_>,
-    rng: &mut RNG,
-    shrubs: usize,
-) {
-    let world = editor.world();
-    let set: HashSet<Point2D> = free.iter().copied().collect();
-    let mut spots: Vec<Point2D> = free.iter().copied().filter(|&c| square_in(&set, c, 1)).collect();
-    rng.shuffle(&mut spots);
-    let lantern = spots.first().copied();
-    if let Some(c) = lantern {
-        if let Some(h) = world.get_ocean_floor_height_at(c) {
-            garden_features::build(editor, "stone_lantern", c, h, Point2D::new(0, -1), kit, rng).await;
-        }
-    }
-    let mut by_fence: Vec<Point2D> = free
-        .iter()
-        .copied()
-        .filter(|&c| {
-            CARDINALS_2D.iter().any(|d| fence.contains(&(c + *d)))
-                && lantern.map_or(true, |l| (l.x - c.x).abs().max((l.y - c.y).abs()) > 1)
-        })
-        .collect();
-    rng.shuffle(&mut by_fence);
-    let mut done: Vec<Point2D> = Vec::new();
-    for c in by_fence {
-        if done.len() >= shrubs {
-            break;
-        }
-        if done.iter().any(|p| (p.x - c.x).abs() + (p.y - c.y).abs() < 4) {
-            continue;
-        }
-        let Some(h) = world.get_ocean_floor_height_at(c) else { continue; };
-        let leaves = if rng.percent(50) {
-            "minecraft:flowering_azalea_leaves[persistent=true]"
-        } else {
-            "minecraft:azalea_leaves[persistent=true]"
-        };
-        put(editor, c.x, h, c.y, leaves).await;
-        // Some shrubs are two cells long, clipped low.
-        if rng.percent(50) {
-            let along = CARDINALS_2D.iter().map(|d| c + *d).find(|n| {
-                set.contains(n) && CARDINALS_2D.iter().any(|d| fence.contains(&(*n + *d))) && lantern != Some(*n)
-            });
-            if let Some(n) = along {
-                if let Some(hn) = world.get_ocean_floor_height_at(n) {
-                    put(editor, n.x, hn, n.y, leaves).await;
+/// What a layout's pieces need to know about the garden.
+struct Pieces<'a> {
+    editor: &'a Editor,
+    fence: &'a HashSet<Point2D>,
+    from_wall: &'a HashMap<Point2D, i32>,
+    into: Point2D,
+    centre: Point2D,
+    style: &'a GardenStyle,
+    kit: &'a Kit<'a>,
+    /// Cells taken by a piece so far, with a ring round each kept clear.
+    taken: HashSet<Point2D>,
+}
+
+/// Set a layout's pieces on cells of `free`, in order: features by name
+/// (where each goes is `garden_features::placement`) and the groups
+/// `azalea_shrubs`, `palms` and `pots`. Counts grow with the bed. Returns the
+/// cells taken, with a ring round each piece.
+async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rng: &mut RNG) -> HashSet<Point2D> {
+    let world = p.editor.world();
+    let height_at = |c: Point2D| world.get_ocean_floor_height_at(c);
+    let toward = -p.into;
+    let across = Point2D::new(p.into.y.abs(), p.into.x.abs());
+    let col = |c: Point2D| c.x * across.x + c.y * across.y;
+    let near = |a: Point2D, b: Point2D, r: i32| (a.x - b.x).abs().max((a.y - b.y).abs()) <= r;
+    let n = free.len();
+    for name in names {
+        let open: Vec<Point2D> = free.iter().copied().filter(|c| !p.taken.contains(c)).collect();
+        let open_set: HashSet<Point2D> = open.iter().copied().collect();
+        match name.as_str() {
+            "azalea_shrubs" => {
+                // Clipped azalea against the fence, some two cells long.
+                let want = (n / 25).clamp(1, 5);
+                let mut by_fence: Vec<Point2D> =
+                    open.iter().copied().filter(|&c| CARDINALS_2D.iter().any(|d| p.fence.contains(&(c + *d)))).collect();
+                rng.shuffle(&mut by_fence);
+                let mut done: Vec<Point2D> = Vec::new();
+                for c in by_fence {
+                    if done.len() >= want {
+                        break;
+                    }
+                    if done.iter().any(|q| (q.x - c.x).abs() + (q.y - c.y).abs() < 4) {
+                        continue;
+                    }
+                    let Some(h) = height_at(c) else { continue; };
+                    let leaves = if rng.percent(50) {
+                        "minecraft:flowering_azalea_leaves[persistent=true]"
+                    } else {
+                        "minecraft:azalea_leaves[persistent=true]"
+                    };
+                    put(p.editor, c.x, h, c.y, leaves).await;
+                    p.taken.insert(c);
+                    if rng.percent(50) {
+                        let along = CARDINALS_2D.iter().map(|d| c + *d).find(|q| {
+                            open_set.contains(q) && !p.taken.contains(q) && CARDINALS_2D.iter().any(|d| p.fence.contains(&(*q + *d)))
+                        });
+                        if let Some(q) = along {
+                            if let Some(hq) = height_at(q) {
+                                put(p.editor, q.x, hq, q.y, leaves).await;
+                                p.taken.insert(q);
+                            }
+                        }
+                    }
+                    done.push(c);
+                }
+            }
+            "palms" => {
+                // Date palms toward the back, well apart.
+                let want = (n / 30).clamp(1, 4);
+                let mut spots: Vec<Point2D> = open
+                    .iter()
+                    .copied()
+                    .filter(|&c| p.from_wall.get(&c).is_some_and(|&d| d >= 3) && square_in(&open_set, c, 1))
+                    .collect();
+                rng.shuffle(&mut spots);
+                spots.sort_by_key(|c| std::cmp::Reverse(p.from_wall.get(c).copied().unwrap_or(0)));
+                let mut palms: Vec<Point2D> = Vec::new();
+                for c in spots {
+                    if palms.len() >= want {
+                        break;
+                    }
+                    if palms.iter().any(|&q| near(q, c, 4)) {
+                        continue;
+                    }
+                    let Some(h) = height_at(c) else { continue; };
+                    palm_tree(p.editor, c, h, rng).await;
+                    palms.push(c);
+                    for dx in -1..=1 {
+                        for dz in -1..=1 {
+                            p.taken.insert(c + Point2D::new(dx, dz));
+                        }
+                    }
+                }
+            }
+            "pots" => {
+                // Pots and potted plants about the bed.
+                if p.style.pots.is_empty() {
+                    continue;
+                }
+                let want = (n / 10).clamp(1, 8);
+                let mut spots = open.clone();
+                rng.shuffle(&mut spots);
+                let mut done: Vec<Point2D> = Vec::new();
+                for c in spots {
+                    if done.len() >= want {
+                        break;
+                    }
+                    if done.iter().any(|q| near(*q, c, 1)) || p.taken.contains(&c) {
+                        continue;
+                    }
+                    let Some(h) = height_at(c) else { continue; };
+                    let pot = rng.choose(&p.style.pots).as_str();
+                    if pot == "minecraft:flowering_azalea" || pot == "minecraft:azalea" {
+                        put_forced(p.editor, c.x, h - 1, c.y, "minecraft:grass_block").await;
+                    }
+                    put(p.editor, c.x, h, c.y, pot).await;
+                    p.taken.insert(c);
+                    done.push(c);
+                }
+            }
+            feature => {
+                let Some(r) = garden_features::radius(feature) else { continue };
+                let foot: Vec<Point2D> = garden_features::footprint(feature).into_iter().map(|o| garden_features::turn(o, toward)).collect();
+                let fits = |c: Point2D| foot.iter().all(|o| open_set.contains(&(c + *o)));
+                let mut spots: Vec<Point2D> = match garden_features::placement(feature) {
+                    garden_features::Placement::Open => open.iter().copied().filter(|&c| fits(c) && square_in(&open_set, c, r.max(1))).collect(),
+                    _ => open.iter().copied().filter(|&c| fits(c) && p.fence.contains(&(c + p.into))).collect(),
+                };
+                let want = match garden_features::placement(feature) {
+                    garden_features::Placement::Open if feature == "stone_lantern" => (n / 60).clamp(1, 3),
+                    garden_features::Placement::Open => 1,
+                    _ => 1,
+                };
+                match garden_features::placement(feature) {
+                    garden_features::Placement::BackMiddle => spots.sort_by_key(|c| ((col(*c) - col(p.centre)).abs(), c.x, c.y)),
+                    garden_features::Placement::BackEnd => spots.sort_by_key(|c| (std::cmp::Reverse((col(*c) - col(p.centre)).abs()), c.x, c.y)),
+                    garden_features::Placement::Open => rng.shuffle(&mut spots),
+                }
+                let mut done: Vec<Point2D> = Vec::new();
+                for c in spots {
+                    if done.len() >= want {
+                        break;
+                    }
+                    if done.iter().any(|&q| near(q, c, 5)) || foot.iter().any(|o| p.taken.contains(&(c + *o))) {
+                        continue;
+                    }
+                    let Some(h) = height_at(c) else { continue; };
+                    garden_features::build(p.editor, feature, c, h, toward, p.kit, rng).await;
+                    for o in &foot {
+                        for dx in -1..=1 {
+                            for dz in -1..=1 {
+                                p.taken.insert(c + *o + Point2D::new(dx, dz));
+                            }
+                        }
+                    }
+                    done.push(c);
                 }
             }
         }
-        done.push(c);
     }
+    p.taken.clone()
 }
 
 /// A pond carved in the middle of the bed: up to a fifth of it, spread from

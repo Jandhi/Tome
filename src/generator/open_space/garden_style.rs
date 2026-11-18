@@ -1,7 +1,8 @@
 //! A culture's garden style, read from `data/gardens/<culture>.yaml`: every
 //! choice a town house's garden makes that is only a block, a list or an odds
-//! (boundary, ground, paths, props, plants, which layouts the culture uses
-//! and how often). The garden's shapes and placement rules
+//! (boundary, ground, paths, props, plants, which layouts, pieces and rare
+//! features the culture uses and how often). Blocks can be plain ids or
+//! roles from the house's palette ([`BlockRef`]). The garden's shapes and placement rules
 //! stay in `garden.rs`; a new culture is a new YAML file, as long as it uses
 //! the layouts that exist. See `data/gardens/README.md`.
 
@@ -11,6 +12,11 @@ use crate::generator::buildings_v2::Culture;
 use crate::geometry::Point2D;
 
 use super::garden::{blotch, hash01, GardenLayout};
+use super::garden_features::Kit;
+use crate::generator::materials::MaterialRole;
+use crate::minecraft::BlockForm;
+use crate::noise::RNG;
+use crate::util::HashMap;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -61,6 +67,12 @@ pub struct GardenStyle {
     pub specials: Vec<String>,
     #[serde(default)]
     pub special_chance: i32,
+    /// The pieces each layout sets (`zen: [stone_lantern, azalea_shrubs]`),
+    /// in order: feature names (`garden_features::FEATURES`) or the groups in
+    /// [`PIECE_GROUPS`]. A layout left out sets its usual pieces
+    /// ([`default_pieces`]).
+    #[serde(default)]
+    pub pieces: HashMap<GardenLayout, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -95,8 +107,8 @@ pub struct WalledRule {
 #[serde(deny_unknown_fields)]
 pub struct FenceStyle {
     /// Post and gate blocks (the gate gets its `facing`).
-    pub post: String,
-    pub gate: String,
+    pub post: BlockRef,
+    pub gate: BlockRef,
     /// Chance (percent) of a lantern on one corner post; absent for never
     /// (and no roll).
     #[serde(default)]
@@ -108,16 +120,74 @@ pub struct FenceStyle {
 #[serde(deny_unknown_fields)]
 pub struct WallStyle {
     /// Bottom course and upper course, each `[block, weathered block]`.
-    pub base: (String, String),
-    pub body: (String, String),
+    pub base: (BlockRef, BlockRef),
+    pub body: (BlockRef, BlockRef),
     /// Coping along the top.
-    pub coping: String,
+    pub coping: BlockRef,
     /// Pier blocks, and the cap on corner piers.
-    pub pier: String,
-    pub pier_cap: String,
+    pub pier: BlockRef,
+    pub pier_cap: BlockRef,
     /// Climbing plant leaves over the coping, `[a, b]` mixed; absent for a bare wall.
     #[serde(default)]
     pub creeper: Option<(String, String)>,
+}
+
+/// A block: a plain id (`"minecraft:bamboo_fence"`), or a material role and
+/// form taken from the house's palette (`{role: primary_wood, form: fence}`),
+/// with an optional `fallback` id for a palette that has no such block.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum BlockRef {
+    Id(String),
+    Role {
+        role: MaterialRole,
+        #[serde(default)]
+        form: Option<BlockForm>,
+        #[serde(default)]
+        fallback: Option<String>,
+    },
+}
+
+impl BlockRef {
+    /// The block id this names for a house with `kit`'s palette.
+    pub fn resolve(&self, kit: &Kit<'_>, rng: &mut RNG) -> String {
+        match self {
+            BlockRef::Id(id) => id.clone(),
+            BlockRef::Role { role, form, fallback } => {
+                let form = form.clone().unwrap_or(BlockForm::Block);
+                if let Some(id) = kit.palette.get_block(*role, &form, kit.materials, rng) {
+                    return id.as_str().to_string();
+                }
+                if let Some(f) = fallback {
+                    return f.clone();
+                }
+                match form {
+                    BlockForm::Slab => kit.theme.slab.to_string(),
+                    BlockForm::Wall => kit.theme.wall.to_string(),
+                    BlockForm::Stairs => "minecraft:stone_brick_stairs".to_string(),
+                    BlockForm::Fence => "minecraft:oak_fence".to_string(),
+                    BlockForm::FenceGate => "minecraft:oak_fence_gate".to_string(),
+                    _ => kit.theme.stone.to_string(),
+                }
+            }
+        }
+    }
+}
+
+/// Piece groups a layout can list besides features: `azalea_shrubs` (clipped
+/// shrubs against the fence), `palms` (date palms at the back), `pots` (pots
+/// and potted plants about the bed).
+pub const PIECE_GROUPS: [&str; 3] = ["azalea_shrubs", "palms", "pots"];
+
+/// The pieces a layout sets when its culture's file doesn't list them.
+pub fn default_pieces(layout: GardenLayout) -> Vec<String> {
+    let names: &[&str] = match layout {
+        GardenLayout::Zen | GardenLayout::Pond => &["stone_lantern", "azalea_shrubs"],
+        GardenLayout::Moss => &["bamboo", "stone_lantern", "azalea_shrubs"],
+        GardenLayout::Courtyard => &["palms", "bench", "pots"],
+        _ => &[],
+    };
+    names.iter().map(|s| s.to_string()).collect()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,13 +271,35 @@ impl GardenStyle {
 
     /// Fail if a rare feature names no feature.
     pub fn check(&self) -> anyhow::Result<()> {
+        let features: Vec<&str> = super::garden_features::FEATURES.iter().map(|(n, _)| *n).collect();
         for name in &self.specials {
             if super::garden_features::radius(name).is_none() {
-                let known: Vec<&str> = super::garden_features::FEATURES.iter().map(|(n, _)| *n).collect();
-                anyhow::bail!("garden style names an unknown feature {name:?}; known: {}", known.join(", "));
+                anyhow::bail!("garden style names an unknown feature {name:?}; known: {}", features.join(", "));
+            }
+        }
+        for (layout, names) in &self.pieces {
+            for name in names {
+                if super::garden_features::radius(name).is_none() && !PIECE_GROUPS.contains(&name.as_str()) {
+                    anyhow::bail!(
+                        "garden style: {layout:?} lists an unknown piece {name:?}; features: {}; groups: {}",
+                        features.join(", "),
+                        PIECE_GROUPS.join(", "),
+                    );
+                }
             }
         }
         Ok(())
+    }
+
+    /// The pieces `layout` sets: the style's list, else the layout's usual ones.
+    pub fn pieces_for(&self, layout: GardenLayout) -> Vec<String> {
+        self.pieces.get(&layout).cloned().unwrap_or_else(|| default_pieces(layout))
+    }
+
+    /// A style from a file anywhere (for trying one out).
+    pub fn from_path(path: &str) -> anyhow::Result<GardenStyle> {
+        let file = std::fs::File::open(path).map_err(|e| anyhow::anyhow!("{path}: {e}"))?;
+        serde_yaml::from_reader(file).map_err(|e| anyhow::anyhow!("{path}: {e}"))
     }
 
     /// The layouts in order, without weights.

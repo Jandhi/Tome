@@ -10,16 +10,16 @@ walled: { always: true }
 # Only used if a desert garden is ever fenced; the corner-lantern roll is kept
 # so towns stay as they were.
 fence:
-  post: "minecraft:birch_fence"
-  gate: "minecraft:birch_fence_gate"
+  post: { role: primary_wood, form: fence }
+  gate: { role: primary_wood, form: fence_gate }
   corner_lantern_chance: 40
 
 wall:
   base: ["minecraft:sandstone", "minecraft:sandstone"]
-  body: ["minecraft:smooth_sandstone", "minecraft:smooth_sandstone"]
-  coping: "minecraft:smooth_sandstone_slab"
-  pier: "minecraft:cut_sandstone"
-  pier_cap: "minecraft:smooth_sandstone_slab"
+  body: [{ role: primary_wall }, { role: primary_wall }]
+  coping: { role: primary_stone, form: slab }
+  pier: { role: secondary_stone }
+  pier_cap: { role: primary_stone, form: slab }
   creeper: ["minecraft:flowering_azalea_leaves[persistent=true]", "minecraft:azalea_leaves[persistent=true]"]
 
 path: ["minecraft:sandstone"]
@@ -57,3 +57,8 @@ trees: { shade_trees: false, wood: oak }
 # gardens that get one.
 specials: [fountain, pergola]
 special_chance: 25
+
+# The pieces each layout sets, in order (feature names or the groups
+# azalea_shrubs, palms, pots); a layout left out sets its usual ones.
+pieces:
+  courtyard: [palms, bench, pots]
