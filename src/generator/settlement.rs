@@ -2157,13 +2157,23 @@ pub async fn generate_settlement_with(
                 .unwrap_or_else(|e| panic!("garden style: {e}"));
             garden_style.check().unwrap_or_else(|e| panic!("{e}"));
             let mut garden_rng = os_rng.derive();
+            // Walled or fenced, decided for every garden first: a wall takes
+            // over any fence line it shares with a neighbour.
+            let area = |g: &crate::generator::city_houses::plots::Garden| {
+                let house = &placed_houses[g.house];
+                house.width as i32 * house.depth
+            };
+            let walled_by: Vec<bool> = gardens
+                .iter()
+                .map(|g| crate::generator::open_space::roll_walled(&garden_style, area(g), &mut garden_rng))
+                .collect();
+            let walls = crate::generator::city_houses::plots::plan_walls(&gardens, &owners, &fences, &walled_by);
             let (mut walled_n, mut big_n, mut walled_big) = (0, 0, 0);
             for (i, g) in gardens.iter().enumerate() {
-                let house = &placed_houses[g.house];
-                let area = house.width as i32 * house.depth;
+                let area = area(g);
                 let kit = crate::generator::open_space::GardenKit { palette: &house_palettes[g.house], materials: &data.materials, theme: &theme };
                 let (_, _, walled) = crate::generator::open_space::furnish_garden(
-                    &*editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &garden_style, &kit, None, area, None, &mut garden_rng,
+                    &*editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &garden_style, &kit, None, walled_by[i], &walls, &mut garden_rng,
                 ).await;
                 let big = area >= garden_style.walled.big_house_area;
                 walled_n += walled as usize;

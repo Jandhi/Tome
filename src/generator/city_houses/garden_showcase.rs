@@ -186,6 +186,18 @@ pub async fn run_garden_showcase(
     let owners = garden_owners(&gardens);
     let fences = super::plots::plan_fences(&editor, &gardens, &owners, &houses);
     let mut garden_rng = RNG::new(seed).derive();
+    // Every third garden walled (every one where the culture always walls),
+    // so both boundaries show in each street; decided first, so a wall takes
+    // over any fence line it shares with a neighbour.
+    let mut counts = vec![0usize; streets.len()];
+    let mut walled_by: Vec<bool> = Vec::new();
+    for g in &gardens {
+        let street = houses[g.house].lot;
+        counts[street] += 1;
+        let always = GardenStyle::for_culture(streets[street].0)?.walled.always;
+        walled_by.push(always || counts[street] % 3 == 0);
+    }
+    let walls = super::plots::plan_walls(&gardens, &owners, &fences, &walled_by);
     let mut per_street = vec![0usize; streets.len()];
     for (i, g) in gardens.iter().enumerate() {
         let street = houses[g.house].lot;
@@ -198,11 +210,9 @@ pub async fn run_garden_showcase(
         let layouts = style.layout_list();
         let layout = layouts[per_street[street] % layouts.len()];
         per_street[street] += 1;
-        // Every third garden walled, so both boundaries show in each street.
-        let walled = per_street[street] % 3 == 0;
         let kit = GardenKit { palette: &house_palettes[g.house], materials: &data.materials, theme: &theme };
         let (built, special, walled) = furnish_garden(
-            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &kit, Some(layout), 0, Some(walled), &mut garden_rng,
+            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &kit, Some(layout), walled_by[i], &walls, &mut garden_rng,
         )
         .await;
         let wall = if walled { ", walled" } else { "" };

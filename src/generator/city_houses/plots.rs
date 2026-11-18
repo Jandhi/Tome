@@ -1,11 +1,25 @@
 //! House plots: how much ground a town house owns, graded by how far it stands
 //! from the town centre.
 //!
-//! The core packs terraced rows on small lots; the further out a block lies, the
-//! larger its lots, the wider the gap between neighbours and the deeper the
-//! back garden each house is given ([`Ring`]). After the houses are placed,
-//! [`plan_gardens`] hands every house the strip of its lot behind it (plus
-//! its side gap) as a garden.
+//! The urban area is split by distance from its centroid ([`RingMap`]): the
+//! nearest 40% of its area is the core, the next 35% the middle ring, the rest
+//! the outer ring. The core packs terraced rows on small lots; the further out,
+//! the larger the lots, the wider the gap between neighbours and the deeper
+//! the ground each house is given ([`Ring`]: 24/32/40-cell lots, 0/1/2-cell
+//! gaps, 3/7/10 deep). Lots are graded per piece as blocks are cut
+//! (`districts::subdivide::subdivide_block_graded`).
+//!
+//! Settlement placement reserves a house's ground behind it outside the core,
+//! and asks for a back door where there is ground behind
+//! (`BuildingContext::back_door`; in the core only with two free cells behind).
+//! After the houses are placed, [`plan_gardens`] hands every house the strip
+//! of its lot behind it (plus its side gap), stepping over door ramps
+//! ([`door_cells`]); outer-ring yards also take the lot's leftover ground, and
+//! a one-cell strip of free ground between two gardens goes to the
+//! lower-numbered one. The settlement claims each garden under the house's own
+//! building id (`World::new_building_id`); what is left goes to the open-space
+//! pass, so the core and middle ring keep their plazas and nooks.
+//! `TOME_DEBUG_GARDENS=1` dumps the gardens and density data to `output/`.
 
 use crate::util::{HashMap, HashSet};
 
@@ -610,4 +624,30 @@ pub fn plan_fences(editor: &Editor, gardens: &[Garden], owners: &HashMap<Point2D
         }
     }
     fences
+}
+
+/// The fence cells built as wall rather than fence: every walled garden's own
+/// line, and any other garden's fence cell beside a walled garden's cell (the
+/// shared line between them), so a wall and a fence never run side by side
+/// or meet on one line; the wall wins. `walled[i]` says whether garden `i` is
+/// walled.
+pub fn plan_walls(gardens: &[Garden], owners: &HashMap<Point2D, usize>, fences: &HashSet<Point2D>, walled: &[bool]) -> HashSet<Point2D> {
+    let mut walls: HashSet<Point2D> = HashSet::default();
+    for (gi, g) in gardens.iter().enumerate() {
+        if !walled[gi] {
+            continue;
+        }
+        for &c in &g.cells {
+            if fences.contains(&c) {
+                walls.insert(c);
+            }
+            for d in CARDINALS_2D {
+                let n = c + d;
+                if fences.contains(&n) && owners.get(&n).is_some_and(|&o| o != gi) {
+                    walls.insert(n);
+                }
+            }
+        }
+    }
+    walls
 }
