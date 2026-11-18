@@ -1,0 +1,54 @@
+# Desert town gardens: closed courtyards behind sandstone walls, with palms,
+# pots, a bench and patchy paving; no gate (the house is the way in).
+# Every field is described in data/gardens/README.md.
+
+layouts:
+  - { layout: courtyard }
+
+walled: { always: true }
+
+# Only used if a desert garden is ever fenced; the corner-lantern roll is kept
+# so towns stay as they were.
+fence:
+  post: "minecraft:birch_fence"
+  gate: "minecraft:birch_fence_gate"
+  corner_lantern_chance: 40
+
+wall:
+  base: ["minecraft:sandstone", "minecraft:sandstone"]
+  body: ["minecraft:smooth_sandstone", "minecraft:smooth_sandstone"]
+  coping: "minecraft:smooth_sandstone_slab"
+  pier: "minecraft:cut_sandstone"
+  pier_cap: "minecraft:smooth_sandstone_slab"
+  creeper: ["minecraft:flowering_azalea_leaves[persistent=true]", "minecraft:azalea_leaves[persistent=true]"]
+
+path: ["minecraft:sandstone"]
+
+# Red sand, then coarse dirt.
+lawn:
+  - { noise: blotch, scale: 3, salt: 0, above: 0.8, blocks: ["minecraft:red_sand"] }
+  - { noise: blotch, scale: 2, salt: 7, above: 0.85, blocks: ["minecraft:coarse_dirt"] }
+
+wall_props:
+  - "minecraft:decorated_pot"
+  - "minecraft:potted_cactus"
+  - "minecraft:water_cauldron[level=3]"
+  - "minecraft:barrel[facing=up]"
+  - "minecraft:decorated_pot"
+
+yard_extras:
+  - "minecraft:potted_cactus"
+  - "minecraft:dead_bush"
+  - "minecraft:decorated_pot"
+  - "minecraft:barrel[facing=up]"
+
+tufts:
+  - { below: 0.04, block: "minecraft:dead_bush" }
+
+pots:
+  - "minecraft:decorated_pot"
+  - "minecraft:potted_cactus"
+  - "minecraft:potted_dead_bush"
+  - "minecraft:flowering_azalea"
+
+trees: { shade_trees: false, wood: oak }

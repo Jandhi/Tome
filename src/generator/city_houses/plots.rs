@@ -23,11 +23,11 @@
 
 use crate::util::{HashMap, HashSet};
 
-use crate::editor::World;
+use crate::editor::{Editor, World};
 use crate::generator::buildings::BuildingID;
 use crate::generator::buildings_v2::HouseOutput;
 use crate::generator::BuildClaim;
-use crate::geometry::{Cardinal, Point2D, CARDINALS_2D};
+use crate::geometry::{Cardinal, Point2D, Point3D, CARDINALS_2D};
 
 /// How far a block lies from the town centre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,4 +324,330 @@ pub fn plan_gardens(world: &World, houses: &[PlacedHouse], lots: &[HashSet<Point
         gardens[gi].cells.push(c);
     }
     gardens
+}
+
+/// Cell -> index into `gardens`, for telling neighbouring gardens apart.
+pub fn garden_owners(gardens: &[Garden]) -> HashMap<Point2D, usize> {
+    let mut m = HashMap::default();
+    for (i, g) in gardens.iter().enumerate() {
+        for &c in &g.cells {
+            m.insert(c, i);
+        }
+    }
+    m
+}
+
+/// Gardens smaller than this get no fence.
+pub const FENCE_MIN_AREA: usize = 8;
+/// A fenced garden keeps at least this many cells inside its fence...
+const FENCE_MIN_INSIDE: usize = 6;
+/// ...spread over at least this many rows back from its house.
+const FENCE_MIN_DEPTH: usize = 2;
+
+/// Every garden's fence posts, planned together so they join up. Only gardens
+/// with room left inside a fence get one (slivers stay open). A garden fences
+/// each of its cells on an edge that isn't its own house wall; where two
+/// fenced gardens meet there is one line: the lower-numbered one fences,
+/// unless the other's cell there is already a post. Fences join only north,
+/// south, east and west, so a diagonal step (within a garden or where two
+/// gardens' lines meet) gets a post on a garden cell between. Then posts in
+/// front of a door (any of `houses`' steps or entrances, or any placed door
+/// block beside the cell), corners of 2x2 squares and posts boxing in a pocket
+/// of one or two cells are removed, and any post left standing alone, or
+/// sticking out one block from a line, is dropped.
+pub fn plan_fences(editor: &Editor, gardens: &[Garden], owners: &HashMap<Point2D, usize>, houses: &[PlacedHouse]) -> HashSet<Point2D> {
+    let world = editor.world();
+    let own_wall = |gi: usize, c: Point2D| {
+        !owners.contains_key(&c) && world.get_claim(c) == Some(BuildClaim::Building(gardens[gi].building))
+    };
+    let inside = |gi: usize, c: Point2D| owners.get(&c) == Some(&gi) || own_wall(gi, c);
+    // Which gardens get a fence: enough cells that no fence could stand on
+    // (every neighbour its own), over at least two rows.
+    let eligible: Vec<bool> = gardens
+        .iter()
+        .enumerate()
+        .map(|(gi, g)| {
+            if g.cells.len() < FENCE_MIN_AREA {
+                return false;
+            }
+            let core: Vec<Point2D> =
+                g.cells.iter().copied().filter(|&c| CARDINALS_2D.iter().all(|d| inside(gi, c + *d))).collect();
+            let rows: HashSet<i32> = core.iter().map(|c| c.x * g.into.x + c.y * g.into.y).collect();
+            core.len() >= FENCE_MIN_INSIDE && rows.len() >= FENCE_MIN_DEPTH
+        })
+        .collect();
+    let fenced_garden = |c: &Point2D| owners.get(c).is_some_and(|&g| eligible[g]);
+    let mut fences: HashSet<Point2D> = HashSet::default();
+    // Edges onto open ground (or an unfenced garden) first, then edges between
+    // fenced gardens, highest-numbered garden first: by the time a garden
+    // fences a shared edge, the far side's posts are final, so it can skip
+    // the cells already fenced from there.
+    let open = |c: Point2D| match owners.get(&c) {
+        Some(&o) => !eligible[o],
+        None => !matches!(world.get_claim(c), Some(BuildClaim::Building(_) | BuildClaim::Structure(_))),
+    };
+    // Against an unfenced garden the line goes on that garden's edge cell,
+    // so a sliver between two fenced gardens becomes their one shared line.
+    for (gi, g) in gardens.iter().enumerate().filter(|(gi, _)| eligible[*gi]) {
+        for &c in &g.cells {
+            for d in CARDINALS_2D {
+                let n = c + d;
+                if inside(gi, n) || !open(n) {
+                    continue;
+                }
+                fences.insert(if owners.contains_key(&n) { n } else { c });
+            }
+        }
+    }
+    for (gi, g) in gardens.iter().enumerate().rev().filter(|(gi, _)| eligible[*gi]) {
+        for &c in &g.cells {
+            let shared = CARDINALS_2D.iter().any(|d| {
+                let n = c + *d;
+                owners.get(&n).is_some_and(|&o| o != gi && eligible[o] && gi < o) && !fences.contains(&n)
+            });
+            if shared {
+                fences.insert(c);
+            }
+        }
+    }
+    // A wall a fence can end against: a building or structure, not a garden.
+    let wall = |c: Point2D| {
+        !owners.contains_key(&c) && matches!(world.get_claim(c), Some(BuildClaim::Building(_) | BuildClaim::Structure(_)))
+    };
+    let fenced = fenced_garden;
+    // Close diagonal steps.
+    let mut sorted: Vec<Point2D> = fences.iter().copied().collect();
+    sorted.sort_by_key(|c| (c.x, c.y));
+    for c in sorted {
+        for (dx, dz) in [(1, 1), (1, -1), (-1, 1), (-1, -1)] {
+            if !fences.contains(&(c + Point2D::new(dx, dz))) {
+                continue;
+            }
+            let (a, b) = (c + Point2D::new(dx, 0), c + Point2D::new(0, dz));
+            if fences.contains(&a) || fences.contains(&b) || wall(a) || wall(b) {
+                continue;
+            }
+            if let Some(p) = [a, b].into_iter().find(|p| fenced(p)) {
+                fences.insert(p);
+            }
+        }
+    }
+    // A line that stops just short of a wall or another fence, across another
+    // garden's cells that aren't fenced there, carries on to meet it; one that
+    // ends beside a house corner diagonally ahead steps sideways onto it.
+    let mut sorted: Vec<Point2D> = fences.iter().copied().collect();
+    sorted.sort_by_key(|c| (c.x, c.y));
+    for c in sorted {
+        let joined: Vec<Point2D> = CARDINALS_2D.iter().copied().filter(|d| fences.contains(&(c + *d)) || wall(c + *d)).collect();
+        if joined.len() != 1 {
+            continue;
+        }
+        let ahead = Point2D::new(-joined[0].x, -joined[0].y);
+        // A house corner diagonally ahead: one post beside the end joins it.
+        let side = [Point2D::new(ahead.y, ahead.x), Point2D::new(-ahead.y, -ahead.x)]
+            .into_iter()
+            .find(|s| wall(c + ahead + *s) && fenced(&(c + *s)) && !fences.contains(&(c + *s)));
+        if let Some(s) = side {
+            fences.insert(c + s);
+            continue;
+        }
+        let mut run: Vec<Point2D> = Vec::new();
+        let mut p = c + ahead;
+        for _ in 0..3 {
+            if fences.contains(&p) || wall(p) {
+                fences.extend(run.iter().copied());
+                break;
+            }
+            if !fenced(&p) {
+                break;
+            }
+            run.push(p);
+            p = p + ahead;
+        }
+    }
+    let links = |f: &HashSet<Point2D>, c: Point2D| {
+        CARDINALS_2D.iter().filter(|d| f.contains(&(c + **d)) || wall(c + **d)).count()
+    };
+    // Keep doors clear: no post on a door's steps or entrance, or beside any
+    // placed door block (towers and structures too).
+    let steps: HashSet<Point2D> = houses.iter().flat_map(|h| h.ramp_cells.iter().chain(&h.entrances).copied()).collect();
+    let by_door = |c: Point2D| {
+        steps.contains(&c)
+            || world.get_ocean_floor_height_at(c).is_some_and(|h| {
+                CARDINALS_2D.iter().any(|d| {
+                    let n = c + *d;
+                    (h - 2..=h + 3).any(|y| {
+                        editor.get_cached_block(Point3D::new(n.x, y, n.y)).is_some_and(|b| {
+                            let id = b.id.as_str();
+                            id.ends_with("_door") && !id.ends_with("trapdoor")
+                        })
+                    })
+                })
+            })
+    };
+    let mut sorted: Vec<Point2D> = fences.iter().copied().collect();
+    sorted.sort_by_key(|c| (c.x, c.y));
+    for c in sorted {
+        if by_door(c) {
+            fences.remove(&c);
+        }
+    }
+    // No two lines one cell apart: a strip of garden one cell wide between
+    // posts (or a wall), two or more cells long, becomes a single line down
+    // its middle; side posts that only ran along it go.
+    let blocked = |f: &HashSet<Point2D>, c: Point2D| f.contains(&c) || wall(c);
+    let neck = |f: &HashSet<Point2D>, c: Point2D, a: Point2D| {
+        !blocked(f, c) && fenced(&c) && blocked(f, c + a) && blocked(f, c - a)
+    };
+    // Converting a strip can leave another beside it: repeat a few times.
+    for _ in 0..3 {
+        let mut necks: Vec<(Point2D, Point2D)> = Vec::new();
+        for (&c, _) in owners.iter() {
+            for a in [Point2D::new(1, 0), Point2D::new(0, 1)] {
+                let along = Point2D::new(a.y, a.x);
+                if neck(&fences, c, a) && (neck(&fences, c + along, a) || neck(&fences, c - along, a)) && !by_door(c) {
+                    necks.push((c, a));
+                }
+            }
+        }
+        necks.sort_by_key(|(c, a)| (c.x, c.y, a.x));
+        if necks.is_empty() {
+            break;
+        }
+        let before = fences.clone();
+        for &(c, a) in &necks {
+            fences.insert(c);
+            for side in [c + a, c - a] {
+                if before.contains(&side) && !blocked(&before, side + (side - c)) {
+                    fences.remove(&side);
+                }
+            }
+        }
+    }
+    // No 2x2 squares of posts: drop the corner with the fewest links outside
+    // the square, then the one leaving the fewest new line ends.
+    let mut sorted: Vec<Point2D> = fences.iter().copied().collect();
+    sorted.sort_by_key(|c| (c.x, c.y));
+    for c in sorted {
+        let square = [c, c + Point2D::new(1, 0), c + Point2D::new(0, 1), c + Point2D::new(1, 1)];
+        if !square.iter().all(|p| fences.contains(p)) {
+            continue;
+        }
+        let cost = |p: Point2D| {
+            let new_ends = CARDINALS_2D.iter().filter(|d| fences.contains(&(p + **d)) && links(&fences, p + **d) <= 2).count();
+            (links(&fences, p) - 2) * 10 + new_ends
+        };
+        if let Some(&p) = square.iter().min_by_key(|p| cost(**p)) {
+            fences.remove(&p);
+        }
+    }
+    // No post boxed in on all four sides (a plain crossing of two lines
+    // stays), and no pocket of one or two cells shut in by posts and walls:
+    // open each through the post with the fewest links.
+    for _ in 0..8 {
+        let mut sorted: Vec<Point2D> = fences.iter().copied().collect();
+        sorted.sort_by_key(|c| (c.x, c.y));
+        let mut changed = false;
+        for &c in &sorted {
+            if !fences.contains(&c) || links(&fences, c) < 4 {
+                continue;
+            }
+            let cross = CARDINALS_2D.iter().all(|d| fences.contains(&(c + *d)))
+                && [(1, 1), (1, -1), (-1, 1), (-1, -1)].iter().all(|&(dx, dz)| !blocked(&fences, c + Point2D::new(dx, dz)));
+            if !cross {
+                fences.remove(&c);
+                changed = true;
+            }
+        }
+        for &c in &sorted {
+            if !fences.contains(&c) {
+                continue;
+            }
+            for d in CARDINALS_2D {
+                let start = c + d;
+                if blocked(&fences, start) {
+                    continue;
+                }
+                let mut pocket = vec![start];
+                let mut i = 0;
+                while i < pocket.len() && pocket.len() <= 2 {
+                    for e in CARDINALS_2D {
+                        let n = pocket[i] + e;
+                        if !blocked(&fences, n) && !pocket.contains(&n) {
+                            pocket.push(n);
+                        }
+                    }
+                    i += 1;
+                }
+                if pocket.len() > 2 {
+                    continue;
+                }
+                // Posts beside the pocket that open onto ground outside it.
+                let mut doors: Vec<Point2D> = pocket
+                    .iter()
+                    .flat_map(|&p| CARDINALS_2D.iter().map(move |e| p + *e))
+                    .filter(|p| fences.contains(p))
+                    .filter(|p| CARDINALS_2D.iter().any(|e| !blocked(&fences, *p + *e) && !pocket.contains(&(*p + *e))))
+                    .collect();
+                doors.sort_by_key(|p| (links(&fences, *p), p.x, p.y));
+                if let Some(&p) = doors.first() {
+                    fences.remove(&p);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    // Drop lone posts and one-block spurs off a line (a line's own end, where
+    // its only neighbour carries on, stays).
+    for _ in 0..2 {
+        let mut drop: Vec<Point2D> = Vec::new();
+        for &c in &fences {
+            match links(&fences, c) {
+                0 => drop.push(c),
+                1 => {
+                    let n = CARDINALS_2D.iter().map(|d| c + *d).find(|n| fences.contains(n));
+                    if n.is_some_and(|n| links(&fences, n) >= 3) {
+                        drop.push(c);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if drop.is_empty() {
+            break;
+        }
+        for c in drop {
+            fences.remove(&c);
+        }
+    }
+    fences
+}
+
+/// The fence cells built as wall rather than fence: every walled garden's own
+/// line, and any other garden's fence cell beside a walled garden's cell (the
+/// shared line between them), so a wall and a fence never run side by side
+/// or meet on one line; the wall wins. `walled[i]` says whether garden `i` is
+/// walled.
+pub fn plan_walls(gardens: &[Garden], owners: &HashMap<Point2D, usize>, fences: &HashSet<Point2D>, walled: &[bool]) -> HashSet<Point2D> {
+    let mut walls: HashSet<Point2D> = HashSet::default();
+    for (gi, g) in gardens.iter().enumerate() {
+        if !walled[gi] {
+            continue;
+        }
+        for &c in &g.cells {
+            if fences.contains(&c) {
+                walls.insert(c);
+            }
+            for d in CARDINALS_2D {
+                let n = c + d;
+                if fences.contains(&n) && owners.get(&n).is_some_and(|&o| o != gi) {
+                    walls.insert(n);
+                }
+            }
+        }
+    }
+    walls
 }

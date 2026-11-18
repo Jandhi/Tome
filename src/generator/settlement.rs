@@ -2147,6 +2147,39 @@ pub async fn generate_settlement_with(
         let regions = detect_regions(editor.world(), &urban);
         let theme = Theme::for_culture(culture);
         let mut os_rng = rng.derive();
+        {
+            let owners = crate::generator::city_houses::plots::garden_owners(&gardens);
+            let fences = crate::generator::city_houses::plots::plan_fences(&*editor, &gardens, &owners, &placed_houses);
+            let garden_style = crate::generator::open_space::GardenStyle::for_culture(culture)
+                .unwrap_or_else(|e| panic!("garden style: {e}"));
+            let mut garden_rng = os_rng.derive();
+            // Walled or fenced, decided for every garden first: a wall takes
+            // over any fence line it shares with a neighbour.
+            let area = |g: &crate::generator::city_houses::plots::Garden| {
+                let house = &placed_houses[g.house];
+                house.width as i32 * house.depth
+            };
+            let walled_by: Vec<bool> = gardens
+                .iter()
+                .map(|g| crate::generator::open_space::roll_walled(&garden_style, area(g), &mut garden_rng))
+                .collect();
+            let walls = crate::generator::city_houses::plots::plan_walls(&gardens, &owners, &fences, &walled_by);
+            let (mut walled_n, mut big_n, mut walled_big) = (0, 0, 0);
+            for (i, g) in gardens.iter().enumerate() {
+                let area = area(g);
+                let (_, walled) = crate::generator::open_space::furnish_garden(
+                    &*editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &garden_style, None, walled_by[i], &walls, &mut garden_rng,
+                ).await;
+                let big = area >= garden_style.walled.big_house_area;
+                walled_n += walled as usize;
+                big_n += big as usize;
+                walled_big += (walled && big) as usize;
+            }
+            println!(
+                "Gardens: {} furnished, {walled_n} walled; {big_n} behind big houses (area >= {}), {walled_big} of those walled",
+                gardens.len(), garden_style.walled.big_house_area,
+            );
+        }
         // Names are picked alongside furnishing so a park is named for the type it
         // was actually built as; `used` keeps every name unique within the town.
         let names = OpenSpaceNames::load();

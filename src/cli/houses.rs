@@ -63,6 +63,38 @@ pub async fn run_houses(args: &[String], out: Outputs) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `--gardens [--culture c|all] [--seed n] [--count n] [--live [--at x,z]]`: house gardens on
+/// fixed plots, one test street per density ring (core, middle, outer) per culture,
+/// every garden layout in each, rendered under `output/gardens/<culture|all>-<seed>[-live]/`.
+/// `--live` builds into the server's build area (offset `--at x,z` from its minimum
+/// corner) and teleports the players to it.
+pub async fn run_gardens(args: &[String]) -> anyhow::Result<()> {
+    let arg_after = |flag: &str, n: usize| {
+        args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
+    };
+    let cultures = match arg_after("--culture", 1).unwrap_or("medieval") {
+        "medieval" => vec![Culture::Medieval],
+        "desert" => vec![Culture::Desert],
+        "japanese" => vec![Culture::Japanese],
+        "all" => vec![Culture::Medieval, Culture::Japanese, Culture::Desert],
+        other => anyhow::bail!("unknown --culture {other} (medieval|desert|japanese|all)"),
+    };
+    let seed = arg_after("--seed", 1).map(str::parse).transpose()?.unwrap_or(42);
+    let count = arg_after("--count", 1).map(str::parse).transpose()?.unwrap_or(8);
+    let live = args.iter().any(|a| a == "--live");
+    // `--at x,z`: offset from the build area's minimum corner (live only).
+    let at = match arg_after("--at", 1) {
+        None => crate::geometry::Point2D::new(0, 0),
+        Some(v) => {
+            let n: Vec<i32> = v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            anyhow::ensure!(n.len() == 2, "--at wants x,z");
+            crate::geometry::Point2D::new(n[0], n[1])
+        }
+    };
+    crate::generator::city_houses::garden_showcase::run_garden_showcase(&cultures, seed, count, live, at).await?;
+    Ok(())
+}
+
 /// `--furniture <name[,name...]> [out_dir]`: render each named piece alone in a
 /// preview corner (default `output/furniture`).
 pub fn run_furniture(names: &str, out_dir: Option<&str>) -> anyhow::Result<()> {

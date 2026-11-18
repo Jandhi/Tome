@@ -121,6 +121,13 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    if args.iter().any(|a| a == "--gardens") {
+        if let Err(e) = cli::houses::run_gardens(&args).await {
+            eprintln!("Garden showcase failed: {e:#}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if houses {
         if let Err(e) = cli::houses::run_houses(&args, out).await {
             eprintln!("House showcase failed: {e:#}");

@@ -19,6 +19,7 @@ cargo view <scene> [out.html] [--light day|night|dusk|<0..1>]   # First-person 3
 cargo run --profile fast -- --houses [--culture medieval|desert|japanese] [--seed N] [--count N] [--size cottage|house|hall|manor|mixed] [--rects "x,z,w,h;..."] [--jetty] [--px N] [--light day|night|dusk|<0..1>]   # No server: houses on a flat world, per-house crops + a perspective inside every room (<house>_rooms.png sheet) + ASCII plans + `<house>.spec.yaml` (the house's resolved spec, see docs/plans/house_spec.md) + houses.json + town.scene (re-render, view or --compare it like a town) -> output/houses/<culture>-<seed>/ ; --rects pins the footprint (plot-relative, core first) so one shape can be checked under every roof style; --light lights the room views (sky + lamps, see Lighting) into output/houses/<culture>-<seed>-<day|night|...>/
 cargo run --profile fast -- --houses --spec <file.yaml> [--spec ...] [--count N] [--seed N]   # Build house specs (buildings_v2/spec.rs): one house per spec, or --count N of each as a sweep (only open fields vary) -> output/houses/spec-<stem>[-xN]/ with each house's resolved .spec.yaml; flags fill open fields; unknown keys and unbuildable pins are refused with every problem listed, off-character pins (other culture's roof, floors/wings outside the size class) print a `note:` and build. Try docs/examples/house_specs/*.yaml; every field and its values: docs/house_spec_schema.md
 --out <list> | --out +x,-y                      # Any run (live, offline, --houses): pick the artifacts written (src/outputs.rs): snapshot (old name: fixture), scene, renders, metrics, specs, viewer, closeups, all, none. `closeups` (settlement runs) renders every house into closeups/house_<n>_*: the same set `--houses` writes per house (iso corners, top, elevations, a view inside every room, per-storey cutaways), cropped to the house plus a few blocks of street, with every other house left out from its ground floor up (the editor tags each house's blocks with an owner, `Editor::set_owner`) so no neighbour blocks a camera; ~0.25 s per house. A plain list replaces the defaults, +/- items adjust them. Settlement default: snapshot, scene, renders, metrics (specs and viewer off; `--out +specs` for house specs, `--out none` to only generate). --houses default: scene, renders, metrics, specs (renders are always written there). Skipped artifacts are not deleted from an earlier run.
+cargo run --profile fast -- --gardens [--culture medieval|desert|japanese|all] [--seed N] [--count N] [--live [--at x,z]]   # No server unless --live: test streets of houses on fixed plots, one per density ring, gardened with the real planner and furnisher, each culture's layouts cycled, every third garden walled -> output/gardens/<culture>-<seed>/; --live builds into the build area (offset --at) and teleports the players there. Check garden changes here before a town run
 cargo run --profile fast -- --furniture <name,...> [out_dir]   # No server: each furniture item alone in a walled corner, two lit 3/4 views -> output/furniture/<name>.png + sheet.png; check new pieces here before they go into rooms
 cargo run -- --snapshot <path>                  # Capture terrain only from the live server (~2 s)
 cargo run -- --compare <a.scene> <b.scene> [out_dir]  # Block diff of two scenes: table + diff.json + diff_top.png (red only-A, green only-B, yellow changed) into out_dir (default: A's dir)
@@ -73,7 +74,7 @@ PRs for visual features carry pictures in the description: the feature itself, o
 - `src/http_mod/` — async GDMC HTTP client (reqwest + retry)
 - `src/noise/` — seed-based deterministic RNG
 - `src/data/` — `Loadable` trait: generic JSON loader from `data/` directory tree
-- `data/` — JSON files: materials, palettes, building wall/roof components and sets, NBT structures, forests
+- `data/` — JSON files: materials, palettes, building wall/roof components and sets, NBT structures, forests; YAML: furniture, rooms, garden styles (`data/gardens/`)
 
 ## Key Patterns
 
@@ -98,7 +99,7 @@ SizeClass controls shape: Cottage (small, 1 floor), House (1-2 floors), Hall (2-
 
 `generate_parcels()` → `get_city_blocks_and_off_limits()` (Voronoi partition of urban area) → per-block building placement. City block inner points become a `Plot` for buildings_v2.
 
-Town density is graded by distance from the town centre (core, middle and outer rings), and every town house gets a plot behind it and a back door onto it; see the module doc of `city_houses/plots.rs`. Every building has its own id (`World::new_building_id`).
+Town density is graded by distance from the town centre (core, middle and outer rings), and every town house gets a plot behind it and a back door onto it; see the module doc of `city_houses/plots.rs`. Every building has its own id (`World::new_building_id`). Each plot is laid out as a garden in its culture's style: see the module doc of `open_space/garden.rs`; the choices live in `data/gardens/<culture>.yaml` (every key in `data/gardens/README.md`), and fences are planned town-wide (`plots::plan_fences`).
 
 ## Palette Merging
 
