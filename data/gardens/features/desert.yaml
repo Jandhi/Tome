@@ -1,0 +1,39 @@
+# Desert garden features. Each faces north, toward its house (see medieval.yaml).
+
+# A sunken basin edged in smooth sandstone, a lantern on a post in the
+# middle (no spout: a water source above ground would flood the yard).
+fountain:
+  radius: 2
+  parts:
+    - cells: [[-2, -2], [-1, -2], [0, -2], [1, -2], [2, -2], [-2, 2], [-1, 2], [0, 2], [1, 2], [2, 2],
+              [-2, -1], [-2, 0], [-2, 1], [2, -1], [2, 0], [2, 1]]
+      stack: { -1: { block: "minecraft:smooth_sandstone", force: true } }
+    - cells: [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]
+      stack:
+        -2: { block: "minecraft:smooth_sandstone", force: true }
+        -1: { block: "minecraft:water", force: true }
+    - at: [0, 0]
+      stack:
+        -2: { block: "minecraft:smooth_sandstone", force: true }
+        -1: { block: "minecraft:chiseled_sandstone", force: true }
+        0: "minecraft:sandstone_wall"
+        1: "minecraft:lantern"
+
+# Four posts under a slatted roof hung with vines, a pot in the shade.
+pergola:
+  radius: 1
+  parts:
+    - cells: [[-1, -1], [1, -1], [-1, 1], [1, 1]]
+      stack:
+        0: "$wood_fence"
+        1: "$wood_fence"
+        2: "$wood_fence"
+    - cells: [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]
+      stack:
+        -1: { block: "minecraft:smooth_sandstone", force: true }
+        3: "$wood_slab"
+    - at: [0, 0]
+      stack: { 0: "minecraft:decorated_pot" }
+    - cells: [[-1, 0], [1, 0], [0, -1], [0, 1]]
+      chance: 70
+      stack: { 2: "minecraft:vine[up=true]" }

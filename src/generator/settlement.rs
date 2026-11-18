@@ -2152,13 +2152,16 @@ pub async fn generate_settlement_with(
             let fences = crate::generator::city_houses::plots::plan_fences(&*editor, &gardens, &owners, &placed_houses);
             let garden_style = crate::generator::open_space::GardenStyle::for_culture(culture)
                 .unwrap_or_else(|e| panic!("garden style: {e}"));
+            let garden_features = crate::generator::open_space::GardenFeatures::load()
+                .unwrap_or_else(|e| panic!("garden features: {e}"));
+            garden_style.check(&garden_features).unwrap_or_else(|e| panic!("{e}"));
             let mut garden_rng = os_rng.derive();
             let (mut walled_n, mut big_n, mut walled_big) = (0, 0, 0);
             for (i, g) in gardens.iter().enumerate() {
                 let house = &placed_houses[g.house];
                 let area = house.width as i32 * house.depth;
-                let (_, walled) = crate::generator::open_space::furnish_garden(
-                    &*editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &garden_style, None, area, None, &mut garden_rng,
+                let (_, _, walled) = crate::generator::open_space::furnish_garden(
+                    &*editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &garden_style, &garden_features, None, area, None, &mut garden_rng,
                 ).await;
                 let big = area >= garden_style.walled.big_house_area;
                 walled_n += walled as usize;

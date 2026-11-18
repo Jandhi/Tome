@@ -21,5 +21,24 @@ refused, so a typo fails loudly.
 | `tufts` | `[{below, block}]`: on leftover lawn, the first entry whose `below` a per-cell hash is under; `$flower` picks from `flowers`. |
 | `crops`, `flowers`, `pots` | Kitchen crops, flower bed and orchard flowers, a courtyard's pots. |
 | `trees` | `{shade_trees, wood, soil}`: whether layouts other than courtyard (and zen, half the time) plant a shade tree; its wood (`oak`, `spruce`, `birch`, `dark_oak`, `cherry`); a block under its trunk. |
+| `specials`, `special_chance` | Rare features (names of pieces in `features/`), picked evenly, and the percent of gardens that get one. |
 
 Check a change with `cargo run --profile fast -- --gardens --culture <c>` before a town run.
+
+## Features
+
+`features/*.yaml` hold garden features: set pieces a garden places whole, like furniture (a well, a scarecrow, a shrine, the Japanese stone lantern). Files are merged; each key is a feature's name. Every block is checked when the pieces load, so a bad id fails at once.
+
+A feature is written facing north, toward its house: `x` runs east, `z` south, and heights count up from the ground (`-1` is the ground's top block, `0` the first block above it). When built, it is turned so its north faces the house, and sided block states (`facing`, `axis`, a vine's `north=true`) turn with it.
+
+| Key | What it is |
+|---|---|
+| `radius` | The clear square of bed it needs round its centre: `1` is 3x3, `2` is 5x5 (default 1). |
+| `parts` | Its blocks, placed in order. Each part names cells (`at: [x, z]` or `cells: [[x, z], ...]`) and a `stack` of height -> block. A block is an id, or `{block: id, force: true}` to replace what is there (ground and blocks already placed are kept otherwise). |
+| `chance` | On a part: percent each of its cells is built. |
+| `one_of` | On a part, instead of `stack`: `[{weight, stack}, ...]`, one picked per cell. |
+| `builtin` | A shape built in code: `bamboo_clump` (three to five bamboo stalks four to seven high). |
+
+Ids may use the town's theme: `$wood` (wood family, as in `$wood_fence` or `$wood_stairs[facing=south]`), `$stone`, `$wall`, `$slab` (the theme's own blocks) and `$rock` (one of its rocks, picked per block).
+
+Try every culture's features at once with `cargo run --profile fast -- --gardens --culture all --all-features`.

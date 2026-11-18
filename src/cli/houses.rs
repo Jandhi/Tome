@@ -63,11 +63,12 @@ pub async fn run_houses(args: &[String], out: Outputs) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `--gardens [--culture c|all] [--seed n] [--count n] [--live [--at x,z]]`: house gardens on
+/// `--gardens [--culture c|all] [--seed n] [--count n] [--all-features] [--live [--at x,z]]`: house gardens on
 /// fixed plots, one test street per density ring (core, middle, outer) per culture,
 /// every garden layout in each, rendered under `output/gardens/<culture|all>-<seed>[-live]/`.
 /// `--live` builds into the server's build area (offset `--at x,z` from its minimum
-/// corner) and teleports the players to it.
+/// corner) and teleports the players to it. `--all-features` gives every garden
+/// that can take one a rare feature.
 pub async fn run_gardens(args: &[String]) -> anyhow::Result<()> {
     let arg_after = |flag: &str, n: usize| {
         args.iter().position(|a| a == flag).and_then(|i| args.get(i + n)).map(String::as_str)
@@ -91,7 +92,7 @@ pub async fn run_gardens(args: &[String]) -> anyhow::Result<()> {
             crate::geometry::Point2D::new(n[0], n[1])
         }
     };
-    crate::generator::city_houses::garden_showcase::run_garden_showcase(&cultures, seed, count, live, at).await?;
+    crate::generator::city_houses::garden_showcase::run_garden_showcase(&cultures, seed, count, live, at, args.iter().any(|a| a == "--all-features")).await?;
     Ok(())
 }
 

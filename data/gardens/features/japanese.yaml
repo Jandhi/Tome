@@ -1,0 +1,49 @@
+# Japanese garden features. Each faces north, toward its house (see medieval.yaml).
+
+# A stone lantern (toro): a lantern on a stone post. Every Japanese garden
+# layout sets one; it is also the culture's smallest feature.
+stone_lantern:
+  radius: 0
+  parts:
+    - at: [0, 0]
+      stack:
+        0: "$wall"
+        1: "minecraft:lantern"
+
+# A stone water basin (tsukubai) brimming with water, a bamboo spout behind
+# it, a rock or a fern either side, on moss.
+tsukubai:
+  radius: 1
+  parts:
+    - cells: [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-1, 1], [0, 1], [1, 1]]
+      stack: { -1: { block: "minecraft:moss_block", force: true } }
+    - at: [0, 0]
+      stack: { 0: "minecraft:water_cauldron[level=3]" }
+    - at: [0, 1]
+      stack:
+        0: "minecraft:bamboo[age=1,leaves=none,stage=0]"
+        1: "minecraft:bamboo[age=1,leaves=none,stage=0]"
+    - cells: [[-1, 0], [1, 0]]
+      one_of:
+        - { weight: 60, stack: { 0: "$rock" } }
+        - { weight: 40, stack: { 0: "minecraft:fern" } }
+
+# A little shrine (hokora) on a stone plinth facing the house, a candle
+# offered in front, moss behind.
+shrine:
+  radius: 1
+  parts:
+    - at: [0, 0]
+      stack:
+        0: "$stone"
+        1: "minecraft:stripped_dark_oak_wood"
+        2: "minecraft:mangrove_stairs[facing=south]"
+    - at: [0, -1]
+      stack: { 0: "minecraft:white_candle[candles=2,lit=true]" }
+    - at: [0, 1]
+      stack: { -1: { block: "minecraft:moss_block", force: true } }
+
+# A clump of bamboo: three to five stalks of four to seven blocks.
+bamboo:
+  radius: 1
+  builtin: bamboo_clump

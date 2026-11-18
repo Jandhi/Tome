@@ -6,7 +6,10 @@
 //! desert ones are walled courtyards with palms and pots; Japanese ones sit
 //! behind bamboo fences as raked-gravel, pond or moss gardens (or a vegetable
 //! plot), with stepping stones and stone lanterns. Any garden may instead be
-//! walled and closed (see `courtyard_wall`).
+//! walled and closed (see `courtyard_wall`). About one garden in four also
+//! gets a rare feature from its culture's list: a well, a scarecrow, a
+//! fountain, a little shrine and so on, each a piece in
+//! `data/gardens/features/` (see `garden_features`).
 
 use crate::util::{HashMap, HashSet};
 
@@ -17,6 +20,7 @@ use crate::geometry::{Point2D, Point3D, CARDINALS_2D};
 use crate::noise::RNG;
 
 use super::props::{cardinal_facing, is_path, place_bench, put, put_forced};
+use super::garden_features::GardenFeatures;
 use super::garden_style::GardenStyle;
 use super::theme::Theme;
 use serde_derive::Deserialize;
@@ -44,11 +48,12 @@ pub enum GardenLayout {
 /// cells on the road, `doors` where the house's doors let out (a path runs
 /// from the one in the garden to the gate), `owners` maps every garden cell in
 /// town to its garden, `fences` is every garden's fence posts (`plan_fences`).
-/// `style` is the culture's garden style (`data/gardens/<culture>.yaml`).
+/// `style` is the culture's garden style (`data/gardens/<culture>.yaml`),
+/// `features` every garden feature piece.
 /// `layout` pins the layout; `None` rolls one from the style's. `walled` pins
 /// a closed walled garden over a fenced one; `None` rolls it from the style's
-/// rule and `house_area` (the house's frontage x depth). Returns the layout
-/// and whether it was walled.
+/// rule and `house_area` (the house's frontage x depth). Returns the layout,
+/// the rare feature built (if any) and whether it was walled.
 #[allow(clippy::too_many_arguments)]
 pub async fn furnish_garden(
     editor: &Editor,
@@ -62,11 +67,12 @@ pub async fn furnish_garden(
     fences: &HashSet<Point2D>,
     theme: &Theme,
     style: &GardenStyle,
+    features: &GardenFeatures,
     layout: Option<GardenLayout>,
     house_area: i32,
     walled: Option<bool>,
     rng: &mut RNG,
-) -> (GardenLayout, bool) {
+) -> (GardenLayout, Option<String>, bool) {
     let world = editor.world();
     // Walled (closed, no gate) or fenced.
     let rule = &style.walled;
@@ -301,6 +307,34 @@ pub async fn furnish_garden(
         .copied()
         .filter(|c| !occupied.contains(c) && !by_house.contains(c) && !clear.contains(c))
         .collect();
+
+    // Now and then a rare feature, on a clear patch of bed off the wall.
+    let mut special = None;
+    if layout != GardenLayout::WorkYard && !style.specials.is_empty() && rng.percent(style.special_chance) {
+        let name = rng.choose(&style.specials).clone();
+        let r = features.get(&name).map_or(1, |f| f.radius);
+        let bed_set: HashSet<Point2D> = bed.iter().copied().collect();
+        let mut spots: Vec<Point2D> = bed
+            .iter()
+            .copied()
+            .filter(|&c| from_wall.get(&c).is_some_and(|&d| d >= 2) && square_in(&bed_set, c, r))
+            .collect();
+        spots.sort_by_key(|c| (c.x, c.y));
+        if !spots.is_empty() {
+            let c = spots[rng.rand_i32_range(0, spots.len() as i32) as usize];
+            if let Some(h) = height_at(c) {
+                features.build(editor, &name, c, h, -into, theme, rng).await;
+                special = Some(name);
+                // Its patch, and a ring of lawn round it.
+                bed.retain(|b| (b.x - c.x).abs().max((b.y - c.y).abs()) > r + 1);
+                for dx in -r..=r {
+                    for dz in -r..=r {
+                        occupied.insert(c + Point2D::new(dx, dz));
+                    }
+                }
+            }
+        }
+    }
 
     // Room for a full-size tree: four steps from the wall, so the crown clears
     // the eaves, with bed all round the trunk and garden under the whole crown.
@@ -558,7 +592,7 @@ pub async fn furnish_garden(
                 .copied()
                 .filter(|c| !rocks.iter().chain(big_trees.iter()).any(|&r| near(r, *c, 1)))
                 .collect();
-            japanese_extras(editor, &free, &fence_set, theme, rng, 2).await;
+            japanese_extras(editor, &free, &fence_set, theme, features, rng, 2).await;
             for &c in &bed {
                 occupied.insert(c);
             }
@@ -593,7 +627,7 @@ pub async fn furnish_garden(
                 .copied()
                 .filter(|c| !water.contains(c) && !occupied.contains(c) && !rim.contains(c) && !big_trees.iter().any(|&t| near(t, *c, 1)))
                 .collect();
-            japanese_extras(editor, &free, &fence_set, theme, rng, 1).await;
+            japanese_extras(editor, &free, &fence_set, theme, features, rng, 1).await;
             for &c in &free {
                 let Some(h) = height_at(c) else { continue; };
                 if hash01(c.x, c.y, salt ^ 0x45) < 0.15 {
@@ -626,7 +660,7 @@ pub async fn furnish_garden(
                 .copied()
                 .filter(|c| !taken.iter().any(|&t| near(t, *c, 1)) && !big_trees.iter().any(|&t| near(t, *c, 1)))
                 .collect();
-            japanese_extras(editor, &free, &fence_set, theme, rng, 3).await;
+            japanese_extras(editor, &free, &fence_set, theme, features, rng, 3).await;
             for &c in &free {
                 let Some(h) = height_at(c) else { continue; };
                 let r = hash01(c.x, c.y, salt ^ 0x33);
@@ -680,7 +714,7 @@ pub async fn furnish_garden(
         let Some(h) = height_at(c) else { continue; };
         put(editor, c.x, h, c.y, tuft).await;
     }
-    (layout, walled)
+    (layout, special, walled)
 }
 
 /// A walled garden's wall on the fence cells, closed all round (the house is
@@ -753,16 +787,17 @@ fn square_in(set: &HashSet<Point2D>, c: Point2D, r: i32) -> bool {
     (-r..=r).all(|dx| (-r..=r).all(|dz| set.contains(&(c + Point2D::new(dx, dz)))))
 }
 
-/// A stone lantern (tōrō): a lantern on a stone wall post. (A slab cap on top
-/// reads as floating: the lantern is narrower than the slab.)
-async fn stone_lantern(editor: &Editor, c: Point2D, h: i32, theme: &Theme) {
-    put(editor, c.x, h, c.y, theme.wall).await;
-    put(editor, c.x, h + 1, c.y, "minecraft:lantern").await;
-}
-
 /// A Japanese garden's furniture: a stone lantern in the open and up to
 /// `shrubs` clipped azalea shrubs against the fence, on cells of `free`.
-async fn japanese_extras(editor: &Editor, free: &[Point2D], fence: &HashSet<Point2D>, theme: &Theme, rng: &mut RNG, shrubs: usize) {
+async fn japanese_extras(
+    editor: &Editor,
+    free: &[Point2D],
+    fence: &HashSet<Point2D>,
+    theme: &Theme,
+    features: &GardenFeatures,
+    rng: &mut RNG,
+    shrubs: usize,
+) {
     let world = editor.world();
     let set: HashSet<Point2D> = free.iter().copied().collect();
     let mut spots: Vec<Point2D> = free.iter().copied().filter(|&c| square_in(&set, c, 1)).collect();
@@ -770,7 +805,7 @@ async fn japanese_extras(editor: &Editor, free: &[Point2D], fence: &HashSet<Poin
     let lantern = spots.first().copied();
     if let Some(c) = lantern {
         if let Some(h) = world.get_ocean_floor_height_at(c) {
-            stone_lantern(editor, c, h, theme).await;
+            features.build(editor, "stone_lantern", c, h, Point2D::new(0, -1), theme, rng).await;
         }
     }
     let mut by_fence: Vec<Point2D> = free
@@ -862,7 +897,7 @@ async fn carve_pond(
 
 /// A clump of bamboo round `c`: three to five stalks on `bed` cells next to
 /// it, four to seven high. Returns the stalk cells.
-async fn bamboo_clump(editor: &Editor, c: Point2D, bed: &[Point2D], height_at: &dyn Fn(Point2D) -> Option<i32>, rng: &mut RNG) -> Vec<Point2D> {
+pub(super) async fn bamboo_clump(editor: &Editor, c: Point2D, bed: &[Point2D], height_at: &dyn Fn(Point2D) -> Option<i32>, rng: &mut RNG) -> Vec<Point2D> {
     let mut cells: Vec<Point2D> = bed.iter().copied().filter(|b| (b.x - c.x).abs() <= 1 && (b.y - c.y).abs() <= 1).collect();
     cells.sort_by_key(|b| (b.x, b.y));
     rng.shuffle(&mut cells);

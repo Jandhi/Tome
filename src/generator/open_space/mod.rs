@@ -25,6 +25,7 @@ mod nook;
 mod plaza;
 mod yard;
 mod garden;
+mod garden_features;
 mod garden_style;
 mod park;
 #[cfg(test)]
@@ -34,6 +35,7 @@ pub use plaza::{furnish_plaza, PlazaType};
 pub use theme::Theme;
 pub use yard::furnish_yard;
 pub use garden::{furnish_garden, GardenLayout};
+pub use garden_features::GardenFeatures;
 pub use garden_style::GardenStyle;
 pub use park::{furnish_park, ParkType};
 

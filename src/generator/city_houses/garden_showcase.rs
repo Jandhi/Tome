@@ -15,7 +15,7 @@ use crate::generator::buildings_v2::footprint::{Footprint, SizeClass};
 use crate::generator::buildings_v2::showcase::house_context;
 use crate::generator::buildings_v2::{build_house, BuildCtx, Culture, HouseSeed};
 use crate::generator::data::LoadedData;
-use crate::generator::open_space::{furnish_garden, GardenStyle, Theme};
+use crate::generator::open_space::{furnish_garden, GardenFeatures, GardenStyle, Theme};
 use crate::generator::paths::PathType;
 use crate::generator::BuildClaim;
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D};
@@ -47,9 +47,18 @@ const MAX_DEPTH: i32 = 9;
 /// its minimum corner instead of a synthetic flat world, then teleports the
 /// players to look over the first street. `at` shifts the whole grid from the
 /// build area's minimum corner (live only), to build clear of what is there.
-/// Returns the output directory.
-pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, live: bool, at: Point2D) -> anyhow::Result<PathBuf> {
+/// `all_features` gives every garden that can take one a rare feature, to
+/// check them all at once. Returns the output directory.
+pub async fn run_garden_showcase(
+    cultures: &[Culture],
+    seed: i64,
+    count: usize,
+    live: bool,
+    at: Point2D,
+    all_features: bool,
+) -> anyhow::Result<PathBuf> {
     let data = LoadedData::load()?;
+    let features = GardenFeatures::load()?;
     let rings = [Ring::Core, Ring::Middle, Ring::Outer];
     let count = count.max(1) as i32;
 
@@ -179,18 +188,23 @@ pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, 
     for (i, g) in gardens.iter().enumerate() {
         let street = houses[g.house].lot;
         let theme = Theme::for_culture(streets[street].0);
-        let style = GardenStyle::for_culture(streets[street].0)?;
+        let mut style = GardenStyle::for_culture(streets[street].0)?;
+        style.check(&features)?;
+        if all_features {
+            style.special_chance = 100;
+        }
         let layouts = style.layout_list();
         let layout = layouts[per_street[street] % layouts.len()];
         per_street[street] += 1;
         // Every third garden walled, so both boundaries show in each street.
         let walled = per_street[street] % 3 == 0;
-        let (built, walled) = furnish_garden(
-            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, Some(layout), 0, Some(walled), &mut garden_rng,
+        let (built, special, walled) = furnish_garden(
+            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &features, Some(layout), 0, Some(walled), &mut garden_rng,
         )
         .await;
         let wall = if walled { ", walled" } else { "" };
-        println!("{:?} {:?} street, house {}: {built:?}{wall}, {} cells", streets[street].0, g.ring, g.house, g.cells.len());
+        let special = special.map(|s| format!(" + {s}")).unwrap_or_default();
+        println!("{:?} {:?} street, house {}: {built:?}{special}{wall}, {} cells", streets[street].0, g.ring, g.house, g.cells.len());
     }
     editor.flush_buffer().await;
 

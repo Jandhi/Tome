@@ -52,3 +52,8 @@ pots:
   - "minecraft:flowering_azalea"
 
 trees: { shade_trees: false, wood: oak }
+
+# Rare features (pieces in data/gardens/features/), and the percent of
+# gardens that get one.
+specials: [fountain, pergola]
+special_chance: 25
