@@ -625,3 +625,29 @@ pub fn plan_fences(editor: &Editor, gardens: &[Garden], owners: &HashMap<Point2D
     }
     fences
 }
+
+/// The fence cells built as wall rather than fence: every walled garden's own
+/// line, and any other garden's fence cell beside a walled garden's cell (the
+/// shared line between them), so a wall and a fence never run side by side
+/// or meet on one line; the wall wins. `walled[i]` says whether garden `i` is
+/// walled.
+pub fn plan_walls(gardens: &[Garden], owners: &HashMap<Point2D, usize>, fences: &HashSet<Point2D>, walled: &[bool]) -> HashSet<Point2D> {
+    let mut walls: HashSet<Point2D> = HashSet::default();
+    for (gi, g) in gardens.iter().enumerate() {
+        if !walled[gi] {
+            continue;
+        }
+        for &c in &g.cells {
+            if fences.contains(&c) {
+                walls.insert(c);
+            }
+            for d in CARDINALS_2D {
+                let n = c + d;
+                if fences.contains(&n) && owners.get(&n).is_some_and(|&o| o != gi) {
+                    walls.insert(n);
+                }
+            }
+        }
+    }
+    walls
+}

@@ -33,7 +33,7 @@ pub use nook::furnish_nook;
 pub use plaza::{furnish_plaza, PlazaType};
 pub use theme::Theme;
 pub use yard::furnish_yard;
-pub use garden::{furnish_garden, GardenLayout};
+pub use garden::{furnish_garden, roll_walled, GardenLayout};
 pub use garden_style::GardenStyle;
 pub use park::{furnish_park, ParkType};
 

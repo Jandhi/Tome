@@ -45,10 +45,14 @@ pub enum GardenLayout {
 /// from the one in the garden to the gate), `owners` maps every garden cell in
 /// town to its garden, `fences` is every garden's fence posts (`plan_fences`).
 /// `style` is the culture's garden style (`data/gardens/<culture>.yaml`).
-/// `layout` pins the layout; `None` rolls one from the style's. `walled` pins
-/// a closed walled garden over a fenced one; `None` rolls it from the style's
-/// rule and `house_area` (the house's frontage x depth). Returns the layout
-/// and whether it was walled.
+/// `layout` pins the layout; `None` rolls one from the style's. `walled` makes
+/// it a closed walled garden (see [`roll_walled`]); `walls` is every fence
+/// cell in town built as wall instead ([`plots::plan_walls`]: a walled
+/// garden's own line and any fence it shares with one), so where a wall and a
+/// fence would meet on one line the wall wins. Returns the layout and whether
+/// it was walled.
+///
+/// [`plots::plan_walls`]: crate::generator::city_houses::plots::plan_walls
 #[allow(clippy::too_many_arguments)]
 pub async fn furnish_garden(
     editor: &Editor,
@@ -63,15 +67,11 @@ pub async fn furnish_garden(
     theme: &Theme,
     style: &GardenStyle,
     layout: Option<GardenLayout>,
-    house_area: i32,
-    walled: Option<bool>,
+    walled: bool,
+    walls: &HashSet<Point2D>,
     rng: &mut RNG,
 ) -> (GardenLayout, bool) {
     let world = editor.world();
-    // Walled (closed, no gate) or fenced.
-    let rule = &style.walled;
-    let walled = rule.always
-        || walled.unwrap_or_else(|| rng.percent(if house_area >= rule.big_house_area { rule.big } else { rule.other }));
     let set: HashSet<Point2D> = cells.iter().copied().collect();
     let height_at = |c: Point2D| world.get_ocean_floor_height_at(c);
     // The house's own wall: claimed under its id but not part of the garden
@@ -143,8 +143,11 @@ pub async fn furnish_garden(
         Point2D::new(s.x / n, s.y / n)
     };
     let mut gate: Option<(i32, i32, Point2D, Point2D)> = None; // (priority, distance, cell, outward)
-    for &c in &fence {
-        let f = |dx: i32, dz: i32| fence_set.contains(&(c + Point2D::new(dx, dz)));
+    for &c in fence.iter().filter(|c| !walls.contains(c)) {
+        let f = |dx: i32, dz: i32| {
+            let n = c + Point2D::new(dx, dz);
+            fence_set.contains(&n) && !walls.contains(&n)
+        };
         let straight = (f(1, 0) && f(-1, 0)) || (f(0, 1) && f(0, -1));
         for d in CARDINALS_2D {
             let (out, inside) = (c + d, c - d);
@@ -239,11 +242,10 @@ pub async fn furnish_garden(
 
     // The boundary: a wall (`courtyard_wall`), or a cottage or bamboo fence
     // with its gate and sometimes a lantern on a corner.
-    if walled {
-        courtyard_wall(editor, &fence, &fence_set, &inner_set, style, salt).await;
-    }
+    let wall_part: Vec<Point2D> = fence.iter().copied().filter(|c| walls.contains(c)).collect();
+    courtyard_wall(editor, &wall_part, walls, &inner_set, style, salt).await;
     let mut lantern_done = style.fence.corner_lantern_chance.map_or(true, |p| !rng.percent(p));
-    for &c in fence.iter().filter(|_| !walled) {
+    for &c in fence.iter().filter(|c| !walls.contains(c)) {
         let Some(h) = height_at(c) else { continue; };
         if let Some((_, _, g, d)) = gate {
             if c == g {
@@ -681,6 +683,13 @@ pub async fn furnish_garden(
         put(editor, c.x, h, c.y, tuft).await;
     }
     (layout, walled)
+}
+
+/// Whether a garden is walled and closed rather than fenced, by its culture's
+/// rule and its house's frontage x depth.
+pub fn roll_walled(style: &GardenStyle, house_area: i32, rng: &mut RNG) -> bool {
+    let rule = &style.walled;
+    rule.always || rng.percent(if house_area >= rule.big_house_area { rule.big } else { rule.other })
 }
 
 /// A walled garden's wall on the fence cells, closed all round (the house is
