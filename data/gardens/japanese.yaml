@@ -1,0 +1,65 @@
+# Japanese town gardens behind bamboo fences: raked-gravel zen, pond and moss
+# gardens or a vegetable plot, stepping-stone paths, cherry trees; bigger
+# houses mostly get a white plaster wall (tsuijibei).
+# Every field is described in data/gardens/README.md.
+
+layouts:
+  - { layout: zen, weight: 30 }
+  - { layout: pond, weight: 25 }
+  - { layout: moss, weight: 25 }
+  - { layout: kitchen, weight: 20 }
+
+walled: { big_house_area: 90, big: 60, other: 10 }
+
+fence:
+  post: "minecraft:bamboo_fence"
+  gate: "minecraft:bamboo_fence_gate"
+
+# Dark stone footing, white plaster between timber posts, a dark tiled coping.
+wall:
+  base: ["minecraft:deepslate_bricks", "minecraft:cracked_deepslate_bricks"]
+  body: ["minecraft:white_concrete", "minecraft:white_concrete"]
+  coping: "minecraft:deepslate_tile_slab"
+  pier: "minecraft:stripped_dark_oak_log"
+  pier_cap: "minecraft:deepslate_tile_slab"
+
+# Stepping stones, moss between.
+path: ["minecraft:polished_andesite", "minecraft:moss_block"]
+
+lawn:
+  - { noise: blotch, scale: 3, salt: 9, above: 0.62, blocks: ["minecraft:moss_block"] }
+
+wall_props:
+  - "minecraft:barrel[facing=up]"
+  - "minecraft:water_cauldron[level=3]"
+  - "minecraft:composter"
+  - "minecraft:potted_bamboo"
+
+yard_extras:
+  - "minecraft:hay_block"
+  - "minecraft:barrel[facing=up]"
+  - "minecraft:grindstone[face=floor]"
+  - "minecraft:short_grass"
+
+tufts:
+  - { below: 0.07, block: "minecraft:short_grass" }
+  - { below: 0.10, block: "minecraft:fern" }
+
+crops:
+  - "minecraft:wheat[age=7]"
+  - "minecraft:carrots[age=7]"
+  - "minecraft:potatoes[age=7]"
+  - "minecraft:beetroots[age=3]"
+
+flowers:
+  - "minecraft:poppy"
+  - "minecraft:dandelion"
+  - "minecraft:cornflower"
+  - "minecraft:oxeye_daisy"
+  - "minecraft:azure_bluet"
+  - "minecraft:allium"
+  - "minecraft:red_tulip"
+  - "minecraft:white_tulip"
+  - "minecraft:lily_of_the_valley"
+
+trees: { shade_trees: true, wood: cherry, soil: "minecraft:moss_block" }

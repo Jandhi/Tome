@@ -13,6 +13,7 @@
 pub mod frontage;
 pub mod walk;
 pub mod plots;
+pub mod garden_showcase;
 #[cfg(test)]
 mod test;
 

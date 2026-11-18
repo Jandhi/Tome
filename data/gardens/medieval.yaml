@@ -1,0 +1,74 @@
+# Medieval town gardens: fenced cottage gardens on lawn worn in patches, a
+# shade tree where there is room; bigger houses mostly get a rubble wall.
+# Every field is described in data/gardens/README.md.
+
+layouts:
+  - { layout: kitchen, weight: 50 }
+  - { layout: orchard, weight: 20 }
+  - { layout: flowers, weight: 15 }
+  - { layout: work_yard, weight: 15 }
+
+walled: { big_house_area: 90, big: 60, other: 10 }
+
+fence:
+  post: "minecraft:oak_fence"
+  gate: "minecraft:oak_fence_gate"
+  corner_lantern_chance: 40
+
+# A rubble wall with moss in it, stone-brick piers, ivy over the top.
+wall:
+  base: ["minecraft:cobblestone", "minecraft:mossy_cobblestone"]
+  body: ["minecraft:cobblestone", "minecraft:mossy_cobblestone"]
+  coping: "minecraft:stone_brick_slab"
+  pier: "minecraft:stone_bricks"
+  pier_cap: "minecraft:stone_brick_slab"
+  creeper: ["minecraft:oak_leaves[persistent=true]", "minecraft:dark_oak_leaves[persistent=true]"]
+
+path: ["minecraft:dirt_path"]
+
+# Worn earth (coarse or rooted dirt), then moss.
+lawn:
+  - { noise: blotch, scale: 3, salt: 0, above: 0.74, blocks: ["minecraft:coarse_dirt", "minecraft:rooted_dirt"], mix_salt: 3, mix_above: 0.4 }
+  - { noise: blotch, scale: 2, salt: 9, above: 0.84, blocks: ["minecraft:moss_block"] }
+
+yard_wear:
+  - { noise: blotch, scale: 2, salt: 5, above: 0.35, blocks: ["minecraft:coarse_dirt"] }
+  - { noise: blotch, scale: 2, salt: 5, above: 0.25, blocks: ["minecraft:rooted_dirt"] }
+
+wall_props:
+  - "minecraft:barrel[facing=up]"
+  - "minecraft:composter"
+  - "minecraft:hay_block"
+  - "minecraft:water_cauldron[level=3]"
+  - "minecraft:hay_block"
+  - "minecraft:barrel[facing=up]"
+
+yard_extras:
+  - "minecraft:hay_block"
+  - "minecraft:barrel[facing=up]"
+  - "minecraft:grindstone[face=floor]"
+  - "minecraft:short_grass"
+
+tufts:
+  - { below: 0.10, block: "minecraft:short_grass" }
+  - { below: 0.12, block: "minecraft:fern" }
+  - { below: 0.13, block: "$flower" }
+
+crops:
+  - "minecraft:wheat[age=7]"
+  - "minecraft:carrots[age=7]"
+  - "minecraft:potatoes[age=7]"
+  - "minecraft:beetroots[age=3]"
+
+flowers:
+  - "minecraft:poppy"
+  - "minecraft:dandelion"
+  - "minecraft:cornflower"
+  - "minecraft:oxeye_daisy"
+  - "minecraft:azure_bluet"
+  - "minecraft:allium"
+  - "minecraft:red_tulip"
+  - "minecraft:white_tulip"
+  - "minecraft:lily_of_the_valley"
+
+trees: { shade_trees: true, wood: oak }
