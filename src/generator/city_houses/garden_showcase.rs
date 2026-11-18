@@ -15,7 +15,7 @@ use crate::generator::buildings_v2::footprint::{Footprint, SizeClass};
 use crate::generator::buildings_v2::showcase::house_context;
 use crate::generator::buildings_v2::{build_house, BuildCtx, Culture, HouseSeed};
 use crate::generator::data::LoadedData;
-use crate::generator::open_space::{furnish_garden, GardenStyle, Theme};
+use crate::generator::open_space::{furnish_garden, GardenKit, GardenStyle, Theme};
 use crate::generator::paths::PathType;
 use crate::generator::BuildClaim;
 use crate::geometry::{Cardinal, Point2D, Point3D, Rect2D, Rect3D};
@@ -47,8 +47,16 @@ const MAX_DEPTH: i32 = 9;
 /// its minimum corner instead of a synthetic flat world, then teleports the
 /// players to look over the first street. `at` shifts the whole grid from the
 /// build area's minimum corner (live only), to build clear of what is there.
-/// Returns the output directory.
-pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, live: bool, at: Point2D) -> anyhow::Result<PathBuf> {
+/// `all_features` gives every garden that can take one a rare feature, to
+/// check them all at once. Returns the output directory.
+pub async fn run_garden_showcase(
+    cultures: &[Culture],
+    seed: i64,
+    count: usize,
+    live: bool,
+    at: Point2D,
+    all_features: bool,
+) -> anyhow::Result<PathBuf> {
     let data = LoadedData::load()?;
     let rings = [Ring::Core, Ring::Middle, Ring::Outer];
     let count = count.max(1) as i32;
@@ -82,6 +90,8 @@ pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, 
     let mut rng = RNG::new(seed);
 
     let mut houses: Vec<PlacedHouse> = Vec::new();
+    // Each house's palette, by `houses` index: its garden builds from it.
+    let mut house_palettes = Vec::new();
     let mut lots: Vec<HashSet<Point2D>> = Vec::new();
     // Per street (= per lot): its culture, ring, rect and ground height.
     let mut streets: Vec<(Culture, Ring, Rect2D, i32)> = Vec::new();
@@ -145,6 +155,7 @@ pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, 
                         let (ramp_cells, entrances) = super::plots::door_cells(&out);
                         let gap = ring.side_gap();
                         let front: Vec<Point2D> = (x..(x + fw + gap).min(x_hi + 1)).map(|cx| Point2D::new(cx, front_z)).collect();
+                        house_palettes.push(house_palette.clone());
                         houses.push(PlacedHouse {
                             front,
                             width: fw as usize,
@@ -191,16 +202,22 @@ pub async fn run_garden_showcase(cultures: &[Culture], seed: i64, count: usize, 
     for (i, g) in gardens.iter().enumerate() {
         let street = houses[g.house].lot;
         let theme = Theme::for_culture(streets[street].0);
-        let style = GardenStyle::for_culture(streets[street].0)?;
+        let mut style = GardenStyle::for_culture(streets[street].0)?;
+        style.check()?;
+        if all_features {
+            style.special_chance = 100;
+        }
         let layouts = style.layout_list();
         let layout = layouts[per_street[street] % layouts.len()];
         per_street[street] += 1;
-        let (built, walled) = furnish_garden(
-            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, Some(layout), walled_by[i], &walls, &mut garden_rng,
+        let kit = GardenKit { palette: &house_palettes[g.house], materials: &data.materials, theme: &theme };
+        let (built, special, walled) = furnish_garden(
+            &editor, i, &g.cells, g.building, g.into, &g.gates, &g.doors, &owners, &fences, &theme, &style, &kit, Some(layout), walled_by[i], &walls, &mut garden_rng,
         )
         .await;
         let wall = if walled { ", walled" } else { "" };
-        println!("{:?} {:?} street, house {}: {built:?}{wall}, {} cells", streets[street].0, g.ring, g.house, g.cells.len());
+        let special = special.map(|s| format!(" + {s}")).unwrap_or_default();
+        println!("{:?} {:?} street, house {}: {built:?}{special}{wall}, {} cells", streets[street].0, g.ring, g.house, g.cells.len());
     }
     editor.flush_buffer().await;
 

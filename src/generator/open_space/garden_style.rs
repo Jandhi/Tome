@@ -55,6 +55,12 @@ pub struct GardenStyle {
     /// their wood (`oak`, `spruce`, `birch`, `dark_oak`, `cherry`), and the
     /// block laid under the trunk (if any).
     pub trees: TreeStyle,
+    /// Rare features (names from `garden_features::FEATURES`), picked
+    /// evenly, and how often a garden gets one (percent).
+    #[serde(default)]
+    pub specials: Vec<String>,
+    #[serde(default)]
+    pub special_chance: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -191,6 +197,17 @@ impl GardenStyle {
     /// The first patch in `patches` that covers `c`.
     pub fn patch<'a>(patches: &'a [Patch], c: Point2D, salt: u32) -> Option<&'a str> {
         patches.iter().find_map(|p| p.at(c, salt))
+    }
+
+    /// Fail if a rare feature names no feature.
+    pub fn check(&self) -> anyhow::Result<()> {
+        for name in &self.specials {
+            if super::garden_features::radius(name).is_none() {
+                let known: Vec<&str> = super::garden_features::FEATURES.iter().map(|(n, _)| *n).collect();
+                anyhow::bail!("garden style names an unknown feature {name:?}; known: {}", known.join(", "));
+            }
+        }
+        Ok(())
     }
 
     /// The layouts in order, without weights.

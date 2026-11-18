@@ -63,3 +63,8 @@ flowers:
   - "minecraft:lily_of_the_valley"
 
 trees: { shade_trees: true, wood: cherry, soil: "minecraft:moss_block" }
+
+# Rare features (any name from data/gardens/README.md), and the percent of
+# gardens that get one.
+specials: [tsukubai, shrine, bamboo]
+special_chance: 25

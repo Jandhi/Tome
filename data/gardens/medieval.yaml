@@ -72,3 +72,8 @@ flowers:
   - "minecraft:lily_of_the_valley"
 
 trees: { shade_trees: true, wood: oak }
+
+# Rare features (any name from data/gardens/README.md), and the percent of
+# gardens that get one.
+specials: [well, scarecrow, arbour]
+special_chance: 25
