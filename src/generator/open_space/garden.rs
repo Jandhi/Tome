@@ -364,12 +364,10 @@ pub async fn furnish_garden(
     if trees_here {
         let (want, spacing) = match layout {
             GardenLayout::Orchard => (usize::MAX, 5),
-            // One tree, and one more per 70 cells of bed, well apart.
-            GardenLayout::Pond | GardenLayout::Moss | GardenLayout::Zen => ((bed.len() / 70).clamp(1, 3), 7),
-            // Elsewhere a shade tree at the back: always in a big garden (an
-            // empty lawn otherwise), sometimes in a smaller one, and another
-            // per 150 cells.
-            _ => (if bed.len() > 60 || rng.percent(40) { (1 + bed.len() / 150).min(3) } else { 0 }, 7),
+            GardenLayout::Pond | GardenLayout::Moss | GardenLayout::Zen => (1, 0),
+            // Elsewhere one shade tree at the back: always in a big garden
+            // (an empty lawn otherwise), sometimes in a smaller one.
+            _ => (if bed.len() > 60 || rng.percent(40) { 1 } else { 0 }, 0),
         };
         for &c in &roomy_spots {
             if big_trees.len() >= want {
@@ -517,7 +515,7 @@ pub async fn furnish_garden(
             }
             let mut spots: Vec<Point2D> = bed.iter().copied().filter(|&c| square_in(&bed_set, c, 1)).collect();
             rng.shuffle(&mut spots);
-            let want = (bed.len() / 20).clamp(1, 8);
+            let want = (bed.len() / 20).clamp(1, 4);
             let mut rocks: Vec<Point2D> = Vec::new();
             for c in spots {
                 if rocks.len() >= want {
@@ -761,7 +759,7 @@ struct Pieces<'a> {
 
 /// Set a layout's pieces on cells of `free`, in order: features by name
 /// (where each goes is `garden_features::placement`) and the groups
-/// `azalea_shrubs`, `palms` and `pots`. Counts grow with the bed. Returns the
+/// `azalea_shrubs`, `palms` and `pots`. Returns the
 /// cells taken, with a ring round each piece.
 async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rng: &mut RNG) -> HashSet<Point2D> {
     let world = p.editor.world();
@@ -777,7 +775,7 @@ async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rn
         match name.as_str() {
             "azalea_shrubs" => {
                 // Clipped azalea against the fence, some two cells long.
-                let want = (n / 25).clamp(1, 5);
+                let want = 2;
                 let mut by_fence: Vec<Point2D> =
                     open.iter().copied().filter(|&c| CARDINALS_2D.iter().any(|d| p.fence.contains(&(c + *d)))).collect();
                 rng.shuffle(&mut by_fence);
@@ -813,7 +811,7 @@ async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rn
             }
             "palms" => {
                 // Date palms toward the back, well apart.
-                let want = (n / 30).clamp(1, 4);
+                let want = (n / 30).clamp(1, 3);
                 let mut spots: Vec<Point2D> = open
                     .iter()
                     .copied()
@@ -844,7 +842,7 @@ async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rn
                 if p.style.pots.is_empty() {
                     continue;
                 }
-                let want = (n / 10).clamp(1, 8);
+                let want = (n / 10).clamp(1, 5);
                 let mut spots = open.clone();
                 rng.shuffle(&mut spots);
                 let mut done: Vec<Point2D> = Vec::new();
@@ -874,8 +872,6 @@ async fn place_pieces(p: &mut Pieces<'_>, names: &[String], free: &[Point2D], rn
                     _ => open.iter().copied().filter(|&c| fits(c) && p.fence.contains(&(c + p.into))).collect(),
                 };
                 let want = match garden_features::placement(feature) {
-                    garden_features::Placement::Open if feature == "stone_lantern" => (n / 60).clamp(1, 3),
-                    garden_features::Placement::Open => 1,
                     _ => 1,
                 };
                 match garden_features::placement(feature) {
